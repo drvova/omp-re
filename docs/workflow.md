@@ -33,8 +33,8 @@ system binary like `/bin/ls` is enough to learn the flow.
 Every successful call to one of the **12 read-tier tools** —
 `list_functions`, `search_functions`, `get_function`, `decompile_function`,
 `disassemble_function`, `get_xrefs_to`, `get_xrefs_from`, `list_imports`,
-`list_exports`, `list_strings`, `list_segments`, `hash_binary` — is
-automatically recorded as a `re.evidence` session entry via a `tool_result`
+`list_exports`, `list_strings`, `list_segments`, `hash_binary` — and to
+`rizin_command` is automatically recorded as a `re.evidence` session entry via a `tool_result`
 hook (`extensions/re/evidence.ts`), content-addressed and hashed. Mutations
 (`rename_function`, `set_comment`, etc.) similarly record `re.annotation`
 entries.

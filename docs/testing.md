@@ -11,7 +11,7 @@ bun install --ignore-scripts
 bun test
 ```
 
-Nine test files. The `bun install` dev dependencies pin omp **18.11.1**, so
+Ten test files. The `bun install` dev dependencies pin omp **18.11.1**, so
 the host APIs under test are the ones users run. Tests that need a real
 `rizin` and a test binary **skip** (not fail) when either is missing:
 
@@ -22,11 +22,12 @@ the host APIs under test are the ones users run. Tests that need a real
 | `evidence.test.ts` | No | 4 |
 | `audit.test.ts` | No | 5 |
 | `report.test.ts` | No | 4 |
-| `extension-sdk.test.ts` | Only its resume/replay test | 6 |
+| `extension-sdk.test.ts` | Only its two rizin tests | 7 |
 | `rizin-integration.test.ts` | Yes (one test runs without) | 13 |
 | `tools-registry.test.ts` | Yes (the renderer and native-view tests run without) | 35 |
 | `tools-mutate-registry.test.ts` | Yes | 15 |
-| **Total** | | **118** |
+| `rizin-cli.test.ts` | Its catalog and tool tests (policy and help search run without) | 24 |
+| **Total** | | **143** |
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
 extension runner (no model is called) and drives `/re` commands and tools
@@ -46,8 +47,8 @@ loaded it asserts the decompiler's output, without one it asserts the
 labeled `(disassembly only — no decompiler plugin available)` fallback. Both
 paths were run for the 0.2.0 release.
 
-Expected shape with rizin present: **118 pass, 0 fail, 0 skip**. Without
-rizin: **62 pass, 64 skip, 0 fail** (126 reported — bun counts skipped
+Expected shape with rizin present: **143 pass, 0 fail, 0 skip**. Without
+rizin: **77 pass, 76 skip, 0 fail** (153 reported — bun counts skipped
 `describe` blocks slightly differently from executed ones). This is CI's
 permanent shape, not a degraded state to "fix".
 

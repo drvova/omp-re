@@ -63,6 +63,23 @@ extension runner, and by installing it with `omp plugin install`.
 - Integration tests run against `/bin/ls` by default instead of an
   undistributed WannaCry sample.
 
+### Added (rizin CLI)
+
+- `rizin_help`: looks up commands in the installed rizin's own catalog
+  (`rizin -qc '?*j'`, about 2,000 commands with typed arguments): a command
+  or prefix for its usage and arguments, or keywords to find one.
+- `rizin_command` (`exec` approval naming the command): runs one read-only
+  rizin command the dedicated tools don't cover — `pdsf`, `agc`, `px`,
+  `ph entropy @!<n>`, `/x`, `/R`, `aoe`, `iH`, and the rest of rizin's
+  print, info, search, graph, and listing commands — returning rizin's own
+  error text when the arguments are wrong. Writes, config, shell escapes,
+  file reads, raw-byte output, and analysis changes are refused before
+  anything reaches rizin (policy in `SECURITY.md`). Its output is evidence
+  like any read tool's.
+- Compatibility check: opening a binary looks up every command omp-re sends
+  in the installed rizin's catalog and names any that are missing; `/re
+  status` shows the result and picks the decompiler from the catalog.
+
 ### Added (omp-native)
 
 - Tool renderers (`renderCall`/`renderResult`) for every RE tool, with
