@@ -64,6 +64,36 @@ model (for example one steered by text inside the sample it was analyzing)
 reach shell execution without passing an `exec`-tier approval. `/re undo`
 replayed stored comments the same way. Upgrade if you run 0.1.x.
 
+## rizin_command
+
+`rizin_command` is the one tool that sends a model-written rizin command
+line, so it is `exec`-tier (the approval prompt quotes the exact command)
+and it refuses before anything reaches rizin unless the command:
+
+- belongs to a read-only family — print, info, search, graph, op/ESIL
+  analysis, xref and function queries, comment and flag lookups — and is
+  none of the write, config, shell, file-reading, or analysis-changing
+  commands inside those families (`pf`, `po`, `pw`, `pkill`, `pm`, `/F`,
+  `ag[enw]`, `afb[cer]`, `afii`, `ica`, `id`, or any name containing
+  `+ - = ! *`);
+- takes no file or path argument according to rizin's own catalog
+  (`/m <magic-file>` runs only bare);
+- contains none of `;`, `|`, `<`, `>`, backticks, `$(`, `${`, `~`, `#`, `"`,
+  `\`, line breaks, or NUL, and no `@` modifier except `@!<n>` — so no
+  chaining, piping to a shell, redirection, substitution, `@@` iterators,
+  `@f:` file reads, or `@e:` config changes; the seek address comes only
+  from the validated `addr` parameter;
+- is in the installed rizin's catalog and is not an `interactive` mode.
+
+Raw-byte printers (`pr`, `prz`, `prg`, `p6d`) are refused too: a NUL in
+their output ends a `-q0` frame, which desyncs the pipe and kills the
+session's rizin process (and with it the live analysis). Each refusal and
+the policy table live in `extensions/re/catalog.ts`; the escapes above are
+covered by `test/rizin-cli.test.ts`.
+
+Even read-only commands parse the sample, so the analysis-hygiene advice
+above applies to them unchanged.
+
 ## Scope
 
 In scope: `extensions/re/*.ts`, the `/re` command surface, and the tool

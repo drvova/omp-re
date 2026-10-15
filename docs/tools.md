@@ -1,14 +1,14 @@
 # Tool reference
 
-All 22 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 24 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 22.
+show fewer than 24.
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
 `tools.approval.<name>` in your omp config), every tool has its own
-transcript renderer, and every read-tier tool call also becomes a
-`re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor
+transcript renderer, and every read-tier and `rizin_command` call also
+becomes a `re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor
 cancellation.
 
 Output larger than the context cap (2000 lines or 50 KB) is truncated for the
@@ -63,6 +63,37 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_comment` | `write` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
 | `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
 | `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
+
+## rizin CLI (2 tools)
+
+For everything the dedicated tools don't cover. Both read the catalog the
+installed rizin publishes about itself (`rizin -qc '?*j'`, read once per
+process with no binary open), so they match the user's rizin version and
+plugins exactly.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `rizin_help` | `read` | `query: string` | A command or prefix (`ph`, `afv`, `/R`) lists that family; an exact match adds its typed arguments (required/optional, defaults, choices) and description. Anything else is a keyword search over summaries and descriptions (`entropy`, `rop gadgets`). Entries `rizin_command` would refuse are marked `[not runnable via rizin_command]`. |
+| `rizin_command` | `exec` (reason names the command) | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
+
+`rizin_command` accepts a command only if all of these hold, checked before
+anything reaches rizin:
+
+- **Read-only family**: print (`p…`), info (`i…`), search (`/…`), graphs
+  (`ag…`), op/ESIL analysis (`ao…`, `ab…`), xref and function queries
+  (`axt`, `axf`, `afl`, `afi`, `afb`, `afx`, `afvl`, `afvx`, `afvR`, `afvW`,
+  `afvd`, `afo`, `afM`), comment queries (`CC.`, `CCl`, `CCf`), and flag
+  descriptions (`fd…`).
+- **Not an exception inside those families**: `pf`/`po`/`pw` (formats and
+  writes), `pr`/`prz`/`prg`/`p6d` (raw bytes — a NUL ends a `-q0` frame; use
+  `px`, `p8`, or `prx`), `pkill`, `pm`, `/F` (searches a file's content),
+  `ag[enw]`, `afb[cer]`, `afii`, `ica`, `id`, or any command name containing
+  `+ - = ! *`. A command whose catalog entry takes a file or path argument
+  (`/m <magic-file>`) runs only with no arguments.
+- **No syntax that leaves the command**: `;`, `|`, `<`/`>`, backticks,
+  `$(`/`${`, `~`, `#`, `"`, `\`, line breaks, and every `@` modifier except
+  `@!<n>` (a temporary block size, e.g. `ph entropy @!4096`). Seek with `addr`.
+- **In this rizin's catalog**, and not an `interactive` output mode.
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 

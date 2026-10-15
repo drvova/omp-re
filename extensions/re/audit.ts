@@ -17,7 +17,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { getState } from "./state.ts";
 
-/** The 12 read-tier RE tools (tools-read.ts) — also evidence.ts's `tool_result` filter for what becomes a `re.evidence` record. */
+/** The 12 read-tier RE tools (tools-read.ts). */
 export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	list_functions: true,
 	search_functions: true,
@@ -50,16 +50,29 @@ export const RE_TRIAGE_TOOL_NAMES: Record<string, true> = {
 	triage_yara: true,
 };
 
+/** The 2 rizin CLI bridge tools (tools-rizin.ts): `rizin_help` reads rizin's own documentation; `rizin_command` runs read-only rizin commands. */
+export const RE_RIZIN_TOOL_NAMES: Record<string, true> = {
+	rizin_help: true,
+	rizin_command: true,
+};
+
+/** Tools whose successful output is an observation of the binary and becomes a `re.evidence` record (evidence.ts). `rizin_help` is not: help text says nothing about the binary. */
+export const RE_EVIDENCE_TOOL_NAMES: Record<string, true> = {
+	...RE_READ_TOOL_NAMES,
+	rizin_command: true,
+};
+
 /** Session-setup tools that are neither analysis (no evidence to record — opening a binary asserts nothing about its contents) nor mutation, but still worth an audit-trail line. */
 export const RE_SESSION_TOOL_NAMES: Record<string, true> = {
 	open_binary: true,
 };
 
-/** All 22 RE-suite tool names (read + mutate + triage + session-setup) — the audit log's gate. */
+/** All 24 RE-suite tool names (read + mutate + triage + rizin CLI + session-setup) — the audit log's gate. */
 export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
 	...RE_MUTATE_TOOL_NAMES,
 	...RE_TRIAGE_TOOL_NAMES,
+	...RE_RIZIN_TOOL_NAMES,
 	...RE_SESSION_TOOL_NAMES,
 };
 

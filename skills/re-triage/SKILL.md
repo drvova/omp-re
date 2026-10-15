@@ -47,6 +47,26 @@ the call failed.
 Long output ends with `[Output truncated … Full output: artifact://N]`; `read`
 that artifact when the part that was cut matters.
 
+## Beyond the dedicated tools
+
+The tools above cover the common path. For the rest of rizin — function
+summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy
+(`ph entropy`), byte and ROP-gadget searches (`/x`, `/R`), ESIL emulation
+(`aoe`), headers (`iH`) — use the installed rizin's own CLI:
+
+1. `rizin_help` with a command prefix (`ph`, `/R`, `ag`) for its usage and
+   typed arguments, or with keywords (`entropy`, `call graph`) to find one.
+   It answers from the rizin actually installed, so its syntax is right for
+   this version, and it marks the commands `rizin_command` will refuse.
+2. `rizin_command` with that one command; put the address in `addr`, never
+   `@` in the command (the only `@` allowed is `@!<n>`, a block size, e.g.
+   `ph entropy @!4096`). If rizin rejects the arguments its error comes back;
+   fix them from `rizin_help` instead of guessing.
+
+`rizin_command` output is recorded evidence like any other tool's. It runs
+read-only commands only: annotate with the dedicated tools so annotations are
+recorded, verified, and undoable.
+
 ## Navigating
 
 `alt+g` opens the function navigator, `alt+s` the strings panel, `alt+i` the

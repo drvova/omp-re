@@ -11,7 +11,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@o
 import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { liveAnnotations } from "./annotations.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
-import { resolveDecompiler } from "./decompile.ts";
+import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { branchEntries, lastRecordedBinaryPath } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
@@ -21,6 +21,7 @@ import { resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
 import { registerReadTools } from "./tools-read.ts";
+import { registerRizinTools } from "./tools-rizin.ts";
 import { registerTriageTools } from "./tools-triage.ts";
 import {
 	citeEvidence,
@@ -48,14 +49,23 @@ interface OpenOptions {
  * the LLM); sendMessage feeds the `re.binary` renderer, which only fires for
  * role:"custom" messages.
  */
-async function openBinary(pi: ExtensionAPI, ctx: ExtensionContext, inputPath: string, options: OpenOptions = {}): Promise<{ path: string; replayed: number; replayFailures: string[] }> {
+async function openBinary(pi: ExtensionAPI, ctx: ExtensionContext, inputPath: string, options: OpenOptions = {}): Promise<OpenResult> {
 	const resolved = await resolveBinaryPath(inputPath);
 	const { replayFailures } = await spawnRizin(ctx, resolved, options);
 	const replayed = liveAnnotations(branchEntries(ctx), resolved).length;
 	pi.appendEntry("re.binary", { path: resolved });
 	pi.sendMessage({ customType: "re.binary", content: `[re: opened ${resolved}]`, display: true, details: { path: resolved } });
 	await refreshStatusBand(ctx);
-	return { path: resolved, replayed, replayFailures };
+	// rizin is the user's own install: say so up front if it lacks a command omp-re's tools send.
+	const missingCommands = await loadCatalog().then(missingRequiredCommands, () => []);
+	return { path: resolved, replayed, replayFailures, missingCommands };
+}
+
+interface OpenResult {
+	path: string;
+	replayed: number;
+	replayFailures: string[];
+	missingCommands: string[];
 }
 
 /** Footer status while rizin analyzes, cleared when done. */
@@ -69,11 +79,16 @@ function clearAnalysisStatus(ctx: ExtensionContext): void {
 	if (ctx.hasUI) ctx.ui.setStatus("re", undefined);
 }
 
-function describeOpen(result: { path: string; replayed: number; replayFailures: string[] }): string {
+function describeOpen(result: OpenResult): string {
 	const lines = [`Binary opened: ${result.path}`];
 	if (result.replayed > 0) lines.push(`Re-applied ${result.replayed - result.replayFailures.length} of ${result.replayed} annotation(s) recorded earlier for this binary.`);
 	for (const failure of result.replayFailures) lines.push(`  could not re-apply ${failure}`);
+	if (result.missingCommands.length > 0) lines.push(missingCommandsWarning(result.missingCommands));
 	return lines.join("\n");
+}
+
+function missingCommandsWarning(missing: string[]): string {
+	return `Warning: this rizin build lacks ${missing.join(", ")}, which omp-re's tools send; the tools that use them will fail. Upgrade rizin (omp-re is tested with 0.9.1).`;
 }
 
 const SUBCOMMANDS: readonly { name: string; usage?: string; description: string }[] = [
@@ -109,15 +124,19 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 	const state = getState(ctx);
 	const version = await rizinVersion();
 	const lines = [`rizin: ${version ?? `not found (${resolveRizinPath()})`}`];
+	const catalog = await loadCatalog().catch(() => null);
+	if (catalog) {
+		const missing = missingRequiredCommands(catalog);
+		lines.push(
+			missing.length === 0
+				? `rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present (${catalog.size} in this build; rizin_help searches them)`
+				: missingCommandsWarning(missing),
+		);
+		lines.push(`decompiler: ${catalog.has("pdg") ? "rz-ghidra (pdg)" : catalog.has("pdd") ? "jsdec (pdd)" : "none — decompile_function returns labeled disassembly"}`);
+	}
 	if (state.binaryPath) {
 		lines.push(`binary: ${state.binaryPath}`);
-		const rz = state.rz && !state.rz.isClosed ? state.rz : null;
-		if (rz) {
-			const decompiler = await resolveDecompiler(rz).catch(() => null);
-			lines.push(`decompiler: ${decompiler === "pdg" ? "rz-ghidra (pdg)" : decompiler === "pdd" ? "jsdec (pdd)" : "none — decompile_function returns labeled disassembly"}`);
-		} else {
-			lines.push("rizin process: not running (starts on next use)");
-		}
+		if (!state.rz || state.rz.isClosed) lines.push("rizin process: not running (starts on next use)");
 		lines.push(`annotations in effect: ${liveAnnotations(branchEntries(ctx), state.binaryPath).length}`);
 	} else {
 		lines.push("binary: none — /re open <path>");
@@ -140,6 +159,7 @@ export default async function (pi: ExtensionAPI) {
 
 	registerReadTools(pi);
 	registerMutateTools(pi);
+	registerRizinTools(pi);
 	registerEvidenceStore(pi);
 	registerAuditLog(pi);
 	registerUI(pi);

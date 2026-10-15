@@ -174,4 +174,18 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 			await second.shutdown();
 		}
 	});
+
+	test("/re status reports the rizin compatibility check, and rizin_command runs through the host", async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		const h = await boot(SessionManager.inMemory());
+		try {
+			await h.session.getToolByName("open_binary")!.execute("t-open", { path: TEST_BINARY });
+			await h.session.prompt("/re status");
+			expect(h.notes.at(-1)).toContain("rizin commands: all 24 omp-re sends are present");
+			const result = await h.session.getToolByName("rizin_command")!.execute("t-rz", { command: "pdsf", addr: "main" });
+			expect(result.content[0]?.type === "text" && result.content[0].text.startsWith("rizin> pdsf @ main\n")).toBe(true);
+		} finally {
+			await h.shutdown();
+		}
+	});
 });

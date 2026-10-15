@@ -151,6 +151,8 @@ export class RzSession {
 	private pending: { resolve: (frame: string) => void; reject: (err: Error) => void } | null = null;
 	private closedFlag = false;
 	private stderrTail = "";
+	/** Total stderr characters seen, so a command can take exactly the stderr written while it ran. */
+	private stderrSeen = 0;
 	private cmdCounter = 0;
 
 	private constructor(
@@ -164,7 +166,9 @@ export class RzSession {
 		// Drain stderr unconditionally: an unread pipe fills its OS buffer and
 		// blocks the child mid-write on a noisy binary, wedging every command.
 		this.proc.stderr?.on("data", (chunk: Buffer) => {
-			this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_MAX);
+			const text = chunk.toString("utf8");
+			this.stderrSeen += text.length;
+			this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX);
 		});
 		this.proc.on("exit", () => {
 			this.closedFlag = true;
@@ -238,11 +242,26 @@ export class RzSession {
 	 * survives. Only a timeout kills the process.
 	 */
 	cmd(command: string, options: CmdOptions = {}): Promise<string> {
+		return this.run(command, options).then((result) => result.output);
+	}
+
+	/**
+	 * Like cmd(), but also returns what rizin wrote to stderr while the command
+	 * ran — its error messages and, for a malformed command, its own usage
+	 * text. Best effort: stderr is a separate pipe, so a final fragment can
+	 * trail the output by an event-loop turn, which is waited for once.
+	 */
+	cmdWithStderr(command: string, options: CmdOptions = {}): Promise<{ output: string; stderr: string }> {
+		return this.run(command, options);
+	}
+
+	private run(command: string, options: CmdOptions): Promise<{ output: string; stderr: string }> {
 		const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
 		const task = this.queue.then(async () => {
 			if (this.closedFlag) throw new RzProtocolError("omp-re: rizin process exited");
 			const marker = `__OMPRE_SYNC_${(this.cmdCounter++).toString(36)}_${process.hrtime.bigint().toString(36)}__`;
 			const deadline = Date.now() + timeoutMs;
+			const stderrStart = this.stderrSeen;
 			this.proc.stdin?.write(`${command}\necho ${marker}\n`);
 
 			const collected: string[] = [];
@@ -255,7 +274,12 @@ export class RzSession {
 					throw err;
 				}
 				const frame = await this.withTimeout(this.readFrame(), command, remaining);
-				if (frame.trim() === marker) return collected.join("");
+				if (frame.trim() === marker) {
+					await new Promise((resolve) => setImmediate(resolve));
+					const written = this.stderrSeen - stderrStart;
+					const stderr = written > 0 ? this.stderrTail.slice(-Math.min(written, this.stderrTail.length)) : "";
+					return { output: collected.join(""), stderr };
+				}
 				collected.push(frame);
 			}
 			const detail = this.stderrTail.trim();

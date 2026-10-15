@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![22 tools](https://img.shields.io/badge/tools-22-informational)
+![24 tools](https://img.shields.io/badge/tools-24-informational)
 
 ![omp-re triaging /usr/bin/ls: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 22 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 24 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -80,10 +80,33 @@ address behind them.
 | Session artifacts (`artifact://`) | Output past the context cap is saved in full to the session's artifact store and linked from the result, never discarded. |
 | Session branches (`getBranch`) | Evidence, annotations, and the open binary follow the active branch: after `/tree` navigation or a branch, an abandoned branch's renames are rolled back and its evidence no longer grounds claims. |
 | Session lifecycle events | `--continue`/`/resume` reopen the branch's binary in the background and **replay its annotations** into the fresh rizin process; a crashed or timed-out rizin respawns the same way. |
-| Approval tiers with reasons | Read tools are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); triage tools are `exec`. omp's `tools.approvalMode` decides. |
+| Approval tiers with reasons | Read tools (and `rizin_help`) are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); `rizin_command` is `exec` with the exact command in its reason; triage tools are `exec`. omp's `tools.approvalMode` decides. |
 | Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
 | Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the evidence ids on this branch. |
 | Footer status, widgets, logger | Analysis progress shows in the footer; the binary-facts band is a widget; headless warnings go to omp's log. |
+
+## Using all of rizin
+
+The dedicated tools cover the common path; rizin has about 2,000 commands.
+Rather than hardcode a list, omp-re reads the catalog rizin publishes about
+itself (`rizin -qc '?*j'`: every command in the installed build, plugins
+included, with typed arguments and a summary) and uses it three ways:
+
+- **`rizin_help`** answers "which command, and what arguments?" from the rizin
+  you actually have, so the model never guesses syntax for the wrong version.
+  `rizin_help ph` shows `ph <algo>` with its choices; `rizin_help "rop gadgets"`
+  finds `/R`.
+- **`rizin_command`** runs one read-only command from that catalog — function
+  summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy
+  (`ph entropy @!4096`), byte and ROP searches (`/x`, `/R`), ESIL (`aoe`),
+  headers (`iH`) — and returns rizin's own error and usage text when the
+  arguments are wrong. Writes, config, shell escapes, file reads, and
+  analysis changes are refused before anything reaches rizin; see
+  [`SECURITY.md`](SECURITY.md#rizin_command).
+- **A compatibility check**: when a binary opens, every command omp-re's own
+  tools send is looked up in the catalog, and any your rizin lacks is named in
+  a warning instead of failing later as an empty result. `/re status` shows
+  the result and which decompiler the catalog lists.
 
 ## What it looks like
 
@@ -159,9 +182,9 @@ blocked, and the IOC is defanged even in the error message:
 
 ## Tool reference
 
-All 22 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 24 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, so
-your own tool list may legitimately show fewer than 22.
+your own tool list may legitimately show fewer than 24.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
@@ -183,6 +206,8 @@ your own tool list may legitimately show fewer than 22.
 | `set_comment` | mutate | Set (or clear) a comment at an address. |
 | `set_prototype` | mutate | Set a function's C prototype. |
 | `set_variable_type` | mutate | Set a local variable's C type. |
+| `rizin_help` | rizin CLI (read) | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
+| `rizin_command` | rizin CLI (exec) | Run one read-only rizin command the dedicated tools don't cover (`pdsf`, `agc`, `px`, `ph entropy`, `/x`, `/R`, `aoe`, …). |
 | `triage_capa` | triage | Run capa rules (capabilities, ATT&CK techniques). |
 | `triage_floss` | triage | Extract obfuscated strings (FLOSS). |
 | `triage_die` | triage | Detect packers/compilers/file types (Detect It Easy). |
@@ -209,7 +234,7 @@ Three environment variables, all optional:
 
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 22 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 24 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

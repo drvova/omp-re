@@ -1,7 +1,8 @@
 /**
  * Evidence store: a SHA-256 content-addressed blob store (temp-file-then-
  * rename, idempotent) plus a central `tool_result` hook that appends an
- * `re.evidence` custom entry after every successful read-tier RE tool call.
+ * `re.evidence` custom entry after every successful read-tier RE tool call
+ * and every successful `rizin_command`.
  *
  * `pi.appendEntry()` persists the entry to the session but does NOT send it
  * to the LLM, so the model sees a tool result once and never re-reads its own
@@ -15,7 +16,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_READ_TOOL_NAMES } from "./audit.ts";
+import { RE_EVIDENCE_TOOL_NAMES } from "./audit.ts";
 import { branchEntries, customEntries } from "./entries.ts";
 import { normalizeAddr } from "./rizin.ts";
 import { getState } from "./state.ts";
@@ -93,7 +94,7 @@ export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
 export function registerEvidenceStore(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.isError) return undefined;
-		if (RE_READ_TOOL_NAMES[event.toolName] !== true) return undefined;
+		if (RE_EVIDENCE_TOOL_NAMES[event.toolName] !== true) return undefined;
 
 		try {
 			const state = getState(ctx);
