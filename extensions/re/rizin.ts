@@ -11,6 +11,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, realpath as fsRealpath } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { dirname, extname, isAbsolute, join } from "node:path";
 
 /** Allowed characters in an address/expression interpolated after `@`: hex, flag names, and
  * arithmetic (sym.main+0x10, $$). `@` itself is excluded so no value can smuggle in rizin's
@@ -402,20 +403,22 @@ export function resolveRizinPath(): string {
 
 /**
  * The path to a sibling rizin CLI tool (`rz-bin`, `rz-diff`, …). rizin ships
- * these next to the `rizin` binary, so when the configured rizin is an
- * absolute path the tool is taken from the same directory (a non-default
- * install prefix keeps its own tools together); otherwise the bare name is
- * returned and resolved on PATH, exactly like `rizin` itself.
+ * these next to the `rizin` binary, so when the configured rizin is a path the
+ * tool is taken from the same directory (a non-default install prefix keeps
+ * its own tools together) and inherits its extension — on Windows a
+ * `…\rizin.exe` yields `…\rz-bin.exe`. A bare command name stays bare and
+ * resolves on PATH, exactly like `rizin` itself. Uses `node:path`, so the
+ * separator handling is correct on both POSIX and Windows at runtime.
  */
 export function resolveRizinTool(tool: string): string {
 	const rizin = resolveRizinPath();
-	const slash = rizin.lastIndexOf("/");
-	return slash === -1 ? tool : `${rizin.slice(0, slash + 1)}${tool}`;
+	const name = `${tool}${extname(rizin)}`;
+	return /[\\/]/.test(rizin) ? join(dirname(rizin), name) : name;
 }
 
-/** Whether `name` resolves to an executable, either as a path or via PATH. */
+/** Whether `name` resolves to an executable, either as a path (POSIX or Windows) or via PATH. */
 export async function isExecutable(name: string): Promise<boolean> {
-	if (!name.includes("/")) return Bun.which(name) !== null;
+	if (!/[\\/]/.test(name) && !isAbsolute(name)) return Bun.which(name) !== null;
 	try {
 		await access(name, fsConstants.X_OK);
 		return true;
