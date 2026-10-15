@@ -271,6 +271,7 @@ Three environment variables, all optional:
 
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the cordis context graph: process effects and subsystem composition.
 - [`docs/tools.md`](docs/tools.md) — full parameter tables for all 26 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
