@@ -90,7 +90,11 @@ describe("checkRizinCommand (no rizin needed)", () => {
 			["pdf @ main", "`@` modifiers"],
 			["px @f:/etc/passwd", "`@` modifiers"],
 			["px @e:io.cache=0", "`@` modifiers"],
+			["px @x:9090 @ main", "`@` modifiers"], // temp-block-replace modifier
+			["px @r:rsp", "`@` modifiers"], // seek-to-register modifier
 			["ph entropy @!4096x", "`@` modifiers"],
+			["iij 2> /tmp/x", "redirection"], // stderr redirect
+			["iij H> /tmp/x", "redirection"], // html redirect
 			['"px 16 !id"', "double quotes"],
 			["px #!pipe sh", "`#`"],
 			["px 16\\x3b", "backslashes"],
@@ -100,8 +104,9 @@ describe("checkRizinCommand (no rizin needed)", () => {
 		}
 	});
 
-	test("refuses commands outside the read-only families, naming the annotate tools", () => {
-		for (const command of ["!id", "wx 90", "e io.cache=true", "o /etc/passwd", "s main", "afn evil", "CC note", "pfw x", "agw /tmp/g", "id /tmp/x.pdb", "$a=!id", ".!id", "(m;!id)"]) {
+	test("refuses every non-read-only command head, including the task (`&`) and shell (`!`) operators", () => {
+		// Validated against rizin's documented prompt grammar (book: first_steps/commandline_rizin).
+		for (const command of ["!id", "!!id", "& dc", "&t dc", "&= 0", "3 px", "wx 90", "e io.cache=true", "o /etc/passwd", "s main", "afn evil", "CC note", "pfw x", "agw /tmp/g", "id /tmp/x.pdb", "$a=!id", ".!id", "(m;!id)"]) {
 			const reason = refusal(command);
 			expect(reason).toMatch(/is not available here|is not allowed in a command/);
 		}

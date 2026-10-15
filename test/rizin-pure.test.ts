@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { eaFromOffset, normalizeAddr, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { baseRizinFlags, eaFromOffset, normalizeAddr, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 
 describe("validateAddr", () => {
 	test("accepts hex addresses, flag names, and arithmetic", () => {
@@ -176,5 +176,26 @@ describe("liveAnnotations", () => {
 
 	test("ignores annotations recorded before any binary was opened", () => {
 		expect(liveAnnotations([custom("a1", "re.annotation", ann("0x1", "x"))], "/bin/a")).toEqual([]);
+	});
+});
+
+describe("baseRizinFlags", () => {
+	const original = process.env.OMPRE_RIZIN_LOAD_USER_CONFIG;
+	const restore = () => {
+		if (original === undefined) delete process.env.OMPRE_RIZIN_LOAD_USER_CONFIG;
+		else process.env.OMPRE_RIZIN_LOAD_USER_CONFIG = original;
+	};
+
+	test("is the NUL-framed pipe protocol with colors/utf8 off and user config skipped", () => {
+		delete process.env.OMPRE_RIZIN_LOAD_USER_CONFIG;
+		expect(baseRizinFlags()).toEqual(["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false", "-N"]);
+		restore();
+	});
+
+	test("OMPRE_RIZIN_LOAD_USER_CONFIG drops -N so the user's rizinrc loads", () => {
+		process.env.OMPRE_RIZIN_LOAD_USER_CONFIG = "1";
+		expect(baseRizinFlags()).not.toContain("-N");
+		expect(baseRizinFlags()[0]).toBe("-q0");
+		restore();
 	});
 });

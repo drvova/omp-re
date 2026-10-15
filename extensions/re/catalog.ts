@@ -48,7 +48,9 @@ export function loadCatalog(rizinPath = resolveRizinPath()): Promise<RzCatalog> 
 }
 
 async function readCatalog(rizinPath: string): Promise<RzCatalog> {
-	const proc = Bun.spawn([rizinPath, "-e", "scr.color=0", "-qc", "?*j", "--"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+	// `-N` (skip user rizinrc) unless overridden, so the catalog reflects the same stock command set the session spawns with; plugins still load, so plugin commands (pdg, …) appear.
+	const noUserConfig = !/^(1|true|yes|on)$/i.test((process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim());
+	const proc = Bun.spawn([rizinPath, "-e", "scr.color=0", ...(noUserConfig ? ["-N"] : []), "-qc", "?*j", "--"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
 	const out = await new Response(proc.stdout).text();
 	await proc.exited;
 	const parsed = JSON.parse(out) as Record<string, RzCommandSpec | null>;

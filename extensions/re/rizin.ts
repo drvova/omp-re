@@ -127,6 +127,25 @@ export function debugTimeoutMs(): number {
 	return Number(process.env.OMPRE_DEBUG_TIMEOUT_MS) || 60_000;
 }
 
+/**
+ * The flags every omp-re rizin process shares.
+ *
+ * `-q0` is the pipe protocol: `-q` (quiet, no prompt) plus `-0` (emit a NUL
+ * after init and after every command), which is the frame delimiter the whole
+ * RzSession protocol is built on. `scr.color`/`scr.utf8` off keep output
+ * plain. `-N` skips the user's `rizinrc` and startup scripts so omp-re always
+ * sees stock rizin — a global eval var or alias in a user's config can't
+ * change the command output omp-re parses — while still loading plugins (that
+ * needs `-NN`, which omp-re never uses), so rz-ghidra/jsdec and the catalog
+ * are unaffected. `OMPRE_RIZIN_LOAD_USER_CONFIG=1` drops `-N` for anyone who
+ * relies on their rizinrc (e.g. a custom `dir.plugins`).
+ */
+export function baseRizinFlags(): string[] {
+	const flags = ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false"];
+	if (!/^(1|true|yes|on)$/i.test((process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim())) flags.push("-N");
+	return flags;
+}
+
 export interface CmdOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
@@ -325,7 +344,7 @@ export class RzSession {
 	 */
 	static async spawn(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
 		if (options.signal?.aborted) throw new RzAbortError("rizin analysis");
-		const proc = spawn(rizinPath, ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false", binaryPath], {
+		const proc = spawn(rizinPath, [...baseRizinFlags(), binaryPath], {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const session = new RzSession(proc, binaryPath);
@@ -357,7 +376,7 @@ export class RzSession {
 	 */
 	static async spawnDebug(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
 		if (options.signal?.aborted) throw new RzAbortError("debug launch");
-		const proc = spawn(rizinPath, ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false", "-d", binaryPath], {
+		const proc = spawn(rizinPath, [...baseRizinFlags(), "-d", binaryPath], {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const session = new RzSession(proc, binaryPath);

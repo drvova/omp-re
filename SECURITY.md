@@ -37,10 +37,17 @@ provides any isolation:
 `set_comment`, `rename_function`, `rename_variable`, `set_prototype`, and
 `set_variable_type` only mutate rizin's **in-process analysis database**
 for the running session. `RzSession.spawn` launches rizin as
-`rizin -q0 <path>` — no `-w` (write) flag — so rizin opens the file
+`rizin -q0 -N <path>` — no `-w` (write) flag — so rizin opens the file
 read-only and none of these tools ever writes back to the sample on disk.
 The annotations themselves are recorded in the omp session and replayed into
 rizin when the session is resumed.
+
+`-N` additionally skips the user's `rizinrc` and startup scripts, so a global
+eval var or alias in the operator's config can't silently change the command
+output omp-re parses; plugins still load (that needs `-NN`, which omp-re never
+uses), so decompilers are unaffected. `OMPRE_RIZIN_LOAD_USER_CONFIG=1` restores
+`rizinrc` loading for operators who need it. The debug session
+(`RzSession.spawnDebug`) adds `-d` to the same flags — see `## rizin_debug`.
 
 ## Command construction
 
@@ -91,6 +98,15 @@ their output ends a `-q0` frame, which desyncs the pipe and kills the
 session's rizin process (and with it the live analysis). Each refusal and
 the policy table live in `extensions/re/catalog.ts`; the escapes above are
 covered by `test/rizin-cli.test.ts`.
+
+The forbidden-syntax set is drawn from rizin's own documented prompt grammar
+(the Rizin Book, *First Steps → Command-line*): command separator `;`, pipes
+`|`, redirection `>`/`2>`/`H>`/`<`, the grep `~`, the full `@` temporary-
+modifier family (`@@` iterators, `@e:`, `@f:`, `@x:`, `@r:`, `@o:`, … — all
+refused, with only `@!<n>` block size allowed), substitution, and comments.
+The shell (`!`/`!!`) and background-task (`&`/`&t`) operators are command
+heads, so they are refused by the read-only-family check rather than the
+syntax scan. `test/rizin-cli.test.ts` pins each of these.
 
 Even read-only commands parse the sample, so the analysis-hygiene advice
 above applies to them unchanged.
