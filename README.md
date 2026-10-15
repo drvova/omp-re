@@ -140,10 +140,9 @@ container — see [`SECURITY.md`](SECURITY.md#rizin_debug).
 ## What it looks like
 
 The screenshots below are real, unmodified captures of an earlier `omp-re`
-release against `/usr/bin/ls` on Ubuntu 24.04 — not mockups. They were taken
-with the radare2 backend before the rizin port; the layout is unchanged, and
-[`tools/shotgen`](tools/shotgen) regenerates them against rizin on any Linux
-machine.
+release against `/usr/bin/ls` on Ubuntu 24.04 — not mockups. The text-UI
+layout is current; [`tools/shotgen`](tools/shotgen) regenerates them against
+your own rizin install on any Linux machine.
 
 ### Function navigator
 
@@ -280,8 +279,7 @@ Three environment variables, all optional:
 - **A notify raised while the code view is open can render underneath it.**
   Panels now close before reporting "nothing to open", and Enter on an
   evidence row cites it into the editor, so this only affects the code view's
-  own `d` notice when a function has no decompiler output. Full writeup:
-  [`test/QA-FINDINGS.md`](test/QA-FINDINGS.md) §1.
+  own `d` notice when a function has no decompiler output.
 - **Annotations made by a `re-analyst` subagent stay in that subagent's
   rizin process.** They are not merged back into the parent session; the
   agent is instructed not to annotate unless asked.

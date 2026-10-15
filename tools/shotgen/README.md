@@ -13,9 +13,8 @@ bun render.ts
 ```
 
 The committed `docs/img/*.png` are real captures of `/bin/ls` — it exists on
-every Linux box, so anyone can reproduce them without a malware fixture. They
-were taken with the radare2 backend before the 0.2.0 rizin port; rerunning
-the steps here regenerates them against rizin. The functions panel ranks
+every Linux box, so anyone can reproduce them without a malware fixture.
+Rerunning the steps here regenerates them against your rizin install. The functions panel ranks
 matches with omp's fuzzy matcher (best first), so filtering for `main` puts
 the real `main` on top; `DECOMPILE_DOWN` exists only for a fixture whose
 target isn't the best match.

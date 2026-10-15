@@ -178,8 +178,8 @@ skip_scene() {
 # session_start). Confirmed by direct testing during this pass: on a machine
 # whose startup runs a large MCP server catalog, session_start's automatic
 # open raced that startup storm and the spawned analyzer child died
-# immediately (observed with the radare2 backend before the rizin port, and
-# kept as a precaution), while a standalone spawn outside that storm ran
+# immediately (observed on a busy host, kept as a precaution), while a
+# standalone spawn outside that storm ran
 # `aaa` to completion with no issue. test/tui-qa.sh already avoids --binary
 # for the same class of reason ("opening from inside via /re open is what a
 # human does anyway") — do the same here: launch bare, let the readiness

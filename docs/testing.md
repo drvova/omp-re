@@ -85,8 +85,10 @@ outage); also not run in CI. Target shape on an otherwise-idle host: **PASS
 with wall-clock timing assumptions, so a host under heavy, unrelated
 resource contention (high load average, active swap, competing processes)
 can produce cascading, environment-induced failures unrelated to the
-plugin's own correctness — see `test/QA-FINDINGS.md` for a worked example
-and the harness robustness fixes it prompted.
+plugin's own correctness. The harness has robustness margins for this
+(generous retries and backspace/keystroke budgets), but a heavily loaded
+host can still flake; re-run on an idle host before treating a failure as
+real.
 
 The suite pins its own assertion count as a drift guard (a literal `-eq 99`
 near the end of the script): if you add or remove an assertion, update that
