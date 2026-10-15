@@ -1,35 +1,39 @@
 /**
- * Report generation, ported from rzx-re's extensions/re/report.ts (itself
- * ported from internal/report/{report,ioc,attack}.go). Two behaviours that
- * report predates as Go-side gaps are built here for real: IOC defanging,
- * and the ungrounded-claim write gate. Every rendered claim also anchors to
- * the evidence entry it actually came from — Go's FormatMarkdown hardcoded
- * the literal "capa" for every anchor regardless of the real source tool;
- * this tracks it per claim.
+ * Report generation with two hard properties: IOCs are defanged, and the
+ * write gate refuses to emit a report containing any claim with zero backing
+ * evidence. Every rendered claim anchors to the evidence entry it actually
+ * came from (`[tool:id]`), tracked per claim.
  *
- * omp-re adaptations: evidence/annotation lookups read the renamed `re.*`
- * custom-entry types (was `rzx.*`) via
- * ctx.sessionManager.getEntries(), capa/floss evidence blobs are read from
- * the relocated `getAgentDir()/re/blobs` store, and the `/re report`
- * command's ctx.hasUI-vs-headless notify/console.error split — previously
- * index.ts's job — is folded into this file's single `writeReport` entry
- * point, so the command handler needs nothing but ctx and an optional path.
+ * Evidence and annotations are read from the current session branch. Tool
+ * output is read from the session artifact when the tool spilled one (the
+ * untruncated output), else from the content-addressed blob store under
+ * `getAgentDir()/re/blobs`. `writeReport` folds in the interactive-vs-
+ * headless split, so the `/re report` handler needs only ctx and a path.
  */
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { branchEntries } from "./entries.ts";
 
 /**
- * Content-addressed blob reader mirroring evidence.ts's `readBlob` (step 4) —
- * duplicated here rather than imported so this file typechecks independently
- * of that sibling module; the construction is identical:
- * `getAgentDir()/re/blobs/<hash[0:2]>/<hash[2:4]>/<hash>`. Never throws — a
- * missing or unreadable blob degrades a capa/floss claim to "no extra
- * evidence" rather than crashing report generation.
+ * The full text a piece of evidence recorded: the session artifact when the
+ * tool spilled one (untruncated), else the content-addressed blob
+ * (`getAgentDir()/re/blobs/<hash[0:2]>/<hash[2:4]>/<hash>`, the same layout
+ * evidence.ts writes). Never throws — a missing or unreadable source degrades
+ * a capa/floss claim to "no extra evidence" rather than crashing the report.
  */
-async function readEvidenceBlob(hash: string): Promise<string | null> {
-	const target = join(getAgentDir(), "re", "blobs", hash.slice(0, 2), hash.slice(2, 4), hash);
+async function readEvidenceOutput(ctx: ExtensionContext, ev: EvidenceRecord): Promise<string | null> {
+	if (ev.artifactId) {
+		try {
+			const path = await ctx.sessionManager.getArtifactPath(ev.artifactId);
+			if (path) return await readFile(path, "utf8");
+		} catch {
+			// fall through to the blob
+		}
+	}
+	if (!ev.outputHash) return null;
+	const target = join(getAgentDir(), "re", "blobs", ev.outputHash.slice(0, 2), ev.outputHash.slice(2, 4), ev.outputHash);
 	try {
 		return await readFile(target, "utf8");
 	} catch {
@@ -55,6 +59,7 @@ interface EvidenceRecord {
 	tool: string;
 	ea?: string;
 	outputHash?: string;
+	artifactId?: string;
 	summary: string;
 }
 
@@ -72,15 +77,23 @@ function collectEvidence(entries: readonly { type: string; customType?: string; 
 		if (entry.type !== "custom" || entry.customType !== "re.evidence") continue;
 		const data = entry.data as Partial<EvidenceRecord> | undefined;
 		if (!data || typeof data.id !== "string" || typeof data.tool !== "string" || typeof data.summary !== "string") continue;
-		out.push({ id: data.id, tool: data.tool, ea: data.ea, outputHash: data.outputHash, summary: data.summary });
+		out.push({ id: data.id, tool: data.tool, ea: data.ea, outputHash: data.outputHash, artifactId: data.artifactId, summary: data.summary });
 	}
 	return out;
 }
 
-function collectAnnotations(entries: readonly { type: string; customType?: string; data?: unknown }[]): AnnotationRecord[] {
+/** Annotations on this branch that `/re undo` has not reversed. */
+function collectAnnotations(entries: readonly { id?: string; type: string; customType?: string; data?: unknown }[]): AnnotationRecord[] {
+	const undone = new Set<string>();
+	for (const entry of entries) {
+		if (entry.type !== "custom" || entry.customType !== "re.undo") continue;
+		const target = (entry.data as { undidEntryId?: unknown } | undefined)?.undidEntryId;
+		if (typeof target === "string") undone.add(target);
+	}
 	const out: AnnotationRecord[] = [];
 	for (const entry of entries) {
 		if (entry.type !== "custom" || entry.customType !== "re.annotation") continue;
+		if (entry.id !== undefined && undone.has(entry.id)) continue;
 		const data = entry.data as Partial<AnnotationRecord> | undefined;
 		if (!data || typeof data.kind !== "string" || typeof data.ea !== "string") continue;
 		out.push({
@@ -171,6 +184,7 @@ function parseEvidenceJson(raw: string): unknown {
 }
 
 async function extractCapabilities(
+	ctx: ExtensionContext,
 	capaEvidence: EvidenceRecord[],
 ): Promise<{
 	capabilities: string[];
@@ -184,8 +198,7 @@ async function extractCapabilities(
 	const labelSet = new Map<string, string>(); // attack id -> capa's own technique/subtechnique label
 
 	for (const ev of capaEvidence) {
-		if (!ev.outputHash) continue;
-		const raw = await readEvidenceBlob(ev.outputHash);
+		const raw = await readEvidenceOutput(ctx, ev);
 		if (!raw) continue;
 		let findings: CapaFinding[];
 		try {
@@ -248,6 +261,7 @@ const MITRE_ATTACK: Record<string, string> = {
 };
 
 async function buildIOCClaims(
+	ctx: ExtensionContext,
 	evidence: EvidenceRecord[],
 	annotations: AnnotationRecord[],
 ): Promise<Claim[]> {
@@ -256,8 +270,8 @@ async function buildIOCClaims(
 	for (const ev of evidence) {
 		const lowerTool = ev.tool.toLowerCase();
 		const texts: string[] = [ev.summary];
-		if ((lowerTool === "floss" || lowerTool === "strings" || lowerTool === "triage_floss" || lowerTool === "list_strings") && ev.outputHash) {
-			const raw = await readEvidenceBlob(ev.outputHash);
+		if (lowerTool === "floss" || lowerTool === "strings" || lowerTool === "triage_floss" || lowerTool === "list_strings") {
+			const raw = await readEvidenceOutput(ctx, ev);
 			if (raw) {
 				try {
 					texts.push(...extractStringsFromJson(parseEvidenceJson(raw)));
@@ -299,7 +313,7 @@ interface BuiltReport {
 
 async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 	const sessionId = ctx.sessionManager.getSessionId();
-	const entries = ctx.sessionManager.getEntries();
+	const entries = branchEntries(ctx);
 	const evidence = collectEvidence(entries);
 	const annotations = collectAnnotations(entries);
 
@@ -311,7 +325,7 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 	const sections: ReportSection[] = [];
 
 	if (capaEvidence.length > 0) {
-		const { capabilities, attackIds, sourceByCapability, sourceByAttack, labelByAttack } = await extractCapabilities(capaEvidence);
+		const { capabilities, attackIds, sourceByCapability, sourceByAttack, labelByAttack } = await extractCapabilities(ctx, capaEvidence);
 		const capClaims: Claim[] = capabilities.map((c) => ({ text: c, evidenceIds: [sourceByCapability.get(c)!] }));
 		const attackClaims: Claim[] = attackIds.map((id) => ({
 			text: `${id} — ${labelByAttack.get(id) ?? MITRE_ATTACK[id] ?? "(unmapped technique)"}`,
@@ -328,7 +342,7 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 		}
 	}
 
-	const iocClaims = await buildIOCClaims(evidence, annotations);
+	const iocClaims = await buildIOCClaims(ctx, evidence, annotations);
 	if (iocClaims.length > 0) {
 		sections.push({ title: "Indicators of Compromise", claims: iocClaims });
 	}

@@ -13,17 +13,23 @@ without reviewing them first.
 
 ```bash
 bun run check      # tsc --noEmit — must exit 0
-bun test           # unit tests; all 8 files run, but 3 report their tests
-                    # as skipped without a real radare2 + the (undistributed)
-                    # WannaCry fixture — see docs/testing.md
+bun test           # unit + integration tests; the rizin suites run against
+                    # /bin/ls when rizin is on PATH and skip otherwise —
+                    # see docs/testing.md
 bash test/tui.sh   # fast tmux smoke test, ~30s
 bun run qa:tui     # full tmux QA pass, 99 assertions
 ```
 
-The last two need tmux, a real `radare2`, and the test fixture; set
-`OMPRE_TEST_BINARY` to point at your own sample if you don't have the
-WannaCry one. See [`docs/testing.md`](docs/testing.md) for what each tier
-actually needs and the exact PASS/SKIP matrix.
+Run `bun test` with rizin installed before opening a PR that touches
+`extensions/re/` — CI cannot run the rizin suites. The last two need tmux,
+`omp`, rizin, a fixture (`OMPRE_TEST_BINARY`), and for `qa:tui` a working
+model. See [`docs/testing.md`](docs/testing.md) for what each tier actually
+needs and the exact PASS/SKIP matrix.
+
+Every rizin command an RE tool sends goes through `validateAddr`,
+`validateIdent`, or `rzQuote` (`extensions/re/rizin.ts`); annotation commands
+are built only by `annotationCommands` (`extensions/re/annotations.ts`),
+which the forward tools, `/re undo`, and replay all share. Keep it that way.
 
 ## Two hard rules `test/tui-qa.sh` depends on
 

@@ -6,14 +6,21 @@ show fewer than 22.
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
-`tools.approval.<name>` in your omp config), and every read-tier tool call
-also becomes a `re.evidence` entry — see [`workflow.md`](workflow.md).
+`tools.approval.<name>` in your omp config), every tool has its own
+transcript renderer, and every read-tier tool call also becomes a
+`re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor
+cancellation.
+
+Output larger than the context cap (2000 lines or 50 KB) is truncated for the
+model and saved in full to the session's artifact store; the result ends with
+`[Output truncated: … Full output: artifact://<id>]` and the model can `read`
+that artifact. List results are JSON arrays with one compact row per line.
 
 ## Session-setup (1 tool)
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `open_binary` | `read` | `path: string` | Spawns radare2 on a binary and runs full analysis (`aaa`). Every other RE tool acts on whichever binary was most recently opened — call this first in a delegated/subagent session that has no `--binary` flag or `/re open` command available. |
+| `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 
 ## Read tier (12 tools)
 
@@ -21,41 +28,46 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `list_functions` | `read` | `offset?, limit?` | List all functions detected in the open binary. |
-| `search_functions` | `read` | `query, offset?, limit?` | Search functions by substring match on name. |
-| `get_function` | `read` | `target` (name or address) | Get detailed info for a single function. |
-| `decompile_function` | `read` | `addr` (address or name) | Decompile to pseudo-C, preferring a real decompiler plugin (r2ghidra `pdg` / r2dec `pdd`); falls back to r2's native `pdc` and flags the fallback in the output. |
-| `disassemble_function` | `read` | `addr` | Disassemble to annotated instructions (comments, flags/labels, xrefs folded in where r2 reports them). |
-| `get_xrefs_to` | `read` | `addr, offset?, limit?` | Cross-references pointing at an address. |
-| `get_xrefs_from` | `read` | `addr, offset?, limit?` | Cross-references originating from an address. |
-| `list_imports` | `read` | `offset?, limit?` | List imported symbols. |
-| `list_exports` | `read` | `offset?, limit?` | List exported symbols. |
-| `list_strings` | `read` | `offset?, limit?, filter?` | List strings, optionally filtered by substring. |
-| `list_segments` | `read` | `offset?, limit?` | List memory segments/sections. |
-| `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the session's bound binary. |
+| `list_functions` | `read` | `offset?, limit?, sort?` | Functions as `{ea, name, size, blocks, callers, callees, signature}`. `sort` is `address` (default), `size`, or `callers`. |
+| `search_functions` | `read` | `query, offset?, limit?` | Same rows, filtered by name substring. |
+| `get_function` | `read` | `target` (name or address) | One function: signature, size and complexity metrics, `args`/`locals` with types and storage, `calls` (unique call targets, named via rizin's flags), `callers` (call sites that reach it), and `refCounts`. Raw jump/data reference arrays are reduced to counts. |
+| `decompile_function` | `read` | `addr` (address or name) | Decompile with rz-ghidra (`pdg`) or jsdec (`pdd`), header `decompiled <ea> (<kind>)`. With neither — or when the decompiler returns nothing for this function — returns annotated disassembly whose output begins `(disassembly only — …) `. |
+| `disassemble_function` | `read` | `addr` | Annotated instructions: comments, flags/labels, and incoming xrefs folded in. |
+| `get_xrefs_to` | `read` | `addr, offset?, limit?` | Cross-references pointing at an address, with `fromEa`/`toEa`. |
+| `get_xrefs_from` | `read` | `addr, offset?, limit?` | Cross-references originating from the instruction at an address (per instruction — use `get_function`'s `calls` for a whole function). |
+| `list_imports` | `read` | `offset?, limit?` | Imported symbols, with the PLT stub as `ea` when there is one. |
+| `list_exports` | `read` | `offset?, limit?` | Exported symbols. |
+| `list_strings` | `read` | `offset?, limit?, filter?` | Strings in data sections, optionally filtered by substring. |
+| `list_segments` | `read` | `offset?, limit?` | Sections with permissions, sizes, and addresses. |
+| `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the open binary. |
 
 `offset`/`limit` default to 0/200 and cap at 1000; every paginated result
-reports its total so the model knows a view is partial.
+reports its total so the model knows a view is partial. An empty page is
+marked as compactable, so omp can drop it from context once it has been read.
 
 ## Mutate tier (5 tools)
 
-Every mutate tool follows read-old → write → read-back → verify: it throws
-rather than reporting success when the requested mutation did not actually
-land against real radare2. `/re undo` reverses the most recently applied
-annotation, tool by tool, in the same way.
+Every mutate tool follows resolve → read-old → write → read-back → verify: it
+throws with what rizin actually stored rather than reporting success when the
+requested mutation did not land. Annotations are keyed on the function's
+start address (or the exact address, for comments). `/re undo` reverses the
+most recently applied annotation, and the session replays annotations into a
+fresh rizin process on resume or respawn. Each approval prompt states the
+exact change (e.g. `Rename function "main" to "parse_args". Reversible with
+/re undo.`).
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rename_function` | `write` | `addr, new` | Rename a function. |
-| `rename_variable` | `write` | `addr, old, new` | Rename a local variable within a function. |
-| `set_comment` | `write` | `addr, text` (empty clears) | Set or clear a comment at an address. Calling it twice at the same address replaces the comment rather than appending. |
-| `set_prototype` | `write` | `addr, sig` | Set a function's C-style signature/prototype. |
-| `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C-style type. |
+| `rename_variable` | `write` | `addr, old, new` | Rename a local variable or argument; an unknown `old` lists the variables that exist. |
+| `set_comment` | `write` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
+| `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
+| `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 
-Each takes no session-specific parameters beyond what's listed; all run
-against the currently open binary.
+Each runs against the currently open binary via omp's `exec`, so cancelling
+the tool call stops the scanner.
 
 | Tool | Approval | Requires on PATH | Parameters | What it does |
 | --- | --- | --- | --- | --- |

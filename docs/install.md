@@ -1,75 +1,87 @@
 # Install
 
-## radare2
+## rizin
 
-**radare2 6.1+ is recommended.** `omp-re` accepts both r2 5.x (`offset`) and
-r2 6.x (`addr`) JSON field names via `addrOf()`, so 5.5.0 technically works
-for the read/mutate tools — but a real decompiler plugin (r2ghidra) cannot
-be built against it, which matters for `decompile_function` and the code
-viewer's `d` key (see the next section).
-
-### Ubuntu / Debian
-
-Ubuntu 24.04's `apt` package is radare2 5.5.0 — usable, but see the r2ghidra
-warning below before relying on it for decompilation:
-
-```bash
-sudo apt install radare2
-```
-
-For 6.1+, install from the upstream `.deb` on the
-[radare2 GitHub releases page](https://github.com/radareorg/radare2/releases)
-instead of `apt`.
+`omp-re` is tested against **rizin 0.9.1**. It talks to rizin over its
+`-q0` pipe protocol and uses only stock commands (`aaa`, `aflj`, `afij`,
+`pdfj`, `axtj`, `afvlj`, `afs`, `CC`, `%v`, …), so a current 0.9.x release is
+the target; older releases are untested.
 
 ### macOS
 
 ```bash
-brew install radare2
+brew install rizin
 ```
 
-Homebrew tracks upstream releases, so this gets you a current 6.x build
-directly.
+### Linux
+
+Arch (`pacman -S rizin`) and Fedora (`dnf install rizin`) package it.
+Ubuntu 24.04's apt has **no** rizin package. Use a release build from
+[rizin's GitHub releases](https://github.com/rizinorg/rizin/releases), or
+build from source (Meson + Ninja, a few minutes on 4 cores):
+
+```bash
+git clone --depth 1 --branch v0.9.1 https://github.com/rizinorg/rizin.git
+cd rizin
+meson setup build --buildtype=release
+ninja -C build
+sudo ninja -C build install
+```
+
+If you install to a non-default prefix (e.g. `--prefix=/opt/rizin`), either
+put `<prefix>/bin` on `PATH` or point omp-re at the binary with
+`OMPRE_RIZIN_PATH=/opt/rizin/bin/rizin`.
+
+### Windows
+
+Use the installer from the releases page; set `OMPRE_RIZIN_PATH` if
+`rizin.exe` is not on `PATH`.
 
 ### Verify
 
 ```bash
-r2 -v
+rizin -v
 ```
 
-## r2ghidra (optional, strongly recommended)
+## Decompiler plugins (optional, strongly recommended)
 
-Without it, `decompile_function` and the code viewer's `d` key fall back to
-r2's native `pdc` — register-level pseudo-C (`rsp -= 0x28`-style output), not
-a real decompile. Every such fallback output is prefixed with
-`(disassembly only — no decompiler plugin available) ` so it's never
-mistaken for the real thing.
+rizin itself has no decompiler. Without a plugin, `decompile_function` and
+the code viewer's `d` key return annotated disassembly whose output begins
+`(disassembly only — no decompiler plugin available) `, so it is never
+mistaken for decompiled code. omp-re probes for, in order:
+
+| Plugin | Command | Notes |
+| --- | --- | --- |
+| [rz-ghidra](https://github.com/rizinorg/rz-ghidra) | `pdg` | Ghidra's decompiler as a rizin plugin. Preferred. |
+| [jsdec](https://github.com/rizinorg/jsdec) | `pdd` | Lighter JavaScript-based decompiler; used when rz-ghidra is absent. |
+
+Build rz-ghidra against the rizin you installed (its tag tracks rizin's minor
+version; v0.9.0 builds against rizin 0.9.1):
 
 ```bash
-r2pm -ci r2ghidra
+git clone --depth 1 --branch v0.9.0 --recurse-submodules --shallow-submodules https://github.com/rizinorg/rz-ghidra.git
+cd rz-ghidra
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$(rizin -H RZ_PREFIX)" \
+  -DBUILD_CUTTER_PLUGIN=OFF -DBUILD_SLEIGH_PLUGIN=OFF
+cmake --build build -j
+sudo cmake --install build
 ```
 
-**The trap this project hit for real:** Ubuntu 24.04's apt-packaged radare2
-(5.5.0) cannot build r2ghidra — the build fails with errors like
-`RAnal has no member named 'config'`, `RFlagItem has no member named 'addr'`,
-and `R_VEC_FOREACH was not declared`, because r2ghidra's build targets r2's
-current internal API and 5.5.0 predates it. `r2pm -ci r2dec` (the other
-common decompiler plugin) fails differently, on a missing `sdb.h`. Neither
-failure is a network/environment fluke — they're a real API mismatch against
-an old radare2. **The working path is radare2 6.1.8+** (the upstream `.deb`
-or Homebrew build above), then `r2pm -ci r2ghidra` against that.
+The plugin lands in `rizin -H RZ_LIB_PLUGINS`. To install for your user only,
+copy `core_ghidra.so` and the `rz_ghidra_sleigh/` directory into
+`rizin -H RZ_USER_PLUGINS` instead.
 
 ### Verify
 
 ```bash
-r2 -qc 'aaa; s main; pdg' /bin/ls
+rizin -qc 'aaa; pdg @ main' /bin/ls
 ```
 
-Expected shape: a typed C function signature with named locals — something
-like `int main(int argc, char **argv) { ... }` with real variable names and
-types, not `rsp -= 0x28` / raw register arithmetic. If you see the latter,
-r2ghidra isn't actually loaded; `pdg` silently falls back to disassembly
-comments in some r2 builds instead of erroring, so check the output shape,
-not just the exit code.
+Expected shape: a typed C function such as `int main(int argc, char **argv)
+{ ... }`. An error like `Error while executing command: pdg` means the
+plugin isn't loaded. Inside omp, `/re status` reports the decompiler omp-re
+found.
 
 ## Optional triage binaries
 
@@ -94,14 +106,26 @@ omp plugin install omp-re@unit221b
 See the [README](../README.md#install) for the dev-load alternative and the
 marketplace-name-vs-GitHub-owner distinction.
 
+## Upgrading from 0.1.x (radare2)
+
+0.2.0 replaces radare2 with rizin. radare2 is no longer used at all:
+
+- Install rizin (above); `r2` can stay installed but is ignored.
+- `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`; `OMPRE_R2_ANALYSIS_TIMEOUT_MS` →
+  `OMPRE_ANALYSIS_TIMEOUT_MS`.
+- r2ghidra → rz-ghidra, r2dec → jsdec.
+- Sessions recorded with 0.1.x keep their evidence. Their annotations are
+  replayed into rizin when the session is resumed; any that rizin rejects
+  are listed in a warning rather than silently dropped.
+
 ## Verify the full stack
 
 ```bash
-r2 -v                                   # radare2 present, ideally 6.1+
-r2 -qc 'aaa; s main; pdg' /bin/ls       # r2ghidra actually producing typed pseudo-C
+rizin -v                                # rizin present
+rizin -qc 'aaa; pdg @ main' /bin/ls     # rz-ghidra producing typed C
 omp plugin list                         # omp-re installed
 ```
 
-Then inside omp: `/re open /bin/ls`, `alt+g`, open a function, press `d`. If
-the decompiled output does not start with the disassembly-only prefix, the
-full stack is working.
+Then inside omp: `/re open /bin/ls`, `/re status`, `alt+g`, open `main`,
+press `d`. If the decompiled view's title reads `decompile` (not
+`decompile (disassembly only)`), the full stack is working.

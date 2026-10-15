@@ -1,5 +1,14 @@
 # omp-re TUI QA findings
 
+> **0.2.0 note:** everything below was recorded against the radare2 backend
+> (0.1.x). 0.2.0 replaces radare2 with rizin: the r2 command templates in §2
+> no longer exist, §4's `pdc` fallback does not exist in rizin (the
+> decompiler probe now only caches a definitive answer), and §1 is narrowed —
+> panels close before notifying, and Enter in the evidence panel cites the
+> row instead of raising a notify under the overlay. Kept as the historical
+> record.
+
+
 Defects found by `test/tui-qa.sh` whose fix would change a surface's contract
 or span modules, so they were recorded rather than patched mid-QA. Everything
 else the pass turned up was either a harness bug (fixed in `test/tui-qa.sh`) or

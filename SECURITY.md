@@ -5,19 +5,20 @@
 Open a private security advisory on this repository's GitHub Security tab,
 or email the maintainer listed in `package.json`. Do not open a public issue
 for an unpatched vulnerability. Include a minimal reproduction and the
-`omp`/`radare2`/`omp-re` versions involved; expect an initial response
+`omp`/`rizin`/`omp-re` versions involved; expect an initial response
 within a few business days.
 
 ## Analysis hygiene — this is not a sandbox
 
-`omp-re` is a dual-use tool: it runs radare2 against binaries you feed it,
-which may include real, live malware. Neither `omp-re` nor radare2 itself
+`omp-re` is a dual-use tool: it runs rizin against binaries you feed it,
+which may include real, live malware. Neither `omp-re` nor rizin itself
 provides any isolation:
 
-- **`aaa` (full analysis) on a hostile binary is not a sandbox.** radare2 is
+- **`aaa` (full analysis) on a hostile binary is not a sandbox.** rizin is
   a static analysis tool — it disassembles and analyzes the file, it does
-  not execute it — but radare2 itself, its plugins (r2ghidra, capa, etc.),
-  and any file-format parsing anywhere in that chain are attack surface. A
+  not execute it — but rizin itself, its plugins (rz-ghidra, jsdec), the
+  triage tools (capa, etc.), and any file-format parsing anywhere in that
+  chain are attack surface. A
   malformed binary crafted to exploit a parser bug is a real, if narrow,
   risk. **Run this suite against untrusted samples inside a VM or other
   disposable environment you're prepared to lose, not on your primary
@@ -33,15 +34,38 @@ provides any isolation:
 ## Mutations never touch the file on disk
 
 `set_comment`, `rename_function`, `rename_variable`, `set_prototype`, and
-`set_variable_type` only mutate radare2's **in-process analysis database**
-for the running session. `R2Session.spawn` launches radare2 as
-`r2 -q0 <path>` — no `-w` (write) flag — so radare2 opens the file
+`set_variable_type` only mutate rizin's **in-process analysis database**
+for the running session. `RzSession.spawn` launches rizin as
+`rizin -q0 <path>` — no `-w` (write) flag — so rizin opens the file
 read-only and none of these tools ever writes back to the sample on disk.
-Closing the session (or the omp process) discards every annotation unless
-you've written a `/re report`.
+The annotations themselves are recorded in the omp session and replayed into
+rizin when the session is resumed.
+
+## Command construction
+
+Every value a model supplies reaches rizin through one of three paths, and
+none of them can start a second command:
+
+- Addresses and names are checked against an allowlist (`[0-9a-zA-Z_.:$+-]`)
+  that excludes `;`, `@`, `~`, `|`, quotes, backticks, and parentheses, so no
+  value can add a command, a `@@` iterator, a grep, a pipe, or a `$(...)`
+  substitution.
+- Function and variable names must be identifiers.
+- Free text (comments) and C types/prototypes are passed as single-quoted
+  rizin arguments with `\'` and `\\` escaped, which rizin treats as a
+  literal; line breaks and NUL are rejected outright.
+
+**0.1.x is affected by a command-injection bug fixed in 0.2.0.** It
+interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and
+radare2 splits commands on `;`. A comment such as `a; !id` therefore ran an
+additional radare2 command — including `!`, a shell escape — reproduced
+against radare2 5.5.0. `set_comment` is a `write`-tier tool, so this let a
+model (for example one steered by text inside the sample it was analyzing)
+reach shell execution without passing an `exec`-tier approval. `/re undo`
+replayed stored comments the same way. Upgrade if you run 0.1.x.
 
 ## Scope
 
 In scope: `extensions/re/*.ts`, the `/re` command surface, and the tool
-implementations. Out of scope: radare2 itself, r2ghidra, capa/floss/diec/
-yara, and omp — report vulnerabilities in those projects upstream.
+implementations. Out of scope: rizin itself, rz-ghidra, jsdec, capa/floss/
+diec/yara, and omp — report vulnerabilities in those projects upstream.

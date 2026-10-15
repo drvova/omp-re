@@ -6,6 +6,7 @@ import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { writeReport } from "../extensions/re/report.ts";
 
 interface StubEntry {
+	id?: string;
 	type: string;
 	customType?: string;
 	data?: unknown;
@@ -21,7 +22,8 @@ function makeCtx(entries: StubEntry[], notifications: { message: string; type?: 
 		hasUI: false,
 		sessionManager: {
 			getSessionId: () => "test-session",
-			getEntries: () => entries,
+			getBranch: () => entries,
+			getArtifactPath: async () => null,
 		},
 	} as unknown as ExtensionContext;
 }
@@ -116,6 +118,24 @@ describe("writeReport", () => {
 		const markdown = await readFile(outputPath, "utf8");
 		expect(markdown).toContain("ev-1");
 		expect(markdown).toContain("hxxp://185[.]220[.]101[.]99/update[.]php");
+	});
+
+	test("undone: an annotation reversed by /re undo no longer contributes claims", async () => {
+		const entries: StubEntry[] = [
+			{
+				id: "ann-1",
+				type: "custom",
+				customType: "re.annotation",
+				data: { kind: "set_comment", ea: "0x401000", oldValue: "", newValue: "http://evil-test.example/payload", evidenceId: "" },
+			},
+			{ id: "undo-1", type: "custom", customType: "re.undo", data: { undidEntryId: "ann-1" } },
+		];
+		const outputPath = join(tempDir, "undone.md");
+
+		await writeReport(makeCtx(entries, []), outputPath);
+
+		expect(process.exitCode).not.toBe(1);
+		expect(await readFile(outputPath, "utf8")).not.toContain("evil-test");
 	});
 
 	test("empty: no entries writes a trivial report without tripping the gate", async () => {

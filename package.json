@@ -1,13 +1,13 @@
 {
   "name": "omp-re",
-  "version": "0.1.2",
-  "description": "Reverse-engineering suite for omp: radare2 tools, evidence store, signed audit log, RE status band, and report generator.",
+  "version": "0.2.0",
+  "description": "Reverse-engineering suite for omp: rizin tools, a re-analyst subagent, evidence store, signed audit log, RE status band, and report generator.",
   "license": "MIT",
   "author": "Lance James <lancejames@unit221b.com>",
   "homepage": "https://github.com/lancejames221b/omp-re",
   "repository": { "type": "git", "url": "git+https://github.com/lancejames221b/omp-re.git" },
   "bugs": { "url": "https://github.com/lancejames221b/omp-re/issues" },
-  "keywords": ["omp", "plugin", "radare2", "reverse-engineering", "malware-analysis"],
+  "keywords": ["omp", "plugin", "rizin", "reverse-engineering", "malware-analysis"],
   "omp": {
     "extensions": ["./extensions"]
   },
