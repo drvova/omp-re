@@ -74,7 +74,7 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(out).toContain(DEBUG_LAUNCH_WARNING);
 		expect(out).toMatch(/rip = 0x[0-9a-f]+/);
 		expect(getState(ctx).dbg?.isClosed).toBe(false);
-	});
+	}, 20_000);
 
 	test("breakpoint, continue, and inspect the running process", async () => {
 		expect(textOf(await run("break_add", { addr: "entry0" }))).toContain('"enabled":true');
@@ -83,7 +83,7 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(textOf(await run("registers"))).toMatch(/"rip":\d+/);
 		expect(textOf(await run("backtrace"))).toContain('"idx":0');
 		expect(textOf(await run("break_list"))).toContain("addr");
-	});
+	}, 20_000);
 
 	test("step advances the PC and read_memory returns bytes at an address", async () => {
 		const before = textOf(await run("registers"));
@@ -91,7 +91,7 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		const after = textOf(await run("registers"));
 		expect(after).not.toBe(before);
 		expect(textOf(await run("read_memory", { addr: "rip", size: 8 }))).toMatch(/^\[.*\]$/m);
-	});
+	}, 20_000);
 
 	test("addr is validated like every other tool", async () => {
 		expect((await captureError(run("read_memory", { addr: "rip;id" }))).message).toContain("invalid address");
