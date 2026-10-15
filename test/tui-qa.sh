@@ -4,7 +4,7 @@
 # every user-facing surface as it goes. The exhaustive tier (~5-8 min) that
 # complements the fast smoke tier test/tui.sh (~55s, 7 assertions).
 #
-# Skips (exit 0, printed reason) when tmux, r2, omp, or the fixture binary is
+# Skips (exit 0, printed reason) when tmux, rizin, omp, or the fixture binary is
 # missing, so CI stays green on a machine without them. Model-dependent phases
 # (G, H, K) degrade to SKIP on a provider outage; skips never fail the run.
 set -u
@@ -27,8 +27,8 @@ if ! command -v tmux >/dev/null 2>&1; then
 	echo "SKIP: tmux not on PATH"
 	exit 0
 fi
-if ! command -v r2 >/dev/null 2>&1; then
-	echo "SKIP: r2 not on PATH"
+if ! command -v "${OMPRE_RIZIN_PATH:-rizin}" >/dev/null 2>&1; then
+	echo "SKIP: rizin not on PATH (set OMPRE_RIZIN_PATH)"
 	exit 0
 fi
 if ! command -v omp >/dev/null 2>&1; then
@@ -400,8 +400,17 @@ picker_enter() {
 	local label="$1"
 	local panel_title="$2"
 	local notify_regex="$3"
+	# Optional: the title of a nested picker Enter may open instead (a string or
+	# import with several references lists them before opening any code view).
+	local nested_regex="${4:-}"
 	keys Enter
-	if wait_for '· disasm$' 20; then
+	if wait_for "· disasm\$${nested_regex:+|$nested_regex}" 20; then
+		if [ -n "$nested_regex" ] && pane | grep -Eq -- "$nested_regex"; then
+			pass "$label (opened a nested picker)"
+			keys Escape
+			sleep 2
+			return 0
+		fi
 		pass "$label (opened a code view)"
 		keys Escape
 		sleep 2
@@ -585,7 +594,7 @@ slash "/re bogus"
 expect 'A7 unknown subcommand "bogus"' 'omp-re: unknown /re subcommand "bogus" — try /re help'
 
 slash "/re"
-expect 'A8 bare /re renders empty subcommand' 'omp-re: unknown /re subcommand "" — try /re help'
+expect 'A8 bare /re shows the help text' '/re open <path>      open a binary'
 
 slash "/re open"
 expect 'A9 /re open without a path' 'Usage: /re open <path>'
@@ -657,8 +666,8 @@ else
 fi
 
 # --- Phase C — functions panel and its filter ------------------------------
-# r2 names unnamed functions "fcn.<addr>" and thunks "sub.<dll>_<sym>", never
-# IDA's "sub_", so "fcn" is the filter substring that actually matches rows.
+# rizin names unnamed functions "fcn.<addr>", never IDA's "sub_", so "fcn" is
+# the filter substring that actually matches rows.
 
 slash "/re functions"
 expect 'C1 functions panel title'        'omp-re: functions'
@@ -775,7 +784,7 @@ if printf '%s' "$D_FILTER_PANE" | grep -q '/main' \
 
 	# D8 covers the untested decompile->disasm toggle direction. It MUST stay
 	# inside Phase D, before E1: an unasserted priming `d` enters decompile
-	# (or is a no-op if pdc is unavailable, in which case the second `d` is
+	# (or is a no-op if there is no decompiler output, in which case the second `d` is
 	# also a no-op and D8 degrades to a trivially-true disasm check — the same
 	# environment limit E1 already tolerates), then the second `d` asserts
 	# disasm reappears, leaving disasm as E1's unchanged precondition. E1
@@ -789,13 +798,14 @@ if printf '%s' "$D_FILTER_PANE" | grep -q '/main' \
 	expect 'D8 second d toggles back to disasm' '· disasm$' 10
 
 	# --- Phase E — code view keys d, x, a ------------------------------
-	# E1/E2 are environment-dependent: whether r2 has a decompiler plugin, and
-	# whether the chosen function has xrefs. Both outcomes are correct behavior.
+	# E1/E2 are environment-dependent: whether rizin has a decompiler plugin
+	# (rz-ghidra/jsdec; without one, `d` shows labeled disassembly), and whether
+	# the chosen function has xrefs. Every outcome listed is correct behavior.
 
 	ensure_panel 'd decomp · x xrefs · a ask · esc back'
 	lit "d"
-	expect_any 'E1 d toggles decompile or reports pdc unavailable' \
-		'· decompile$' 'omp-re: no decompiler output \(pdc unavailable\)'
+	expect_any 'E1 d toggles decompile or reports none' \
+		'· decompile( \(disassembly only\))?$' 'omp-re: no decompiler output for this function'
 
 	ensure_panel 'd decomp · x xrefs · a ask · esc back'
 	lit "x"
@@ -829,7 +839,7 @@ else
 	skip 'D6 Up rewinds the scroll offset' 'no function matching "main" in this fixture'
 	skip 'D7 PageUp rewinds by a page' 'no function matching "main" in this fixture'
 	skip 'D8 second d toggles back to disasm' 'no function matching "main" in this fixture'
-	skip 'E1 d toggles decompile or reports pdc unavailable' 'no function matching "main" in this fixture'
+	skip 'E1 d toggles decompile or reports none' 'no function matching "main" in this fixture'
 	skip 'E2 x opens xrefs or reports none' 'no function matching "main" in this fixture'
 	skip 'E3 a closes the code view' 'no function matching "main" in this fixture'
 	skip 'E6 xrefs panel hint' 'no function matching "main" in this fixture'
@@ -872,7 +882,7 @@ expect 'F1 strings panel title' 'omp-re: strings'
 expect 'F1 strings panel hint'  'enter open · type to filter · esc close'
 
 picker_enter 'F2 enter on a string jumps to its xref or reports none' \
-	'omp-re: strings' 'omp-re: (no xrefs to that string|no code at 0x[0-9a-f]+)'
+	'omp-re: strings' 'omp-re: (no xrefs to that string|no code at 0x[0-9a-f]+)' 'omp-re: xrefs to "'
 
 close_overlay 'omp-re: strings'
 # "Closed" must mean every overlay is gone, not merely that this title is out
@@ -1002,8 +1012,8 @@ fi
 # A PE import's `plt` points at an IAT thunk, which frequently has no analyzed
 # function behind it, so "no code at <addr>" is a third legitimate outcome
 # alongside a code view and "no PLT stub".
-picker_enter 'F6 enter on an import opens its PLT stub or reports none' \
-	'omp-re: imports' 'omp-re: (no PLT stub for that import|no code at 0x[0-9a-f]+)'
+picker_enter 'F6 enter on an import opens its callers, its PLT stub, or reports none' \
+	'omp-re: imports' 'omp-re: (no PLT stub for that import|no code at 0x[0-9a-f]+)' 'omp-re: callers of '
 close_overlay 'omp-re: imports'
 
 # --- Phase G — evidence surface (needs one model round-trip) ----------------
@@ -1041,7 +1051,14 @@ if model_step 'G1 model calls hash_binary and reports the real digest' \
 		lit "hash_binary"
 		sleep 2
 		keys Enter
-		expect 'G4 enter shows the evidence detail' '\[hash_binary:' 10
+		# Enter cites the row: the panel closes and the editor is prefilled, so
+		# nothing renders underneath a still-open overlay.
+		if wait_for "Re: evidence [0-9a-f]{8} \\(hash_binary @" 10 && clear_editor; then
+			pass 'G4 enter cites the evidence entry into the editor'
+		else
+			fail 'G4 enter cites the evidence entry into the editor'
+			diagnose
+		fi
 		close_overlay 'omp-re: evidence'
 
 		# The picker only ever shows 8 chars of the UUID, so exact-equality
@@ -1057,7 +1074,7 @@ if model_step 'G1 model calls hash_binary and reports the real digest' \
 			diagnose
 		fi
 	else
-		fail 'G4 enter shows the evidence detail (could not capture an evidence id)'
+		fail 'G4 enter cites the evidence entry into the editor (could not capture an evidence id)'
 		close_overlay 'omp-re: evidence'
 		skip 'G5 /re evidence <8-char prefix> resolves' 'no evidence id captured'
 		skip 'G7 /re cite prefills the editor' 'no evidence id captured'
@@ -1069,7 +1086,7 @@ else
 	skip 'G1b audit HMAC warning on first tool call' 'model round-trip timed out'
 	skip 'G2 tool_result refreshed the band evidence count' 'model round-trip timed out'
 	skip 'G3 evidence panel lists the hash_binary entry' 'model round-trip timed out'
-	skip 'G4 enter shows the evidence detail' 'model round-trip timed out'
+	skip 'G4 enter cites the evidence entry into the editor' 'model round-trip timed out'
 	skip 'G5 /re evidence <8-char prefix> resolves' 'model round-trip timed out'
 	skip 'G6 /re evidence with an unknown id' 'model round-trip timed out'
 	skip 'G7 /re cite prefills the editor' 'model round-trip timed out'

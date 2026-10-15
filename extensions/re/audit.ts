@@ -1,16 +1,14 @@
 /**
- * Audit trail for RE tool calls — the audit-only sliver of rzx-re's
- * extensions/re/perm.ts (itself ported from internal/perm/policy.go +
- * audit.go).
+ * Audit trail for RE tool calls.
  *
- * The T0-T4 permission gate, its four-option prompt, `sessionGrants`, and
- * `neverTools` are NOT ported here: omp's own `ToolDefinition.approval`
- * tiers (declared per-tool in tools-read.ts / tools-mutate.ts /
- * tools-triage.ts) plus `tools.approvalMode` / `tools.approval.<tool>` cover
- * all of that. What remains is a `tool_call` observer that always lets the
- * call through and appends one signed JSON line per RE tool call to a
- * per-session log, so operators keep a record of what the RE suite did even
- * though nothing in this module decides whether it was allowed to.
+ * Allow/deny/prompt is entirely omp's: every tool declares an `approval` tier
+ * (with a per-call reason for the mutate and triage tools), and
+ * `tools.approvalMode` / `tools.approval.<tool>` in the user's omp config
+ * decide what happens. This module only observes: a `tool_call` handler that
+ * always lets the call through and appends one (optionally HMAC-signed) JSON
+ * line per RE tool call to a per-session log, plus one line per approval
+ * decision omp reports for an RE tool, so operators keep a record of what the
+ * RE suite did and who allowed it.
  */
 import { createHmac } from "node:crypto";
 import { mkdir, open } from "node:fs/promises";
@@ -19,7 +17,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { getState } from "./state.ts";
 
-/** The 12 read-tier RE tools (tools-read.ts) — also evidence.ts's `tool_result` filter for what becomes a `re.evidence` record. */
+/** The 12 read-tier RE tools (tools-read.ts). */
 export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	list_functions: true,
 	search_functions: true,
@@ -52,16 +50,41 @@ export const RE_TRIAGE_TOOL_NAMES: Record<string, true> = {
 	triage_yara: true,
 };
 
+/** The 2 rizin CLI bridge tools (tools-rizin.ts): `rizin_help` reads rizin's own documentation; `rizin_command` runs read-only rizin commands. */
+export const RE_RIZIN_TOOL_NAMES: Record<string, true> = {
+	rizin_help: true,
+	rizin_command: true,
+};
+
+/** The rizin CLI-suite bridge (tools-rzcli.ts): one tool fronting rz-bin, rz-diff, rz-hash, rz-find, rz-asm, rz-ax. */
+export const RE_RZCLI_TOOL_NAMES: Record<string, true> = {
+	rizin_cli: true,
+};
+
+/** The dynamic-analysis debugger (tools-debug.ts): one tool, registered only when OMPRE_ENABLE_DEBUGGER is set. In the audit gate regardless, so its executions are always logged when it is on. */
+export const RE_DEBUG_TOOL_NAMES: Record<string, true> = {
+	rizin_debug: true,
+};
+
+/** Tools whose successful output is an observation of the binary and becomes a `re.evidence` record (evidence.ts). `rizin_help` is not (help text says nothing about the binary); `rizin_cli` is not (it also does arithmetic and standalone assembly — cite binary facts through the dedicated tools or rizin_command). */
+export const RE_EVIDENCE_TOOL_NAMES: Record<string, true> = {
+	...RE_READ_TOOL_NAMES,
+	rizin_command: true,
+};
+
 /** Session-setup tools that are neither analysis (no evidence to record — opening a binary asserts nothing about its contents) nor mutation, but still worth an audit-trail line. */
 export const RE_SESSION_TOOL_NAMES: Record<string, true> = {
 	open_binary: true,
 };
 
-/** All 22 RE-suite tool names (read + mutate + triage + session-setup) — the audit log's gate. */
+/** All 26 RE-suite tool names (read + mutate + triage + rizin REPL + rizin CLI + debugger + session-setup) — the audit log's gate. `debug` is counted here even though it registers only when enabled, so turning it on never bypasses the log. */
 export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
 	...RE_MUTATE_TOOL_NAMES,
 	...RE_TRIAGE_TOOL_NAMES,
+	...RE_RIZIN_TOOL_NAMES,
+	...RE_RZCLI_TOOL_NAMES,
+	...RE_DEBUG_TOOL_NAMES,
 	...RE_SESSION_TOOL_NAMES,
 };
 
@@ -70,7 +93,11 @@ interface AuditLine {
 	sessionId: string;
 	toolCallId: string;
 	tool: string;
-	args: unknown;
+	/** Present on call lines. */
+	args?: unknown;
+	/** Present on approval lines: what omp's approval gate decided for this call. */
+	approved?: boolean;
+	reason?: string;
 	/** Base64 HMAC-SHA256 over the JSON encoding of every other field, present only when OMPRE_AUDIT_HMAC_KEY is configured. */
 	hmac?: string;
 }
@@ -79,11 +106,15 @@ interface AuditLine {
  * Append one line to the current session's audit log. Never throws: a
  * serialization failure (unlikely — args come from schema-validated tool
  * params, but not impossible) or a filesystem error is reported via
- * `ctx.ui.notify`/`console.error` and otherwise swallowed, because the audit
+ * `ctx.ui.notify` (or omp's log file when headless) and otherwise swallowed, because the audit
  * log is a mirror for operator review, not the source of truth — it must
  * never abort the tool call being audited.
  */
-async function appendAuditLine(ctx: ExtensionContext, line: Omit<AuditLine, "ts" | "sessionId" | "hmac">): Promise<void> {
+async function appendAuditLine(
+	ctx: ExtensionContext,
+	line: Omit<AuditLine, "ts" | "sessionId" | "hmac">,
+	logger?: ExtensionAPI["logger"],
+): Promise<void> {
 	try {
 		const state = getState(ctx);
 		const dir = join(getAgentDir(), "re", "audit");
@@ -102,7 +133,7 @@ async function appendAuditLine(ctx: ExtensionContext, line: Omit<AuditLine, "ts"
 				state.auditHmacWarned = true;
 				const msg = "omp-re: OMPRE_AUDIT_HMAC_KEY not configured — audit log entries will not be signed.";
 				if (ctx.hasUI) ctx.ui.notify(msg, "warning");
-				else console.error(msg);
+				else logger?.warn(msg);
 			}
 		}
 
@@ -118,20 +149,28 @@ async function appendAuditLine(ctx: ExtensionContext, line: Omit<AuditLine, "ts"
 	} catch (err) {
 		const msg = `omp-re: audit log write failed: ${err instanceof Error ? err.message : String(err)}`;
 		if (ctx.hasUI) ctx.ui.notify(msg, "error");
-		else console.error(msg);
+		else logger?.error(msg);
 	}
 }
 
 /**
  * Register the RE audit trail: records every RE tool call (read + mutate +
- * triage) to a signed, per-session log. Never blocks — the handler always
- * returns `undefined`, since omp's per-tool `approval` tiers own
- * allow/deny/prompt now.
+ * triage + session setup) and every approval decision for one to a
+ * per-session log. Never blocks — the handlers always return `undefined`.
  */
 export function registerAuditLog(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
 		if (RE_ALL_TOOL_NAMES[event.toolName] !== true) return undefined;
-		await appendAuditLine(ctx, { toolCallId: event.toolCallId, tool: event.toolName, args: event.input });
+		await appendAuditLine(ctx, { toolCallId: event.toolCallId, tool: event.toolName, args: event.input }, pi.logger);
 		return undefined;
+	});
+
+	pi.on("tool_approval_resolved", async (event, ctx) => {
+		if (RE_ALL_TOOL_NAMES[event.toolName] !== true) return;
+		await appendAuditLine(
+			ctx,
+			{ toolCallId: event.toolCallId, tool: event.toolName, approved: event.approved, ...(event.reason ? { reason: event.reason } : {}) },
+			pi.logger,
+		);
 	});
 }

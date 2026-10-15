@@ -4,9 +4,8 @@
 #
 # Not part of the plugin: standalone dev tool under tools/shotgen/, isolated
 # from the root package.json (see tools/shotgen/README.md). Requires tmux, a
-# real radare2, and a fixture binary (FIXTURE env var; defaults to the
-# WannaCry sample used by test/tui-qa.sh, deliberately not distributed with
-# this repo).
+# real rizin, and a fixture binary (FIXTURE env var; defaults to /bin/ls, so
+# anyone can reproduce the committed screenshots).
 #
 # Reuses test/tui-qa.sh's and test/tui.sh's harness conventions rather than
 # inventing new ones: the readiness handshake, the slash/lit/keys send
@@ -21,22 +20,18 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHOTGEN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$SHOTGEN_DIR/out"
 SESSION="ompre-shot"
-FIXTURE="${FIXTURE:-/tmp/rzx-dogfood/wannacry.bin}"
+FIXTURE="${FIXTURE:-/bin/ls}"
 FIXTURE_NAME="$(basename "$FIXTURE")"
 # Function-name substring to filter to for the decompile/xrefs scenes, and
 # an address with no evidence gathered yet for the report-gate scene.
-# Fixture-specific: default values assume the WannaCry PE (main at
-# 0x408140, fcn.00407c40 unexamined); override both together when using a
-# different FIXTURE.
+# Fixture-specific: override both together when using a different FIXTURE.
 DECOMPILE_FN="${DECOMPILE_FN:-main}"
-REPORT_ADDR="${REPORT_ADDR:-0x407c40}"
-# Down-arrow presses after filtering, before Enter: the functions panel
-# filters on the function NAME substring only (extensions/re/ui.ts
-# showFunctionsPanel), so "main" also matches any import thunk whose name
-# happens to end in "...main" (observed on /bin/ls: sym.imp.textdomain and
-# sym.imp.bindtextdomain both contain "main" and, being imports, sort ahead
-# of the real main() by address — Enter with no Down presses opened the
-# wrong one). 0 for a fixture where the filter is already unambiguous.
+REPORT_ADDR="${REPORT_ADDR:-0x1000}"
+# Down-arrow presses after filtering, before Enter. The functions panel ranks
+# matches with omp's fuzzy matcher, best first, so an exact name like "main"
+# is already the top row (on /bin/ls, ahead of sym.imp.textdomain and
+# sym.imp.bindtextdomain, which also contain "main"). Raise it only for a
+# fixture whose target is not the best match for DECOMPILE_FN.
 DECOMPILE_DOWN="${DECOMPILE_DOWN:-0}"
 
 # --- prerequisite gate -------------------------------------------------
@@ -45,8 +40,8 @@ if ! command -v tmux >/dev/null 2>&1; then
 	echo "capture.sh: tmux not found on PATH" >&2
 	exit 1
 fi
-if ! command -v r2 >/dev/null 2>&1; then
-	echo "capture.sh: radare2 not found on PATH" >&2
+if ! command -v "${OMPRE_RIZIN_PATH:-rizin}" >/dev/null 2>&1; then
+	echo "capture.sh: rizin not found on PATH (set OMPRE_RIZIN_PATH)" >&2
 	exit 1
 fi
 if ! command -v omp >/dev/null 2>&1; then
@@ -182,9 +177,9 @@ skip_scene() {
 # pi.registerFlag in extensions/re/index.ts, opened automatically on
 # session_start). Confirmed by direct testing during this pass: on a machine
 # whose startup runs a large MCP server catalog, session_start's automatic
-# open races that startup storm and the spawned radare2 child dies
-# immediately (`omp-re: radare2 process exited`, reproduced twice in a row),
-# while a bare standalone `r2 -q0 <fixture>` spawned outside that storm runs
+# open raced that startup storm and the spawned analyzer child died
+# immediately (observed on a busy host, kept as a precaution), while a
+# standalone spawn outside that storm ran
 # `aaa` to completion with no issue. test/tui-qa.sh already avoids --binary
 # for the same class of reason ("opening from inside via /re open is what a
 # human does anyway") — do the same here: launch bare, let the readiness
@@ -279,11 +274,8 @@ wait_for '[1-9][0-9]* evidence' 30 || true
 capture hero
 
 # --- scene: functions --------------------------------------------------
-# The plan's suggested filter substring ("Crypt") matches no function or
-# import name in this specific WannaCry sample (verified directly against
-# r2's aflj/iij output); "fcn" is r2's real, always-present prefix for
-# unnamed functions and is what test/tui-qa.sh's own C4 assertion already
-# filters on, so it is used here instead.
+# "fcn" is rizin's always-present prefix for unnamed functions and is what
+# test/tui-qa.sh's own C4 assertion already filters on.
 
 ensure_editor
 lit $'\x1bg' # alt+g = function navigator
@@ -294,9 +286,9 @@ sleep 2
 capture functions
 
 # --- scene: decompile ---------------------------------------------------
-# On the default WannaCry fixture, main (0x408140) is confirmed to
-# decompile through r2ghidra's pdg into real typed pseudo-C, not the
-# "(disassembly only" fallback.
+# With rz-ghidra installed, main decompiles through pdg into typed C; without
+# it, `d` shows the labeled "(disassembly only" fallback, which is still a
+# truthful capture of what a user without the plugin sees.
 
 for _ in 1 2 3 4 5; do keys BSpace; done
 sleep 1
@@ -309,11 +301,11 @@ done
 keys Enter
 if wait_for '· disasm$' 15; then
 	lit "d"
-	if wait_for '· decompile$' 15; then
+	if wait_for '· decompile( \(disassembly only\))?$' 15; then
 		sleep 1
 		capture decompile
 	else
-		skip_scene decompile "code view never reported decompile mode (pdc/pdg unavailable?)"
+		skip_scene decompile "code view never reported decompile mode"
 	fi
 else
 	skip_scene decompile "code view for \"$DECOMPILE_FN\" never opened"

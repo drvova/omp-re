@@ -5,23 +5,26 @@
 Use a binary you're allowed to run commands against without a sandbox — a
 system binary like `/bin/ls` is enough to learn the flow.
 
-1. `/re open /bin/ls` — spawns radare2, runs full analysis (`aaa`), and
-   populates the status band.
-2. `alt+g` (function navigator) or `/re functions` — browse everything r2's
-   analysis found. Type to filter.
+1. `/re open /bin/ls` — spawns rizin, runs full analysis (`aaa`, progress in
+   the footer), and populates the status band.
+2. `alt+g` (function navigator) or `/re functions` — browse everything
+   rizin's analysis found. Type to filter (fuzzy, best match first).
 3. Select a function to open the code view. `d` toggles decompiled pseudo-C;
    `x` follows the selected cross-reference one hop; `a` hands the function
    off to the model with a grounding prompt ("use the RE tools to gather
    evidence first; report only what the evidence supports").
-4. `alt+s` / `/re strings` — the string list, same filter-and-open pattern.
-5. `/re imports` — imported symbols, useful for a quick capability guess
-   before diving into decompilation.
+4. `alt+s` / `/re strings` — the string list; Enter lists the code that
+   references a string, then opens it.
+5. `alt+i` / `/re imports` — imported symbols; Enter lists the callers of an
+   import. Useful for a quick capability guess before diving into
+   decompilation.
 6. If `capa`/`floss`/`diec`/`yara` are on PATH, ask the model to run the
    matching `triage_*` tool for a fast capability/packer read before manual
    analysis.
-7. `/re evidence` lists everything gathered so far; `/re cite <id>` pulls a
-   specific entry's tool/address/summary into your next chat message so you
-   can ask a follow-up about it without retyping context.
+7. `/re evidence` lists everything gathered so far on this branch; Enter on
+   a row (or `/re cite <id>`, which completes ids) pulls that entry's
+   tool/address/summary into your next chat message so you can ask a
+   follow-up about it without retyping context.
 8. `/re report [path]` writes a Markdown report. With no path, it prints the
    report directly instead of writing a file.
 
@@ -30,8 +33,8 @@ system binary like `/bin/ls` is enough to learn the flow.
 Every successful call to one of the **12 read-tier tools** —
 `list_functions`, `search_functions`, `get_function`, `decompile_function`,
 `disassemble_function`, `get_xrefs_to`, `get_xrefs_from`, `list_imports`,
-`list_exports`, `list_strings`, `list_segments`, `hash_binary` — is
-automatically recorded as a `re.evidence` session entry via a `tool_result`
+`list_exports`, `list_strings`, `list_segments`, `hash_binary` — and to
+`rizin_command` is automatically recorded as a `re.evidence` session entry via a `tool_result`
 hook (`extensions/re/evidence.ts`), content-addressed and hashed. Mutations
 (`rename_function`, `set_comment`, etc.) similarly record `re.annotation`
 entries.
@@ -56,10 +59,29 @@ depends on it.
 Evidence and annotation entries persist in the session JSONL and survive a
 `--continue`/reload, but they are **not** injected into LLM context and are
 **not** rendered inline in the transcript — omp's `pi.appendEntry()`
-explicitly does not forward custom entries to the model, and there is no
-ported adviser rail to render them into. The status band's evidence counter
-and the `/re evidence`/`/re cite` panel and command are the only visible
-surfaces.
+explicitly does not forward custom entries to the model. The status band's
+evidence counter and the `/re evidence`/`/re cite` panel and command are the
+visible surfaces. When a tool's output was too large for the context and was
+spilled to a session artifact, its evidence entry records the
+`artifact://<id>` too, and `/re report` reads the untruncated artifact.
+
+## Branches, resume, and annotation replay
+
+Everything above reads the **current session branch** (root to active leaf),
+not the whole session file:
+
+- After `/tree` navigation or a branch, evidence from the abandoned branch no
+  longer counts toward the status band, grounding, or the report gate.
+- rizin's renames, comments, and prototypes live in the rizin process's
+  memory. Whenever a fresh process is needed — `--continue`/`/resume`, a
+  respawn after a crash or timeout, or a branch whose annotations differ from
+  what the process holds — omp-re re-analyzes the binary the branch last
+  opened and **replays that branch's annotations** (minus any `/re undo`
+  reversed) in order. Each annotation is attributed to the binary that was
+  open when it was made, so opening a second binary never receives the
+  first one's renames.
+- Annotations rizin rejects on replay are reported in a warning, not dropped
+  silently.
 
 ## Related capabilities
 
@@ -104,6 +126,14 @@ installing as a plugin, copy `WATCHDOG.md` into the project you're actually
 reverse-engineering in, or into `<agentDir>/WATCHDOG.md` for a user-wide
 default.
 
-**No delegatable `re` analyst agent ships** (`agents/` is an empty
-directory) — omp does not currently surface extension-registered tools to
-`task`-dispatched subagents, so a packaged agent could not call any RE tool.
+**Delegating to the `re-analyst` agent.** omp forwards extension-registered
+tools to `task` subagents, so the plugin ships `agents/re-analyst.md`. Ask
+for it by name with a binary path and a question; it opens the binary in its
+own rizin process (its first call is always `open_binary`), follows the
+`re-triage` skill's order of work, and returns structured findings — a
+summary plus a list of `{claim, ea, evidence, confidence}` — where every
+`ea` is copied from tool output. Two properties to keep in mind: its
+evidence entries live in the subagent's session, not yours, so cite the
+findings it returns rather than expecting them in your `/re evidence`; and
+annotations it makes stay in its own rizin process, which is why it is told
+not to annotate unless asked.

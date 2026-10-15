@@ -1,64 +1,70 @@
 /**
- * Per-omp-session state shared across the omp-re modules: the lazily-spawned
- * R2Session and the currently open binary. Keyed by ctx.sessionManager.getSessionId().
+ * Per-omp-session state, now a thin facade over the cordis backend in
+ * `runtime.ts`. The exported surface is unchanged so the tools, UI, evidence,
+ * and audit modules keep their imports; the process lifecycle underneath is
+ * managed by cordis revertible effects rather than hand-rolled `.close()`
+ * calls. Keyed by `ctx.sessionManager.getSessionId()`, so the main session
+ * and every task subagent get their own rizin process.
  */
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { R2Session, resolveR2Path } from "./r2.ts";
+import { type RzSession, type SpawnOptions } from "./rizin.ts";
+import { backend, type ReSessionState } from "./runtime.ts";
 
-export interface ReSessionState {
-	sessionId: string;
-	r2: R2Session | null;
-	binaryPath: string | null;
-	auditHmacWarned: boolean;
-	evidenceCount: number;
-	findingCount: number;
-	/** normalized addr -> most recent evidence id observed at that address (used by mutate tools' resolveEvidence and by report anchors) */
-	evidenceByAddr: Map<string, string>;
-}
-
-const sessions = new Map<string, ReSessionState>();
-
-function newState(sessionId: string): ReSessionState {
-	return {
-		sessionId,
-		r2: null,
-		binaryPath: null,
-		auditHmacWarned: false,
-		evidenceCount: 0,
-		findingCount: 0,
-		evidenceByAddr: new Map(),
-	};
-}
+export type { ReSessionState } from "./runtime.ts";
 
 export function getState(ctx: ExtensionContext): ReSessionState {
-	const sessionId = ctx.sessionManager.getSessionId();
-	let state = sessions.get(sessionId);
-	if (!state) {
-		state = newState(sessionId);
-		sessions.set(sessionId, state);
-	}
-	return state;
+	return backend().record(ctx.sessionManager.getSessionId());
 }
 
-/** Idempotent teardown for session_shutdown: closes the r2 process and drops the state entry. */
+/** Idempotent teardown: closes the session's rizin (and debug) processes via their effects and drops the record. */
 export function shutdownState(sessionId: string): void {
-	const state = sessions.get(sessionId);
-	if (!state) return;
-	state.r2?.close();
-	sessions.delete(sessionId);
+	backend().dispose(sessionId);
+}
+
+/** Carry a session's state over to a new session id (a branch writes a new session file with the same history up to the branch point). */
+export function rekeyState(fromId: string, toId: string): void {
+	backend().rekey(fromId, toId);
 }
 
 export function requireBinary(state: ReSessionState): string {
-	if (!state.binaryPath) {
-		throw new Error("omp-re: no binary open — use /re open <path> or --binary <path> first");
-	}
-	return state.binaryPath;
+	return backend().requireBinary(state);
 }
 
-/** Returns a live R2Session for this state, transparently respawning against the same binary if the previous process died or timed out. */
-export async function ensureR2(state: ReSessionState): Promise<R2Session> {
-	if (state.r2 && !state.r2.isClosed) return state.r2;
-	const binaryPath = requireBinary(state);
-	state.r2 = await R2Session.spawn(resolveR2Path(), binaryPath);
-	return state.r2;
+/** Spawn and analyze a fresh rizin process, replaying this branch's annotations. Returns replay failures for the caller to surface. */
+export function spawnRizin(ctx: ExtensionContext, binaryPath: string, options: SpawnOptions = {}): Promise<{ rz: RzSession; replayFailures: string[] }> {
+	return backend().spawn(ctx, binaryPath, options);
+}
+
+/** A live RzSession for this session, respawning and replaying annotations transparently if the previous process died or went stale. */
+export function ensureRizin(ctx: ExtensionContext, options: SpawnOptions = {}): Promise<RzSession> {
+	return backend().ensure(ctx, options);
+}
+
+/** Launch the opt-in debug session (rizin -d) for this session, or return the running one. */
+export function startDebug(ctx: ExtensionContext, options: SpawnOptions = {}): Promise<RzSession> {
+	return backend().startDebug(ctx, options);
+}
+
+/** Tear down just the debug process, leaving the static session alive. Returns whether one was running. */
+export function stopDebug(ctx: ExtensionContext): Promise<boolean> {
+	return backend().stopDebug(ctx);
+}
+
+/** The running debug session for this session, or throw omp-re's guidance to start one first. */
+export function requireDebug(ctx: ExtensionContext): RzSession {
+	const rz = getState(ctx).dbg;
+	if (!rz || rz.isClosed) {
+		throw new Error("omp-re: no debug session — run the debug tool with action 'start' first (it launches the process).");
+	}
+	return rz;
+}
+
+/** Record that the rizin process now matches the branch's annotations (after a forward mutation or an undo applied them directly). */
+export function markAnnotationsApplied(ctx: ExtensionContext): void {
+	backend().markAnnotationsApplied(ctx);
+}
+
+/** After `/tree` navigation or a branch, tear down the process if the active branch's annotations differ; the next tool call respawns and replays them. */
+export function syncAnnotationsToBranch(ctx: ExtensionContext): void {
+	backend().syncToBranch(ctx);
 }

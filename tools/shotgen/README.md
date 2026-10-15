@@ -8,18 +8,16 @@ release body. Standalone dev tool, isolated from the plugin's own
 
 ```bash
 bun install --ignore-scripts
-FIXTURE=/bin/ls DECOMPILE_FN=main DECOMPILE_DOWN=2 REPORT_ADDR=0x1000 bash capture.sh
+bash capture.sh            # FIXTURE defaults to /bin/ls
 bun render.ts
 ```
 
-The committed `docs/img/*.png` are real captures of `/bin/ls`, not the
-WannaCry sample `capture.sh` defaults to — `/bin/ls` exists on every Linux
-box, so anyone can reproduce them without a malware fixture.
-`DECOMPILE_DOWN=2` is required for this fixture because the functions panel
-filters on the function **name** substring only, so `main` also matches
-`sym.imp.textdomain` and `sym.imp.bindtextdomain`, both of which sort ahead
-of the real `main` by address; without the two Down presses, Enter opens an
-import thunk instead.
+The committed `docs/img/*.png` are real captures of `/bin/ls` — it exists on
+every Linux box, so anyone can reproduce them without a malware fixture.
+Rerunning the steps here regenerates them against your rizin install. The functions panel ranks
+matches with omp's fuzzy matcher (best first), so filtering for `main` puts
+the real `main` on top; `DECOMPILE_DOWN` exists only for a fixture whose
+target isn't the best match.
 
 Then, with an agent that has the `browser` tool, open each
 `out/<scene>.html` and screenshot the `#shot` element. Measured fact: the
@@ -28,14 +26,11 @@ viewport/scale (1040px viewport / `scale: 2` requested, 1024px delivered) —
 target roughly that width for a visual match with any headless-Chrome
 equivalent. Save the result to `../../docs/img/<scene>.png`.
 
-`capture.sh` requires tmux, a real `radare2`, and a fixture binary. Unset,
-`FIXTURE` defaults to the WannaCry sample used by `test/tui-qa.sh`
-(`/tmp/rzx-dogfood/wannacry.bin`), which is **deliberately not distributed**
-with this repo — set `FIXTURE=/path/to/your/binary` to point it elsewhere.
-Some scenes assume that specific fixture's disassembly (the `main` filter in
-the decompile/xrefs scenes) and may skip on a substitute rather than fail;
-the invocation above is the one that actually produced the committed
-images.
+`capture.sh` requires tmux, `omp`, a real rizin (`OMPRE_RIZIN_PATH` if it
+isn't on PATH), and a fixture binary (`FIXTURE`, default `/bin/ls`). Set
+`DECOMPILE_FN` and `REPORT_ADDR` together when using a different fixture.
+With rz-ghidra installed the decompile scene shows typed C; without it, the
+labeled disassembly fallback — both are truthful captures.
 
 `out/` is intermediate output — ANSI captures and rendered HTML — and is
 git-ignored. Only the final PNGs under `docs/img/` are committed.

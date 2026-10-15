@@ -1,14 +1,14 @@
 /**
  * RE surface: an always-visible binary-facts status band plus transient,
- * dismissable overlays opened by slash commands. `binaryFacts()` is this
- * package's single source of truth for reverser-relevant state (format,
- * arch, entry, protections, counts); `refreshStatusBand` mounts it via
- * `ctx.ui.setWidget` above the editor. omp exposes no sidebar/rail
- * primitive for extensions, so the band is the only status surface.
+ * dismissable overlays opened by slash commands and shortcuts.
+ * `binaryFacts()` is this package's single source of truth for
+ * reverser-relevant state (format, arch, entry, protections, counts);
+ * `refreshStatusBand` mounts it via `ctx.ui.setWidget` above the editor.
  */
 import { basename } from "node:path";
-import { getSymbolTheme, type CustomEntry, type ExtensionAPI, type ExtensionContext, type Theme } from "@oh-my-pi/pi-coding-agent";
+import { getSymbolTheme, highlightCode, type ExtensionAPI, type ExtensionContext, type Theme } from "@oh-my-pi/pi-coding-agent";
 import {
+	fuzzyFilter,
 	matchesKey,
 	SelectList,
 	truncateToWidth,
@@ -18,62 +18,53 @@ import {
 	type SelectListTheme,
 	type TUI,
 } from "@oh-my-pi/pi-tui";
-import { DISASM_ONLY_PREFIX, decompileAt } from "./decompile.ts";
-import { addrOf, eaFromOffset, type R2Session } from "./r2.ts";
-import { getState } from "./state.ts";
+import { RE_ALL_TOOL_NAMES } from "./audit.ts";
+import { decompileAt } from "./decompile.ts";
+import { disassembleAt } from "./disasm.ts";
+import { branchEntries, customEntries } from "./entries.ts";
+import { addrOf, eaFromOffset, type RzSession } from "./rizin.ts";
+import { ensureRizin, getState } from "./state.ts";
 
-async function functionCount(ctx: ExtensionContext): Promise<number> {
-	const state = getState(ctx);
-	if (!state.r2 || state.r2.isClosed) return 0;
+/** The live rizin session for UI use, or null (with the reason already shown) when there is none. Respawns transparently like the tools do, so a panel opened after a branch change still works. */
+async function uiSession(ctx: ExtensionContext): Promise<RzSession | null> {
+	if (!getState(ctx).binaryPath) {
+		ctx.ui.notify("omp-re: no binary open — use /re open <path> first", "error");
+		return null;
+	}
 	try {
-		const fns = await state.r2.cmdj<unknown[]>("aflj");
-		return fns?.length ?? 0;
-	} catch {
-		return 0;
+		return await ensureRizin(ctx);
+	} catch (err) {
+		ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
+		return null;
 	}
 }
 
-/** Static facts an `ij`/`iej` pair always answers for a given r2 process — genuinely invariant for the lifetime of one R2Session, unlike function count (which `set_prototype`'s `af` can grow mid-session). */
+/** Static facts an `ij`/`iej` pair answers for a given rizin process — invariant for its lifetime, unlike the function count (which annotations can change). */
 interface BinInfo {
 	core: { size: number; format: string };
 	bin: {
 		arch: string;
 		bits: number;
 		os: string;
-		bintype: string;
 		class: string;
-		endian: string;
 		stripped: boolean;
 		static: boolean;
-		pic: boolean;
+		pie?: boolean;
 		nx: boolean;
 		canary: boolean;
-		lang: string;
-		baddr: number;
-		subsys: string;
 	};
 }
 
-const binInfoCache = new WeakMap<R2Session, { info: BinInfo | null; entry: number | null }>();
+const binInfoCache = new WeakMap<RzSession, { info: BinInfo | null; entry: number | null }>();
 
-async function loadBinInfo(r2: R2Session): Promise<{ info: BinInfo | null; entry: number | null }> {
-	const cached = binInfoCache.get(r2);
+async function loadBinInfo(rz: RzSession): Promise<{ info: BinInfo | null; entry: number | null }> {
+	const cached = binInfoCache.get(rz);
 	if (cached) return cached;
-	let info: BinInfo | null = null;
-	try {
-		info = await r2.cmdj<BinInfo>("ij");
-	} catch {
-		info = null;
-	}
-	let entry: number | null = null;
-	try {
-		const iej = await r2.cmdj<Array<{ vaddr: number }>>("iej");
-		entry = iej?.[0]?.vaddr ?? null;
-	} catch {
-		entry = null;
-	}
-	const result = { info, entry };
-	binInfoCache.set(r2, result);
+	const info = await rz.cmdj<BinInfo>("ij").catch(() => null);
+	const iej = await rz.cmdj<Array<{ vaddr: number; type?: string }>>("iej").catch(() => null);
+	const program = iej?.find((e) => e.type === "program") ?? iej?.[0];
+	const result = { info, entry: program?.vaddr ?? null };
+	binInfoCache.set(rz, result);
 	return result;
 }
 
@@ -103,14 +94,17 @@ export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
 		os: null,
 		entry: null,
 		prot: [],
-		fnCount: await functionCount(ctx),
+		fnCount: 0,
 		findings: state.findingCount,
 		evidence: state.evidenceCount,
 	};
 
-	if (!state.r2 || state.r2.isClosed) return facts;
+	// Never spawn from the status band: it only describes a process that is already up.
+	const rz = state.rz;
+	if (!rz || rz.isClosed) return facts;
 
-	const { info, entry } = await loadBinInfo(state.r2);
+	facts.fnCount = Number.parseInt((await rz.cmd("aflc").catch(() => "0")).trim(), 10) || 0;
+	const { info, entry } = await loadBinInfo(rz);
 	if (info?.bin) {
 		const bin = info.bin;
 		facts.format = bin.class ?? null;
@@ -119,13 +113,13 @@ export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
 		const prot: string[] = [];
 		if (bin.stripped) prot.push("stripped");
 		if (bin.static) prot.push("static");
-		if (bin.pic) prot.push("pic");
+		if (bin.pie) prot.push("pie");
 		if (bin.nx) prot.push("nx");
 		if (bin.canary) prot.push("canary");
 		facts.prot = prot;
 	}
 	facts.size = info?.core?.size ?? null;
-	facts.entry = entry != null ? `0x${entry.toString(16)}` : null;
+	facts.entry = entry != null ? eaFromOffset(entry) : null;
 	return facts;
 }
 
@@ -143,9 +137,9 @@ function formatSize(bytes: number): string {
 
 function renderBand(f: BinaryFacts, theme: Theme, width: number): string[] {
 	const info = [f.format, f.arch, f.os].filter(Boolean).join(" ");
-	const groups = [f.name, info, f.entry ? `entry ${f.entry}` : null, f.size != null ? formatSize(f.size) : null].filter(Boolean);
+	const groups = [f.name, info, f.entry ? `entry ${f.entry}` : null, f.size != null ? formatSize(f.size) : null, f.prot.join(",") || null].filter(Boolean);
 	const line1 = theme.fg("accent", groups.join("  "));
-	const metrics = [`${f.fnCount} fn`, `${f.findings} findings`, `${f.evidence} evidence`].join(" \u00b7 ");
+	const metrics = [`${f.fnCount} fn`, `${f.findings} findings`, `${f.evidence} evidence`].join(" · ");
 	const line2 = theme.fg("muted", metrics);
 	return [truncateToWidth(line1, width), truncateToWidth(line2, width)];
 }
@@ -161,21 +155,22 @@ function makeHud(facts: BinaryFacts): (tui: TUI, theme: Theme) => Component {
 }
 
 /**
- * Exported so index.ts can force an immediate refresh right after openBinary() — session_start handlers across
- * extensions are not guaranteed to run in a particular order, so waiting for this module's own session_start hook
- * could render "no binary" if it fires before the binary finishes opening.
+ * Exported so index.ts can force an immediate refresh right after opening a
+ * binary — session_start handlers across extensions are not guaranteed to run
+ * in a particular order. With no binary open the band reads "no binary".
  */
 export async function refreshStatusBand(ctx: ExtensionContext): Promise<void> {
+	if (!ctx.hasUI) return;
 	try {
 		const facts = await binaryFacts(ctx);
 		ctx.ui.setWidget("re.hud", makeHud(facts), { placement: "aboveEditor" });
 	} catch {
-		// best-effort: a stale ctx or dead r2 process must never crash the primary flow
+		// best-effort: a stale ctx or dead rizin process must never crash the primary flow
 	}
 }
 
 const MAX_VISIBLE_ROWS = 12;
-const DEFAULT_HINT = "enter select \u00b7 esc close";
+const DEFAULT_HINT = "enter select · esc close";
 
 function selectListTheme(theme: Theme): SelectListTheme {
 	return {
@@ -193,25 +188,19 @@ interface PickerOptions {
 	items: SelectItem[];
 	/** Invoked on Enter. Return "close" to dismiss the panel, "keep" to leave it open. */
 	onChoose?: (item: SelectItem) => "close" | "keep" | Promise<"close" | "keep">;
-	/** Extra key handling, tried before the SelectList. Return true if consumed. */
-	onKey?: (data: string, selected: SelectItem | null) => boolean;
-	/** Right-hand hint text, e.g. "enter open \u00b7 x xrefs \u00b7 esc back". */
+	/** Right-hand hint text, e.g. "enter open · esc back". */
 	hint?: string;
 	done: (result: undefined) => void;
 }
 
-/** A scrollable, filterable list: SelectList plus an externally-driven text filter that matches on `label`
- * (not `value` — SelectList's built-in setFilter matches value by prefix, which is useless when value is an
- * address). Rebuilds the SelectList on each filter change since it exposes no setItems. */
+/** A scrollable, fuzzy-filterable list: SelectList plus an externally-driven filter that matches on `label` with omp's own fuzzy matcher (SelectList's built-in filter matches `value` by prefix, which is useless when value is an address). Rebuilds the SelectList on each filter change since it exposes no setItems. */
 function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
 	const allItems = opts.items;
 	let filter = "";
 	let selectList = buildSelectList();
 
 	function buildSelectList(): SelectList {
-		const filtered = filter !== ""
-			? allItems.filter((item) => item.label.toLowerCase().includes(filter.toLowerCase()))
-			: allItems;
+		const filtered = filter !== "" ? fuzzyFilter(allItems, filter, (item) => item.label) : allItems;
 		const sl = new SelectList(filtered, MAX_VISIBLE_ROWS, selectListTheme(theme));
 		sl.onSelect = async (item) => {
 			if ((await opts.onChoose?.(item)) !== "keep") opts.done(undefined);
@@ -223,11 +212,11 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
 	return {
 		render(width: number): string[] {
 			const filterLine = filter !== "" ? `${theme.fg("dim", "/")}${filter}` : theme.fg("dim", "(type to filter)");
-			const lines = [theme.fg("accent", opts.title), filterLine, ...selectList.render(width), theme.fg("dim", opts.hint ?? DEFAULT_HINT)];
+			const count = theme.fg("dim", ` ${allItems.length}`);
+			const lines = [theme.fg("accent", opts.title) + count, filterLine, ...selectList.render(width), theme.fg("dim", opts.hint ?? DEFAULT_HINT)];
 			return lines.map((l) => truncateToWidth(l, width));
 		},
 		handleInput(data: string) {
-			if (opts.onKey?.(data, selectList.getSelectedItem())) return;
 			if (matchesKey(data, "escape")) {
 				if (filter !== "") {
 					filter = "";
@@ -256,9 +245,9 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
 }
 
 /**
- * Overlay when the interactive TUI is available; falls back to a plain notification otherwise
- * (headless/print/RPC modes, where `ctx.ui.custom` is a no-op that would otherwise hang the
- * command indefinitely).
+ * Overlay when the interactive TUI is available; falls back to a plain
+ * notification otherwise (headless/print/RPC modes, where `ctx.ui.custom` is
+ * a no-op that would otherwise hang the command indefinitely).
  */
 async function showPanel(ctx: ExtensionContext, opts: Omit<PickerOptions, "done">): Promise<void> {
 	if (!ctx.hasUI) {
@@ -270,27 +259,20 @@ async function showPanel(ctx: ExtensionContext, opts: Omit<PickerOptions, "done"
 }
 
 export async function showFunctionsPanel(ctx: ExtensionContext): Promise<void> {
-	const state = getState(ctx);
-	if (!state.r2 || state.r2.isClosed) {
-		ctx.ui.notify("omp-re: no binary open — use /re open <path> first", "error");
-		return;
-	}
+	const rz = await uiSession(ctx);
+	if (!rz) return;
 	interface Fn {
 		addr?: number;
 		offset?: number;
 		name: string;
+		size?: number;
 	}
-	let fns: Fn[] = [];
-	try {
-		fns = (await state.r2.cmdj<Fn[]>("aflj")) ?? [];
-	} catch {
-		// leave fns empty — panel shows "(nothing to show)"
-	}
+	const fns = (await rz.cmdj<Fn[]>("aflj").catch(() => null)) ?? [];
 	const items: SelectItem[] = fns.flatMap((fn) => {
 		const addr = addrOf(fn);
 		if (addr === undefined) return [];
 		const value = eaFromOffset(addr);
-		return [{ value, label: fn.name, description: value }];
+		return [{ value, label: fn.name, description: fn.size !== undefined ? `${value} · ${fn.size}b` : value }];
 	});
 	await showPanel(ctx, {
 		title: "omp-re: functions",
@@ -299,30 +281,23 @@ export async function showFunctionsPanel(ctx: ExtensionContext): Promise<void> {
 			await showCodeView(ctx, item.value, item.label);
 			return "keep" as const;
 		},
-		hint: "enter open \u00b7 type to filter \u00b7 esc close",
+		hint: "enter open · type to filter · esc close",
 	});
-}
-
-interface PdfjResult {
-	ops: { addr?: number; offset?: number; disasm: string }[];
-}
-
-interface R2XrefRow {
-	from: number;
-	type: string;
-	fcn_name?: string;
 }
 
 type CodeViewMode = "disasm" | "decompile";
 
 /**
- * Fixed-width addressed-text viewer with a scroll offset — deliberately not SelectList, whose
- * primary/description column layout and truncation would reflow disassembly and pseudo-C alike.
+ * Fixed-width addressed-text viewer with a scroll offset — deliberately not
+ * SelectList, whose column layout and truncation would reflow disassembly and
+ * pseudo-C alike. Decompiled code is syntax-highlighted with omp's own
+ * highlighter (once, at open).
  */
 function makeCodeView(opts: {
 	title: string;
 	disasmLines: string[];
 	decompileLines: string[] | null;
+	decompileLabel: string;
 	theme: Theme;
 	keybindings: KeybindingsManager;
 	onToggle: () => boolean;
@@ -332,22 +307,28 @@ function makeCodeView(opts: {
 }): Component {
 	let mode: CodeViewMode = "disasm";
 	let offset = 0;
+	const theme = opts.theme;
+	const disasm = opts.disasmLines.map((l) => theme.fg("text", l));
+	const decompiled = opts.decompileLines;
+
+	function current(): string[] {
+		return mode === "decompile" && decompiled ? decompiled : disasm;
+	}
 
 	function clamp(): void {
-		const lines = mode === "decompile" && opts.decompileLines ? opts.decompileLines : opts.disasmLines;
-		const max = Math.max(0, lines.length - 1);
-		offset = Math.min(Math.max(0, offset), max);
+		offset = Math.min(Math.max(0, offset), Math.max(0, current().length - 1));
 	}
 
 	return {
 		render(width: number): string[] {
-			const theme = opts.theme;
-			const lines = mode === "decompile" && opts.decompileLines ? opts.decompileLines : opts.disasmLines;
+			const lines = current();
 			const window = lines.slice(offset, offset + MAX_VISIBLE_ROWS);
+			const label = mode === "decompile" ? opts.decompileLabel : "disasm";
+			const position = lines.length > MAX_VISIBLE_ROWS ? ` · ${offset + 1}-${Math.min(offset + MAX_VISIBLE_ROWS, lines.length)}/${lines.length}` : "";
 			const rendered = [
-				theme.fg("accent", `${opts.title} \u00b7 ${mode}`),
-				...(window.length > 0 ? window.map((l) => theme.fg("text", l)) : [theme.fg("dim", "(nothing to show)")]),
-				theme.fg("dim", "d decomp \u00b7 x xrefs \u00b7 a ask \u00b7 esc back"),
+				theme.fg("accent", `${opts.title} · ${label}`),
+				...(window.length > 0 ? window : [theme.fg("dim", "(nothing to show)")]),
+				theme.fg("dim", `d decomp · x xrefs · a ask · esc back${position}`),
 			];
 			return rendered.map((l) => truncateToWidth(l, width));
 		},
@@ -372,119 +353,104 @@ function makeCodeView(opts: {
 				return;
 			}
 			const kb = opts.keybindings;
-			if (kb.matches(data, "tui.select.up")) {
-				offset -= 1;
-				clamp();
-				return;
-			}
-			if (kb.matches(data, "tui.select.down")) {
-				offset += 1;
-				clamp();
-				return;
-			}
-			if (kb.matches(data, "tui.select.pageUp")) {
-				offset -= MAX_VISIBLE_ROWS;
-				clamp();
-				return;
-			}
-			if (kb.matches(data, "tui.select.pageDown")) {
-				offset += MAX_VISIBLE_ROWS;
-				clamp();
-				return;
-			}
+			if (kb.matches(data, "tui.select.up")) offset -= 1;
+			else if (kb.matches(data, "tui.select.down")) offset += 1;
+			else if (kb.matches(data, "tui.select.pageUp")) offset -= MAX_VISIBLE_ROWS;
+			else if (kb.matches(data, "tui.select.pageDown")) offset += MAX_VISIBLE_ROWS;
+			else return;
+			clamp();
 		},
 		invalidate() {},
 	};
 }
 
+interface RzXrefRow {
+	from?: number;
+	type: string;
+}
+
+/** Name the function containing each xref site (rizin's axtj carries none). Bounded: past the cap, rows keep their bare address. */
+async function labelXrefs(rz: RzSession, rows: RzXrefRow[]): Promise<SelectItem[]> {
+	const LABEL_CAP = 64;
+	const items: SelectItem[] = [];
+	for (const [index, row] of rows.entries()) {
+		if (typeof row.from !== "number") continue;
+		const ea = eaFromOffset(row.from);
+		let label = ea;
+		if (index < LABEL_CAP) {
+			const fn = (await rz.cmdj<{ name?: string }[]>(`afij @ ${ea}`).catch(() => null))?.[0];
+			if (fn?.name) label = `${fn.name} (${ea})`;
+		}
+		items.push({ value: ea, label, description: row.type });
+	}
+	return items;
+}
+
 /**
- * The code-view surface: disassembly (default) or decompiled pseudo-C, with xref following and a
- * model hand-off key. Writes no `re.evidence` entry — evidence means "the agent observed this";
- * recording a human's browsing would let a claim be credited to something the model never actually saw.
+ * The code-view surface: disassembly (default) or decompiled pseudo-C, with
+ * xref following and a model hand-off key. Writes no `re.evidence` entry —
+ * evidence means "the agent observed this"; recording a human's browsing
+ * would let a claim be credited to something the model never actually saw.
  */
 export async function showCodeView(ctx: ExtensionContext, addr: string, name?: string, depth = 0): Promise<void> {
-	const state = getState(ctx);
-	if (!state.r2 || state.r2.isClosed) {
-		ctx.ui.notify("omp-re: no binary open — use /re open <path> first", "error");
-		return;
-	}
+	const session = await uiSession(ctx);
+	if (!session) return;
+	const rz: RzSession = session;
 	if (depth > 8) {
 		ctx.ui.notify("omp-re: xref chain too deep — stopping to avoid an unbounded loop", "info");
 		return;
 	}
-	const r2 = state.r2;
 
-	let decompileLines: string[] | null = null;
-	try {
-		const outcome = await decompileAt(r2, addr);
-		if (outcome) {
-			const codeLines = outcome.code.split("\n");
-			decompileLines =
-				outcome.kind === "pdc" ? [DISASM_ONLY_PREFIX, ...codeLines] : [`// decompiled with ${outcome.kind}`, ...codeLines];
-		}
-	} catch {
-		decompileLines = null;
-	}
-	let disasmLines: string[] = [];
-	try {
-		const pdf = await r2.cmdj<PdfjResult>(`pdfj @ ${addr}`);
-		if (pdf?.ops)
-			disasmLines = pdf.ops.flatMap((op) => {
-				const opAddr = addrOf(op);
-				return opAddr === undefined ? [] : [`${eaFromOffset(opAddr)}  ${op.disasm}`];
-			});
-	} catch {
-		disasmLines = [];
-	}
-	if (disasmLines.length === 0 && !decompileLines) {
+	const outcome = await decompileAt(rz, addr).catch(() => null);
+	const disasm = await disassembleAt(rz, addr).catch(() => null);
+	const disasmLines = disasm?.lines ?? [];
+	if (disasmLines.length === 0 && !outcome) {
 		ctx.ui.notify(`omp-re: no code at ${addr}`, "error");
 		return;
 	}
 
 	if (!ctx.hasUI) {
-		const lines = disasmLines.length > 0 ? disasmLines : (decompileLines ?? []);
-		ctx.ui.notify(`${name ?? addr}\n${lines.join("\n")}`.slice(0, 4000), "info");
+		ctx.ui.notify(`${name ?? addr}\n${disasmLines.join("\n")}`.slice(0, 4000), "info");
 		return;
 	}
 
 	async function followXrefs(): Promise<void> {
-		let xrefs: R2XrefRow[] = [];
-		try {
-			xrefs = ((await r2.cmdj<R2XrefRow[]>(`axtj @ ${addr}`)) ?? []).filter((row) => typeof row.from === "number");
-		} catch {
-			xrefs = [];
-		}
-		if (xrefs.length === 0) {
+		const rows = ((await rz.cmdj<RzXrefRow[]>(`axtj @ ${addr}`).catch(() => null)) ?? []).filter((row) => typeof row.from === "number");
+		if (rows.length === 0) {
 			ctx.ui.notify(`omp-re: no xrefs to ${addr}`, "info");
 			return;
 		}
-		const items: SelectItem[] = xrefs.map((row) => ({
-			value: eaFromOffset(row.from),
-			label: row.fcn_name ?? eaFromOffset(row.from),
-			description: row.type,
-		}));
 		await showPanel(ctx, {
-			title: `omp-re: xrefs to ${addr}`,
-			items,
+			title: `omp-re: xrefs to ${name ?? addr}`,
+			items: await labelXrefs(rz, rows),
 			onChoose: async (item) => {
 				await showCodeView(ctx, item.value, item.label, depth + 1);
 				return "keep" as const;
 			},
-			hint: "enter open \u00b7 esc back",
+			hint: "enter open · esc back",
 		});
 	}
 
 	await ctx.ui.custom<undefined>(
-		(_tui, theme, keybindings, done) =>
-			makeCodeView({
+		(_tui, theme, keybindings, done) => {
+			let decompileLines: string[] | null = null;
+			let decompileLabel = "decompile";
+			if (outcome?.kind === "disasm") {
+				decompileLines = [theme.fg("warning", outcome.prefix?.trim() ?? ""), ...outcome.code.split("\n").map((l) => theme.fg("text", l))];
+				decompileLabel = "decompile (disassembly only)";
+			} else if (outcome) {
+				decompileLines = [theme.fg("dim", `// decompiled with ${outcome.kind}`), ...highlightCode(outcome.code, "c", theme)];
+			}
+			return makeCodeView({
 				title: name ?? addr,
 				disasmLines,
 				decompileLines,
+				decompileLabel,
 				theme,
 				keybindings,
 				onToggle: () => {
 					if (!decompileLines) {
-						ctx.ui.notify("omp-re: no decompiler output (pdc unavailable)", "info");
+						ctx.ui.notify("omp-re: no decompiler output for this function", "info");
 						return false;
 					}
 					return true;
@@ -499,7 +465,8 @@ export async function showCodeView(ctx: ExtensionContext, addr: string, name?: s
 					done(undefined);
 				},
 				done,
-			}),
+			});
+		},
 		{ overlay: true },
 	);
 }
@@ -509,122 +476,109 @@ export interface EvidenceRecord {
 	tool: string;
 	ea?: string;
 	summary: string;
+	artifactId?: string;
 }
 
-function isEvidenceEntry(entry: { type: string; customType?: string }): entry is CustomEntry<EvidenceRecord> & { customType: string } {
-	return entry.type === "custom" && entry.customType === "re.evidence";
+/** Evidence on the current branch, oldest first. */
+export function evidenceRecords(ctx: ExtensionContext): EvidenceRecord[] {
+	return customEntries(branchEntries(ctx), "re.evidence")
+		.map((entry) => entry.data as EvidenceRecord)
+		.filter((data) => typeof data?.id === "string");
 }
 
-/** Prefix match: the picker only ever displays an 8-char slice of the UUID, so retyping what's
- * shown could never satisfy an exact-equality lookup. Shared by `showEvidencePanel` and `/re cite`
- * so there is exactly one lookup rule. */
+/** Prefix match: the picker only ever displays an 8-char slice of the UUID, so retyping what's shown could never satisfy an exact-equality lookup. Shared by `showEvidencePanel`, `/re cite`, and `/re` argument completion so there is exactly one lookup rule. */
 export function findEvidence(ctx: ExtensionContext, id: string): EvidenceRecord | undefined {
-	const all = ctx.sessionManager
-		.getEntries()
-		.filter(isEvidenceEntry)
-		.map((entry) => entry.data as EvidenceRecord);
-	return all.find((e) => e.id === id || e.id.startsWith(id));
+	const all = evidenceRecords(ctx);
+	return all.find((e) => e.id === id) ?? all.find((e) => e.id.startsWith(id));
+}
+
+function evidenceDetail(match: EvidenceRecord): string {
+	const full = match.artifactId ? `\n\nfull output: artifact://${match.artifactId}` : "";
+	return `[${match.tool}:${match.ea ?? "?"}]\n\n${match.summary}${full}`;
 }
 
 export async function showEvidencePanel(ctx: ExtensionContext, id?: string): Promise<void> {
-	const all = ctx.sessionManager
-		.getEntries()
-		.filter(isEvidenceEntry)
-		.map((entry) => entry.data as EvidenceRecord);
-
-	function showDetail(match: EvidenceRecord | undefined, lookupId: string): void {
-		if (match) {
-			ctx.ui.notify(`[${match.tool}:${match.ea ?? "?"}]\n\n${match.summary}`, "info");
-		} else {
-			ctx.ui.notify(`omp-re: no evidence found with id ${lookupId}`, "error");
-		}
-	}
-
 	if (id) {
-		showDetail(findEvidence(ctx, id), id);
+		const match = findEvidence(ctx, id);
+		if (match) ctx.ui.notify(evidenceDetail(match), "info");
+		else ctx.ui.notify(`omp-re: no evidence found with id ${id}`, "error");
 		return;
 	}
 
+	const all = evidenceRecords(ctx);
 	const items: SelectItem[] = all.map((e) => ({
 		value: e.id,
 		label: `[${e.id.slice(0, 8)}] ${e.tool} @ ${e.ea ?? "?"}`,
-		description: e.summary?.slice(0, 80),
+		description: e.summary?.split("\n")[0]?.slice(0, 80),
 	}));
 	await showPanel(ctx, {
 		title: "omp-re: evidence",
 		items,
 		onChoose: (item) => {
-			showDetail(
-				all.find((e) => e.id === item.value),
-				item.value,
-			);
-			return "keep" as const;
+			const match = all.find((e) => e.id === item.value);
+			if (!match) return "keep" as const;
+			// Close the panel and prefill a citation: a notify raised under an open overlay can render underneath it.
+			citeEvidence(ctx, match);
+			return "close" as const;
 		},
-		hint: "enter detail \u00b7 type to filter \u00b7 esc close",
+		hint: "enter cite · type to filter · esc close",
 	});
 }
 
-interface R2String {
-	vaddr: number;
+/** Pull one evidence record into the editor as a prefilled message, so a follow-up carries its exact recorded content. */
+export function citeEvidence(ctx: ExtensionContext, rec: EvidenceRecord): void {
+	ctx.ui.setEditorText(`Re: evidence ${rec.id.slice(0, 8)} (${rec.tool} @ ${rec.ea ?? "?"})\n\n${rec.summary}\n\n`);
+}
+
+interface RzString {
+	vaddr?: number;
 	string: string;
 }
 
 export async function showStringsPanel(ctx: ExtensionContext): Promise<void> {
-	const state = getState(ctx);
-	if (!state.r2 || state.r2.isClosed) {
-		ctx.ui.notify("omp-re: no binary open — use /re open <path> first", "error");
-		return;
-	}
-	const r2 = state.r2;
-	let strings: R2String[] = [];
-	try {
-		strings = ((await r2.cmdj<R2String[]>("izj")) ?? []).filter((s) => typeof s.vaddr === "number");
-	} catch {
-		strings = [];
-	}
-	const items: SelectItem[] = strings.map((s) => ({ value: eaFromOffset(s.vaddr), label: s.string, description: eaFromOffset(s.vaddr) }));
+	const rz = await uiSession(ctx);
+	if (!rz) return;
+	const strings = ((await rz.cmdj<RzString[]>("izj").catch(() => null)) ?? []).filter((s) => typeof s.vaddr === "number");
+	const items: SelectItem[] = strings.map((s) => ({ value: eaFromOffset(s.vaddr!), label: s.string, description: eaFromOffset(s.vaddr!) }));
 	await showPanel(ctx, {
 		title: "omp-re: strings",
 		items,
 		onChoose: async (item) => {
-			let xrefs: { from: number; fcn_name?: string }[] = [];
-			try {
-				xrefs = ((await r2.cmdj<{ from: number; fcn_name?: string }[]>(`axtj @ ${item.value}`)) ?? []).filter(
-					(row) => typeof row.from === "number",
-				);
-			} catch {
-				xrefs = [];
-			}
-			if (xrefs.length === 0) {
+			const rows = ((await rz.cmdj<RzXrefRow[]>(`axtj @ ${item.value}`).catch(() => null)) ?? []).filter((row) => typeof row.from === "number");
+			if (rows.length === 0) {
+				// Close first: a notify raised under an open overlay can render underneath it.
 				ctx.ui.notify("omp-re: no xrefs to that string", "info");
+				return "close" as const;
+			}
+			if (rows.length === 1) {
+				const ea = eaFromOffset(rows[0]!.from!);
+				await showCodeView(ctx, ea);
 				return "keep" as const;
 			}
-			const target = xrefs[0]!;
-			await showCodeView(ctx, eaFromOffset(target.from), target.fcn_name);
+			await showPanel(ctx, {
+				title: `omp-re: xrefs to ${JSON.stringify(item.label.slice(0, 40))}`,
+				items: await labelXrefs(rz, rows),
+				onChoose: async (xref) => {
+					await showCodeView(ctx, xref.value, xref.label);
+					return "keep" as const;
+				},
+				hint: "enter open · esc back",
+			});
 			return "keep" as const;
 		},
-		hint: "enter open \u00b7 type to filter \u00b7 esc close",
+		hint: "enter open · type to filter · esc close",
 	});
 }
 
-interface R2Import {
+interface RzImport {
 	name: string;
 	plt?: number;
 }
 
 export async function showImportsPanel(ctx: ExtensionContext): Promise<void> {
-	const state = getState(ctx);
-	if (!state.r2 || state.r2.isClosed) {
-		ctx.ui.notify("omp-re: no binary open — use /re open <path> first", "error");
-		return;
-	}
-	const r2 = state.r2;
-	let imports: R2Import[] = [];
-	try {
-		imports = (await r2.cmdj<R2Import[]>("iij")) ?? [];
-	} catch {
-		imports = [];
-	}
+	const rz = await uiSession(ctx);
+	if (!rz) return;
+	const imports = (await rz.cmdj<RzImport[]>("iij").catch(() => null)) ?? [];
 	const items: SelectItem[] = imports.map((imp) => ({
 		value: imp.plt ? eaFromOffset(imp.plt) : "",
 		label: imp.name,
@@ -636,21 +590,33 @@ export async function showImportsPanel(ctx: ExtensionContext): Promise<void> {
 		onChoose: async (item) => {
 			if (item.value === "") {
 				ctx.ui.notify("omp-re: no PLT stub for that import", "info");
+				return "close" as const;
+			}
+			const rows = ((await rz.cmdj<RzXrefRow[]>(`axtj @ ${item.value}`).catch(() => null)) ?? []).filter((row) => typeof row.from === "number");
+			if (rows.length === 0) {
+				await showCodeView(ctx, item.value, item.label);
 				return "keep" as const;
 			}
-			await showCodeView(ctx, item.value, item.label);
+			await showPanel(ctx, {
+				title: `omp-re: callers of ${item.label}`,
+				items: await labelXrefs(rz, rows),
+				onChoose: async (xref) => {
+					await showCodeView(ctx, xref.value, xref.label);
+					return "keep" as const;
+				},
+				hint: "enter open · esc back",
+			});
 			return "keep" as const;
 		},
-		hint: "enter open \u00b7 type to filter \u00b7 esc close",
+		hint: "enter open · type to filter · esc close",
 	});
 }
 
 export function registerUI(pi: ExtensionAPI): void {
-	pi.on("session_start", async (_event, ctx) => {
-		await refreshStatusBand(ctx);
-	});
-	pi.on("tool_result", async (_event, ctx) => {
-		await refreshStatusBand(ctx);
+	// Only RE tools change what the band shows, and the refresh is fire-and-forget: its rizin
+	// query can queue behind a long decompile, which must never hold up a tool result.
+	pi.on("tool_result", (event, ctx) => {
+		if (RE_ALL_TOOL_NAMES[event.toolName] === true) void refreshStatusBand(ctx);
 	});
 
 	pi.registerShortcut("alt+g", {
@@ -663,6 +629,12 @@ export function registerUI(pi: ExtensionAPI): void {
 		description: "omp-re: strings panel",
 		handler: async (ctx) => {
 			await showStringsPanel(ctx);
+		},
+	});
+	pi.registerShortcut("alt+i", {
+		description: "omp-re: imports panel",
+		handler: async (ctx) => {
+			await showImportsPanel(ctx);
 		},
 	});
 }

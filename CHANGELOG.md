@@ -4,112 +4,179 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.2] - 2026-08-04
+## [0.2.0] - 2026-10-15
+
+radare2 is replaced by [rizin](https://rizin.re), and the plugin targets
+omp **18.11.1** (the latest release) and its native extension surfaces.
+rizin is not bundled: omp-re runs the rizin on your `PATH` or at
+`OMPRE_RIZIN_PATH`. Verified against rizin 0.9.1 (latest), with and without
+rz-ghidra, by loading the extension through omp 18.11.1's own SDK and
+extension runner, and by installing it with `omp plugin install`.
+
+### Security
+
+- Fixed a command injection in `set_comment` (and `/re undo` of a comment):
+  0.1.x interpolated comment text unquoted into `CC <text> @ <addr>`, and
+  radare2 splits on `;`, so a comment like `a; !id` ran an extra command,
+  including a `!` shell escape (reproduced on radare2 5.5.0). Free text and
+  C types now reach rizin only as single-quoted literals, and addresses can
+  no longer contain `@` (rizin's `@@` iterators). See `SECURITY.md`.
+- rizin is now spawned with `-N`, so a user's `rizinrc` can't change the
+  command output omp-re parses (plugins still load; `OMPRE_RIZIN_LOAD_USER_CONFIG=1`
+  restores it). The `rizin_command` syntax denylist was audited against
+  rizin's documented prompt grammar and pins the `&`/`&t` task and `!`/`!!`
+  shell operators and the full `@` modifier family.
 
 ### Changed
 
-- `skills/re-triage/SKILL.md` rewritten to own the initial "analyse this
-  binary" trigger instead of only covering post-open triage: broadened
-  `description:` (analyse, reverse, triage, decompile, characterise,
-  unpack), starts at `/re open <path>`, states there is no `/re triage`
-  subcommand, and states the evidence/report-withhold rule (work done
-  outside the RE tools has no evidence id, and `/re report` withholds the
-  entire report if any claim is unbacked). Fixes agents routing to a
-  different, non-omp-re RE toolchain on the first "analyse this binary"
-  request and recording zero evidence.
+- **Backend: radare2 → rizin.** `R2Session`/`r2.ts` become
+  `RzSession`/`rizin.ts`, speaking `rizin -q0` with rizin's dialect (`%v`,
+  `echo`, `afvlj`, `afs @`, `aflc`, `fdj`). rizin is required; radare2 is no
+  longer used.
+- **Process lifecycle on cordis.** The rizin and debug processes are now owned
+  by [cordis](https://github.com/cordiverse/cordis) *revertible effects*: a
+  child scope per omp session, and each process a `ctx.effect` whose setup
+  returns its teardown (`runtime.ts`). Respawn disposes one effect; session
+  shutdown disposes the scope and every process with it — replacing the
+  hand-rolled nullable-field map and scattered `.close()` calls. `state.ts` is
+  now a thin facade over it, so the tool and UI call sites are unchanged.
+- **Extension composed on cordis.** Every subsystem — the read / mutate /
+  rizin-REPL / rizin-CLI / debugger / triage tool groups, the evidence store,
+  the audit log, the UI, and the command shell — is now a cordis plugin loaded
+  on one `Context` per extension load (`app.ts`'s `composeApp`). The omp host
+  (`pi`) is provided as a service each subsystem injects (`inject: ["pi"]`), so
+  a subsystem activates only when the host is present — the *reactive coeffect*
+  (spatial composability). The subsystems' registration functions stay plain
+  `(pi) => …` so they remain independently testable.
+- **Environment variables:** `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`;
+  `OMPRE_R2_ANALYSIS_TIMEOUT_MS` → `OMPRE_ANALYSIS_TIMEOUT_MS`.
+- **Decompilers:** rz-ghidra (`pdg`) then jsdec (`pdd`). rizin has no `pdc`,
+  so without a plugin `decompile_function` returns annotated disassembly
+  labeled `(disassembly only — no decompiler plugin available)`; when a
+  plugin is loaded but returns nothing for a function, the label says so. A
+  failed probe is no longer cached for the life of the process, so a
+  decompiler is never wrongly reported absent after one slow moment.
+- `list_functions`/`search_functions` rows are slimmed to `{ea, name, size,
+  blocks, callers, callees, signature}` (rizin's raw rows carry hundreds of
+  reference entries each; `/bin/ls`'s full `aflj` is 457 KB). New `sort`
+  parameter: `address`, `size`, `callers`.
+- `get_function` returns a curated summary: metrics, signature, typed
+  `args`/`locals`, unique `calls` named via rizin's flags, `callers`, and
+  reference counts.
+- List results are JSON arrays with one compact row per line.
+- Mutate tools resolve to the function's start address before writing (a
+  rename can retire the flag the model used), read variables back through
+  `afvlj` JSON instead of parsing text, and report what rizin actually
+  stored when a mutation lands differently from the request.
+- Enter in the evidence panel now cites the entry into the editor and closes
+  the panel; Enter on a string or an import lists the code that references
+  it before opening a code view. Panels close before reporting that there is
+  nothing to open, so those messages are no longer hidden under an overlay.
+- Bare `/re` shows the help text.
+- `/re on` works on omp 18, whose `getAllTools()` returns tool objects
+  instead of names (0.1.x's `/re on` silently re-enabled nothing there).
+- The `@oh-my-pi/*` packages are now pinned dev dependencies at `^18.11.1`
+  (they stay `*` peers at runtime), so local typechecks and tests run against
+  the current host. Tool schemas are declared as named consts so `params`
+  types infer under omp 18's zod-compatible builder.
+- Integration tests run against `/bin/ls` by default instead of an
+  undistributed WannaCry sample.
 
-## [0.1.1] - 2026-08-03
+### Added (using all of rizin)
 
-### Fixed
+- `rizin_cli`: one `exec`-tier tool fronting rizin's standalone command-line
+  programs with their own arguments — `rz-bin` (headers/imports/strings
+  without full analysis), `rz-diff` (compare two binaries), `rz-hash`
+  (hashing and entropy), `rz-find` (raw pattern search), `rz-asm`
+  (assemble/disassemble), `rz-ax` (base conversion). Invoked by argv (no
+  shell); `@binary` substitutes the open binary; `args: ["-h"]` returns the
+  tool's own help. Flags that run code (`rz-find -E`/`-R`, `rz-diff -t
+  command`), write files (`rz-bin -O`/`-o`/`-C`, `rz-asm -O`), fetch over the
+  network (`rz-bin -dd`/`-PP`), or open an interactive view (`rz-diff
+  -H`/`-S`) are refused before the tool runs. rz-gg and rz-run are not exposed.
+- The decompiler is now extensible: `OMPRE_DECOMPILER` is a comma-separated
+  priority list (default `pdg,pdd`) that reorders the probe or names another
+  plugin's `pdX`-style command, with the built-ins kept as a fallback. `/re
+  status` lists the available decompilers and the active one.
+- `rizin_debug` (opt-in via `OMPRE_ENABLE_DEBUGGER`): dynamic analysis under
+  rizin's debugger — launch, breakpoints, continue/continue-until, single-
+  step and step-over, registers, memory reads, and backtrace. It EXECUTES the
+  sample, so it is off by default, runs in a debug session separate from the
+  static one (which still never executes the file), is killed with its
+  debuggee on `stop`/shutdown, and is `exec`-tier with a reason that
+  distinguishes resuming from inspecting. No anti-anti-debug, hiding, or
+  injection features. See `SECURITY.md`.
 
-- `resolveEA` (the address normalizer `rename_function` and `set_prototype`
-  use to build their `/re undo` message) read a JSON read-back's `offset`
-  field, but r2 6.x renamed that field to `addr` on `afij` — confirmed
-  directly (`afij @ entry0` returns `{"addr":...}`, no `offset` key at all).
-  `resolveEA` therefore always fell back to the caller's raw address
-  argument, so `/re undo` after a `rename_function` showed the literal
-  string the model passed (e.g. `omp-re: undid rename_function @ entry0
-  (restored ...)`) instead of a normalized hex address. `extensions/re/r2.ts`
-  already exports `addrOf`/`eaFromOffset` handling exactly this `addr`/
-  `offset` split for every read tool; `resolveEA` now uses them too.
-  Verified against real radare2 6.1.8: `/re undo` now reports
-  `omp-re: undid rename_function @ 0x...`. See
-  [`test/QA-FINDINGS.md`](test/QA-FINDINGS.md) for the discovery context.
-- `test/tui-qa.sh`'s `clear_editor` backspace budget (20s, 40 keys/batch)
-  was sized for a short single-line prefill and could leave a fragment of a
-  real ~250-byte `/re cite` evidence summary in the editor, which the next
-  `slash` call would append to and submit as prose instead of a command.
-  Widened to 45s/80 keys per batch (comfortable margin up to the 512-byte
-  evidence-summary cap) — QA-harness-only, no plugin behavior change.
-- `test/tui-qa.sh`'s readiness handshake (`/re help` retried 8× at 15s) was
-  too tight on a host whose startup connects a large MCP server catalog;
-  widened to 16× at 20s. QA-harness-only.
+### Added (rizin REPL)
+
+- `rizin_help`: looks up commands in the installed rizin's own catalog
+  (`rizin -qc '?*j'`, about 2,000 commands with typed arguments): a command
+  or prefix for its usage and arguments, or keywords to find one.
+- `rizin_command` (`exec` approval naming the command): runs one read-only
+  rizin command the dedicated tools don't cover — `pdsf`, `agc`, `px`,
+  `ph entropy @!<n>`, `/x`, `/R`, `aoe`, `iH`, and the rest of rizin's
+  print, info, search, graph, and listing commands — returning rizin's own
+  error text when the arguments are wrong. Writes, config, shell escapes,
+  file reads, raw-byte output, and analysis changes are refused before
+  anything reaches rizin (policy in `SECURITY.md`). Its output is evidence
+  like any read tool's.
+- Compatibility check: opening a binary looks up every command omp-re sends
+  in the installed rizin's catalog and names any that are missing; `/re
+  status` shows the result and picks the decompiler from the catalog.
+
+### Added (omp-native)
+
+- **Compaction preservation** (`session.compacting`): when omp compacts the
+  conversation, omp-re folds a snapshot of the RE session — the open binary,
+  evidence and annotation counts, and the most recent evidence ids — into the
+  summary, so the post-compaction model does not lose track of what is open or
+  already found (the entries themselves always persisted on the branch; this
+  keeps the model's working memory grounded). Only contributes lines when a
+  session is active. `extensions/re/preserve.ts`.
+
+- Tool renderers (`renderCall`/`renderResult`) for every RE tool, with
+  decompiled code highlighted as C by omp's highlighter, plus native views
+  (`describeCall`/`describeResult`) so Tern shows each RE tool as a native
+  tool card with a `code` body instead of a generic text card.
+- `open_binary` streams analysis progress via `onUpdate`, and the footer
+  shows progress for `/re open` and session restores. Every tool honors its
+  `AbortSignal`: cancelling a command stops waiting without killing rizin;
+  cancelling analysis kills the half-analyzed process.
+- Truncated output is saved in full as a session artifact and linked as
+  `artifact://<id>`; evidence entries record the artifact, and `/re report`
+  reads it.
+- Evidence, annotations, and the open binary follow the active session
+  **branch** (`getBranch()`), with handlers for `session_switch`,
+  `session_branch`, and `session_tree`.
+- **Annotation replay:** resuming a session, respawning a crashed rizin, or
+  moving to a branch with different annotations re-applies that branch's
+  annotations (minus undone ones) to a fresh rizin process. Annotations are
+  attributed to the binary that was open when they were made.
+- `agents/re-analyst.md`: a packaged `task` subagent (omp forwards
+  extension tools to subagents) with a structured `{binary, sha256, summary,
+  findings[{claim, ea, evidence, confidence}], gaps}` output, marked
+  `structured: true` so the schema is enforced even with `task.structured`
+  off.
+- `test/extension-sdk.test.ts`: loads the extension through omp's real SDK
+  in CI, so host API drift fails `bun test`.
+- Per-call approval reasons for mutate and triage tools (e.g. `Rename
+  function "main" to "parse_args"`); approval decisions for RE tools are
+  written to the audit log.
+- `/re` argument completion (subcommands, and evidence ids for `cite` /
+  `evidence`), `/re status`, the `alt+i` imports shortcut, fuzzy panel
+  filtering (best match first), and a scroll position in the code view.
+- Empty list pages are marked compactable (`useless`) for omp's context
+  compaction.
 
 ### Docs
 
-- `docs/testing.md`, `.github/workflows/ci.yml`, and `CONTRIBUTING.md`
-  corrected to the actual measured `bun test` shape: **72 pass / 0 fail / 0
-  skip** locally with radare2 + the real fixture (not 73), **33 pass / 45
-  skip / 78 total** in CI (the three fixture-gated files' tests report as
-  skipped inside the total, not as zero tests as previously stated).
-- `README.md` rewritten with real screenshots (`docs/img/`, regenerated via
-  the new `tools/shotgen/`) replacing the two ASCII "screenshot" fences,
-  one of which contained a fabricated `... 201 more rows ...` line that
-  matched no real pane capture.
-- New `test/QA-FINDINGS.md` §4: `decompileAt` observed falling back to
-  `pdc` even with r2ghidra installed, reproduced but not root-caused.
+- README, `docs/install.md` (rizin and rz-ghidra install, upgrade notes),
+  `docs/workflow.md` (branches and replay, the re-analyst agent),
+  `docs/tools.md`, `docs/testing.md`, `SECURITY.md`, and `CONTRIBUTING.md`
+  rewritten for rizin. The committed screenshots predate the port and were
+  taken with the radare2 backend.
 
-## [0.1.0] - 2026-08-03
+## [0.1.x] - 2026-08
 
-Initial public release.
-
-### Added
-
-- `/re cite <id>` — pulls a specific `/re evidence` entry into the editor as
-  a prefilled chat message (`Re: evidence <id> (<tool> @ <addr>)` plus its
-  summary), so a picked row's detail can actually be handed to the model
-  instead of only rendering underneath the still-open evidence panel.
-- Public docs: `docs/install.md`, `docs/workflow.md`, `docs/tools.md`,
-  `docs/testing.md`, `CONTRIBUTING.md`, `SECURITY.md`.
-- `.github/workflows/ci.yml` — `check` (typecheck) and `test` (unit tests)
-  jobs on every push/PR.
-- `LICENSE` (MIT).
-
-### Fixed
-
-- `rename_variable` and `set_variable_type` sent a bare `${addr}` as a
-  trailing positional token to r2's `afvn`/`afvt`, which don't take an
-  address argument at all; both tools threw `mutation did not land` on
-  every input. Fixed to use r2's `@ addr` temporary-seek syntax. The
-  identical defect in `/re undo`'s `rename_variable`/`set_variable_type`
-  branches — found while verifying this fix — is fixed the same way; those
-  branches previously reported success while silently reverting nothing.
-- `set_prototype` sent `af ${sig} ${addr}` — `af` renames a function, it
-  does not set a signature. Fixed to use `afs ${sig} @ ${addr}` (both the
-  forward tool and `/re undo`'s branch). r2's `afij` read-back always
-  re-punctuates a stored signature (adds a space before `(`, appends a
-  trailing `;`); the tool now normalizes both sides of the comparison
-  before checking they match, so it tolerates r2's own cosmetic
-  reformatting without weakening the check — a genuinely different
-  signature still fails loudly. The forward tool also now strips that
-  trailing `;` from the captured old signature before storing it, so a
-  later `/re undo` doesn't trip the `sig` validator's forbidden-character
-  check on a semicolon r2 itself appended.
-- `set_comment` used plain `CC ${text} @ ${addr}`, and r2's `CC` **appends**
-  to an existing comment rather than replacing it, so a second call at the
-  same address always failed its own read-back. Fixed to clear first
-  (`CC- @ ${addr}`) before writing, in both the forward tool and `/re
-  undo`'s branch, making both idempotent.
-
-All four defects (and their `/re undo` counterparts) are verified fixed
-against real radare2 6.1.8. All 5 mutate-tier tools and all 5 `/re undo`
-branches now work end to end; the advertised tool count stays at 22. See
-[`test/QA-FINDINGS.md`](test/QA-FINDINGS.md) §2 for the historical record
-and [`test/tools-mutate-registry.test.ts`](test/tools-mutate-registry.test.ts)
-for the regression coverage.
-
-### Changed
-
-- `test/tui-qa.sh` gained 3 assertions for `/re cite` (bare usage, unknown
-  id, and prefill-into-editor); the suite's assertion-count drift guard
-  moved from 96 to 99.
+The 0.1.x releases (0.1.0–0.1.2) ran on the **radare2** backend, which 0.2.0
+replaced with rizin. Their detailed notes are preserved in the git history.

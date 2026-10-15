@@ -1,50 +1,28 @@
 /**
- * Deterministic unit coverage for the 11 read-tier tool wrappers registered
- * by registerReadTools() (tools-read.ts) that are never invoked by name
- * anywhere else in the codebase: list_functions, search_functions,
- * get_function, decompile_function, disassemble_function, get_xrefs_to,
- * get_xrefs_from, list_imports, list_exports, list_strings, list_segments.
- *
- * Setup mirrors r2-integration.test.ts (spawn a real R2Session against the
- * fixture, skip the whole suite when r2 or the fixture is unavailable), but
- * instead of talking to R2Session directly, this file builds a stub
- * ExtensionAPI that records every registerTool() call and then invokes each
- * recorded ToolDefinition's execute() directly — the same 5-argument shape
- * (toolCallId, params, signal, onUpdate, ctx) the real pi runtime uses.
+ * Deterministic coverage for the 12 read-tier tool wrappers registered by
+ * registerReadTools() (tools-read.ts), executed through a stub ExtensionAPI
+ * the same way omp calls them: execute(toolCallId, params, signal, onUpdate, ctx).
  *
  * "Valid argument" assertions are checked against ground truth fetched
- * independently (via raw session.cmd/cmdj calls in beforeAll, never by
- * calling into tools-read.ts), so a broken r2 command template inside a tool
- * — not a coincidence of this file mirroring it — is what makes a test fail.
- * "Invalid argument" assertions exercise whichever validation path is real
- * for that tool: the app-level ADDR_CHARS regex (validateAddr, for the 5
- * tools that take an address/name) or the Zod parameter schema itself (for
- * the other 6, which have no runtime argument validation of their own).
+ * independently (raw rz.cmd/cmdj calls in beforeAll, never by calling into
+ * tools-read.ts), so a broken rizin command template inside a tool — not a
+ * coincidence of this file mirroring it — is what makes a test fail. Ground
+ * truth is picked from whatever the fixture contains (default /bin/ls), so any
+ * ELF or PE with a `main` works as OMPRE_TEST_BINARY.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
-import { zod } from "@oh-my-pi/pi-coding-agent";
-import { R2Session, addrOf, eaFromOffset, resolveR2Path } from "../extensions/re/r2.ts";
-import { getState } from "../extensions/re/state.ts";
+import { DECOMPILER_EMPTY_PREFIX, DISASM_ONLY_PREFIX } from "../extensions/re/decompile.ts";
+import { reRenderers } from "../extensions/re/render.ts";
+import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
+import { getState, shutdownState } from "../extensions/re/state.ts";
 import { registerReadTools } from "../extensions/re/tools-read.ts";
+import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, splitHeaderBody, TEST_BINARY, textOf } from "./helpers.ts";
 
-const TEST_BINARY = process.env.OMPRE_TEST_BINARY ?? "/tmp/rzx-dogfood/wannacry.bin";
-const r2Path = resolveR2Path();
-const r2Available = Bun.which(r2Path) !== null;
-const binaryAvailable = existsSync(TEST_BINARY);
+logSkip("tools-registry tests");
 
-if (!r2Available || !binaryAvailable) {
-	console.log(
-		`omp-re: skipping tools-registry tests — ${!r2Available ? `radare2 ("${r2Path}") not on PATH` : ""}${!r2Available && !binaryAvailable ? "; " : ""}${!binaryAvailable ? `test binary not found at ${TEST_BINARY} (set OMPRE_TEST_BINARY)` : ""}`,
-	);
-}
-
-/** An address string that fails r2.ts's ADDR_CHARS allowlist (the ';' makes r2 command-injection intent obvious) — used to exercise validateAddr's throw path. */
+/** An address string that fails validateAddr's allowlist (the ';' makes command-injection intent obvious). */
 const BAD_ADDR = "main;whoami";
-function expectedInvalidAddrMessage(addr: string): string {
-	return `omp-re: invalid address or expression: ${JSON.stringify(addr)}`;
-}
+const invalidAddrMessage = (addr: string) => `omp-re: invalid address or expression: ${JSON.stringify(addr)}`;
 
 /** Mirrors tools-read.ts's own (unexported) pageHeader() so header assertions test real behavior without importing a private helper. */
 function expectedPageHeader(label: string, pageLen: number, total: number, offset = 0): string {
@@ -52,484 +30,471 @@ function expectedPageHeader(label: string, pageLen: number, total: number, offse
 	return `${pageLen} of ${total} ${label} (offset=${offset}; use offset/limit to page through the rest)`;
 }
 
-function textOf(result: { content: { type: string; text?: string }[] }): string {
-	const block = result.content[0];
-	if (!block || block.type !== "text" || typeof block.text !== "string") {
-		throw new Error("expected a text content block");
-	}
-	return block.text;
-}
-
-/** Splits a tool result's rendered text into its header line and the remaining body (JSON payload for jsonResult, raw text for textResult). */
-function splitHeaderBody(text: string): { header: string; body: string } {
-	const nl = text.indexOf("\n");
-	if (nl === -1) return { header: text, body: "" };
-	return { header: text.slice(0, nl), body: text.slice(nl + 1) };
-}
-
-async function captureError(promise: Promise<unknown>): Promise<Error> {
-	try {
-		await promise;
-	} catch (err) {
-		if (err instanceof Error) return err;
-		throw new Error(`expected an Error to be thrown, got ${String(err)}`);
-	}
-	throw new Error("expected the promise to reject, but it resolved");
-}
-
 function mustFind<T>(items: T[], pred: (item: T) => boolean, label: string): T {
 	const found = items.find(pred);
-	if (!found) {
-		throw new Error(
-			`tools-registry.test setup: fixture is missing ${label} — these tests assume the default WannaCry fixture (OMPRE_TEST_BINARY overrides at your own risk)`,
-		);
-	}
+	if (!found) throw new Error(`tools-registry.test setup: fixture ${TEST_BINARY} is missing ${label}`);
 	return found;
 }
 
-/** r2 6.x renamed aflj/afij's address field from `offset` to `addr` (and dropped `callrefs` entirely); accept either via addrOf(). */
 interface GroundFn {
-	addr?: number;
 	offset?: number;
+	addr?: number;
 	name: string;
-	size?: number;
+	size: number;
 }
 interface GroundImport {
 	name: string;
-	libname?: string;
 	plt?: number;
 }
 interface GroundString {
 	vaddr?: number;
-	paddr?: number;
 	string: string;
 }
 interface GroundSegment {
 	name: string;
 	perm: string;
 	vaddr?: number;
-	paddr?: number;
 }
 interface GroundXref {
 	from?: number;
 	to?: number;
 	type: string;
 }
-interface GroundPdc {
-	code: string;
-}
-/** r2 6.x renamed pdfj ops' address field from `offset` to `addr` too; accept either via addrOf(). */
-interface GroundPdfOp {
-	addr?: number;
-	offset?: number;
-	type: string;
-	disasm: string;
-}
 interface GroundPdf {
-	addr?: number;
-	offset?: number;
-	ops: GroundPdfOp[];
+	ops: { offset?: number; addr?: number; type: string; disasm: string }[];
 }
 
-const registered = new Map<string, ToolDefinition<any, any>>();
+const harness = makeHarness("tools-registry-test-session");
+const { ctx } = harness;
+const tool = harness.tool;
+const run = (name: string, params: Record<string, unknown>) => tool(name).execute(`t-${name}`, params, undefined, undefined, ctx);
 
-function tool(name: string): ToolDefinition<any, any> {
-	const def = registered.get(name);
-	if (!def) throw new Error(`tools-registry.test setup: "${name}" was never registered by registerReadTools()`);
-	return def;
-}
-
-let session: R2Session;
-let ctx: ExtensionContext;
-
+let session: RzSession;
 let groundFns: GroundFn[];
 let mainFn: GroundFn;
-let mainAddr: number;
-let mainCallSite: number;
+let mainEa: string;
+let callSite: number;
 let groundImports: GroundImport[];
-let waitForSingleObject: GroundImport;
+let pltImport: GroundImport;
 let groundExports: unknown[];
 let groundStrings: GroundString[];
-let killSwitchString: GroundString;
+let probeString: GroundString;
 let groundSegments: GroundSegment[];
-let textSegment: GroundSegment;
+let execSegment: GroundSegment;
 let groundAxt: GroundXref[];
 let groundAxf: GroundXref[];
-let groundPdc: GroundPdc;
 let groundPdf: GroundPdf;
-/** decompile_function prefers a real decompiler plugin (r2ghidra's pdg, then r2dec's pdd) over r2's native pdc pseudo-decompiler when one is loaded; mirror decompile.ts's own probe-and-prefer order so the test asserts whichever branch the tool actually takes on this host. */
-let expectedDecompileKind: "pdg" | "pdd" | "pdc";
-let groundDecompileCode: string;
+let expectedDecompiler: "pdg" | "pdd" | null;
 
-const KILL_SWITCH_FRAGMENT = "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea";
-
-describe.skipIf(!r2Available || !binaryAvailable)("registerReadTools (T0 read-only r2 tool wrappers)", () => {
+describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)", () => {
 	beforeAll(async () => {
-		session = await R2Session.spawn(r2Path, TEST_BINARY);
-
-		ctx = {
-			sessionManager: { getSessionId: () => "tools-registry-test-session" },
-		} as unknown as ExtensionContext;
+		const binaryPath = await resolveBinaryPath(TEST_BINARY);
+		session = await RzSession.spawn(rizinPath, binaryPath);
 		const state = getState(ctx);
-		state.r2 = session;
-		state.binaryPath = TEST_BINARY;
-
-		const stubApi = {
-			zod,
-			registerTool(def: ToolDefinition<any, any>) {
-				registered.set(def.name, def);
-			},
-		} as unknown as ExtensionAPI;
-		registerReadTools(stubApi);
+		state.rz = session;
+		state.binaryPath = binaryPath;
+		registerReadTools(harness.pi);
 
 		groundFns = JSON.parse((await session.cmd("aflj")).trim()) as GroundFn[];
 		mainFn = mustFind(groundFns, (f) => f.name === "main", "a function named 'main'");
-		const resolvedMainAddr = addrOf(mainFn);
-		if (resolvedMainAddr === undefined) {
-			throw new Error("tools-registry.test setup: 'main' has neither 'addr' nor 'offset' in aflj output");
-		}
-		mainAddr = resolvedMainAddr;
+		mainEa = eaFromOffset(addrOf(mainFn)!);
 
-		// r2 6.x's aflj carries no `callrefs` field at all, so a real CALL site
-		// inside 'main' is found by disassembling it and picking the first op
-		// whose `type` is "call" (verified live against r2 6.1.8).
-		groundPdf = JSON.parse((await session.cmd("pdfj @ main")).trim()) as GroundPdf;
-		const mainCallOp = mustFind(groundPdf.ops, (op) => op.type === "call", "a CALL instruction in 'main' (pdfj ops)");
-		const resolvedCallSite = addrOf(mainCallOp);
-		if (resolvedCallSite === undefined) {
-			throw new Error("tools-registry.test setup: the CALL instruction in 'main' has neither 'addr' nor 'offset' in pdfj output");
-		}
-		mainCallSite = resolvedCallSite;
+		groundPdf = JSON.parse((await session.cmd(`pdfj @ ${mainEa}`)).trim()) as GroundPdf;
+		callSite = addrOf(mustFind(groundPdf.ops, (op) => op.type === "call", "a call instruction in main"))!;
 
 		groundImports = JSON.parse((await session.cmd("iij")).trim()) as GroundImport[];
-		waitForSingleObject = mustFind(groundImports, (i) => i.name === "WaitForSingleObject", "import 'WaitForSingleObject'");
-
+		pltImport = mustFind(groundImports, (i) => typeof i.plt === "number" && i.plt > 0, "an import with a PLT stub");
 		groundExports = JSON.parse((await session.cmd("iEj")).trim()) as unknown[];
 
 		groundStrings = JSON.parse((await session.cmd("izj")).trim()) as GroundString[];
-		killSwitchString = mustFind(
+		probeString = mustFind(
 			groundStrings,
-			(s) => s.string.includes(KILL_SWITCH_FRAGMENT),
-			`a string containing "${KILL_SWITCH_FRAGMENT}"`,
+			(s) => s.string.length >= 12 && groundStrings.filter((o) => o.string.includes(s.string)).length === 1,
+			"a unique string of at least 12 characters",
 		);
 
 		groundSegments = JSON.parse((await session.cmd("iSj")).trim()) as GroundSegment[];
-		textSegment = mustFind(groundSegments, (s) => s.name === ".text", "segment '.text'");
+		execSegment = mustFind(groundSegments, (s) => s.perm.includes("x") && s.name.length > 0, "an executable section");
 
-		groundAxt = JSON.parse((await session.cmd("axtj @ main")).trim()) as GroundXref[];
-		if (groundAxt.length === 0) throw new Error("tools-registry.test setup: expected at least one xref to 'main'");
+		groundAxt = JSON.parse((await session.cmd(`axtj @ ${mainEa}`)).trim()) as GroundXref[];
+		groundAxf = JSON.parse((await session.cmd(`axfj @ ${callSite}`)).trim()) as GroundXref[];
+		if (groundAxf.length === 0) throw new Error("tools-registry.test setup: expected an outgoing xref from main's first call");
 
-		groundAxf = JSON.parse((await session.cmd(`axfj @ ${mainCallSite}`)).trim()) as GroundXref[];
-		if (groundAxf.length === 0) throw new Error("tools-registry.test setup: expected at least one outgoing xref from the chosen call site");
-
-		groundPdc = JSON.parse((await session.cmd("pdcj @ main")).trim()) as GroundPdc;
-
-		const isDecompilerUnavailable = (reply: string): boolean => {
-			const trimmed = reply.trim();
-			return trimmed.length === 0 || trimmed.includes("r2pm -ci") || trimmed.includes("Unknown command") || trimmed.includes("Cannot find");
-		};
-		const pdgHelp = await session.cmd("pdg?");
-		const pddHelp = await session.cmd("pdd?");
-		if (!isDecompilerUnavailable(pdgHelp)) {
-			expectedDecompileKind = "pdg";
-			groundDecompileCode = (await session.cmd("pdg @ main")).trim();
-		} else if (!isDecompilerUnavailable(pddHelp)) {
-			expectedDecompileKind = "pdd";
-			groundDecompileCode = (await session.cmd("pdd @ main")).trim();
-		} else {
-			expectedDecompileKind = "pdc";
-			groundDecompileCode = groundPdc.code;
-		}
+		const pdgHelp = (await session.cmd("pdg?")).trim();
+		const pddHelp = (await session.cmd("pdd?")).trim();
+		expectedDecompiler = pdgHelp.length > 0 ? "pdg" : pddHelp.length > 0 ? "pdd" : null;
 	});
 
 	afterAll(() => {
-		session.close();
+		shutdownState(ctx.sessionManager.getSessionId());
+	});
+
+	test("registers all 11 analysis tools plus hash_binary, each with read approval and renderers", () => {
+		for (const name of [
+			"list_functions",
+			"search_functions",
+			"get_function",
+			"decompile_function",
+			"disassemble_function",
+			"get_xrefs_to",
+			"get_xrefs_from",
+			"list_imports",
+			"list_exports",
+			"list_strings",
+			"list_segments",
+			"hash_binary",
+		]) {
+			const def = tool(name);
+			expect(def.approval).toBe("read");
+			expect(typeof def.renderCall).toBe("function");
+			expect(typeof def.renderResult).toBe("function");
+		}
 	});
 
 	describe("list_functions", () => {
 		test("valid: limit=1 returns the first function page-shaped, with matching total and hex ea", async () => {
-			const result = await tool("list_functions").execute("t-list_functions-valid", { limit: 1 }, undefined, undefined, ctx);
-			const { header, body } = splitHeaderBody(textOf(result));
+			const { header, body } = splitHeaderBody(textOf(await run("list_functions", { limit: 1 })));
 			expect(header).toBe(expectedPageHeader("functions", 1, groundFns.length));
-			const parsed = JSON.parse(body) as { name: string; addr?: number; offset?: number; ea: string }[];
-			expect(Array.isArray(parsed)).toBe(true);
-			expect(parsed.length).toBe(1);
-			expect(parsed[0]?.name).toBe(groundFns[0]?.name);
-			expect(addrOf(parsed[0]!)).toBe(addrOf(groundFns[0]!));
+			const parsed = JSON.parse(body) as { ea: string; name: string; size: number; offset?: number; callrefs?: unknown }[];
+			expect(parsed).toHaveLength(1);
+			expect(parsed[0]?.name).toBe(groundFns[0]!.name);
 			expect(parsed[0]?.ea).toBe(eaFromOffset(addrOf(groundFns[0]!)!));
+			expect(parsed[0]?.size).toBe(groundFns[0]!.size);
+			// Rows are slimmed: no decimal offset, no per-function reference arrays.
+			expect(parsed[0]?.offset).toBeUndefined();
+			expect(parsed[0]?.callrefs).toBeUndefined();
+		});
+
+		test("sort=callers orders by rizin's indegree, most-called first", async () => {
+			const { header, body } = splitHeaderBody(textOf(await run("list_functions", { sort: "callers", limit: 5 })));
+			expect(header.endsWith(`functions by callers (offset=0; use offset/limit to page through the rest)`)).toBe(true);
+			const parsed = JSON.parse(body) as { callers: number }[];
+			const most = Math.max(...groundFns.map((f) => (f as { indegree?: number }).indegree ?? 0));
+			expect(parsed[0]?.callers).toBe(most);
+			for (let i = 1; i < parsed.length; i++) expect(parsed[i - 1]!.callers).toBeGreaterThanOrEqual(parsed[i]!.callers);
+		});
+
+		test("list rows are one compact JSON object per line", async () => {
+			const { body } = splitHeaderBody(textOf(await run("list_functions", { limit: 3 })));
+			const lines = body.split("\n");
+			expect(lines).toHaveLength(5);
+			expect(lines[0]).toBe("[");
+			expect(lines[4]).toBe("]");
 		});
 
 		test("invalid: non-numeric limit is rejected by the parameter schema", () => {
 			const result = tool("list_functions").parameters.safeParse({ limit: "nope" });
 			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(result.error.issues[0]?.message).toBe("Invalid input: expected number, received string");
-				expect(result.error.issues[0]?.path).toEqual(["limit"]);
-			}
+			if (!result.success) expect(result.error.issues[0]?.path).toEqual(["limit"]);
+		});
+
+		test("a page past the end is empty, says so, and is marked useless for compaction", async () => {
+			const offset = groundFns.length + 10;
+			const result = await run("list_functions", { offset });
+			expect(splitHeaderBody(textOf(result)).header).toBe(expectedPageHeader("functions", 0, groundFns.length, offset));
+			expect(result.useless).toBe(true);
 		});
 	});
 
 	describe("search_functions", () => {
 		test("valid: query 'main' returns only name-matching functions, page-shaped", async () => {
 			const groundMatches = groundFns.filter((f) => f.name.includes("main"));
-			const result = await tool("search_functions").execute(
-				"t-search_functions-valid",
-				{ query: "main", limit: 5 },
-				undefined,
-				undefined,
-				ctx,
-			);
-			const { header, body } = splitHeaderBody(textOf(result));
+			const { header, body } = splitHeaderBody(textOf(await run("search_functions", { query: "main", limit: 5 })));
 			const pageLen = Math.min(5, groundMatches.length);
 			expect(header).toBe(expectedPageHeader(`functions matching ${JSON.stringify("main")}`, pageLen, groundMatches.length));
-			const parsed = JSON.parse(body) as { name: string; ea: string }[];
-			expect(Array.isArray(parsed)).toBe(true);
+			const parsed = JSON.parse(body) as { name: string }[];
 			expect(parsed.length).toBe(pageLen);
-			expect(parsed.length).toBeGreaterThan(0);
 			for (const fn of parsed) expect(fn.name).toContain("main");
 		});
 
 		test("invalid: missing required query is rejected by the parameter schema", () => {
 			const result = tool("search_functions").parameters.safeParse({});
 			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(result.error.issues[0]?.message).toBe("Invalid input: expected string, received undefined");
-				expect(result.error.issues[0]?.path).toEqual(["query"]);
-			}
+			if (!result.success) expect(result.error.issues[0]?.path).toEqual(["query"]);
 		});
 	});
 
 	describe("get_function", () => {
 		test("valid: target 'main' returns its name, size, and hex ea", async () => {
-			const ea = eaFromOffset(mainAddr);
-			const result = await tool("get_function").execute("t-get_function-valid", { target: "main" }, undefined, undefined, ctx);
+			const result = await run("get_function", { target: "main" });
 			const text = textOf(result);
-			expect(text.startsWith(`main at ${ea} (size ${mainFn.size})\n`)).toBe(true);
-			const { body } = splitHeaderBody(text);
-			const parsed = JSON.parse(body) as { name: string; addr?: number; offset?: number; size: number; ea: string };
+			expect(text.startsWith(`main at ${mainEa} (size ${mainFn.size})\n`)).toBe(true);
+			const parsed = JSON.parse(splitHeaderBody(text).body) as {
+				name: string;
+				ea: string;
+				signature?: string;
+				calls: { ea: string; name?: string }[];
+				refCounts: { calls: number };
+				callrefs?: unknown;
+			};
 			expect(parsed.name).toBe("main");
-			expect(addrOf(parsed)).toBe(mainAddr);
-			expect(parsed.size).toBe(mainFn.size!);
-			expect(parsed.ea).toBe(ea);
-			const { details: fnDetails } = result;
-			const fnDetailsEa = fnDetails && typeof fnDetails === "object" && "ea" in fnDetails ? fnDetails.ea : undefined;
-			expect(fnDetailsEa).toBe(ea);
+			expect(parsed.ea).toBe(mainEa);
+			expect(result.details?.ea).toBe(mainEa);
+			// Raw reference arrays are summarized, never dumped.
+			expect(parsed.callrefs).toBeUndefined();
+			expect(parsed.refCounts.calls).toBeGreaterThan(0);
+			// main's first call target is among the named, deduplicated call targets.
+			const firstCallTarget = groundAxf.find((x) => x.type === "CALL")?.to;
+			if (firstCallTarget !== undefined) expect(parsed.calls.map((c) => c.ea)).toContain(eaFromOffset(firstCallTarget));
+			expect(new Set(parsed.calls.map((c) => c.ea)).size).toBe(parsed.calls.length);
+			expect(parsed.calls.some((c) => typeof c.name === "string")).toBe(true);
 		});
 
 		test("invalid: a target containing forbidden characters throws validateAddr's exact message", async () => {
-			const err = await captureError(
-				tool("get_function").execute("t-get_function-invalid", { target: BAD_ADDR }, undefined, undefined, ctx),
+			expect((await captureError(run("get_function", { target: BAD_ADDR }))).message).toBe(invalidAddrMessage(BAD_ADDR));
+		});
+
+		test("an unknown name is a clear error, not an empty result", async () => {
+			expect((await captureError(run("get_function", { target: "no_such_function_xyz" }))).message).toBe(
+				"omp-re: function not found: no_such_function_xyz",
 			);
-			expect(err.message).toBe(expectedInvalidAddrMessage(BAD_ADDR));
 		});
 	});
 
 	describe("decompile_function", () => {
-		test("valid: addr 'main' returns real decompiled output — pdg/pdd if a real decompiler plugin is loaded, else pdc's pseudo-C — containing the WannaCry kill-switch domain", async () => {
-			const ea = eaFromOffset(mainAddr);
-			const result = await tool("decompile_function").execute(
-				"t-decompile_function-valid",
-				{ addr: "main" },
-				undefined,
-				undefined,
-				ctx,
-			);
+		test("valid: 'main' is decompiled by the probed plugin, or labeled disassembly when there is none", async () => {
+			const result = await run("decompile_function", { addr: "main" });
 			const text = textOf(result);
-			const expectedPrefix =
-				expectedDecompileKind === "pdc" ? `pseudo-C for ${ea}\n` : `decompiled ${ea} (${expectedDecompileKind})\n`;
-			expect(text.startsWith(expectedPrefix)).toBe(true);
-			expect(text).toContain("main");
-			expect(text).toContain(KILL_SWITCH_FRAGMENT);
-			expect(text).toContain(groundDecompileCode.slice(0, 40));
-			const { details: decompileDetails } = result;
-			const decompileDetailsEa =
-				decompileDetails && typeof decompileDetails === "object" && "ea" in decompileDetails ? decompileDetails.ea : undefined;
-			expect(decompileDetailsEa).toBe(ea);
+			expect(result.details?.ea).toBe(mainEa);
+			if (expectedDecompiler) {
+				expect(result.details?.decompiler).toBe(expectedDecompiler);
+				expect(text.startsWith(`decompiled ${mainEa} (${expectedDecompiler})\n`)).toBe(true);
+				expect(text).toContain("main");
+			} else {
+				expect(result.details?.decompiler).toBe("disasm");
+				expect(text.startsWith(`${DISASM_ONLY_PREFIX}disassembly of ${mainEa}\n`)).toBe(true);
+			}
+			expect(text.startsWith(DECOMPILER_EMPTY_PREFIX)).toBe(false);
 		});
 
 		test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-			const err = await captureError(
-				tool("decompile_function").execute("t-decompile_function-invalid", { addr: BAD_ADDR }, undefined, undefined, ctx),
+			expect((await captureError(run("decompile_function", { addr: BAD_ADDR }))).message).toBe(invalidAddrMessage(BAD_ADDR));
+		});
+
+		test("an unresolvable name fails fast with a clear error", async () => {
+			expect((await captureError(run("decompile_function", { addr: "no_such_function_xyz" }))).message).toBe(
+				"omp-re: could not resolve address: no_such_function_xyz",
 			);
-			expect(err.message).toBe(expectedInvalidAddrMessage(BAD_ADDR));
 		});
 	});
 
 	describe("disassemble_function", () => {
-		test("valid: addr 'main' returns the real disassembly with matching instruction count and first line", async () => {
-			const ea = eaFromOffset(mainAddr);
-			const result = await tool("disassemble_function").execute(
-				"t-disassemble_function-valid",
-				{ addr: "main" },
-				undefined,
-				undefined,
-				ctx,
-			);
-			const text = textOf(result);
+		test("valid: 'main' returns the real disassembly with matching instruction count and first line", async () => {
+			const text = textOf(await run("disassemble_function", { addr: "main" }));
 			const firstOp = groundPdf.ops[0]!;
-			expect(text.startsWith(`${groundPdf.ops.length} instructions at ${ea}\n`)).toBe(true);
+			expect(text.startsWith(`${groundPdf.ops.length} instructions at ${mainEa}\n`)).toBe(true);
 			expect(text).toContain(`${eaFromOffset(addrOf(firstOp)!)}  ${firstOp.disasm}`);
 		});
 
 		test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-			const err = await captureError(
-				tool("disassemble_function").execute("t-disassemble_function-invalid", { addr: BAD_ADDR }, undefined, undefined, ctx),
-			);
-			expect(err.message).toBe(expectedInvalidAddrMessage(BAD_ADDR));
+			expect((await captureError(run("disassemble_function", { addr: BAD_ADDR }))).message).toBe(invalidAddrMessage(BAD_ADDR));
 		});
 	});
 
 	describe("get_xrefs_to", () => {
-		test("valid: addr 'main' returns entry0's real call xref with matching hex fromEa", async () => {
-			const result = await tool("get_xrefs_to").execute("t-get_xrefs_to-valid", { addr: "main" }, undefined, undefined, ctx);
-			const { header, body } = splitHeaderBody(textOf(result));
+		test("valid: 'main' returns exactly rizin's xrefs with hex fromEa", async () => {
+			const { header, body } = splitHeaderBody(textOf(await run("get_xrefs_to", { addr: "main" })));
 			expect(header).toBe(expectedPageHeader("xrefs to main", groundAxt.length, groundAxt.length));
-			const parsed = JSON.parse(body) as { from?: number; type: string; fromEa?: string }[];
+			const parsed = JSON.parse(body) as (GroundXref & { fromEa?: string })[];
 			expect(parsed.length).toBe(groundAxt.length);
-			expect(parsed[0]?.from).toBe(groundAxt[0]?.from);
-			expect(parsed[0]?.type).toBe(groundAxt[0]?.type);
-			expect(parsed[0]?.fromEa).toBe(eaFromOffset(groundAxt[0]!.from!));
+			for (const [i, row] of parsed.entries()) {
+				expect(row.from).toBe(groundAxt[i]!.from);
+				expect(row.fromEa).toBe(eaFromOffset(groundAxt[i]!.from!));
+			}
 		});
 
 		test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-			const err = await captureError(
-				tool("get_xrefs_to").execute("t-get_xrefs_to-invalid", { addr: BAD_ADDR }, undefined, undefined, ctx),
-			);
-			expect(err.message).toBe(expectedInvalidAddrMessage(BAD_ADDR));
+			expect((await captureError(run("get_xrefs_to", { addr: BAD_ADDR }))).message).toBe(invalidAddrMessage(BAD_ADDR));
 		});
 	});
 
 	describe("get_xrefs_from", () => {
-		test("valid: addr at a real call site returns its outgoing xref with matching hex toEa", async () => {
-			const addr = String(mainCallSite);
-			const result = await tool("get_xrefs_from").execute("t-get_xrefs_from-valid", { addr }, undefined, undefined, ctx);
-			const { header, body } = splitHeaderBody(textOf(result));
+		test("valid: a real call site returns its outgoing xref with matching hex toEa", async () => {
+			const addr = eaFromOffset(callSite);
+			const { header, body } = splitHeaderBody(textOf(await run("get_xrefs_from", { addr })));
 			expect(header).toBe(expectedPageHeader(`xrefs from ${addr}`, groundAxf.length, groundAxf.length));
-			const parsed = JSON.parse(body) as { to?: number; type: string; toEa?: string }[];
-			expect(parsed.length).toBe(groundAxf.length);
-			expect(parsed[0]?.to).toBe(groundAxf[0]?.to);
-			expect(parsed[0]?.type).toBe(groundAxf[0]?.type);
+			const parsed = JSON.parse(body) as (GroundXref & { toEa?: string })[];
+			expect(parsed[0]?.to).toBe(groundAxf[0]!.to);
 			expect(parsed[0]?.toEa).toBe(eaFromOffset(groundAxf[0]!.to!));
-		});
-
-		test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-			const err = await captureError(
-				tool("get_xrefs_from").execute("t-get_xrefs_from-invalid", { addr: BAD_ADDR }, undefined, undefined, ctx),
-			);
-			expect(err.message).toBe(expectedInvalidAddrMessage(BAD_ADDR));
 		});
 	});
 
 	describe("list_imports", () => {
-		test("valid: default page includes the real WaitForSingleObject/KERNEL32.dll import with matching plt-derived ea", async () => {
-			const result = await tool("list_imports").execute("t-list_imports-valid", {}, undefined, undefined, ctx);
-			const { header, body } = splitHeaderBody(textOf(result));
-			expect(header).toBe(expectedPageHeader("imports", groundImports.length, groundImports.length));
-			const parsed = JSON.parse(body) as { name: string; libname?: string; plt?: number; ea?: string }[];
-			expect(Array.isArray(parsed)).toBe(true);
-			expect(parsed.length).toBe(groundImports.length);
-			const found = mustFind(parsed, (i) => i.name === "WaitForSingleObject", "WaitForSingleObject in tool output");
-			expect(found.libname).toBe(waitForSingleObject.libname);
-			expect(found.ea).toBe(eaFromOffset(waitForSingleObject.plt!));
+		test("valid: default page includes a real PLT-backed import with matching ea", async () => {
+			const { header, body } = splitHeaderBody(textOf(await run("list_imports", {})));
+			const pageLen = Math.min(200, groundImports.length);
+			expect(header).toBe(expectedPageHeader("imports", pageLen, groundImports.length));
+			const parsed = JSON.parse(body) as (GroundImport & { ea?: string })[];
+			const found = mustFind(parsed, (i) => i.name === pltImport.name, `${pltImport.name} in tool output`);
+			expect(found.ea).toBe(eaFromOffset(pltImport.plt!));
 		});
 
 		test("invalid: non-numeric offset is rejected by the parameter schema", () => {
-			const result = tool("list_imports").parameters.safeParse({ offset: "nope" });
-			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(result.error.issues[0]?.message).toBe("Invalid input: expected number, received string");
-				expect(result.error.issues[0]?.path).toEqual(["offset"]);
-			}
+			expect(tool("list_imports").parameters.safeParse({ offset: "nope" }).success).toBe(false);
 		});
 	});
 
 	describe("list_exports", () => {
-		test("valid: default page matches the real (empty, for this non-DLL PE) export table", async () => {
-			const result = await tool("list_exports").execute("t-list_exports-valid", {}, undefined, undefined, ctx);
-			const { header, body } = splitHeaderBody(textOf(result));
-			expect(header).toBe(expectedPageHeader("exports", groundExports.length, groundExports.length));
-			const parsed = JSON.parse(body) as unknown[];
-			expect(Array.isArray(parsed)).toBe(true);
-			expect(parsed.length).toBe(groundExports.length);
-		});
-
-		test("invalid: non-numeric limit is rejected by the parameter schema", () => {
-			const result = tool("list_exports").parameters.safeParse({ limit: "nope" });
-			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(result.error.issues[0]?.message).toBe("Invalid input: expected number, received string");
-				expect(result.error.issues[0]?.path).toEqual(["limit"]);
-			}
+		test("valid: the default page matches rizin's export table size", async () => {
+			const { header } = splitHeaderBody(textOf(await run("list_exports", {})));
+			expect(header).toBe(expectedPageHeader("exports", Math.min(200, groundExports.length), groundExports.length));
 		});
 	});
 
 	describe("list_strings", () => {
-		test("valid: default page is capped at 200 of the real total, and the first row's known content survives", async () => {
-			const result = await tool("list_strings").execute("t-list_strings-valid", {}, undefined, undefined, ctx);
-			const text = textOf(result);
-			const { header } = splitHeaderBody(text);
-			expect(header).toBe(expectedPageHeader("strings", 200, groundStrings.length));
-			// The body may be display-truncated at 200 rows, so assert on the
-			// (always head-preserved) first row's exact known fields via
-			// substring checks rather than a full JSON.parse.
-			const first = groundStrings[0]!;
-			expect(text).toContain(`"string": ${JSON.stringify(first.string)}`);
-			if (first.vaddr !== undefined) {
-				expect(text).toContain(`"ea": ${JSON.stringify(eaFromOffset(first.vaddr))}`);
-			}
+		test("valid: the default page is capped at 200 of the real total", async () => {
+			const { header } = splitHeaderBody(textOf(await run("list_strings", {})));
+			expect(header).toBe(expectedPageHeader("strings", Math.min(200, groundStrings.length), groundStrings.length));
 		});
 
-		test("valid: filtering for the WannaCry kill-switch domain fragment returns exactly that string", async () => {
-			const result = await tool("list_strings").execute(
-				"t-list_strings-filter-valid",
-				{ filter: KILL_SWITCH_FRAGMENT },
-				undefined,
-				undefined,
-				ctx,
-			);
-			const { body } = splitHeaderBody(textOf(result));
+		test("valid: filtering for a unique string returns exactly that string with its ea", async () => {
+			const { body } = splitHeaderBody(textOf(await run("list_strings", { filter: probeString.string })));
 			const parsed = JSON.parse(body) as { string: string; ea?: string }[];
-			expect(parsed.length).toBe(1);
-			expect(parsed[0]?.string).toBe(killSwitchString.string);
-			if (killSwitchString.vaddr !== undefined) {
-				expect(parsed[0]?.ea).toBe(eaFromOffset(killSwitchString.vaddr));
-			}
+			expect(parsed).toHaveLength(1);
+			expect(parsed[0]?.string).toBe(probeString.string);
+			expect(parsed[0]?.ea).toBe(eaFromOffset(probeString.vaddr!));
 		});
 
 		test("invalid: non-string filter is rejected by the parameter schema", () => {
-			const result = tool("list_strings").parameters.safeParse({ filter: 42 });
-			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(result.error.issues[0]?.message).toBe("Invalid input: expected string, received number");
-				expect(result.error.issues[0]?.path).toEqual(["filter"]);
-			}
+			expect(tool("list_strings").parameters.safeParse({ filter: 42 }).success).toBe(false);
 		});
 	});
 
 	describe("list_segments", () => {
-		test("valid: default page includes the real executable .text segment with matching hex ea", async () => {
-			const result = await tool("list_segments").execute("t-list_segments-valid", {}, undefined, undefined, ctx);
-			const { header, body } = splitHeaderBody(textOf(result));
-			expect(header).toBe(expectedPageHeader("segments", groundSegments.length, groundSegments.length));
-			const parsed = JSON.parse(body) as { name: string; perm: string; vaddr?: number; ea?: string }[];
-			expect(Array.isArray(parsed)).toBe(true);
+		test("valid: includes a real executable section with matching hex ea, and never prints rizin's UINT64_MAX sentinel", async () => {
+			const text = textOf(await run("list_segments", {}));
+			const parsed = JSON.parse(splitHeaderBody(text).body) as (GroundSegment & { ea?: string })[];
 			expect(parsed.length).toBe(groundSegments.length);
-			const found = mustFind(parsed, (s) => s.name === ".text", ".text segment in tool output");
-			expect(found.perm).toContain("x");
-			expect(found.vaddr).toBe(textSegment.vaddr);
-			if (textSegment.vaddr !== undefined) {
-				expect(found.ea).toBe(eaFromOffset(textSegment.vaddr));
-			}
+			const found = mustFind(parsed, (s) => s.name === execSegment.name, `${execSegment.name} in tool output`);
+			expect(found.ea).toBe(eaFromOffset(execSegment.vaddr!));
+			expect(text).not.toContain("0x10000000000000000");
 		});
+	});
 
-		test("invalid: non-numeric offset is rejected by the parameter schema", () => {
-			const result = tool("list_segments").parameters.safeParse({ offset: "nope" });
-			expect(result.success).toBe(false);
-			if (!result.success) {
-				expect(result.error.issues[0]?.message).toBe("Invalid input: expected number, received string");
-				expect(result.error.issues[0]?.path).toEqual(["offset"]);
+	describe("hash_binary", () => {
+		test("returns the same digests as an independent hash of the file", async () => {
+			const bytes = await Bun.file(getState(ctx).binaryPath!).arrayBuffer();
+			const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+			const text = textOf(await run("hash_binary", {}));
+			expect(text).toContain(`sha256=${sha256}`);
+			expect(text).toContain(`size=${bytes.byteLength}`);
+		});
+	});
+
+	describe("long output", () => {
+		test("get_function on a large function spills to a session artifact when truncated", async () => {
+			const biggest = [...groundFns].sort((a, b) => b.size - a.size)[0]!;
+			const result = await run("get_function", { target: eaFromOffset(addrOf(biggest)!) });
+			if (result.details?.truncated) {
+				expect(result.details.artifactId).toBeDefined();
+				expect(textOf(result)).toContain(`artifact://${result.details.artifactId}`);
+			} else {
+				expect(result.details?.artifactId).toBeUndefined();
 			}
 		});
 	});
 });
 
+describe("reRenderers", () => {
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+		styledSymbol: (key: string) => (key === "status.error" ? "x" : key === "status.success" ? "ok" : "*"),
+		spinnerFrames: ["-", "\\"],
+	} as never;
+	const render = (component: { render(width: number): readonly string[] }) =>
+		component
+			.render(200)
+			.map((line) => line.trimEnd())
+			.join("\n");
+
+	test("renderCall shows the title and the call's subject", () => {
+		const { renderCall } = reRenderers({ title: "Decompile", subject: "addr", body: "code" });
+		expect(render(renderCall({ addr: "main" }, { expanded: false, isPartial: false }, theme))).toContain("Decompile main");
+	});
+
+	test("renderResult shows the header and a collapsed text preview with a hidden-line count", () => {
+		const { renderResult } = reRenderers({ title: "Disassemble", subject: "addr", body: "text" });
+		const body = Array.from({ length: 20 }, (_, i) => `0x${i}  nop`).join("\n");
+		const out = render(
+			renderResult(
+				{ content: [{ type: "text", text: `20 instructions at 0x0\n${body}` }], details: { header: "20 instructions at 0x0", summary: "" } },
+				{ expanded: false, isPartial: false },
+				theme,
+				{ addr: "main" },
+			),
+		);
+		expect(out).toContain("ok 20 instructions at 0x0");
+		expect(out).toContain("0x0  nop");
+		expect(out).toContain("14 more lines");
+	});
+
+	test("renderResult labels disassembly-only output and links a spilled artifact", () => {
+		const { renderResult } = reRenderers({ title: "Decompile", subject: "addr", body: "code" });
+		const out = render(
+			renderResult(
+				{
+					content: [{ type: "text", text: `${DISASM_ONLY_PREFIX}disassembly of 0x10\n0x10  ret` }],
+					details: { header: DISASM_ONLY_PREFIX.trim(), summary: "", decompiler: "disasm", truncated: true, artifactId: "3" },
+				},
+				{ expanded: true, isPartial: false },
+				theme,
+			),
+		);
+		expect(out).toContain("disassembly only");
+		expect(out).toContain("artifact://3");
+		expect(out).toContain("0x10  ret");
+	});
+
+	test("describeCall gives Tern a native head with the call's target", () => {
+		const { describeCall } = reRenderers({ title: "Decompile", subject: "addr", body: "code" });
+		expect(describeCall({ addr: "main" })).toEqual({ tool: { title: "Decompile", target: "main", meta: [] }, inline: true });
+	});
+
+	test("describeResult renders decompiler output as a C code node and labels the disassembly fallback", () => {
+		const { describeResult } = reRenderers({ title: "Decompile", subject: "addr", body: "code" });
+		const decompiled = describeResult(
+			{
+				content: [{ type: "text", text: "decompiled 0x10 (pdg)\nint main(void) { return 0; }" }],
+				details: { header: "decompiled 0x10 (pdg)", summary: "", decompiler: "pdg" },
+			},
+			{ expanded: false, isPartial: false },
+			{ addr: "main" },
+		);
+		expect(decompiled.tool?.meta).toEqual(["decompiled 0x10 (pdg)"]);
+		expect(decompiled.body?.[0]).toMatchObject({ k: "code", p: { lang: "c", text: "int main(void) { return 0; }" } });
+
+		const fallback = describeResult(
+			{
+				content: [{ type: "text", text: `${DISASM_ONLY_PREFIX}disassembly of 0x10\n0x10  ret` }],
+				details: { header: DISASM_ONLY_PREFIX.trim(), summary: "", decompiler: "disasm", artifactId: "2" },
+			},
+			{ expanded: false, isPartial: false },
+		);
+		expect(fallback.tone).toBe("warning");
+		expect(JSON.stringify(fallback.tool?.meta)).toContain("disassembly only");
+		expect(JSON.stringify(fallback.tool?.meta)).toContain("artifact://2");
+		expect((fallback.body?.[0] as { p?: { lang?: string } }).p?.lang).toBeUndefined();
+	});
+
+	test("describeResult shows progress while partial and a one-line error gist", () => {
+		const { describeResult } = reRenderers({ title: "Open binary", subject: "path", body: "text" });
+		const partial = describeResult({ content: [{ type: "text", text: "Analyzing ls with rizin… 3s" }] }, { expanded: false, isPartial: true }, { path: "/bin/ls" });
+		expect(partial.tool?.target).toBe("/bin/ls");
+		expect(JSON.stringify(partial.tool?.meta)).toContain("Analyzing ls with rizin… 3s");
+		const failed = describeResult({ content: [{ type: "text", text: "omp-re: boom\nstack" }], isError: true }, { expanded: false, isPartial: false });
+		expect(failed.tone).toBe("error");
+		expect(JSON.stringify(failed.tool?.meta)).toContain("— omp-re: boom");
+		expect(failed.body).toHaveLength(1);
+	});
+
+	test("renderResult shows partial progress and errors on one line", () => {
+		const { renderResult } = reRenderers({ title: "Open binary", subject: "path", body: "text" });
+		expect(render(renderResult({ content: [{ type: "text", text: "Analyzing ls with rizin… 3s" }] }, { expanded: false, isPartial: true, spinnerFrame: 1 }, theme))).toBe(
+			"\\ Analyzing ls with rizin… 3s",
+		);
+		expect(render(renderResult({ content: [{ type: "text", text: "omp-re: boom\nstack" }], isError: true }, { expanded: false, isPartial: false }, theme))).toBe(
+			"x omp-re: boom",
+		);
+	});
+});

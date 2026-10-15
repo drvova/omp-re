@@ -1,25 +1,21 @@
 /**
- * T0 read-only r2 tools. Port of internal/re/r2tools.go (11 native tools) +
- * internal/re/hashtools.go (hash_binary).
+ * Read-only rizin tools (11 analysis tools + hash_binary).
  *
- * Unlike the Go daemon — which sends the model only a short count string and
- * keeps the actual JSON in a side-channel evidence blob (agentloop.go:662,
- * `Content: result.Text` where Text is "12 functions") — every tool here
- * returns the real data as tool content. A model that never sees function
- * names or addresses has nothing to ground claims on.
- *
- * Because the full list is now visible to the model (not just a count), list
- * tools default to a bounded page (DEFAULT_LIMIT, capped at MAX_LIMIT) and
- * jsonResult applies pi's standard truncation as a defense-in-depth backstop,
- * always telling the model explicitly when a view is partial.
+ * Every tool here returns the real data as tool content, never just a count:
+ * a model that never sees function names or addresses has nothing to ground
+ * claims on. Because the full list is visible to the model, list tools
+ * default to a bounded page (DEFAULT_LIMIT, capped at MAX_LIMIT), always say
+ * when a view is partial, and spill anything truncated to a session artifact.
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { ensureR2, getState, requireBinary } from "./state.ts";
-import { addrOf, eaFromOffset, resolveNumericAddr, validateAddr } from "./r2.ts";
-import { jsonResult, prefixedTextResult, textResult } from "./format.ts";
-import { decompileAt, DISASM_ONLY_PREFIX } from "./decompile.ts";
+import { decompileAt } from "./decompile.ts";
+import { disassembleAt } from "./disasm.ts";
+import { jsonResult, plainResult, prefixedTextResult, textResult, type ReToolResult } from "./format.ts";
+import { reRenderers } from "./render.ts";
+import { addrOf, eaFromOffset, resolveNumericAddr, validateAddr, type RzSession } from "./rizin.ts";
+import { ensureRizin, getState, requireBinary } from "./state.ts";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
@@ -43,47 +39,121 @@ function pageHeader(label: string, page: unknown[], total: number, offset: numbe
 	return `${page.length} of ${total} ${label} (offset=${offset ?? 0}; use offset/limit to page through the rest)`;
 }
 
-/** r2 6.x reports functions (aflj/afij) with `addr`; r2 5.x used `offset`. Both are optional here — resolve via `addrOf`, never assume either is present. */
-interface R2Func {
+/** rizin reports a few "no address" sentinels as UINT64_MAX (e.g. the NULL section in iSj), which a JS number can't even represent exactly. Anything beyond the safe-integer range is treated as unknown, never printed as an address. */
+function knownAddr(value: number | undefined): number | undefined {
+	return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+interface RzRef {
+	from: number;
+	to: number;
+	type: string;
+}
+
+interface RzVar {
+	name: string;
+	type: string;
+	arg?: boolean;
+	storage?: { type?: string; reg?: string; stack?: number };
+}
+
+/** aflj/afij rows: rizin reports the function start as `offset`, and every row carries full call/data/xref arrays (hundreds of entries for a big function), which is why rows are slimmed before reaching the model. */
+interface RzFunc {
 	addr?: number;
 	offset?: number;
 	name: string;
 	size: number;
-}
-
-interface R2FuncInfo extends R2Func {
+	nbbs?: number;
+	nargs?: number;
+	nlocals?: number;
+	indegree?: number;
+	outdegree?: number;
+	signature?: string;
 	[key: string]: unknown;
 }
 
-/** pdfj's address field — at the function-start level and on each per-instruction op — is `addr`; there is no `offset` field anywhere in pdfj's JSON, despite the previous assumption here (verified against live r2 5.5.0 and 6.1.8 processes on both an ELF and the WannaCry PE fixture; r2 6.x also renamed aflj/afij's `offset` to `addr`, hence addrOf). Ops also carry `comment` (base64), `flags` (attached symbol/label names), and `xrefs` (incoming references) when r2 has them. */
-interface PdfjOp {
-	addr: number;
-	disasm: string;
-	/** Base64-encoded; decode before display. */
-	comment?: string;
-	/** Flag/symbol names attached at this address. */
-	flags?: string[];
-	/** Other locations that reference (jump/call to) this instruction's address. */
-	xrefs?: { addr: number; type: string }[];
+/** One function list row: what an analyst scans a function list for, with `callers` (rizin's indegree) as the cheapest "what matters" signal. */
+function functionRow(fn: RzFunc): Record<string, unknown> {
+	const addr = knownAddr(addrOf(fn));
+	return {
+		...(addr === undefined ? {} : { ea: eaFromOffset(addr) }),
+		name: fn.name,
+		size: fn.size,
+		...(fn.nbbs === undefined ? {} : { blocks: fn.nbbs }),
+		...(fn.indegree === undefined ? {} : { callers: fn.indegree }),
+		...(fn.outdegree === undefined ? {} : { callees: fn.outdegree }),
+		...(fn.signature ? { signature: fn.signature.replace(/;\s*$/, "") } : {}),
+	};
 }
 
-interface PdfjResult {
-	addr: number;
-	ops: PdfjOp[];
+const SORTERS: Record<string, (a: RzFunc, b: RzFunc) => number> = {
+	address: (a, b) => (addrOf(a) ?? 0) - (addrOf(b) ?? 0),
+	size: (a, b) => b.size - a.size,
+	callers: (a, b) => (b.indegree ?? 0) - (a.indegree ?? 0),
+};
+
+const REF_CAP = 100;
+
+function storageOf(v: RzVar): string | undefined {
+	if (v.storage?.type === "reg" && v.storage.reg) return v.storage.reg;
+	if (v.storage?.type === "stack" && typeof v.storage.stack === "number") {
+		const off = v.storage.stack;
+		return `stack${off < 0 ? "-" : "+"}0x${Math.abs(off).toString(16)}`;
+	}
+	return v.storage?.type;
 }
 
-/** axtj rows carry only `from` (the queried address is the implicit `to`); axfj rows carry both. Never fabricate the missing side. */
-interface R2Xref {
+/**
+ * get_function's payload: the function's metrics and signature, its
+ * arguments and locals, the unique functions it calls (named via rizin's
+ * flags), and the call sites that reach it. Raw intra-function CODE xrefs and
+ * immediate-operand DATA refs are reduced to counts: they are hundreds of
+ * entries of noise for a model, and disassemble_function/get_xrefs_* expose
+ * them precisely when needed.
+ */
+async function functionSummary(rz: RzSession, fn: RzFunc, ea: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+	const refs = (key: string): RzRef[] => (Array.isArray(fn[key]) ? (fn[key] as RzRef[]) : []);
+	const vars = [...(Array.isArray(fn.regvars) ? (fn.regvars as RzVar[]) : []), ...(Array.isArray(fn.stackvars) ? (fn.stackvars as RzVar[]) : [])];
+	const describeVar = (v: RzVar) => ({ name: v.name, type: v.type, ...(storageOf(v) ? { storage: storageOf(v) } : {}) });
+
+	const callTargets = [...new Set(refs("callrefs").filter((r) => r.type === "CALL").map((r) => r.to))];
+	const calls: { ea: string; name?: string }[] = [];
+	for (const to of callTargets.slice(0, REF_CAP)) {
+		const flag = await rz.cmdj<{ name?: string; offset?: number }>(`fdj @ ${eaFromOffset(to)}`, { signal });
+		calls.push({ ea: eaFromOffset(to), ...(flag?.name && flag.offset === to ? { name: flag.name } : {}) });
+	}
+	const callers = [...new Set(refs("codexrefs").filter((r) => r.type === "CALL").map((r) => r.from))];
+
+	const omitted = new Set(["offset", "addr", "callrefs", "datarefs", "codexrefs", "dataxrefs", "regvars", "stackvars", "minbound", "maxbound"]);
+	const metrics = Object.fromEntries(Object.entries(fn).filter(([key]) => !omitted.has(key)));
+	return {
+		ea,
+		...metrics,
+		...(typeof fn.signature === "string" ? { signature: fn.signature.replace(/;\s*$/, "") } : {}),
+		args: vars.filter((v) => v.arg).map(describeVar),
+		locals: vars.filter((v) => !v.arg).map(describeVar),
+		calls,
+		...(callTargets.length > REF_CAP ? { callsOmitted: callTargets.length - REF_CAP } : {}),
+		callers: callers.slice(0, REF_CAP).map(eaFromOffset),
+		...(callers.length > REF_CAP ? { callersOmitted: callers.length - REF_CAP } : {}),
+		refCounts: {
+			calls: refs("callrefs").length,
+			dataRefs: refs("datarefs").length,
+			codeXrefs: refs("codexrefs").length,
+			dataXrefs: refs("dataxrefs").length,
+		},
+	};
+}
+
+/** axtj rows carry `from` and `to`; rizin adds no function name. Never fabricate a missing side. */
+interface RzXref {
 	from?: number;
 	to?: number;
 	type: string;
-	opcode?: string;
-	name?: string;
-	refname?: string;
 }
 
-/** iij: no `offset` field — `plt` is the PLT stub address, 0/absent for symbols with no stub (weak/unresolved). */
-interface R2Import {
+/** iij: `plt` is the PLT stub address, absent for symbols with no stub (weak/unresolved). */
+interface RzImport {
 	ordinal: number;
 	bind: string;
 	type: string;
@@ -91,24 +161,22 @@ interface R2Import {
 	plt?: number;
 }
 
-/** iEj: address lives in `vaddr`/`paddr`, not `offset`. */
-interface R2Export {
-	name: string;
-	flagname?: string;
-	realname?: string;
-	ordinal: number;
-	bind: string;
-	size: number;
-	type: string;
+/** iEj/izj/iSj: addresses live in `vaddr`/`paddr`. */
+interface RzVaddrRow {
 	vaddr?: number;
 	paddr?: number;
 }
 
-/** izj: address lives in `vaddr`/`paddr`, not `offset`. */
-interface R2String {
-	vaddr?: number;
-	paddr?: number;
+interface RzExport extends RzVaddrRow {
+	name: string;
 	ordinal: number;
+	bind: string;
+	size: number;
+	type: string;
+}
+
+interface RzString extends RzVaddrRow {
+	ordinal?: number;
 	size: number;
 	length: number;
 	section: string;
@@ -116,88 +184,88 @@ interface R2String {
 	string: string;
 }
 
-/** iSj: address lives in `vaddr`/`paddr`, not `offset`. */
-interface R2Segment {
+interface RzSegment extends RzVaddrRow {
 	name: string;
 	size: number;
 	vsize: number;
 	perm: string;
-	paddr?: number;
-	vaddr?: number;
 }
 
-/** Annotate each row with a hex `ea` field so the model quotes the address rzx computed, not one it derived itself from a decimal offset. r2 6.x reports functions (aflj/afij) with `addr`; r2 5.x used `offset`. Resolve via `addrOf` and omit `ea` entirely rather than fabricate when neither is present. */
-function withEa<T extends { addr?: number; offset?: number }>(items: T[]): (T & { ea?: string })[] {
+/** Annotate each row with a hex `ea` so the model quotes the address rizin computed, not one it derived from a decimal offset. Omit `ea` rather than fabricate when no address is known. */
+function withVaddrEa<T extends RzVaddrRow>(items: T[]): (T & { ea?: string })[] {
 	return items.map((item) => {
-		const addr = addrOf(item);
+		const addr = knownAddr(item.vaddr) ?? knownAddr(item.paddr);
 		return addr === undefined ? { ...item } : { ...item, ea: eaFromOffset(addr) };
 	});
 }
 
-/** iEj/izj/iSj carry `vaddr`/`paddr`, never `offset`. Omit `ea` entirely rather than fabricate when neither is present. */
-function withVaddrEa<T extends { vaddr?: number; paddr?: number }>(items: T[]): (T & { ea?: string })[] {
-	return items.map((item) => {
-		const addr = item.vaddr ?? item.paddr;
-		return addr === undefined ? { ...item } : { ...item, ea: eaFromOffset(addr) };
-	});
-}
-
-/** iij carries `plt`, not `offset`; plt 0/absent means no PLT stub (weak/unresolved symbol) — omit `ea` rather than emit "0x0". */
-function withPltEa(items: R2Import[]): (R2Import & { ea?: string })[] {
+/** plt 0/absent means no PLT stub — omit `ea` rather than emit "0x0". */
+function withPltEa(items: RzImport[]): (RzImport & { ea?: string })[] {
 	return items.map((item) => (item.plt ? { ...item, ea: eaFromOffset(item.plt) } : { ...item }));
 }
 
-/** Only annotate whichever side (`from`/`to`) the row actually carries — never fabricate the implicit side. */
-function withXrefEa(items: R2Xref[]): (R2Xref & { fromEa?: string; toEa?: string })[] {
+function withXrefEa(items: RzXref[]): (RzXref & { fromEa?: string; toEa?: string })[] {
 	return items.map((item) => {
-		const out: R2Xref & { fromEa?: string; toEa?: string } = { ...item };
+		const out: RzXref & { fromEa?: string; toEa?: string } = { ...item };
 		if (typeof item.from === "number") out.fromEa = eaFromOffset(item.from);
 		if (typeof item.to === "number") out.toEa = eaFromOffset(item.to);
 		return out;
 	});
 }
 
-/** Render one pdfj op as 1-2 plain-text lines: an optional flag/label line ahead of the instruction it marks, then the address-prefixed instruction with any comment/xrefs folded in as a trailing annotation. Keeps output compact — this feeds an LLM context window. */
-function formatPdfOp(op: PdfjOp): string[] {
-	const lines: string[] = [];
-	if (op.flags && op.flags.length > 0) lines.push(`${op.flags.join(", ")}:`);
-
-	const annotations: string[] = [];
-	if (op.comment) {
-		try {
-			const decoded = Buffer.from(op.comment, "base64").toString("utf8").trim();
-			if (decoded.length > 0) annotations.push(decoded);
-		} catch {
-			// Malformed base64 in a pdfj comment must never crash the tool; just omit the annotation.
-		}
-	}
-	if (op.xrefs && op.xrefs.length > 0) {
-		annotations.push(`xrefs: ${op.xrefs.map((xref) => `${xref.type} ${eaFromOffset(addrOf(xref)!)}`).join(", ")}`);
-	}
-	const suffix = annotations.length > 0 ? `  ; ${annotations.join(" | ")}` : "";
-	lines.push(`${eaFromOffset(addrOf(op)!)}  ${op.disasm}${suffix}`);
-	return lines;
+/** An empty page is still evidence ("no xrefs to X" is a finding), but omp may elide it from context once consumed. */
+function markEmpty(result: ReToolResult, empty: boolean): ReToolResult {
+	return empty ? { ...result, useless: true } : result;
 }
 
 export function registerReadTools(pi: ExtensionAPI): void {
+	// Schemas are named consts, not inline in registerTool({...}): omp 18's zod-compatible builder
+	// infers each tool's params type only from a schema value declared outside the call.
 	const z = pi.zod;
 	const offsetLimit = {
 		offset: z.number().int().optional().describe("Skip this many results (default 0)."),
 		limit: z.number().int().optional().describe(`Max results to return (default ${DEFAULT_LIMIT}, capped at ${MAX_LIMIT}).`),
 	};
+	const pageParams = z.object(offsetLimit);
+	const listFunctionsParams = z.object({
+		...offsetLimit,
+		sort: z.enum(["address", "size", "callers"]).optional().describe("Row order (default address)."),
+	});
+	const searchParams = z.object({
+		query: z.string().describe("Substring to match against function names."),
+		...offsetLimit,
+	});
+	const targetParams = z.object({
+		target: z.string().describe("Function name or address (e.g. main, sym.foo, 0x4da0)."),
+	});
+	const addrParams = z.object({ addr: z.string().describe("Function address or name.") });
+	const xrefParams = z.object({
+		addr: z.string().describe("Address or name to query cross-references for."),
+		...offsetLimit,
+	});
+	const stringsParams = z.object({
+		...offsetLimit,
+		filter: z.string().optional().describe("Only include strings containing this substring."),
+	});
+	const noParams = z.object({});
 
 	pi.registerTool({
 		name: "list_functions",
 		label: "List Functions",
-		description: "List all functions detected in the open binary.",
+		description:
+			"List the functions rizin detected in the open binary: ea, name, size, basic blocks, callers/callees counts, and signature. Sort by `callers` to find the most-used helpers or by `size` to find the biggest logic first.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const fns = (await r2.cmdj<R2Func[]>("aflj")) ?? [];
-			const { page, total } = paginate(fns, params.offset, params.limit);
-			return jsonResult(pageHeader("functions", page, total, params.offset), withEa(page));
+		parameters: listFunctionsParams,
+		...reRenderers({ title: "Functions", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const fns = (await rz.cmdj<RzFunc[]>("aflj", { signal })) ?? [];
+			const sorted = params.sort ? [...fns].sort(SORTERS[params.sort]) : fns;
+			const { page, total } = paginate(sorted, params.offset, params.limit);
+			const label = params.sort && params.sort !== "address" ? `functions by ${params.sort}` : "functions";
+			const result = await jsonResult(pageHeader(label, page, total, params.offset), page.map(functionRow), { ctx, tool: "list_functions" });
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
@@ -207,41 +275,40 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "Search functions in the open binary by substring match on name.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			query: z.string().describe("Substring to match against function names."),
-			...offsetLimit,
-		}),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const fns = (await r2.cmdj<R2Func[]>("aflj")) ?? [];
+		parameters: searchParams,
+		...reRenderers({ title: "Search functions", subject: "query", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const fns = (await rz.cmdj<RzFunc[]>("aflj", { signal })) ?? [];
 			const filtered = fns.filter((fn) => fn.name.includes(params.query));
 			const { page, total } = paginate(filtered, params.offset, params.limit);
-			return jsonResult(
+			const result = await jsonResult(
 				pageHeader(`functions matching ${JSON.stringify(params.query)}`, page, total, params.offset),
-				withEa(page),
+				page.map(functionRow),
+				{ ctx, tool: "search_functions" },
 			);
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
 	pi.registerTool({
 		name: "get_function",
 		label: "Get Function",
-		description: "Get detailed info for a single function by name or address.",
+		description:
+			"Get one function by name or address: signature, size and complexity metrics, arguments and locals, the functions it calls (by name), and the call sites that reach it.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			target: z.string().describe("Function name or address (e.g. sym.main, 0x1000)."),
-		}),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
+		parameters: targetParams,
+		...reRenderers({ title: "Function", subject: "target", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
 			const target = validateAddr(params.target);
-			const fns = (await r2.cmdj<R2FuncInfo[]>(`afij @ ${target}`)) ?? [];
-			if (fns.length === 0) throw new Error(`omp-re: function not found: ${params.target}`);
-			const fn = fns[0]!;
-			const addr = addrOf(fn);
-			if (addr === undefined) throw new Error(`omp-re: function not found: ${params.target}`);
+			const fns = (await rz.cmdj<RzFunc[]>(`afij @ ${target}`, { signal })) ?? [];
+			const fn = fns[0];
+			const addr = fn ? knownAddr(addrOf(fn)) : undefined;
+			if (!fn || addr === undefined) throw new Error(`omp-re: function not found: ${params.target}`);
 			const ea = eaFromOffset(addr);
-			return jsonResult(`${fn.name} at ${ea} (size ${fn.size})`, { ...fn, ea }, ea);
+			return jsonResult(`${fn.name} at ${ea} (size ${fn.size})`, await functionSummary(rz, fn, ea, signal), { ea, ctx, tool: "get_function" });
 		},
 	});
 
@@ -249,23 +316,19 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		name: "decompile_function",
 		label: "Decompile Function",
 		description:
-			"Decompile a function to pseudo-C, preferring a real decompiler plugin (r2ghidra's pdg or r2dec's pdd) when one is loaded. Falls back to r2's native pdc — register-level pseudo-C, not a real decompile — when no plugin is available, and flags that fallback in the output.",
+			"Decompile a function to pseudo-C with the best decompiler plugin loaded in rizin (rz-ghidra's pdg, then jsdec's pdd). When none is available — or it produces nothing for this function — returns annotated disassembly instead, labeled `(disassembly only — …)` at the very start of the output.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({ addr: z.string().describe("Function address or name.") }),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const addr = validateAddr(params.addr);
-			const ea = eaFromOffset(await resolveNumericAddr(r2, addr));
-
-			const outcome = await decompileAt(r2, ea);
-			if (!outcome) {
-				throw new Error(`omp-re: decompile_function: no decompiler (pdg/pdd/pdc) produced output for ${params.addr}`);
-			}
-			if (outcome.kind === "pdc") {
-				return prefixedTextResult(DISASM_ONLY_PREFIX, `pseudo-C for ${ea}\n${outcome.code}`, ea);
-			}
-			return textResult(`decompiled ${ea} (${outcome.kind})`, outcome.code, ea);
+		parameters: addrParams,
+		...reRenderers({ title: "Decompile", subject: "addr", body: "code" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const outcome = await decompileAt(rz, ea, signal);
+			if (!outcome) throw new Error(`omp-re: decompile_function: no function at ${params.addr}`);
+			const options = { ea, ctx, tool: "decompile_function", decompiler: outcome.kind };
+			if (outcome.kind === "disasm") return prefixedTextResult(outcome.prefix ?? "", `disassembly of ${ea}\n${outcome.code}`, options);
+			return textResult(`decompiled ${ea} (${outcome.kind})`, outcome.code, options);
 		},
 	});
 
@@ -273,55 +336,60 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		name: "disassemble_function",
 		label: "Disassemble Function",
 		description:
-			"Disassemble a function to annotated instructions: comments, flags/labels, and cross-references are folded in where pdfj reports them.",
+			"Disassemble a function to annotated instructions: comments, flags/labels, and incoming cross-references are folded in where rizin reports them.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({ addr: z.string().describe("Function address or name.") }),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const addr = validateAddr(params.addr);
-			const ea = eaFromOffset(await resolveNumericAddr(r2, addr));
-			const pdf = await r2.cmdj<PdfjResult>(`pdfj @ ${addr}`);
-			if (!pdf) throw new Error(`omp-re: disassemble_function: no instructions at ${params.addr}`);
-			const lines = pdf.ops.flatMap(formatPdfOp);
-			return textResult(`${pdf.ops.length} instructions at ${ea}`, lines.join("\n"), ea);
+		parameters: addrParams,
+		...reRenderers({ title: "Disassemble", subject: "addr", body: "text" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const disasm = await disassembleAt(rz, ea, signal);
+			if (!disasm) throw new Error(`omp-re: disassemble_function: no instructions at ${params.addr}`);
+			return textResult(`${disasm.opCount} instructions at ${ea}`, disasm.lines.join("\n"), { ea, ctx, tool: "disassemble_function" });
 		},
-	});
-
-	const xrefParams = z.object({
-		addr: z.string().describe("Address to query cross-references for."),
-		...offsetLimit,
 	});
 
 	pi.registerTool({
 		name: "get_xrefs_to",
 		label: "Get Xrefs To",
-		description: "List cross-references pointing to an address.",
+		description: "List cross-references pointing to an address (calls, jumps, and data reads/writes that target it).",
 		approval: "read",
 		loadMode: "essential",
 		parameters: xrefParams,
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
+		...reRenderers({ title: "Xrefs to", subject: "addr", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
 			const addr = validateAddr(params.addr);
-			const xrefs = (await r2.cmdj<R2Xref[]>(`axtj @ ${addr}`)) ?? [];
+			const xrefs = (await rz.cmdj<RzXref[]>(`axtj @ ${addr}`, { signal })) ?? [];
 			const { page, total } = paginate(xrefs, params.offset, params.limit);
-			return jsonResult(pageHeader(`xrefs to ${params.addr}`, page, total, params.offset), withXrefEa(page));
+			const result = await jsonResult(pageHeader(`xrefs to ${params.addr}`, page, total, params.offset), withXrefEa(page), {
+				ctx,
+				tool: "get_xrefs_to",
+			});
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
 	pi.registerTool({
 		name: "get_xrefs_from",
 		label: "Get Xrefs From",
-		description: "List cross-references originating from an address.",
+		description:
+			"List cross-references originating from the instruction at an address (what it calls, jumps to, or reads/writes). This is per-instruction: at a function's entry it only covers the first instruction — use get_function's callrefs/datarefs for a whole function.",
 		approval: "read",
 		loadMode: "essential",
 		parameters: xrefParams,
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
+		...reRenderers({ title: "Xrefs from", subject: "addr", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
 			const addr = validateAddr(params.addr);
-			const xrefs = (await r2.cmdj<R2Xref[]>(`axfj @ ${addr}`)) ?? [];
+			const xrefs = (await rz.cmdj<RzXref[]>(`axfj @ ${addr}`, { signal })) ?? [];
 			const { page, total } = paginate(xrefs, params.offset, params.limit);
-			return jsonResult(pageHeader(`xrefs from ${params.addr}`, page, total, params.offset), withXrefEa(page));
+			const result = await jsonResult(pageHeader(`xrefs from ${params.addr}`, page, total, params.offset), withXrefEa(page), {
+				ctx,
+				tool: "get_xrefs_from",
+			});
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
@@ -331,12 +399,14 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "List imported symbols in the open binary.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const items = (await r2.cmdj<R2Import[]>("iij")) ?? [];
+		parameters: pageParams,
+		...reRenderers({ title: "Imports", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const items = (await rz.cmdj<RzImport[]>("iij", { signal })) ?? [];
 			const { page, total } = paginate(items, params.offset, params.limit);
-			return jsonResult(pageHeader("imports", page, total, params.offset), withPltEa(page));
+			const result = await jsonResult(pageHeader("imports", page, total, params.offset), withPltEa(page), { ctx, tool: "list_imports" });
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
@@ -346,64 +416,64 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "List exported symbols in the open binary.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const items = (await r2.cmdj<R2Export[]>("iEj")) ?? [];
+		parameters: pageParams,
+		...reRenderers({ title: "Exports", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const items = (await rz.cmdj<RzExport[]>("iEj", { signal })) ?? [];
 			const { page, total } = paginate(items, params.offset, params.limit);
-			return jsonResult(pageHeader("exports", page, total, params.offset), withVaddrEa(page));
+			const result = await jsonResult(pageHeader("exports", page, total, params.offset), withVaddrEa(page), { ctx, tool: "list_exports" });
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
 	pi.registerTool({
 		name: "list_strings",
 		label: "List Strings",
-		description: "List strings found in the open binary, optionally filtered by substring.",
+		description: "List strings found in the open binary's data sections, optionally filtered by substring.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			...offsetLimit,
-			filter: z.string().optional().describe("Only include strings containing this substring."),
-		}),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const items = (await r2.cmdj<R2String[]>("izj")) ?? [];
-			const filtered = params.filter ? items.filter((s) => s.string.includes(params.filter as string)) : items;
+		parameters: stringsParams,
+		...reRenderers({ title: "Strings", subject: "filter", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const items = (await rz.cmdj<RzString[]>("izj", { signal })) ?? [];
+			const filter = params.filter;
+			const filtered = filter ? items.filter((s) => s.string.includes(filter)) : items;
 			const { page, total } = paginate(filtered, params.offset, params.limit);
-			return jsonResult(pageHeader("strings", page, total, params.offset), withVaddrEa(page));
+			const result = await jsonResult(pageHeader("strings", page, total, params.offset), withVaddrEa(page), { ctx, tool: "list_strings" });
+			return markEmpty(result, page.length === 0);
 		},
 	});
 
 	pi.registerTool({
 		name: "list_segments",
 		label: "List Segments",
-		description: "List memory segments/sections in the open binary.",
+		description: "List sections of the open binary with their permissions, sizes, and addresses.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const r2 = await ensureR2(getState(ctx));
-			const items = (await r2.cmdj<R2Segment[]>("iSj")) ?? [];
+		parameters: pageParams,
+		...reRenderers({ title: "Sections", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const items = (await rz.cmdj<RzSegment[]>("iSj", { signal })) ?? [];
 			const { page, total } = paginate(items, params.offset, params.limit);
-			return jsonResult(pageHeader("segments", page, total, params.offset), withVaddrEa(page));
+			return jsonResult(pageHeader("segments", page, total, params.offset), withVaddrEa(page), { ctx, tool: "list_segments" });
 		},
 	});
 
 	pi.registerTool({
 		name: "hash_binary",
 		label: "Hash Binary",
-		description: "Compute SHA-256, SHA-1, and MD5 digests of the session's bound binary.",
+		description: "Compute SHA-256, SHA-1, and MD5 digests of the session's open binary.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({}),
-		async execute(_id, _params, _signal, _onUpdate, ctx) {
+		parameters: noParams,
+		...reRenderers({ title: "Hash", body: "text" }),
+		async execute(_id, _params, signal, _onUpdate, ctx) {
 			const binaryPath = requireBinary(getState(ctx));
-			const digest = await hashFile(binaryPath);
-			const text = `sha256=${digest.sha256}\nsha1=${digest.sha1}\nmd5=${digest.md5}\nsize=${digest.size}`;
-			return {
-				content: [{ type: "text" as const, text }],
-				details: { ea: "0x0", summary: text },
-			};
+			const digest = await hashFile(binaryPath, signal);
+			return plainResult(`sha256=${digest.sha256}\nsha1=${digest.sha1}\nmd5=${digest.md5}\nsize=${digest.size}`, "0x0");
 		},
 	});
 }
@@ -415,18 +485,19 @@ interface FileDigest {
 	size: number;
 }
 
-function hashFile(path: string): Promise<FileDigest> {
+function hashFile(path: string, signal?: AbortSignal): Promise<FileDigest> {
 	const { promise, resolve, reject } = Promise.withResolvers<FileDigest>();
 	const sha256 = createHash("sha256");
 	const sha1 = createHash("sha1");
 	const md5 = createHash("md5");
 	let size = 0;
-	const stream = createReadStream(path);
-	stream.on("data", (chunk: Buffer) => {
-		size += chunk.length;
-		sha256.update(chunk);
-		sha1.update(chunk);
-		md5.update(chunk);
+	const stream = createReadStream(path, { signal });
+	stream.on("data", (chunk: string | Buffer) => {
+		const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+		size += bytes.length;
+		sha256.update(bytes);
+		sha1.update(bytes);
+		md5.update(bytes);
 	});
 	stream.on("end", () => {
 		resolve({ sha256: sha256.digest("hex"), sha1: sha1.digest("hex"), md5: md5.digest("hex"), size });

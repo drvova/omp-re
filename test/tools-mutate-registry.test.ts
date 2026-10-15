@@ -1,251 +1,193 @@
 /**
- * Deterministic unit coverage for the 5 MUTATE-tier tool wrappers and the
- * `/re undo` switch (tools-mutate.ts:315-341).
+ * Coverage for the 5 mutate-tier tools and `/re undo`, against real rizin.
  *
- * v0.1.0 note: this file previously pinned four command-template defects
- * (rename_variable/set_variable_type never seeking to the target address,
- * set_prototype sending the function-rename command `af` instead of the
- * set-signature command `afs`, and set_comment's non-idempotent append via
- * plain `CC`) as expected failures. All four are fixed in
- * `extensions/re/tools-mutate.ts`, verified directly against real radare2
- * (5.5.0 and 6.1.8) — see `test/QA-FINDINGS.md` §2 for the historical
- * record. Every case below now asserts real success plus an independent
- * read-back via `session.cmd`, bypassing the tool's own verification so a
- * regression back to any of the old command templates fails this suite.
- *
- * Tests within each `describe` block run in declaration order and share one
- * long-lived `R2Session` (spawned once in the outer `beforeAll`), so a test
- * that mutates state undoes it before the next `describe` block runs
- * anything against the same address/variable.
+ * Every case asserts real success plus an independent read-back via raw
+ * rz.cmd/cmdj (bypassing the tool's own verification), so a regression in a
+ * command template fails here even if the tool's self-check were also wrong.
+ * Tests share one rizin process and undo their own mutation before the next
+ * block runs. Targets are picked from whatever the fixture contains (default
+ * /bin/ls): `main`, its first local variable, and its first instruction.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import * as zod from "zod/v4";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
-import { R2Session, resolveR2Path } from "../extensions/re/r2.ts";
-import { getState } from "../extensions/re/state.ts";
-import { recordAnnotation, registerMutateTools, undoLastAnnotation } from "../extensions/re/tools-mutate.ts";
+import { liveAnnotations } from "../extensions/re/annotations.ts";
+import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
+import { ensureRizin, getState, shutdownState } from "../extensions/re/state.ts";
+import { registerMutateTools, undoLastAnnotation } from "../extensions/re/tools-mutate.ts";
+import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
 
-const TEST_BINARY = process.env.OMPRE_TEST_BINARY ?? "/tmp/rzx-dogfood/wannacry.bin";
-const r2Path = resolveR2Path();
-const r2Available = Bun.which(r2Path) !== null;
-const binaryAvailable = existsSync(TEST_BINARY);
+logSkip("tools-mutate-registry tests");
 
-if (!r2Available || !binaryAvailable) {
-	console.log(
-		`omp-re: skipping tools-mutate-registry tests — ${!r2Available ? `radare2 ("${r2Path}") not on PATH` : ""}${!r2Available && !binaryAvailable ? "; " : ""}${!binaryAvailable ? `test binary not found at ${TEST_BINARY} (set OMPRE_TEST_BINARY)` : ""}`,
-	);
+interface AfvlVar {
+	name: string;
+	type: string;
 }
 
-interface StubEntry {
-	type: "custom";
-	id: string;
-	customType: string;
-	data: unknown;
-}
+describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
+	const harness = makeHarness("omp-re-tools-mutate-registry-test");
+	const { pi, ctx, entries } = harness;
+	const run = (name: string, params: Record<string, unknown>) => harness.tool(name).execute(`call-${name}`, params, undefined, undefined, ctx);
+	let rz: RzSession;
+	let binaryPath: string;
+	let mainEa: string;
+	let mainName: string;
+	let firstVar: AfvlVar;
 
-/** Awaits a promise expected to reject and returns the rejection as an Error, for exact `.message` assertions (stricter than jest/bun's substring-matching `.toThrow(string)`). */
-async function captureError(promise: Promise<unknown>): Promise<Error> {
-	try {
-		await promise;
-	} catch (err) {
-		return err instanceof Error ? err : new Error(String(err));
+	async function vars(): Promise<AfvlVar[]> {
+		const grouped = (await rz.cmdj<Record<string, AfvlVar[]>>(`afvlj @ ${mainEa}`)) ?? {};
+		return Object.values(grouped).flat();
 	}
-	throw new Error("expected promise to reject, but it resolved");
-}
-
-describe.skipIf(!r2Available || !binaryAvailable)("mutate tool registry + undo coverage", () => {
-	let session: R2Session;
-	let entryCounter = 0;
-	const entries: StubEntry[] = [];
-	const tools = new Map<string, ToolDefinition<any, any>>();
-
-	const pi = {
-		zod,
-		appendEntry: (customType: string, data?: unknown) => {
-			entries.push({ type: "custom", id: `entry-${entryCounter++}`, customType, data });
-		},
-		registerTool: (def: ToolDefinition<any, any>) => {
-			tools.set(def.name, def);
-		},
-	} as unknown as ExtensionAPI;
-
-	const ctx = {
-		ui: { notify: () => {} },
-		sessionManager: {
-			getSessionId: () => "omp-re-tools-mutate-registry-test",
-			getEntries: () => entries,
-		},
-	} as unknown as ExtensionContext;
+	const fnName = async (): Promise<string | undefined> => (await rz.cmdj<{ name: string }[]>(`afij @ ${mainEa}`))?.[0]?.name;
 
 	registerMutateTools(pi);
 
-	function tool(name: string): ToolDefinition<any, any> {
-		const def = tools.get(name);
-		if (!def) throw new Error(`omp-re test setup: tool "${name}" was never registered`);
-		return def;
-	}
-
 	beforeAll(async () => {
-		session = await R2Session.spawn(r2Path, TEST_BINARY);
+		binaryPath = await resolveBinaryPath(TEST_BINARY);
+		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
+		rz = await RzSession.spawn(rizinPath, binaryPath);
 		const state = getState(ctx);
-		state.binaryPath = TEST_BINARY;
-		state.r2 = session;
+		state.binaryPath = binaryPath;
+		state.rz = rz;
+		const main = (await rz.cmdj<{ offset: number; name: string }[]>("afij @ main"))![0]!;
+		mainEa = eaFromOffset(addrOf(main)!);
+		mainName = main.name;
+		const all = await vars();
+		if (all.length === 0) throw new Error(`fixture ${TEST_BINARY}: main has no variables to rename`);
+		firstVar = all[0]!;
 	});
 
 	afterAll(() => {
-		session.close();
+		shutdownState(ctx.sessionManager.getSessionId());
+	});
+
+	test("every mutate tool declares write approval with a per-call reason", () => {
+		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type"]) {
+			const approval = harness.tool(name).approval as (args: unknown) => { tier: string; reason?: string };
+			expect(typeof approval).toBe("function");
+			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int" });
+			expect(decision.tier).toBe("write");
+			expect(decision.reason).toContain("main");
+		}
+	});
+
+	describe("rename_function", () => {
+		test("an invalid name throws the validateIdent literal before touching rizin", async () => {
+			expect((await captureError(run("rename_function", { addr: "main", new: "1bad" }))).message).toBe('omp-re: invalid new: "1bad"');
+		});
+
+		test("lands, is keyed on the function's start ea, records an annotation, and /re undo reverts it", async () => {
+			const result = await run("rename_function", { addr: "main", new: "omp_re_main" });
+			expect(textOf(result)).toBe(`rename_function: ${JSON.stringify(mainName)} -> "omp_re_main" @ ${mainEa}`);
+			expect(await fnName()).toBe("omp_re_main");
+
+			const live = liveAnnotations(entries as never, binaryPath);
+			expect(live.at(-1)?.data).toMatchObject({ kind: "rename_function", ea: mainEa, oldValue: mainName, newValue: "omp_re_main", ungrounded: true });
+
+			expect(await undoLastAnnotation(pi, ctx)).toBe(`omp-re: undid rename_function @ ${mainEa} (restored ${JSON.stringify(mainName)})`);
+			expect(await fnName()).toBe(mainName);
+			expect(liveAnnotations(entries as never, binaryPath)).toHaveLength(0);
+		});
 	});
 
 	describe("rename_variable", () => {
-		test("a malformed new name throws the validateIdent literal before touching r2", async () => {
-			const err = await captureError(
-				tool("rename_variable").execute("call-rv-invalid", { addr: "main", old: "var_14h", new: "1bad" }, undefined, undefined, ctx),
+		test("a malformed new name throws the validateIdent literal before touching rizin", async () => {
+			expect((await captureError(run("rename_variable", { addr: "main", old: firstVar.name, new: "1bad" }))).message).toBe(
+				'omp-re: invalid new: "1bad"',
 			);
-			expect(err.message).toBe('omp-re: invalid new: "1bad"');
 		});
 
-		test("well-formed args land, independently verified, and /re undo reverts it", async () => {
-			const before = await session.cmd("afv @ main");
-			expect(before).toContain("var_14h");
+		test("an unknown variable is reported with the variables that do exist", async () => {
+			const err = await captureError(run("rename_variable", { addr: "main", old: "no_such_var", new: "x" }));
+			expect(err.message).toContain('has no variable "no_such_var"');
+			expect(err.message).toContain(firstVar.name);
+		});
 
-			const result = await tool("rename_variable").execute(
-				"call-rv-valid",
-				{ addr: "main", old: "var_14h", new: "renamedVar" },
-				undefined,
-				undefined,
-				ctx,
-			);
-			const expectedSummary = "rename_variable: var_14h -> renamedVar @ main";
-			expect(result.content).toEqual([{ type: "text", text: expectedSummary }]);
-			expect(result.details).toEqual({ ea: "main", summary: expectedSummary });
+		test("lands, independently verified, and /re undo reverts it", async () => {
+			const result = await run("rename_variable", { addr: "main", old: firstVar.name, new: "omp_re_var" });
+			expect(textOf(result)).toBe(`rename_variable: ${JSON.stringify(firstVar.name)} -> "omp_re_var" @ ${mainEa}`);
+			const after = (await vars()).map((v) => v.name);
+			expect(after).toContain("omp_re_var");
+			expect(after).not.toContain(firstVar.name);
 
-			const after = await session.cmd("afv @ main");
-			expect(after).toContain("renamedVar");
-			expect(after).not.toContain("var_14h");
-
-			const message = await undoLastAnnotation(pi, ctx);
-			expect(message).toBe('omp-re: undid rename_variable @ main (restored "var_14h")');
-
-			const reverted = await session.cmd("afv @ main");
-			expect(reverted).toContain("var_14h");
-			expect(reverted).not.toContain("renamedVar");
+			await undoLastAnnotation(pi, ctx);
+			const reverted = (await vars()).map((v) => v.name);
+			expect(reverted).toContain(firstVar.name);
+			expect(reverted).not.toContain("omp_re_var");
 		});
 	});
 
 	describe("set_comment", () => {
-		let entryOriginalComment = "";
-
-		test("valid text lands (verified independently via CC.) and returns a meaningful success shape", async () => {
-			entryOriginalComment = (await session.cmd("CC. @ entry0")).trim();
-			const result = await tool("set_comment").execute("call-sc-valid", { addr: "entry0", text: "qa probe comment" }, undefined, undefined, ctx);
-			const expectedSummary = `set_comment: ${entryOriginalComment} -> qa probe comment @ entry0`;
-			expect(result.content).toEqual([{ type: "text", text: expectedSummary }]);
-			expect(result.details).toEqual({ ea: "entry0", summary: expectedSummary });
-			const after = (await session.cmd("CC. @ entry0")).trim();
-			expect(after).toBe("qa probe comment");
+		test("replaces rather than appends, independently verified via CC.", async () => {
+			await run("set_comment", { addr: mainEa, text: "first" });
+			await run("set_comment", { addr: mainEa, text: "second" });
+			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("second");
 		});
 
-		test("a second call at the same address also succeeds — CC no longer appends", async () => {
-			const result = await tool("set_comment").execute(
-				"call-sc-second",
-				{ addr: "entry0", text: "second qa probe comment" },
-				undefined,
-				undefined,
-				ctx,
+		test("rizin metacharacters in the text are stored literally and execute nothing", async () => {
+			const text = "x; echo INJECTED @ 0x0 ~ | > out `y` $(z) #";
+			const result = await run("set_comment", { addr: mainEa, text });
+			expect(textOf(result)).not.toContain("INJECTED\n");
+			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe(text);
+		});
+
+		test("multi-line text is rejected", async () => {
+			expect((await captureError(run("set_comment", { addr: mainEa, text: "a\nb" }))).message).toBe(
+				"omp-re: invalid text: contains forbidden character",
 			);
-			const expectedSummary = "set_comment: qa probe comment -> second qa probe comment @ entry0";
-			expect(result.content).toEqual([{ type: "text", text: expectedSummary }]);
-			const after = (await session.cmd("CC. @ entry0")).trim();
-			expect(after).toBe("second qa probe comment");
 		});
 
-		test("a newline in the comment throws the validateText literal before touching r2", async () => {
-			const err = await captureError(
-				tool("set_comment").execute("call-sc-invalid", { addr: "entry0", text: "bad\ntext" }, undefined, undefined, ctx),
-			);
-			expect(err.message).toBe("omp-re: invalid text: contains forbidden character");
+		test("/re undo steps back through comment history, then clears", async () => {
+			await undoLastAnnotation(pi, ctx);
+			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("second");
+			await undoLastAnnotation(pi, ctx);
+			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("first");
+			await undoLastAnnotation(pi, ctx);
+			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("");
 		});
-
-		test("undo reverts the second call through the real tool and returns the exact literal", async () => {
-			const message = await undoLastAnnotation(pi, ctx);
-			expect(message).toBe('omp-re: undid set_comment @ entry0 (restored "qa probe comment")');
-			const after = (await session.cmd("CC. @ entry0")).trim();
-			expect(after).toBe("qa probe comment");
-		});
-
-		test("undoing again reverts the first call back to the original comment", async () => {
-			// The "valid text" test's annotation is still on the stack; this undo steps back through it.
-			const message = await undoLastAnnotation(pi, ctx);
-			expect(message).toBe(`omp-re: undid set_comment @ entry0 (restored ${JSON.stringify(entryOriginalComment)})`);
-			const after = (await session.cmd("CC. @ entry0")).trim();
-			expect(after).toBe(entryOriginalComment);
-		});
-
 	});
 
 	describe("set_prototype", () => {
-		test("a forbidden shell character throws the validateTypeLike literal before touching r2", async () => {
-			const err = await captureError(
-				tool("set_prototype").execute("call-sp-invalid", { addr: "entry0", sig: "bad;sig" }, undefined, undefined, ctx),
-			);
-			expect(err.message).toBe('omp-re: invalid sig: forbidden character ";"');
+		test("lands (tolerating rizin's trailing ;), and /re undo restores the old signature", async () => {
+			const before = (await rz.cmd(`afs @ ${mainEa}`)).trim();
+			const sig = `int ${mainName}(int argc, char **argv)`;
+			const result = await run("set_prototype", { addr: mainEa, sig });
+			expect(textOf(result)).toContain(`-> ${JSON.stringify(sig)} @ ${mainEa}`);
+			expect((await rz.cmd(`afs @ ${mainEa}`)).trim()).toBe(`${sig};`);
+
+			await undoLastAnnotation(pi, ctx);
+			expect((await rz.cmd(`afs @ ${mainEa}`)).trim()).toBe(before);
 		});
 
-		test("a well-formed signature lands, independently verified, and /re undo reverts it", async () => {
-			const before = (await session.cmd("afij @ entry0")).trim();
-
-			const result = await tool("set_prototype").execute("call-sp-valid", { addr: "entry0", sig: "int probe(int a)" }, undefined, undefined, ctx);
-			expect(result.content).toEqual([
-				{ type: "text", text: expect.stringContaining("set_prototype:") as unknown as string },
-			]);
-
-			const after = (await session.cmd("afij @ entry0")).trim();
-			expect(after).toContain('"signature":"int probe (int a);"');
-
-			const message = await undoLastAnnotation(pi, ctx);
-			expect(message).toStartWith("omp-re: undid set_prototype @ 0x");
-
-			const reverted = (await session.cmd("afij @ entry0")).trim();
-			expect(reverted).toBe(before);
+		test("a forbidden character is rejected before touching rizin", async () => {
+			expect((await captureError(run("set_prototype", { addr: mainEa, sig: "int f(void); !id" }))).message).toBe(
+				'omp-re: invalid sig: forbidden character ";"',
+			);
 		});
 	});
 
 	describe("set_variable_type", () => {
-		test("a malformed variable name throws the validateIdent literal before touching r2", async () => {
-			const err = await captureError(
-				tool("set_variable_type").execute("call-svt-invalid", { addr: "main", var: "1bad", type: "int" }, undefined, undefined, ctx),
-			);
-			expect(err.message).toBe('omp-re: invalid var: "1bad"');
+		test("lands, independently verified, and /re undo restores the old type", async () => {
+			const result = await run("set_variable_type", { addr: mainEa, var: firstVar.name, type: "char *" });
+			expect(textOf(result)).toBe(`set_variable_type: ${firstVar.name}: ${JSON.stringify(firstVar.type)} -> "char *" @ ${mainEa}`);
+			expect((await vars()).find((v) => v.name === firstVar.name)?.type).toBe("char *");
+
+			await undoLastAnnotation(pi, ctx);
+			expect((await vars()).find((v) => v.name === firstVar.name)?.type).toBe(firstVar.type);
+		});
+	});
+
+	describe("annotation replay", () => {
+		test("a rename survives the rizin process dying: the respawn replays it", async () => {
+			await run("rename_function", { addr: mainEa, new: "omp_re_survivor" });
+			rz.close();
+			rz = await ensureRizin(ctx);
+			expect(await fnName()).toBe("omp_re_survivor");
+
+			await undoLastAnnotation(pi, ctx);
+			expect(await fnName()).toBe(mainName);
 		});
 
-		test("a well-formed type lands, independently verified, and /re undo reverts it", async () => {
-			const before = await session.cmd("afv @ main");
-			expect(before).toMatch(/var\s+\S+\s+var_14h\s+@/);
-
-			const result = await tool("set_variable_type").execute(
-				"call-svt-valid",
-				{ addr: "main", var: "var_14h", type: "uint32_t" },
-				undefined,
-				undefined,
-				ctx,
-			);
-			expect(result.details).toMatchObject({ ea: "main" });
-
-			const after = await session.cmd("afv @ main");
-			expect(after).toMatch(/var\s+uint32_t\s+var_14h\s+@/);
-
-			const message = await undoLastAnnotation(pi, ctx);
-			expect(message).toStartWith("omp-re: undid set_variable_type @ main (restored ");
-
-			const reverted = await session.cmd("afv @ main");
-			expect(reverted).toBe(before);
-		});
-
-		test("undo throws its own guard literal when the annotation is missing the variable name", async () => {
-			await recordAnnotation(pi, ctx, "set_variable_type", { ea: "0x6666", oldValue: "int32_t", newValue: "uint32_t" });
-			const err = await captureError(undoLastAnnotation(pi, ctx));
-			expect(err.message).toBe("omp-re: cannot undo set_variable_type: annotation is missing the variable name");
+		test("nothing is left to undo once every annotation is reverted", async () => {
+			expect((await captureError(undoLastAnnotation(pi, ctx))).message).toBe("omp-re: no annotation left to undo");
 		});
 	});
 });
