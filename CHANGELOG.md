@@ -34,13 +34,20 @@ extension runner, and by installing it with `omp plugin install`.
   `echo`, `afvlj`, `afs @`, `aflc`, `fdj`). rizin is required; radare2 is no
   longer used.
 - **Process lifecycle on cordis.** The rizin and debug processes are now owned
-  by [cordis](https://github.com/cordiverse/cordis) *revertible effects*: one
-  root `Context` per load, a child scope per omp session, and each process a
-  `ctx.effect` whose setup returns its teardown (`runtime.ts`). Respawn
-  disposes one effect; session shutdown disposes the scope and every process
-  with it — replacing the hand-rolled nullable-field map and scattered
-  `.close()` calls. `state.ts` is now a thin facade over it, so the tool and
-  UI call sites are unchanged.
+  by [cordis](https://github.com/cordiverse/cordis) *revertible effects*: a
+  child scope per omp session, and each process a `ctx.effect` whose setup
+  returns its teardown (`runtime.ts`). Respawn disposes one effect; session
+  shutdown disposes the scope and every process with it — replacing the
+  hand-rolled nullable-field map and scattered `.close()` calls. `state.ts` is
+  now a thin facade over it, so the tool and UI call sites are unchanged.
+- **Extension composed on cordis.** Every subsystem — the read / mutate /
+  rizin-REPL / rizin-CLI / debugger / triage tool groups, the evidence store,
+  the audit log, the UI, and the command shell — is now a cordis plugin loaded
+  on one `Context` per extension load (`app.ts`'s `composeApp`). The omp host
+  (`pi`) is provided as a service each subsystem injects (`inject: ["pi"]`), so
+  a subsystem activates only when the host is present — the *reactive coeffect*
+  (spatial composability). The subsystems' registration functions stay plain
+  `(pi) => …` so they remain independently testable.
 - **Environment variables:** `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`;
   `OMPRE_R2_ANALYSIS_TIMEOUT_MS` → `OMPRE_ANALYSIS_TIMEOUT_MS`.
 - **Decompilers:** rz-ghidra (`pdg`) then jsdec (`pdd`). rizin has no `pdc`,
