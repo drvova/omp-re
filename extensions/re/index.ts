@@ -14,6 +14,7 @@ import { composeApp } from "./app.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
+import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { branchEntries, lastRecordedBinaryPath } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
@@ -392,6 +393,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:debugger", apply: registerDebugTools },
 		{ name: "re:evidence", apply: registerEvidenceStore },
 		{ name: "re:audit", apply: registerAuditLog },
+		{ name: "re:preserve", apply: registerPreservation },
 		{ name: "re:ui", apply: registerUI },
 		{ name: "re:shell", apply: registerShell },
 	]);
