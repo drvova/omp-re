@@ -128,17 +128,14 @@ omp plugin install omp-re@drvova
 See the [README](../README.md#install) for the dev-load alternative and the
 marketplace-name-vs-GitHub-owner distinction.
 
-## Upgrading from 0.1.x (radare2)
+## Upgrading from 0.1.x
 
-0.2.0 replaces radare2 with rizin. radare2 is no longer used at all:
-
-- Install rizin (above); `r2` can stay installed but is ignored.
-- `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`; `OMPRE_R2_ANALYSIS_TIMEOUT_MS` →
-  `OMPRE_ANALYSIS_TIMEOUT_MS`.
-- r2ghidra → rz-ghidra, r2dec → jsdec.
-- Sessions recorded with 0.1.x keep their evidence. Their annotations are
-  replayed into rizin when the session is resumed; any that rizin rejects
-  are listed in a warning rather than silently dropped.
+0.1.x used the radare2 backend; 0.2.0 onward uses rizin exclusively. If you are
+upgrading: install rizin (above), rename `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`
+and `OMPRE_R2_ANALYSIS_TIMEOUT_MS` → `OMPRE_ANALYSIS_TIMEOUT_MS`, and install a
+rizin decompiler plugin (rz-ghidra or jsdec). Evidence and annotations recorded
+by 0.1.x sessions are preserved and replayed into rizin on resume; any rizin
+rejects are listed in a warning rather than silently dropped.
 
 ## Verify the full stack
 

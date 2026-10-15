@@ -64,13 +64,13 @@ none of them can start a second command:
   literal; line breaks and NUL are rejected outright.
 
 **0.1.x is affected by a command-injection bug fixed in 0.2.0.** It
-interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and
-radare2 splits commands on `;`. A comment such as `a; !id` therefore ran an
-additional radare2 command — including `!`, a shell escape — reproduced
-against radare2 5.5.0. `set_comment` is a `write`-tier tool, so this let a
-model (for example one steered by text inside the sample it was analyzing)
-reach shell execution without passing an `exec`-tier approval. `/re undo`
-replayed stored comments the same way. Upgrade if you run 0.1.x.
+interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and the
+command backend splits on `;`, so a comment such as `a; !id` ran an
+additional command — including `!`, a shell escape. `set_comment` is a
+`write`-tier tool, so this let a model (for example one steered by text
+inside the sample it was analyzing) reach shell execution without passing an
+`exec`-tier approval. `/re undo` replayed stored comments the same way.
+Upgrade if you run 0.1.x; 0.2.0 onward (rizin) is not affected.
 
 ## rizin_command
 
