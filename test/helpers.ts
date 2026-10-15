@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 // The schema builder omp 18 injects as `pi.zod` (see pi-coding-agent extensions/loader.ts).
 import * as zod from "@oh-my-pi/omptype/zod";
-import { resolveRizinPath } from "../extensions/re/rizin.ts";
+import { resolveRizinPath, resolveRizinTool } from "../extensions/re/rizin.ts";
 
 /** Any readable binary works; /bin/ls exists on every Linux host and macOS. Override with OMPRE_TEST_BINARY. */
 export const TEST_BINARY = process.env.OMPRE_TEST_BINARY ?? "/bin/ls";
@@ -16,6 +16,12 @@ export const rizinPath = resolveRizinPath();
 export const rizinAvailable = rizinPath.includes("/") ? existsSync(rizinPath) : Bun.which(rizinPath) !== null;
 export const binaryAvailable = existsSync(TEST_BINARY);
 export const canRunRizin = rizinAvailable && binaryAvailable;
+
+/** Whether a sibling rizin CLI tool (`rz-bin`, `rz-diff`, …) is present next to the configured rizin or on PATH. */
+export function isRzToolAvailable(tool: string): boolean {
+	const path = resolveRizinTool(tool);
+	return path.includes("/") ? existsSync(path) : Bun.which(path) !== null;
+}
 
 export function logSkip(suite: string): void {
 	if (canRunRizin) return;
@@ -61,6 +67,13 @@ export function makeHarness(sessionId: string): Harness {
 			entries.push({ type: "custom", id: `entry-${counter++}`, customType, data });
 		},
 		on: noop,
+		// A real argv exec (no shell), matching omp's pi.exec shape, so the rz-* CLI tools run against the actual binaries in tests.
+		exec: async (bin: string, argv: string[], opts?: { signal?: AbortSignal }) => {
+			const proc = Bun.spawn([bin, ...argv], { stdout: "pipe", stderr: "pipe", signal: opts?.signal });
+			const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+			const code = await proc.exited;
+			return { code, stdout, stderr };
+		},
 	} as unknown as ExtensionAPI;
 
 	const ctx = {

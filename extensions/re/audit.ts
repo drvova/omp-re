@@ -56,7 +56,17 @@ export const RE_RIZIN_TOOL_NAMES: Record<string, true> = {
 	rizin_command: true,
 };
 
-/** Tools whose successful output is an observation of the binary and becomes a `re.evidence` record (evidence.ts). `rizin_help` is not: help text says nothing about the binary. */
+/** The rizin CLI-suite bridge (tools-rzcli.ts): one tool fronting rz-bin, rz-diff, rz-hash, rz-find, rz-asm, rz-ax. */
+export const RE_RZCLI_TOOL_NAMES: Record<string, true> = {
+	rizin_cli: true,
+};
+
+/** The dynamic-analysis debugger (tools-debug.ts): one tool, registered only when OMPRE_ENABLE_DEBUGGER is set. In the audit gate regardless, so its executions are always logged when it is on. */
+export const RE_DEBUG_TOOL_NAMES: Record<string, true> = {
+	rizin_debug: true,
+};
+
+/** Tools whose successful output is an observation of the binary and becomes a `re.evidence` record (evidence.ts). `rizin_help` is not (help text says nothing about the binary); `rizin_cli` is not (it also does arithmetic and standalone assembly — cite binary facts through the dedicated tools or rizin_command). */
 export const RE_EVIDENCE_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
 	rizin_command: true,
@@ -67,12 +77,14 @@ export const RE_SESSION_TOOL_NAMES: Record<string, true> = {
 	open_binary: true,
 };
 
-/** All 24 RE-suite tool names (read + mutate + triage + rizin CLI + session-setup) — the audit log's gate. */
+/** All 26 RE-suite tool names (read + mutate + triage + rizin REPL + rizin CLI + debugger + session-setup) — the audit log's gate. `debug` is counted here even though it registers only when enabled, so turning it on never bypasses the log. */
 export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
 	...RE_MUTATE_TOOL_NAMES,
 	...RE_TRIAGE_TOOL_NAMES,
 	...RE_RIZIN_TOOL_NAMES,
+	...RE_RZCLI_TOOL_NAMES,
+	...RE_DEBUG_TOOL_NAMES,
 	...RE_SESSION_TOOL_NAMES,
 };
 

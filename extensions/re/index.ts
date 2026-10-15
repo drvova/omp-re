@@ -12,6 +12,8 @@ import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { liveAnnotations } from "./annotations.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
+import { decompilerCommands, decompilerLabel } from "./decompile.ts";
+import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { branchEntries, lastRecordedBinaryPath } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
@@ -22,6 +24,7 @@ import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnot
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
 import { registerReadTools } from "./tools-read.ts";
 import { registerRizinTools } from "./tools-rizin.ts";
+import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
 import {
 	citeEvidence,
@@ -132,7 +135,10 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 				? `rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present (${catalog.size} in this build; rizin_help searches them)`
 				: missingCommandsWarning(missing),
 		);
-		lines.push(`decompiler: ${catalog.has("pdg") ? "rz-ghidra (pdg)" : catalog.has("pdd") ? "jsdec (pdd)" : "none — decompile_function returns labeled disassembly"}`);
+		// Decompiler availability from the catalog (?*j lists plugin commands), in the configured probe order; a live session would resolve the same first entry.
+		const present = decompilerCommands().filter((command) => catalog.has(command));
+		lines.push(`decompiler: ${decompilerLabel(present[0] ?? null)}`);
+		if (present.length > 1) lines.push(`  also available: ${present.slice(1).map(decompilerLabel).join(", ")} (reorder with OMPRE_DECOMPILER)`);
 	}
 	if (state.binaryPath) {
 		lines.push(`binary: ${state.binaryPath}`);
@@ -141,6 +147,11 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 	} else {
 		lines.push("binary: none — /re open <path>");
 	}
+	lines.push(
+		debuggerEnabled()
+			? `debugger: enabled${state.dbg && !state.dbg.isClosed ? " — a process is running under it" : " (OMPRE_ENABLE_DEBUGGER); executes the sample"}`
+			: "debugger: off (set OMPRE_ENABLE_DEBUGGER to enable dynamic analysis — it executes the sample)",
+	);
 	lines.push(`evidence on this branch: ${evidenceRecords(ctx).length}`);
 	lines.push(`audit log signing: ${process.env.OMPRE_AUDIT_HMAC_KEY ? "HMAC-SHA256" : "unsigned (set OMPRE_AUDIT_HMAC_KEY)"}`);
 	return lines.join("\n");
@@ -164,6 +175,8 @@ export default async function (pi: ExtensionAPI) {
 	registerAuditLog(pi);
 	registerUI(pi);
 	await registerTriageTools(pi);
+	await registerRzCliTools(pi);
+	registerDebugTools(pi);
 
 	const openBinaryParams = pi.zod.object({ path: pi.zod.string().describe("Path to the binary file to open.") });
 	pi.registerTool({

@@ -15,13 +15,19 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES } from "../extensions/re/audit.ts";
+import { RE_ALL_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES } from "../extensions/re/audit.ts";
 import { canRunRizin, logSkip, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
 const EXTENSION = resolve(import.meta.dir, "../extensions/re");
-const ALWAYS_REGISTERED = Object.keys(RE_ALL_TOOL_NAMES).filter((name) => !name.startsWith("triage_"));
+/** The tools registered unconditionally in every session. Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
+const ALWAYS_REGISTERED = [
+	...Object.keys(RE_READ_TOOL_NAMES),
+	...Object.keys(RE_MUTATE_TOOL_NAMES),
+	...Object.keys(RE_RIZIN_TOOL_NAMES),
+	...Object.keys(RE_SESSION_TOOL_NAMES),
+];
 
 interface Harness {
 	session: AgentSession;
@@ -184,8 +190,35 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 			expect(h.notes.at(-1)).toContain("rizin commands: all 24 omp-re sends are present");
 			const result = await h.session.getToolByName("rizin_command")!.execute("t-rz", { command: "pdsf", addr: "main" });
 			expect(result.content[0]?.type === "text" && result.content[0].text.startsWith("rizin> pdsf @ main\n")).toBe(true);
+			// rizin_cli registers through the real runner when the rz-* tools are present (they ship with rizin).
+			expect(h.session.getToolByName("rizin_cli")).toBeDefined();
 		} finally {
 			await h.shutdown();
 		}
 	});
+
+	test("the debugger registers through the real runner only when opted in, and its enum schema loads", async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		const off = await boot(SessionManager.inMemory());
+		try {
+			expect(off.session.getToolByName("rizin_debug")).toBeUndefined();
+		} finally {
+			await off.shutdown();
+		}
+
+		const prev = process.env.OMPRE_ENABLE_DEBUGGER;
+		process.env.OMPRE_ENABLE_DEBUGGER = "1";
+		const on = await boot(SessionManager.inMemory());
+		try {
+			expect(on.session.getToolByName("rizin_debug")).toBeDefined();
+			await on.session.getToolByName("open_binary")!.execute("t-open", { path: TEST_BINARY });
+			const started = await on.session.getToolByName("rizin_debug")!.execute("t-dbg", { action: "start" });
+			expect(started.content[0]?.type === "text" && started.content[0].text).toContain("RUNNING under a debugger");
+			await on.session.getToolByName("rizin_debug")!.execute("t-dbg-stop", { action: "stop" });
+		} finally {
+			await on.shutdown();
+			if (prev === undefined) delete process.env.OMPRE_ENABLE_DEBUGGER;
+			else process.env.OMPRE_ENABLE_DEBUGGER = prev;
+		}
+	}, 30_000); // two full SDK boots plus a real launch; the default 5s is too tight
 });

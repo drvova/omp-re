@@ -1,14 +1,14 @@
 {
-  "name": "unit221b",
-  "owner": { "name": "Unit 221B" },
-  "metadata": { "description": "Unit 221B tooling for omp" },
+  "name": "drvova",
+  "owner": { "name": "drvova" },
+  "metadata": { "description": "drvova tooling for omp" },
   "plugins": [
     {
       "name": "omp-re",
       "description": "Reverse-engineering suite: rizin tools, re-analyst subagent, evidence store, audit log, RE status band, report generator",
       "version": "0.2.0",
-      "homepage": "https://github.com/lancejames221b/omp-re",
-      "repository": "https://github.com/lancejames221b/omp-re",
+      "homepage": "https://github.com/drvova/omp-re",
+      "repository": "https://github.com/drvova/omp-re",
       "license": "MIT",
       "keywords": ["rizin", "reverse-engineering", "malware-analysis", "security"],
       "category": "security",

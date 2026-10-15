@@ -11,8 +11,8 @@ bun install --ignore-scripts
 bun test
 ```
 
-Ten test files. The `bun install` dev dependencies pin omp **18.11.1**, so
-the host APIs under test are the ones users run. Tests that need a real
+Thirteen test files. The `bun install` dev dependencies pin omp **18.11.1**,
+so the host APIs under test are the ones users run. Tests that need a real
 `rizin` and a test binary **skip** (not fail) when either is missing:
 
 | File | Needs rizin? | Tests (rizin present) |
@@ -22,12 +22,15 @@ the host APIs under test are the ones users run. Tests that need a real
 | `evidence.test.ts` | No | 4 |
 | `audit.test.ts` | No | 5 |
 | `report.test.ts` | No | 4 |
-| `extension-sdk.test.ts` | Only its two rizin tests | 7 |
+| `decompile.test.ts` | No | 5 |
+| `extension-sdk.test.ts` | Only its rizin tests | 8 |
 | `rizin-integration.test.ts` | Yes (one test runs without) | 13 |
 | `tools-registry.test.ts` | Yes (the renderer and native-view tests run without) | 35 |
 | `tools-mutate-registry.test.ts` | Yes | 15 |
 | `rizin-cli.test.ts` | Its catalog and tool tests (policy and help search run without) | 24 |
-| **Total** | | **143** |
+| `rzcli.test.ts` | Its integration tests (the flag-policy tests run without) | 11 |
+| `debug.test.ts` | Its integration tests (the enable-gate tests run without) | 9 |
+| **Total** | | **169** |
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
 extension runner (no model is called) and drives `/re` commands and tools
@@ -47,8 +50,13 @@ loaded it asserts the decompiler's output, without one it asserts the
 labeled `(disassembly only — no decompiler plugin available)` fallback. Both
 paths were run for the 0.2.0 release.
 
-Expected shape with rizin present: **143 pass, 0 fail, 0 skip**. Without
-rizin: **77 pass, 76 skip, 0 fail** (153 reported — bun counts skipped
+The debugger suite (`debug.test.ts`) sets `OMPRE_ENABLE_DEBUGGER` itself and
+**executes the fixture** under rizin's debugger; it needs a host where
+`ptrace` is permitted (most Linux, and containers started with it allowed).
+Its enable-gate tests run everywhere.
+
+Expected shape with rizin present: **169 pass, 0 fail, 0 skip**. Without
+rizin: **89 pass, 94 skip, 0 fail** (183 reported — bun counts skipped
 `describe` blocks slightly differently from executed ones). This is CI's
 permanent shape, not a degraded state to "fix".
 
@@ -109,7 +117,7 @@ sessionManager })`, then `initializeExtensions(...)` from
 `@oh-my-pi/pi-coding-agent/modes/runtime-init`. Slash commands passed to
 `session.prompt("/re …")` and tools fetched with `session.getToolByName(...)`
 run locally with no model call. For a full install check, `omp plugin
-marketplace add /path/to/checkout` then `omp plugin install omp-re@unit221b`
+marketplace add /path/to/checkout` then `omp plugin install omp-re@drvova`
 installs from a local checkout.
 
 ## Local dev loop
@@ -122,5 +130,5 @@ cached copy under `~/.omp/plugins/cache/plugins/...` is a **copy, not a
 symlink**, so an edit to your checkout does nothing until you reinstall:
 
 ```bash
-omp plugin upgrade omp-re@unit221b
+omp plugin upgrade omp-re@drvova
 ```

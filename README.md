@@ -1,15 +1,15 @@
 # omp-re
 
-[![CI](https://github.com/lancejames221b/omp-re/actions/workflows/ci.yml/badge.svg)](https://github.com/lancejames221b/omp-re/actions/workflows/ci.yml)
+[![CI](https://github.com/drvova/omp-re/actions/workflows/ci.yml/badge.svg)](https://github.com/drvova/omp-re/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![24 tools](https://img.shields.io/badge/tools-24-informational)
+![26 tools](https://img.shields.io/badge/tools-26-informational)
 
 ![omp-re triaging /usr/bin/ls: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 24 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 26 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -19,13 +19,14 @@ observed; the report writer will not let it claim more than that.
 ## Install
 
 ```bash
-omp plugin marketplace add lancejames221b/omp-re
-omp plugin install omp-re@unit221b
+omp plugin marketplace add drvova/omp-re
+omp plugin install omp-re@drvova
 ```
 
-`unit221b` is the *marketplace catalog name* declared inside
-`.omp-plugin/marketplace.json` — it is independent of the `lancejames221b`
-GitHub owner, so the two identifiers being different is expected, not a typo.
+`drvova` after the `@` is the *marketplace catalog name* declared inside
+`.omp-plugin/marketplace.json`; it happens to match the GitHub owner but is a
+separate identifier (the `marketplace add` argument is the GitHub `owner/repo`,
+the `@name` is the catalog).
 
 To develop against a local checkout instead of installing as a plugin, point
 omp at the extension directory directly:
@@ -108,6 +109,34 @@ included, with typed arguments and a summary) and uses it three ways:
   a warning instead of failing later as an empty result. `/re status` shows
   the result and which decompiler the catalog lists.
 
+Beyond the in-core commands, rizin's **standalone CLI tools** are one tool
+away. `rizin_cli` fronts `rz-bin` (fast headers/imports/strings without full
+analysis), `rz-diff` (compare two binaries — versions of a sample, patched vs.
+original), `rz-hash` (hashing and entropy), `rz-find` (raw pattern search),
+`rz-asm` (standalone assemble/disassemble), and `rz-ax` (base conversion),
+each with its own arguments and its own `-h`. Argv only — no shell — and the
+flags that write files, run code, fetch over the network, or open an
+interactive view are refused.
+
+### Decompiler: whatever you have
+
+`decompile_function` and the code view use the best decompiler plugin
+installed — rz-ghidra (`pdg`) then jsdec (`pdd`) by default. `OMPRE_DECOMPILER`
+reorders that, or names another plugin's command entirely (any `pdX`-style
+decompiler is probed the same way); the built-ins stay as a fallback. Without
+any plugin, output is labeled annotated disassembly, never passed off as
+decompiled code.
+
+### Dynamic analysis: the debugger (opt-in)
+
+rizin is also a debugger, and `rizin_debug` drives it — launch the target,
+set breakpoints, continue, single-step, read registers and memory, walk the
+backtrace. This **executes the sample**, so it is off until you set
+`OMPRE_ENABLE_DEBUGGER`, runs in a session separate from the static one that
+only ever reads the file, and every resume is an `exec`-tier approval that
+says so. Run untrusted samples only in an isolated, disposable VM or
+container — see [`SECURITY.md`](SECURITY.md#rizin_debug).
+
 ## What it looks like
 
 The screenshots below are real, unmodified captures of an earlier `omp-re`
@@ -182,9 +211,10 @@ blocked, and the IOC is defanged even in the error message:
 
 ## Tool reference
 
-All 24 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
-tables. Triage tools appear only when their backing binary is on PATH, so
-your own tool list may legitimately show fewer than 24.
+All 26 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+tables. Triage tools appear only when their backing binary is on PATH, and
+`rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
+may legitimately show fewer than 26.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
@@ -206,8 +236,10 @@ your own tool list may legitimately show fewer than 24.
 | `set_comment` | mutate | Set (or clear) a comment at an address. |
 | `set_prototype` | mutate | Set a function's C prototype. |
 | `set_variable_type` | mutate | Set a local variable's C type. |
-| `rizin_help` | rizin CLI (read) | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
-| `rizin_command` | rizin CLI (exec) | Run one read-only rizin command the dedicated tools don't cover (`pdsf`, `agc`, `px`, `ph entropy`, `/x`, `/R`, `aoe`, …). |
+| `rizin_help` | rizin REPL (read) | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
+| `rizin_command` | rizin REPL (exec) | Run one read-only rizin command the dedicated tools don't cover (`pdsf`, `agc`, `px`, `ph entropy`, `/x`, `/R`, `aoe`, …). |
+| `rizin_cli` | rizin CLI (exec) | Run a standalone rizin CLI tool (`rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax`) with its own arguments. |
+| `rizin_debug` | debugger (exec) | Dynamic analysis: launch the binary under rizin's debugger and drive it (breakpoints, continue, step, registers, memory, backtrace). Opt-in via `OMPRE_ENABLE_DEBUGGER`. |
 | `triage_capa` | triage | Run capa rules (capabilities, ATT&CK techniques). |
 | `triage_floss` | triage | Extract obfuscated strings (FLOSS). |
 | `triage_die` | triage | Detect packers/compilers/file types (Detect It Easy). |
@@ -226,15 +258,18 @@ Three environment variables, all optional:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `OMPRE_RIZIN_PATH` | `rizin` | Path to the rizin executable. |
+| `OMPRE_RIZIN_PATH` | `rizin` | Path to the rizin executable; its sibling `rz-*` tools are taken from the same directory. |
 | `OMPRE_ANALYSIS_TIMEOUT_MS` | `300000` | Budget for the one-time `aaa` analysis run on open. |
+| `OMPRE_DECOMPILER` | `pdg,pdd` | Comma-separated decompiler command priority; names a plugin's command. Built-ins stay as a fallback. |
+| `OMPRE_ENABLE_DEBUGGER` | unset | Set (`1`/`true`) to register `rizin_debug`, which **executes** the sample under rizin's debugger. Off by default. |
+| `OMPRE_DEBUG_TIMEOUT_MS` | `60000` | Budget for one debugger continue/step before the stuck debuggee is killed. |
 | `OMPRE_AUDIT_HMAC_KEY` | unset | HMAC-SHA256 key for signing audit log lines. Unset → lines are written unsigned plus a one-time warning. |
 
 ## Docs
 
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 24 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 26 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

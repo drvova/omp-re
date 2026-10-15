@@ -14,6 +14,8 @@ export interface ReSessionState {
 	rz: RzSession | null;
 	/** In-flight spawn, so concurrent tool calls after a crash share one respawn instead of racing two. */
 	spawning: Promise<RzSession> | null;
+	/** The DEBUG session (rizin -d), which has launched the target process. Separate from `rz`, created only by the `debug` tool, never auto-respawned (that would silently re-run the program). */
+	dbg: RzSession | null;
 	binaryPath: string | null;
 	/** annotationFingerprint() of the annotations applied to `rz`; compared after branch/tree changes. */
 	appliedAnnotations: string;
@@ -31,6 +33,7 @@ function newState(sessionId: string): ReSessionState {
 		sessionId,
 		rz: null,
 		spawning: null,
+		dbg: null,
 		binaryPath: null,
 		appliedAnnotations: "",
 		auditHmacWarned: false,
@@ -55,6 +58,7 @@ export function shutdownState(sessionId: string): void {
 	const state = sessions.get(sessionId);
 	if (!state) return;
 	state.rz?.close();
+	state.dbg?.close(); // closing the debug rizin also kills the launched debuggee
 	sessions.delete(sessionId);
 }
 

@@ -62,6 +62,11 @@ mistaken for decompiled code. omp-re probes for, in order:
 | [rz-ghidra](https://github.com/rizinorg/rz-ghidra) | `pdg` | Ghidra's decompiler as a rizin plugin. Preferred. |
 | [jsdec](https://github.com/rizinorg/jsdec) | `pdd` | Lighter JavaScript-based decompiler; used when rz-ghidra is absent. |
 
+Set `OMPRE_DECOMPILER` to a comma-separated list of decompiler commands to
+change the order or add another plugin's command (`OMPRE_DECOMPILER=pdd` to
+prefer jsdec; `OMPRE_DECOMPILER=mydec` for a plugin omp-re doesn't know).
+`pdg` and `pdd` stay as a fallback, and `/re status` reports what it found.
+
 Build rz-ghidra against the rizin you installed (its tag tracks rizin's minor
 version; v0.9.0 builds against rizin 0.9.1):
 
@@ -90,6 +95,16 @@ Expected shape: a typed C function such as `int main(int argc, char **argv)
 plugin isn't loaded. Inside omp, `/re status` reports the decompiler omp-re
 found.
 
+## Dynamic analysis (the debugger, opt-in)
+
+`rizin_debug` runs the sample under rizin's debugger. Because that executes
+the binary, it is **off by default**: set `OMPRE_ENABLE_DEBUGGER=1` before
+starting omp to register it. rizin's debugger uses `ptrace`, so it needs a
+host that permits it (most Linux; a container must be started with it
+allowed). Only ever enable this inside a disposable VM or container — see
+[`SECURITY.md`](../SECURITY.md#rizin_debug). `OMPRE_DEBUG_TIMEOUT_MS` (default
+60000) bounds a single continue/step.
+
 ## Optional triage binaries
 
 Each is independently probed on PATH when the plugin loads, and its tool is
@@ -106,8 +121,8 @@ either way.
 ## Installing omp-re itself
 
 ```bash
-omp plugin marketplace add lancejames221b/omp-re
-omp plugin install omp-re@unit221b
+omp plugin marketplace add drvova/omp-re
+omp plugin install omp-re@drvova
 ```
 
 See the [README](../README.md#install) for the dev-load alternative and the
