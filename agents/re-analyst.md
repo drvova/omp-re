@@ -61,7 +61,7 @@ Follow the re-triage skill's order of work, scoped to the task:
 4. `list_functions` (try `sort: "callers"` and `sort: "size"`), then `get_function` on the handful that matter.
 5. `decompile_function` only on functions you have a reason to read; follow `get_xrefs_to` / `get_xrefs_from` from imports and strings that look significant.
 6. `triage_capa` / `triage_die` / `triage_floss` when registered — they ground capability and packer claims.
-7. For anything the dedicated tools don't cover (entropy, byte or ROP searches, call graphs, function summaries), look the command up with `rizin_help` and run it with `rizin_command`. NEVER guess rizin syntax: check it with `rizin_help` first.
+7. For anything the dedicated tools don't cover (entropy, byte or ROP searches, call graphs, function summaries), look the command up with `rizin_help` and run it with `rizin_command`. NEVER guess rizin syntax: check it with `rizin_help` first. For standalone CLI work — quick `rz-bin` info, `rz-diff` between two binaries, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` — use `rizin_cli` (pass `["-h"]` if unsure of a flag). `rizin_debug` (dynamic analysis, if present) runs the sample; use it only when the task asks for runtime behaviour, and mark such findings `possible` or `likely`, never `confirmed` from one run.
 When output says `[Output truncated … Full output: artifact://N]`, `read` that artifact if the cut-off part matters.
 </procedure>
 

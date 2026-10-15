@@ -11,7 +11,13 @@
 import { disassembleAt } from "./disasm.ts";
 import type { RzSession } from "./rizin.ts";
 
-export type DecompilerKind = "pdg" | "pdd";
+/**
+ * A decompiler is identified by the rizin command that runs it. The two known
+ * plugins have stable names (rz-ghidra `pdg`, jsdec `pdd`), kept as a type for
+ * the display labels and tests; any other value is a user-configured plugin
+ * command probed the same way.
+ */
+export type DecompilerKind = "pdg" | "pdd" | (string & {});
 
 export interface DecompileOutcome {
 	/** The decompiler that produced `code`, or "disasm" when none did. */
@@ -30,11 +36,43 @@ export const DECOMPILER_EMPTY_PREFIX = "(disassembly only — the decompiler pro
 /** A real decompile (pdg especially — full Ghidra Sleigh analysis) can run far longer than a plain rizin command. */
 const DECOMPILE_TIMEOUT_MS = 180_000;
 
-/** Ordered probe table: rz-ghidra's `pdg` first, then jsdec's `pdd`. */
-const DECOMPILER_PROBES: readonly { kind: DecompilerKind; helpCommand: string }[] = [
-	{ kind: "pdg", helpCommand: "pdg?" },
-	{ kind: "pdd", helpCommand: "pdd?" },
-];
+/** The built-in probe order: rz-ghidra's `pdg` first, then jsdec's `pdd`. */
+const DEFAULT_DECOMPILER_COMMANDS: readonly DecompilerKind[] = ["pdg", "pdd"];
+
+/**
+ * The decompiler commands to probe, in priority order. `OMPRE_DECOMPILER` is a
+ * comma-separated list that overrides it — put a preferred plugin first, or
+ * name a decompiler plugin omp-re doesn't know (any rizin plugin that adds a
+ * `pdX`-style command works, since probing is generic). The two built-ins are
+ * appended as a fallback unless already named, so setting it only ever adds or
+ * reorders, never silently removes a working decompiler. A single bare word
+ * (e.g. `pdg`) simply forces that one first.
+ */
+export function decompilerCommands(): DecompilerKind[] {
+	const configured = (process.env.OMPRE_DECOMPILER ?? "")
+		.split(",")
+		.map((name) => name.trim())
+		.filter((name) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(name));
+	const ordered: DecompilerKind[] = [];
+	for (const name of [...configured, ...DEFAULT_DECOMPILER_COMMANDS]) if (!ordered.includes(name)) ordered.push(name);
+	return ordered;
+}
+
+/** Every decompiler command whose plugin is actually loaded in this rizin, in priority order (for `/re status` and diagnostics). */
+export async function availableDecompilers(rz: RzSession, signal?: AbortSignal): Promise<DecompilerKind[]> {
+	const found: DecompilerKind[] = [];
+	for (const command of decompilerCommands()) {
+		if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) found.push(command);
+	}
+	return found;
+}
+
+/** A human label for a decompiler command (the two known plugins get their names; anything else is shown as its command). */
+export function decompilerLabel(kind: DecompilerKind | null): string {
+	if (kind === "pdg") return "rz-ghidra (pdg)";
+	if (kind === "pdd") return "jsdec (pdd)";
+	return kind ? `${kind} (plugin)` : "none — decompile_function returns labeled disassembly";
+}
 
 /** Never infer presence from anything short of the command's own help text. */
 function isAvailableReply(reply: string): boolean {
@@ -53,10 +91,10 @@ const kindBySession = new WeakMap<RzSession, DecompilerKind | null>();
 
 export async function resolveDecompiler(rz: RzSession, signal?: AbortSignal): Promise<DecompilerKind | null> {
 	if (kindBySession.has(rz)) return kindBySession.get(rz) ?? null;
-	for (const probe of DECOMPILER_PROBES) {
-		if (isAvailableReply(await rz.cmd(probe.helpCommand, { signal }))) {
-			kindBySession.set(rz, probe.kind);
-			return probe.kind;
+	for (const command of decompilerCommands()) {
+		if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
+			kindBySession.set(rz, command);
+			return command;
 		}
 	}
 	kindBySession.set(rz, null);

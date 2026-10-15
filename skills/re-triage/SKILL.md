@@ -67,6 +67,24 @@ summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy
 read-only commands only: annotate with the dedicated tools so annotations are
 recorded, verified, and undoable.
 
+For rizin's standalone CLI programs, use `rizin_cli`: `rz-bin` for quick
+headers/imports/strings, `rz-diff` to compare two binaries (e.g. two versions
+of a sample), `rz-hash` for hashing and entropy, `rz-find` for raw pattern
+search, `rz-asm` for one-off (dis)assembly, `rz-ax` for base conversion. Pass
+the tool's own flags in `args`, `@binary` for the open file, and `["-h"]` when
+unsure of a flag. It is argv-only; flags that write, run code, or fetch over
+the network are refused.
+
+## Dynamic analysis (only if enabled)
+
+`rizin_debug` is present only when the operator set `OMPRE_ENABLE_DEBUGGER`,
+because it **runs the sample**. If it exists and the task calls for runtime
+behaviour: `start` to launch (stops at entry), `break_add` at the addresses
+you care about, then `continue`/`step`, reading `registers`, `read_memory`,
+and `backtrace` at each stop; `stop` when done. Dynamic observations are
+real but volatile — hedge them and never treat a single run as exhaustive.
+Keep annotating through the static mutate tools, not the debugger.
+
 ## Navigating
 
 `alt+g` opens the function navigator, `alt+s` the strings panel, `alt+i` the

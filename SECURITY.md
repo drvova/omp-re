@@ -23,10 +23,11 @@ provides any isolation:
   risk. **Run this suite against untrusted samples inside a VM or other
   disposable environment you're prepared to lose, not on your primary
   machine.**
-- `omp-re` never executes the binary you open. `debug`-tool-driven dynamic
-  analysis (attach, breakpoints) is a separate, explicit action via omp's
-  own built-in `debug` tool — see [`docs/workflow.md`](docs/workflow.md).
-  If you use it, the sandboxing responsibility is entirely yours.
+- The static tools never execute the binary you open; they only read and
+  analyze the file. The **one exception is `rizin_debug`**, which launches
+  the sample under rizin's debugger. It is off unless you set
+  `OMPRE_ENABLE_DEBUGGER`, and when on, the sandboxing responsibility is
+  entirely yours — see `## rizin_debug` below.
 - Triage tools (`triage_capa`, `triage_yara`, etc.) shell out to real
   external binaries you installed yourself. Their own security posture is
   out of scope for this document — keep them updated.
@@ -93,6 +94,56 @@ covered by `test/rizin-cli.test.ts`.
 
 Even read-only commands parse the sample, so the analysis-hygiene advice
 above applies to them unchanged.
+
+## rizin_cli
+
+`rizin_cli` runs the standalone `rz-*` tools. They are invoked by argv
+through omp's `exec`, never a shell, so `;`/`|`/`$()`/backticks in an
+argument are inert text. What is gated is the flags, refused before the tool
+is spawned:
+
+- flags that run code: `rz-find -E` (shell command per hit), `rz-find -R`
+  (rizin command per hit, which can reach `!` shell), `rz-diff -t command`
+  (runs commands in both files);
+- flags that write to disk: `rz-bin -O`/`-o`/`-C`, `rz-asm -O`;
+- flags that reach the network: `rz-bin -dd`/`-PP` (debuginfod / pdb);
+- flags that open an interactive view that would hang: `rz-diff -H`/`-S`.
+
+Short-flag clusters are checked letter by letter and case-sensitively (so
+`rz-bin -c`, list classes, is allowed while `-C`, create a binary, is not),
+and a doubled flag like `-dd` is matched whole. `rz-gg` (shellcode/egg
+generation) and `rz-run` (launches a process) are not exposed at all. This is
+a convenience boundary over the flags, not a sandbox: the tools read whatever
+files you point them at, with your privileges, exactly as if you ran them.
+The policy lives in `extensions/re/tools-rzcli.ts` and is covered by
+`test/rzcli.test.ts`.
+
+## rizin_debug
+
+`rizin_debug` is the one tool that **executes the sample**: it launches the
+binary under rizin's debugger (`rizin -d`) so it can be stepped and inspected
+at runtime. Because that inverts the "never runs the file" property the rest
+of the suite holds:
+
+- It is **off by default**. The tool is registered only when
+  `OMPRE_ENABLE_DEBUGGER` is set, so a default install cannot be talked into
+  executing a sample — the capability has to be deliberately enabled by the
+  operator, out of band.
+- It runs in a **separate rizin session** (`-d`) from the static one, which
+  continues to only read the file. The debug process is killed with its
+  debuggee on `stop` and on session shutdown.
+- Every action is `exec`-tier, and the approval reason says plainly whether
+  it resumes execution (`start`, `continue`, `step`) or only inspects
+  (`registers`, `read_memory`, `backtrace`). Addresses are validated with the
+  same allowlist as every other tool.
+- It is a **plain debugger** — breakpoints, stepping, registers, memory,
+  backtrace. It has no features for evading anti-debugging, hiding the
+  debuggee, or injecting into other processes.
+
+The debugger provides **no isolation whatsoever** — it is the opposite of a
+sandbox. Enable it and run a sample only inside a disposable VM or container
+you are prepared to lose. The implementation is `extensions/re/tools-debug.ts`
+(launch in `RzSession.spawnDebug`), covered by `test/debug.test.ts`.
 
 ## Scope
 

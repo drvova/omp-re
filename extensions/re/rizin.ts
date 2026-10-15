@@ -122,6 +122,11 @@ export function analysisTimeoutMs(): number {
 	return Number(process.env.OMPRE_ANALYSIS_TIMEOUT_MS) || 300_000;
 }
 
+/** Budget for a single debugger step/continue: a resumed process runs until it hits a breakpoint, signals, or exits. A continue that never returns (a process blocked on input) is killed at this bound. */
+export function debugTimeoutMs(): number {
+	return Number(process.env.OMPRE_DEBUG_TIMEOUT_MS) || 60_000;
+}
+
 export interface CmdOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
@@ -341,10 +346,52 @@ export class RzSession {
 			options.signal?.removeEventListener("abort", onAbort);
 		}
 	}
+
+	/**
+	 * Spawn a rizin DEBUG session: `rizin -q0 -d <binary>`, which LAUNCHES the
+	 * target process (stopped at its entry) so it can be stepped and inspected.
+	 * This is the one place omp-re executes a sample, kept entirely separate
+	 * from the static {@link spawn} session that only ever reads the file.
+	 * Light `aa` analysis (not full `aaa`) runs so symbols resolve in
+	 * backtraces without slowing the launch.
+	 */
+	static async spawnDebug(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
+		if (options.signal?.aborted) throw new RzAbortError("debug launch");
+		const proc = spawn(rizinPath, ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false", "-d", binaryPath], {
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		const session = new RzSession(proc, binaryPath);
+		const onAbort = () => session.close();
+		options.signal?.addEventListener("abort", onAbort, { once: true });
+		try {
+			await session.withTimeout(session.readFrame(), "<debug startup banner>", COMMAND_TIMEOUT_MS);
+			await session.cmd("aa", { timeoutMs: analysisTimeoutMs() });
+			return session;
+		} catch (err) {
+			session.close();
+			if (options.signal?.aborted) throw new RzAbortError("debug launch");
+			throw err;
+		} finally {
+			options.signal?.removeEventListener("abort", onAbort);
+		}
+	}
 }
 
 export function resolveRizinPath(): string {
 	return process.env.OMPRE_RIZIN_PATH?.trim() || "rizin";
+}
+
+/**
+ * The path to a sibling rizin CLI tool (`rz-bin`, `rz-diff`, …). rizin ships
+ * these next to the `rizin` binary, so when the configured rizin is an
+ * absolute path the tool is taken from the same directory (a non-default
+ * install prefix keeps its own tools together); otherwise the bare name is
+ * returned and resolved on PATH, exactly like `rizin` itself.
+ */
+export function resolveRizinTool(tool: string): string {
+	const rizin = resolveRizinPath();
+	const slash = rizin.lastIndexOf("/");
+	return slash === -1 ? tool : `${rizin.slice(0, slash + 1)}${tool}`;
 }
 
 /** Whether `name` resolves to an executable, either as a path or via PATH. */

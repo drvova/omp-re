@@ -63,7 +63,32 @@ extension runner, and by installing it with `omp plugin install`.
 - Integration tests run against `/bin/ls` by default instead of an
   undistributed WannaCry sample.
 
-### Added (rizin CLI)
+### Added (using all of rizin)
+
+- `rizin_cli`: one `exec`-tier tool fronting rizin's standalone command-line
+  programs with their own arguments — `rz-bin` (headers/imports/strings
+  without full analysis), `rz-diff` (compare two binaries), `rz-hash`
+  (hashing and entropy), `rz-find` (raw pattern search), `rz-asm`
+  (assemble/disassemble), `rz-ax` (base conversion). Invoked by argv (no
+  shell); `@binary` substitutes the open binary; `args: ["-h"]` returns the
+  tool's own help. Flags that run code (`rz-find -E`/`-R`, `rz-diff -t
+  command`), write files (`rz-bin -O`/`-o`/`-C`, `rz-asm -O`), fetch over the
+  network (`rz-bin -dd`/`-PP`), or open an interactive view (`rz-diff
+  -H`/`-S`) are refused before the tool runs. rz-gg and rz-run are not exposed.
+- The decompiler is now extensible: `OMPRE_DECOMPILER` is a comma-separated
+  priority list (default `pdg,pdd`) that reorders the probe or names another
+  plugin's `pdX`-style command, with the built-ins kept as a fallback. `/re
+  status` lists the available decompilers and the active one.
+- `rizin_debug` (opt-in via `OMPRE_ENABLE_DEBUGGER`): dynamic analysis under
+  rizin's debugger — launch, breakpoints, continue/continue-until, single-
+  step and step-over, registers, memory reads, and backtrace. It EXECUTES the
+  sample, so it is off by default, runs in a debug session separate from the
+  static one (which still never executes the file), is killed with its
+  debuggee on `stop`/shutdown, and is `exec`-tier with a reason that
+  distinguishes resuming from inspecting. No anti-anti-debug, hiding, or
+  injection features. See `SECURITY.md`.
+
+### Added (rizin REPL)
 
 - `rizin_help`: looks up commands in the installed rizin's own catalog
   (`rizin -qc '?*j'`, about 2,000 commands with typed arguments): a command

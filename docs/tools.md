@@ -1,8 +1,8 @@
 # Tool reference
 
-All 24 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 26 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 24.
+show fewer than 26 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -64,7 +64,7 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
 | `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
 
-## rizin CLI (2 tools)
+## rizin REPL (2 tools)
 
 For everything the dedicated tools don't cover. Both read the catalog the
 installed rizin publishes about itself (`rizin -qc '?*j'`, read once per
@@ -94,6 +94,56 @@ anything reaches rizin:
   `$(`/`${`, `~`, `#`, `"`, `\`, line breaks, and every `@` modifier except
   `@!<n>` (a temporary block size, e.g. `ph entropy @!4096`). Seek with `addr`.
 - **In this rizin's catalog**, and not an `interactive` output mode.
+
+## rizin CLI suite (1 tool)
+
+`rizin_cli` fronts the standalone `rz-*` executables that ship beside rizin,
+for analysis the in-core commands don't cover. It registers only when those
+binaries are found next to the configured rizin (or on PATH). Invoked by argv
+through omp's `exec` — no shell — so there is no `;`/`|`/`$()` surface; the
+gating is on the flags.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `rizin_cli` | `exec` (reason is the full command line) | `tool: enum`, `args: string[]` | Runs one of `rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` with the given arguments. `@binary` in `args` is the open binary's path (auto-appended for `rz-bin`). `args: ["-h"]` returns that tool's own help. Output, or `(no output)`; the tool's stderr comes back as an error result. |
+
+| Tool | Covers | For example |
+| --- | --- | --- |
+| `rz-bin` | headers, imports, exports, symbols, sections, strings, classes, checksums, demangling — without loading the full core | `rz-bin -I -j` |
+| `rz-diff` | compare two files: edit distance or structural (functions, imports, strings, …) | `rz-diff -t functions a.bin b.bin` |
+| `rz-hash` | hashes, entropy, checksums of a file or input | `rz-hash -a sha256,entropy @binary` |
+| `rz-find` | raw byte/string/regex/symbol search | `rz-find -x 4889e5 @binary` |
+| `rz-asm` | standalone assemble / disassemble | `rz-asm -a x86 -b 64 -d 4889e5` |
+| `rz-ax` | base and format conversion | `rz-ax 0xdead` |
+
+Refused before the tool is spawned: any flag that runs code (`rz-find
+-E`/`-R`, `rz-diff -t command`), writes a file (`rz-bin -O`/`-o`/`-C`,
+`rz-asm -O`), fetches over the network (`rz-bin -dd`/`-PP`), or opens an
+interactive view (`rz-diff -H`/`-S`), and any argument with a line break or
+NUL. rz-gg (shellcode generation) and rz-run (launches a process) are not
+exposed — they generate or execute rather than analyze.
+
+## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
+
+`rizin_debug` launches the open binary under rizin's debugger and drives it.
+It **executes the sample**, so it registers only when `OMPRE_ENABLE_DEBUGGER`
+is set, runs in a debug session separate from the static one (which never
+executes the file), and is killed with its debuggee on `stop` or session
+shutdown. Run untrusted samples only in an isolated, disposable environment.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `rizin_debug` | `exec` (the reason says plainly when a step executes vs. inspects) | `action: enum`, `addr?`, `count?`, `size?` | Drives one debug action (below). `addr` is validated like every other address. |
+
+Actions: `start` (launch, stopped at entry), `continue` / `continue_until`
+(resume), `step` / `step_over` (`count` instructions), `registers`,
+`read_memory` (`size` bytes at `addr`), `break_add` / `break_remove` /
+`break_list`, `backtrace`, `stop` (kill and end the session). Every action
+needs a session started first except `start`; nothing is ever launched
+implicitly. A `continue`/`step` that never returns (a debuggee blocked on
+input) is killed at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
+no facilities for evading detection or hiding the debuggee; see
+[`SECURITY.md`](../SECURITY.md#rizin_debug).
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 
