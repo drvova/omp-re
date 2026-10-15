@@ -13,6 +13,18 @@
  * The subsystems' own registration functions stay plain `(pi) => …` so they
  * remain unit-testable in isolation; this module only wires them onto the
  * context graph.
+ *
+ * On teardown: omp's `ExtensionAPI` returns no handle from `on()`,
+ * `registerTool()`, `registerCommand()`, … and exposes no extension-unload
+ * hook, so a listener or tool, once registered, cannot be removed — those
+ * subsystems are register-once by the host's design, and their plugin nodes
+ * carry no inverse because there is nothing to undo. The teardown that is real
+ * lives one level down, in `runtime.ts`: the per-session rizin and debug
+ * processes are effects on a per-session scope that `session_shutdown`
+ * disposes. omp's only supported toggle, `setActiveTools`, is what `/re off`
+ * uses. So this graph buys declarative, dependency-ordered composition and a
+ * single place to see every subsystem — not host-level hot-unload, which the
+ * host does not offer.
  */
 import { Context } from "cordis";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -27,8 +39,9 @@ export interface ReSubsystem {
  * Build the extension's context graph: provide `pi`, then load each subsystem
  * as a cordis plugin that injects it. Awaits every plugin's activation (the
  * async ones probe PATH) so all tools and listeners are registered before the
- * extension finishes initializing. Returns the root `Context`; disposing it
- * unwinds every subsystem.
+ * extension finishes initializing. Returns the root `Context` for inspection;
+ * it is not disposed in normal operation (see the note above — omp has no
+ * extension-unload hook, and the real per-session teardown lives in runtime.ts).
  */
 export async function composeApp(pi: ExtensionAPI, subsystems: readonly ReSubsystem[]): Promise<Context> {
 	const app = new Context();
