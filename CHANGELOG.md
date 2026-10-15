@@ -4,6 +4,95 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2026-10-15
+
+radare2 is replaced by [rizin](https://rizin.re), and the plugin now uses
+omp 17.2.6's native extension surfaces throughout. Verified against rizin
+0.9.1, with and without rz-ghidra, and by loading the extension through
+omp's own SDK and extension runner.
+
+### Security
+
+- Fixed a command injection in `set_comment` (and `/re undo` of a comment):
+  0.1.x interpolated comment text unquoted into `CC <text> @ <addr>`, and
+  radare2 splits on `;`, so a comment like `a; !id` ran an extra command,
+  including a `!` shell escape (reproduced on radare2 5.5.0). Free text and
+  C types now reach rizin only as single-quoted literals, and addresses can
+  no longer contain `@` (rizin's `@@` iterators). See `SECURITY.md`.
+
+### Changed
+
+- **Backend: radare2 → rizin.** `R2Session`/`r2.ts` become
+  `RzSession`/`rizin.ts`, speaking `rizin -q0` with rizin's dialect (`%v`,
+  `echo`, `afvlj`, `afs @`, `aflc`, `fdj`). rizin is required; radare2 is no
+  longer used.
+- **Environment variables:** `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`;
+  `OMPRE_R2_ANALYSIS_TIMEOUT_MS` → `OMPRE_ANALYSIS_TIMEOUT_MS`.
+- **Decompilers:** rz-ghidra (`pdg`) then jsdec (`pdd`). rizin has no `pdc`,
+  so without a plugin `decompile_function` returns annotated disassembly
+  labeled `(disassembly only — no decompiler plugin available)`; when a
+  plugin is loaded but returns nothing for a function, the label says so. A
+  failed probe is no longer cached for the life of the process (the 0.1.x
+  "falls back to pdc even with r2ghidra installed" report, QA-FINDINGS §4,
+  does not apply to this probe).
+- `list_functions`/`search_functions` rows are slimmed to `{ea, name, size,
+  blocks, callers, callees, signature}` (rizin's raw rows carry hundreds of
+  reference entries each; `/bin/ls`'s full `aflj` is 457 KB). New `sort`
+  parameter: `address`, `size`, `callers`.
+- `get_function` returns a curated summary: metrics, signature, typed
+  `args`/`locals`, unique `calls` named via rizin's flags, `callers`, and
+  reference counts.
+- List results are JSON arrays with one compact row per line.
+- Mutate tools resolve to the function's start address before writing (a
+  rename can retire the flag the model used), read variables back through
+  `afvlj` JSON instead of parsing text, and report what rizin actually
+  stored when a mutation lands differently from the request.
+- Enter in the evidence panel now cites the entry into the editor and closes
+  the panel; Enter on a string or an import lists the code that references
+  it before opening a code view. Panels close before reporting that there is
+  nothing to open, so those messages are no longer hidden under an overlay.
+- Bare `/re` shows the help text.
+- Integration tests run against `/bin/ls` by default instead of an
+  undistributed WannaCry sample.
+
+### Added (omp-native)
+
+- Tool renderers (`renderCall`/`renderResult`) for every RE tool, with
+  decompiled code highlighted as C by omp's highlighter.
+- `open_binary` streams analysis progress via `onUpdate`, and the footer
+  shows progress for `/re open` and session restores. Every tool honors its
+  `AbortSignal`: cancelling a command stops waiting without killing rizin;
+  cancelling analysis kills the half-analyzed process.
+- Truncated output is saved in full as a session artifact and linked as
+  `artifact://<id>`; evidence entries record the artifact, and `/re report`
+  reads it.
+- Evidence, annotations, and the open binary follow the active session
+  **branch** (`getBranch()`), with handlers for `session_switch`,
+  `session_branch`, and `session_tree`.
+- **Annotation replay:** resuming a session, respawning a crashed rizin, or
+  moving to a branch with different annotations re-applies that branch's
+  annotations (minus undone ones) to a fresh rizin process. Annotations are
+  attributed to the binary that was open when they were made.
+- `agents/re-analyst.md`: a packaged `task` subagent (omp 17.2.6 forwards
+  extension tools to subagents) with a structured `{binary, sha256, summary,
+  findings[{claim, ea, evidence, confidence}], gaps}` output.
+- Per-call approval reasons for mutate and triage tools (e.g. `Rename
+  function "main" to "parse_args"`); approval decisions for RE tools are
+  written to the audit log.
+- `/re` argument completion (subcommands, and evidence ids for `cite` /
+  `evidence`), `/re status`, the `alt+i` imports shortcut, fuzzy panel
+  filtering (best match first), and a scroll position in the code view.
+- Empty list pages are marked compactable (`useless`) for omp's context
+  compaction.
+
+### Docs
+
+- README, `docs/install.md` (rizin and rz-ghidra install, upgrade notes),
+  `docs/workflow.md` (branches and replay, the re-analyst agent),
+  `docs/tools.md`, `docs/testing.md`, `SECURITY.md`, and `CONTRIBUTING.md`
+  rewritten for rizin. The committed screenshots predate the port and were
+  taken with the radare2 backend.
+
 ## [0.1.2] - 2026-08-04
 
 ### Changed

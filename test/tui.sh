@@ -11,7 +11,7 @@
 # lives in the exhaustive tier, test/tui-qa.sh phase K, which budgets for
 # a real model turn and has a skip-on-outage path.
 #
-# Skips (exit 0, printed reason) when tmux, radare2, or the fixture binary
+# Skips (exit 0, printed reason) when tmux, rizin, or the fixture binary
 # is missing, so `bun test` / CI stays green on a machine without them.
 set -u
 
@@ -34,8 +34,8 @@ if ! command -v tmux >/dev/null 2>&1; then
 	log "SKIP: tmux not found on PATH"
 	exit 0
 fi
-if ! command -v r2 >/dev/null 2>&1; then
-	log "SKIP: radare2 (r2) not found on PATH"
+if ! command -v "${OMPRE_RIZIN_PATH:-rizin}" >/dev/null 2>&1; then
+	log "SKIP: rizin not found on PATH (set OMPRE_RIZIN_PATH)"
 	exit 0
 fi
 if [ ! -f "$TEST_BINARY" ]; then

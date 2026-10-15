@@ -34,17 +34,23 @@ describe("RE_ALL_TOOL_NAMES", () => {
 	});
 });
 
-/** Captures the "tool_call" handler registered by registerAuditLog without a real ExtensionAPI. */
-function captureToolCallHandler(): (event: { type: "tool_call"; toolCallId: string; toolName: string; input: unknown }, ctx: ExtensionContext) => Promise<void> {
-	let captured: ((event: unknown, ctx: unknown) => unknown) | undefined;
+type Handler = (event: Record<string, unknown>, ctx: ExtensionContext) => Promise<void>;
+
+/** Captures the handlers registerAuditLog installs, plus whatever it logs through pi.logger, without a real ExtensionAPI. */
+function captureHandlers(): { toolCall: Handler; approval: Handler; warnings: string[] } {
+	const handlers = new Map<string, Handler>();
+	const warnings: string[] = [];
 	const fakePi = {
-		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
-			if (event === "tool_call") captured = handler;
+		on: (event: string, handler: Handler) => {
+			handlers.set(event, handler);
 		},
+		logger: { warn: (msg: string) => warnings.push(msg), error: (msg: string) => warnings.push(msg) },
 	} as unknown as ExtensionAPI;
 	registerAuditLog(fakePi);
-	if (!captured) throw new Error("registerAuditLog did not register a tool_call handler");
-	return captured as (event: { type: "tool_call"; toolCallId: string; toolName: string; input: unknown }, ctx: ExtensionContext) => Promise<void>;
+	const toolCall = handlers.get("tool_call");
+	const approval = handlers.get("tool_approval_resolved");
+	if (!toolCall || !approval) throw new Error("registerAuditLog did not register its handlers");
+	return { toolCall, approval, warnings };
 }
 
 function makeCtx(sessionId: string, notifications: { message: string; type?: string }[]): ExtensionContext {
@@ -91,7 +97,7 @@ describe("audit log", () => {
 	test("with OMPRE_AUDIT_HMAC_KEY set, an appended line carries a non-empty hmac field that verifies", async () => {
 		process.env.OMPRE_AUDIT_HMAC_KEY = "test-hmac-key";
 		const sessionId = "audit-signed-session";
-		const handler = captureToolCallHandler();
+		const { toolCall: handler } = captureHandlers();
 		const notifications: { message: string; type?: string }[] = [];
 		const ctx = makeCtx(sessionId, notifications);
 
@@ -111,22 +117,13 @@ describe("audit log", () => {
 	test("with the key unset, lines are still written and the warning fires exactly once per session", async () => {
 		delete process.env.OMPRE_AUDIT_HMAC_KEY;
 		const sessionId = "audit-unsigned-session";
-		const handler = captureToolCallHandler();
+		const { toolCall: handler, warnings } = captureHandlers();
 		const notifications: { message: string; type?: string }[] = [];
 		const ctx = makeCtx(sessionId, notifications);
 
-		const originalConsoleError = console.error;
-		const errorCalls: unknown[][] = [];
-		console.error = (...args: unknown[]) => {
-			errorCalls.push(args);
-		};
-		try {
-			await handler({ type: "tool_call", toolCallId: "call-1", toolName: "hash_binary", input: {} }, ctx);
-			await handler({ type: "tool_call", toolCallId: "call-2", toolName: "list_functions", input: {} }, ctx);
-			await handler({ type: "tool_call", toolCallId: "call-3", toolName: "list_imports", input: {} }, ctx);
-		} finally {
-			console.error = originalConsoleError;
-		}
+		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "hash_binary", input: {} }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-2", toolName: "list_functions", input: {} }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-3", toolName: "list_imports", input: {} }, ctx);
 
 		const lines = await readAuditLines(sessionId);
 		expect(lines).toHaveLength(3);
@@ -135,7 +132,30 @@ describe("audit log", () => {
 			expect(parsed.hmac).toBeUndefined();
 		}
 
-		const warnCalls = errorCalls.filter((args) => typeof args[0] === "string" && args[0].includes("OMPRE_AUDIT_HMAC_KEY not configured"));
-		expect(warnCalls).toHaveLength(1);
+		// Headless: the one-time warning goes to omp's log, not stdout/stderr.
+		expect(warnings.filter((msg) => msg.includes("OMPRE_AUDIT_HMAC_KEY not configured"))).toHaveLength(1);
+	});
+
+	test("non-RE tool calls are not audited", async () => {
+		const sessionId = "audit-non-re-session";
+		const { toolCall: handler } = captureHandlers();
+		const ctx = makeCtx(sessionId, []);
+		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "bash", input: { command: "ls" } }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-2", toolName: "hash_binary", input: {} }, ctx);
+		expect((await readAuditLines(sessionId)).map((l) => (JSON.parse(l) as { tool: string }).tool)).toEqual(["hash_binary"]);
+	});
+
+	test("an approval decision for an RE tool is recorded next to its call", async () => {
+		const sessionId = "audit-approval-session";
+		const { approval } = captureHandlers();
+		const ctx = makeCtx(sessionId, []);
+		await approval(
+			{ type: "tool_approval_resolved", sessionId, toolCallId: "call-9", toolName: "rename_function", approved: false, reason: "user denied" },
+			ctx,
+		);
+		await approval({ type: "tool_approval_resolved", sessionId, toolCallId: "call-10", toolName: "bash", approved: true }, ctx);
+		const lines = (await readAuditLines(sessionId)).map((l) => JSON.parse(l) as Record<string, unknown>);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({ toolCallId: "call-9", tool: "rename_function", approved: false, reason: "user denied" });
 	});
 });

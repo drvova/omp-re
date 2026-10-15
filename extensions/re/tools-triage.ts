@@ -1,21 +1,21 @@
 /**
- * External triage tools (capa/floss/yara/die), ported from internal/re/triage.go.
+ * External triage tools (capa/floss/yara/die).
  *
- * Each wraps an external binary invoked via argv (never a shell). A tool is
- * registered only when its binary is found on PATH at factory time — an
- * offered tool that always fails is worse than an absent one. On this
- * machine that means only `yara` registers; capa/floss/diec are absent.
+ * Each wraps an external binary invoked via argv (never a shell) through
+ * omp's `pi.exec`, so a cancelled tool call kills the scanner. A tool is
+ * registered only when its binary is found on PATH at load time — an offered
+ * tool that always fails is worse than an absent one.
  *
  * Like tools-read.ts, every tool returns the real findings (rule names,
- * matched capabilities, detections) as content, not just a count — Go's
- * agentloop.go:662 sent the model only `result.Text`, and Go's own summarize*
- * functions produced counts, not names.
+ * matched capabilities, detections) as content, not just a count.
  */
 import { access, realpath as fsRealpath } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { getState, requireBinary } from "./state.ts";
 import { jsonResult, textResult } from "./format.ts";
+import { reRenderers } from "./render.ts";
+import { isExecutable } from "./rizin.ts";
+import { getState, requireBinary } from "./state.ts";
 
 interface PlainTriageDef {
 	/** External tool key (also the summarizer lookup key). */
@@ -49,19 +49,6 @@ const PLAIN_TRIAGE_TOOLS: PlainTriageDef[] = [
 ];
 
 const YARA_TIMEOUT_MS = 120_000;
-
-async function isOnPath(bin: string): Promise<boolean> {
-	const dirs = (process.env.PATH ?? "").split(":").filter(Boolean);
-	for (const dir of dirs) {
-		try {
-			await access(`${dir}/${bin}`, fsConstants.X_OK);
-			return true;
-		} catch {
-			// keep scanning
-		}
-	}
-	return false;
-}
 
 /** Resolve and validate an existing, readable file path (used for both the session binary and yara's rules file). */
 async function resolveExistingFile(label: string, value: string): Promise<string> {
@@ -138,8 +125,8 @@ function parseYaraPlainText(stdout: string): YaraMatch[] {
 export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 	const z = pi.zod;
 	const [plainAvailability, yaraAvailable] = await Promise.all([
-		Promise.all(PLAIN_TRIAGE_TOOLS.map((def) => isOnPath(def.bin))),
-		isOnPath("yara"),
+		Promise.all(PLAIN_TRIAGE_TOOLS.map((def) => isExecutable(def.bin))),
+		isExecutable("yara"),
 	]);
 
 	for (const [index, def] of PLAIN_TRIAGE_TOOLS.entries()) {
@@ -149,29 +136,31 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 			name: `triage_${def.name}`,
 			label: `Triage: ${def.name}`,
 			description: def.description,
-			approval: "exec",
+			approval: { tier: "exec", reason: `Run ${def.bin} against the open binary.` },
 			loadMode: "essential",
 			parameters: z.object({}),
-			async execute(_id, _params, _signal, _onUpdate, ctx) {
+			...reRenderers({ title: `Triage: ${def.name}`, body: "json" }),
+			async execute(_id, _params, signal, _onUpdate, ctx) {
 				const file = await resolveExistingFile("file", requireBinary(getState(ctx)));
-				const result = await pi.exec(def.bin, ["-j", file], { timeout: def.timeoutMs });
+				const result = await pi.exec(def.bin, ["-j", file], { timeout: def.timeoutMs, signal });
 				// Exit code is advisory, not failure: capa signals "no matches" with a non-zero exit.
 				// But empty stdout + non-zero exit means it never ran at all — that must not read as "0 findings".
 				if (result.code !== 0 && result.stdout.trim() === "") {
 					throw new Error(`omp-re: ${def.name} failed (exit ${result.code}): ${result.stderr.trim() || "no output"}`);
 				}
+				const options = { ctx, tool: `triage_${def.name}` };
 				let parsed: unknown;
 				try {
 					parsed = JSON.parse(result.stdout);
 				} catch {
-					return textResult(`${def.name}: output was not valid JSON (schema not recognized)`, result.stdout);
+					return textResult(`${def.name}: output was not valid JSON (schema not recognized)`, result.stdout, options);
 				}
 				const findings = FINDERS[def.name]?.(parsed);
 				if (findings === null || findings === undefined) {
-					return textResult(`${def.name}: expected JSON shape not found`, result.stdout);
+					return textResult(`${def.name}: expected JSON shape not found`, result.stdout, options);
 				}
 				const count = Array.isArray(findings) ? findings.length : Object.keys(findings as object).length;
-				return jsonResult(`${def.name}: ${count} finding group(s)`, findings);
+				return jsonResult(`${def.name}: ${count} finding group(s)`, findings, options);
 			},
 		});
 	}
@@ -181,18 +170,22 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 			name: "triage_yara",
 			label: "Triage: yara",
 			description: "Scan the binary with user-supplied YARA rules.",
-			approval: "exec",
+			approval: (args) => ({
+				tier: "exec",
+				reason: `Run yara with rules ${JSON.stringify((args as { rules_path?: unknown })?.rules_path ?? "?")} against the open binary.`,
+			}),
 			loadMode: "essential",
 			parameters: z.object({
 				rules_path: z.string().describe("Path to a YARA rules file."),
 			}),
-			async execute(_id, params, _signal, _onUpdate, ctx) {
+			...reRenderers({ title: "Triage: yara", subject: "rules_path", body: "json" }),
+			async execute(_id, params, signal, _onUpdate, ctx) {
 				if (params.rules_path.trim() === "") {
 					throw new Error("omp-re: yara: rules_path argument is required (no default ruleset ships)");
 				}
 				const file = await resolveExistingFile("file", requireBinary(getState(ctx)));
 				const rules = await resolveExistingFile("rules_path", params.rules_path);
-				const result = await pi.exec("yara", [rules, file], { timeout: YARA_TIMEOUT_MS });
+				const result = await pi.exec("yara", [rules, file], { timeout: YARA_TIMEOUT_MS, signal });
 				// Exit code is advisory, not failure: yara exits non-zero on zero matches. But empty
 				// stdout + non-zero exit (e.g. a rules file that failed to compile) must not read as
 				// "0 rules matched" — that would be a false all-clear from a security tool.
@@ -200,7 +193,7 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 					throw new Error(`omp-re: yara failed (exit ${result.code}): ${result.stderr.trim() || "no output"}`);
 				}
 				const matches = parseYaraPlainText(result.stdout);
-				return jsonResult(`yara: ${matches.length} rule(s) matched`, matches);
+				return jsonResult(`yara: ${matches.length} rule(s) matched`, matches, { ctx, tool: "triage_yara" });
 			},
 		});
 	}
