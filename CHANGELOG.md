@@ -126,6 +126,14 @@ extension runner, and by installing it with `omp plugin install`.
 
 ### Added (omp-native)
 
+- **Compaction preservation** (`session.compacting`): when omp compacts the
+  conversation, omp-re folds a snapshot of the RE session — the open binary,
+  evidence and annotation counts, and the most recent evidence ids — into the
+  summary, so the post-compaction model does not lose track of what is open or
+  already found (the entries themselves always persisted on the branch; this
+  keeps the model's working memory grounded). Only contributes lines when a
+  session is active. `extensions/re/preserve.ts`.
+
 - Tool renderers (`renderCall`/`renderResult`) for every RE tool, with
   decompiled code highlighted as C by omp's highlighter, plus native views
   (`describeCall`/`describeResult`) so Tern shows each RE tool as a native
