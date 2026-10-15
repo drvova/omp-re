@@ -21,6 +21,10 @@ extension runner, and by installing it with `omp plugin install`.
   including a `!` shell escape (reproduced on radare2 5.5.0). Free text and
   C types now reach rizin only as single-quoted literals, and addresses can
   no longer contain `@` (rizin's `@@` iterators). See `SECURITY.md`.
+- Cross-platform executable resolution: `resolveRizinTool` and `isExecutable`
+  handle both `/` and `\\` separators and carry rizin's extension, so the
+  `rz-*` CLI tools resolve next to a Windows `rizin.exe`. Set `OMPRE_RIZIN_PATH`
+  to the full `rizin.exe` path on Windows.
 - rizin is now spawned with `-N`, so a user's `rizinrc` can't change the
   command output omp-re parses (plugins still load; `OMPRE_RIZIN_LOAD_USER_CONFIG=1`
   restores it). The `rizin_command` syntax denylist was audited against

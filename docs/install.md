@@ -41,8 +41,14 @@ put `<prefix>/bin` on `PATH` or point omp-re at the binary with
 
 ### Windows
 
-Use the installer from the releases page; set `OMPRE_RIZIN_PATH` if
-`rizin.exe` is not on `PATH`.
+Use the installer from the releases page. If `rizin.exe` is not on `PATH`,
+point omp-re at it with the **full path**, e.g.
+`OMPRE_RIZIN_PATH=C:\rizin\bin\rizin.exe`. omp-re takes the `rz-*` CLI tools
+(`rz-bin.exe`, `rz-diff.exe`, …) from the same folder and with the same
+`.exe` extension, so a full path makes `rizin_cli` work too. omp-re is
+cross-platform (it uses `node:path` and runs each tool via argv, never a
+shell), but is primarily exercised on Linux and macOS; the opt-in debugger's
+behavior on Windows is rizin's own.
 
 ### Verify
 

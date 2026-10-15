@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { baseRizinFlags, eaFromOffset, normalizeAddr, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { baseRizinFlags, eaFromOffset, normalizeAddr, resolveRizinTool, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 
 describe("validateAddr", () => {
 	test("accepts hex addresses, flag names, and arithmetic", () => {
@@ -197,5 +197,35 @@ describe("baseRizinFlags", () => {
 		expect(baseRizinFlags()).not.toContain("-N");
 		expect(baseRizinFlags()[0]).toBe("-q0");
 		restore();
+	});
+});
+
+describe("resolveRizinTool (sibling rz-* resolution)", () => {
+	const original = process.env.OMPRE_RIZIN_PATH;
+	const set = (v: string | undefined) => {
+		if (v === undefined) delete process.env.OMPRE_RIZIN_PATH;
+		else process.env.OMPRE_RIZIN_PATH = v;
+	};
+	// Restore after every test so a mutated OMPRE_RIZIN_PATH never leaks into other suites' rizin spawns.
+	afterEach(() => set(original));
+
+	test("a bare command stays bare (resolved on PATH, like rizin itself)", () => {
+		set(undefined);
+		expect(resolveRizinTool("rz-bin")).toBe("rz-bin");
+		set("rizin");
+		expect(resolveRizinTool("rz-diff")).toBe("rz-diff");
+	});
+
+	test("a path takes the sibling from the same directory", () => {
+		set("/opt/rizin/bin/rizin");
+		expect(resolveRizinTool("rz-bin")).toBe("/opt/rizin/bin/rz-bin");
+	});
+
+	test("the sibling inherits rizin's extension (Windows .exe)", () => {
+		// node:path is platform-correct at runtime; this verifies the extension carry cross-separator.
+		set("/opt/rizin/bin/rizin.exe");
+		expect(resolveRizinTool("rz-hash")).toBe("/opt/rizin/bin/rz-hash.exe");
+		set("rizin.exe");
+		expect(resolveRizinTool("rz-ax")).toBe("rz-ax.exe");
 	});
 });
