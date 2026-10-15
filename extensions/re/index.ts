@@ -145,7 +145,7 @@ export default async function (pi: ExtensionAPI) {
 	registerUI(pi);
 	await registerTriageTools(pi);
 
-	const z = pi.zod;
+	const openBinaryParams = pi.zod.object({ path: pi.zod.string().describe("Path to the binary file to open.") });
 	pi.registerTool({
 		name: "open_binary",
 		label: "Open binary",
@@ -153,7 +153,7 @@ export default async function (pi: ExtensionAPI) {
 			"Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (hash_binary, list_functions, decompile_function, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({ path: z.string().describe("Path to the binary file to open.") }),
+		parameters: openBinaryParams,
 		...reRenderers({ title: "Open binary", subject: "path", body: "text" }),
 		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
 			const name = basename(params.path);
@@ -321,7 +321,7 @@ export default async function (pi: ExtensionAPI) {
 						return;
 					}
 					case "on": {
-						const all = new Set(pi.getAllTools());
+						const all = new Set(pi.getAllTools().map((tool) => tool.name));
 						const active = new Set(pi.getActiveTools());
 						for (const name of Object.keys(RE_ALL_TOOL_NAMES)) {
 							if (all.has(name)) active.add(name);

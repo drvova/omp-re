@@ -75,8 +75,32 @@ function mutateResult(kind: AnnotationKind, data: { ea: string; oldValue: string
 }
 
 export function registerMutateTools(pi: ExtensionAPI): void {
+	// Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
 	const z = pi.zod;
 	const undoNote = "Reversible with /re undo.";
+	const fnAddr = () => z.string().describe("Function address or name.");
+	const renameFunctionParams = z.object({
+		addr: fnAddr(),
+		new: z.string().describe("New function name (identifier characters only)."),
+	});
+	const renameVariableParams = z.object({
+		addr: fnAddr(),
+		old: z.string().describe("Current variable name."),
+		new: z.string().describe("New variable name."),
+	});
+	const setCommentParams = z.object({
+		addr: z.string().describe("Address (or name) to comment."),
+		text: z.string().describe("Comment text (single line); empty string clears the comment."),
+	});
+	const setPrototypeParams = z.object({
+		addr: fnAddr(),
+		sig: z.string().describe("New C-style prototype, without a trailing semicolon."),
+	});
+	const setVariableTypeParams = z.object({
+		addr: fnAddr(),
+		var: z.string().describe("Variable name."),
+		type: z.string().describe("New C-style type, e.g. `char *` or `struct sockaddr_in *`."),
+	});
 
 	pi.registerTool({
 		name: "rename_function",
@@ -84,10 +108,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description: "Rename the function at an address, verifying the rename actually landed before reporting success.",
 		approval: (args) => ({ tier: "write", reason: `Rename function ${describeArg(args, "addr")} to ${describeArg(args, "new")}. ${undoNote}` }),
 		loadMode: "essential",
-		parameters: z.object({
-			addr: z.string().describe("Function address or name."),
-			new: z.string().describe("New function name (identifier characters only)."),
-		}),
+		parameters: renameFunctionParams,
 		...reRenderers({ title: "Rename function", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -115,11 +136,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			reason: `Rename variable ${describeArg(args, "old")} to ${describeArg(args, "new")} in ${describeArg(args, "addr")}. ${undoNote}`,
 		}),
 		loadMode: "essential",
-		parameters: z.object({
-			addr: z.string().describe("Function address or name."),
-			old: z.string().describe("Current variable name."),
-			new: z.string().describe("New variable name."),
-		}),
+		parameters: renameVariableParams,
 		...reRenderers({ title: "Rename variable", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -149,10 +166,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description: "Set (or clear, with empty text) the comment at an address, replacing any existing comment, and verify it landed before reporting success.",
 		approval: (args) => ({ tier: "write", reason: `Set the comment at ${describeArg(args, "addr")}. ${undoNote}` }),
 		loadMode: "essential",
-		parameters: z.object({
-			addr: z.string().describe("Address (or name) to comment."),
-			text: z.string().describe("Comment text (single line); empty string clears the comment."),
-		}),
+		parameters: setCommentParams,
 		...reRenderers({ title: "Comment", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -179,10 +193,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			"Set a function's C prototype, e.g. `int parse_config(const char *path, int flags)`. The name in the prototype becomes the function's name. Verifies what rizin stored and reports it if rizin's C parser normalized it differently.",
 		approval: (args) => ({ tier: "write", reason: `Set the prototype of ${describeArg(args, "addr")} to ${describeArg(args, "sig")}. ${undoNote}` }),
 		loadMode: "essential",
-		parameters: z.object({
-			addr: z.string().describe("Function address or name."),
-			sig: z.string().describe("New C-style prototype, without a trailing semicolon."),
-		}),
+		parameters: setPrototypeParams,
 		...reRenderers({ title: "Prototype", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -211,11 +222,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			reason: `Set the type of ${describeArg(args, "var")} in ${describeArg(args, "addr")} to ${describeArg(args, "type")}. ${undoNote}`,
 		}),
 		loadMode: "essential",
-		parameters: z.object({
-			addr: z.string().describe("Function address or name."),
-			var: z.string().describe("Variable name."),
-			type: z.string().describe("New C-style type, e.g. `char *` or `struct sockaddr_in *`."),
-		}),
+		parameters: setVariableTypeParams,
 		...reRenderers({ title: "Variable type", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });

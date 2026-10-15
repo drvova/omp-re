@@ -446,6 +446,48 @@ describe("reRenderers", () => {
 		expect(out).toContain("0x10  ret");
 	});
 
+	test("describeCall gives Tern a native head with the call's target", () => {
+		const { describeCall } = reRenderers({ title: "Decompile", subject: "addr", body: "code" });
+		expect(describeCall({ addr: "main" })).toEqual({ tool: { title: "Decompile", target: "main", meta: [] }, inline: true });
+	});
+
+	test("describeResult renders decompiler output as a C code node and labels the disassembly fallback", () => {
+		const { describeResult } = reRenderers({ title: "Decompile", subject: "addr", body: "code" });
+		const decompiled = describeResult(
+			{
+				content: [{ type: "text", text: "decompiled 0x10 (pdg)\nint main(void) { return 0; }" }],
+				details: { header: "decompiled 0x10 (pdg)", summary: "", decompiler: "pdg" },
+			},
+			{ expanded: false, isPartial: false },
+			{ addr: "main" },
+		);
+		expect(decompiled.tool?.meta).toEqual(["decompiled 0x10 (pdg)"]);
+		expect(decompiled.body?.[0]).toMatchObject({ k: "code", p: { lang: "c", text: "int main(void) { return 0; }" } });
+
+		const fallback = describeResult(
+			{
+				content: [{ type: "text", text: `${DISASM_ONLY_PREFIX}disassembly of 0x10\n0x10  ret` }],
+				details: { header: DISASM_ONLY_PREFIX.trim(), summary: "", decompiler: "disasm", artifactId: "2" },
+			},
+			{ expanded: false, isPartial: false },
+		);
+		expect(fallback.tone).toBe("warning");
+		expect(JSON.stringify(fallback.tool?.meta)).toContain("disassembly only");
+		expect(JSON.stringify(fallback.tool?.meta)).toContain("artifact://2");
+		expect((fallback.body?.[0] as { p?: { lang?: string } }).p?.lang).toBeUndefined();
+	});
+
+	test("describeResult shows progress while partial and a one-line error gist", () => {
+		const { describeResult } = reRenderers({ title: "Open binary", subject: "path", body: "text" });
+		const partial = describeResult({ content: [{ type: "text", text: "Analyzing ls with rizin… 3s" }] }, { expanded: false, isPartial: true }, { path: "/bin/ls" });
+		expect(partial.tool?.target).toBe("/bin/ls");
+		expect(JSON.stringify(partial.tool?.meta)).toContain("Analyzing ls with rizin… 3s");
+		const failed = describeResult({ content: [{ type: "text", text: "omp-re: boom\nstack" }], isError: true }, { expanded: false, isPartial: false });
+		expect(failed.tone).toBe("error");
+		expect(JSON.stringify(failed.tool?.meta)).toContain("— omp-re: boom");
+		expect(failed.body).toHaveLength(1);
+	});
+
 	test("renderResult shows partial progress and errors on one line", () => {
 		const { renderResult } = reRenderers({ title: "Open binary", subject: "path", body: "text" });
 		expect(render(renderResult({ content: [{ type: "text", text: "Analyzing ls with rizin… 3s" }] }, { expanded: false, isPartial: true, spinnerFrame: 1 }, theme))).toBe(

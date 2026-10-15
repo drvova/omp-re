@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lancejames221b/omp-re/actions/workflows/ci.yml/badge.svg)](https://github.com/lancejames221b/omp-re/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![omp ≥ 17.2.6](https://img.shields.io/badge/omp-%E2%89%A5%2017.2.6-informational)
+![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
 ![22 tools](https://img.shields.io/badge/tools-22-informational)
 
@@ -40,11 +40,13 @@ TypeScript loads natively through Bun; an edit is picked up on the next omp
 start with no build step. Never use a real home directory in this config
 (`/path/to/omp-re`, not a machine-specific path).
 
-**rizin is required.** Without it, `/re open` throws exactly:
-`omp-re: rizin not found on PATH — install rizin (https://rizin.re) or set
-OMPRE_RIZIN_PATH`. See [Prerequisites](#prerequisites) for versions and the
-optional decompiler plugins, and [`docs/install.md`](docs/install.md) for
-per-platform steps.
+**rizin is required, and it is yours.** omp-re does not bundle, download,
+or build rizin: it runs the `rizin` on your `PATH` (or the one
+`OMPRE_RIZIN_PATH` names), so you choose the version, update it with your
+package manager, and keep the decompiler plugins you already have. Without
+it, `/re open` throws exactly: `omp-re: rizin not found on PATH — install
+rizin (https://rizin.re) or set OMPRE_RIZIN_PATH`. See
+[Prerequisites](#prerequisites) and [`docs/install.md`](docs/install.md).
 
 ## Quickstart
 
@@ -73,12 +75,13 @@ address behind them.
 | omp feature | What omp-re does with it |
 | --- | --- |
 | Tool renderers (`renderCall`/`renderResult`) | Every RE tool renders a compact call line and a collapsible result; decompiled code is syntax-highlighted as C with omp's highlighter. |
+| Native tool views (`describeCall`/`describeResult`) | In Tern and other TSP terminals, each RE tool is a native tool card — title, target, and facts in the head; C, JSON, or disassembly as a `code` node the terminal highlights and clamps — instead of a generic text card. |
 | Streaming updates + `AbortSignal` | `open_binary` streams analysis progress; cancelling a tool call stops waiting without killing rizin (and its annotations); cancelling analysis kills the half-analyzed process. |
 | Session artifacts (`artifact://`) | Output past the context cap is saved in full to the session's artifact store and linked from the result, never discarded. |
 | Session branches (`getBranch`) | Evidence, annotations, and the open binary follow the active branch: after `/tree` navigation or a branch, an abandoned branch's renames are rolled back and its evidence no longer grounds claims. |
 | Session lifecycle events | `--continue`/`/resume` reopen the branch's binary in the background and **replay its annotations** into the fresh rizin process; a crashed or timed-out rizin respawns the same way. |
 | Approval tiers with reasons | Read tools are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); triage tools are `exec`. omp's `tools.approvalMode` decides. |
-| Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md` with a structured output schema. |
+| Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
 | Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the evidence ids on this branch. |
 | Footer status, widgets, logger | Analysis progress shows in the footer; the binary-facts band is a widget; headless warnings go to omp's log. |
 
@@ -130,9 +133,9 @@ blocked, and the IOC is defanged even in the error message:
 
 | Requirement | Notes |
 | --- | --- |
-| `omp` ≥ 17.2.6 | Tested against 17.2.6: extension tools reach `task` subagents, session artifacts and branch APIs are available. |
+| `omp` ≥ 18.11.1 | Developed and tested against 18.11.1, the latest release (its `getAllTools()` returns tool objects, and Tern renders tools natively). The dev dependencies pin it, so `bun install` tests against the same host. |
 | `bun` | The runtime `omp` invokes plugin code with; omp ships it as a dependency, but you need it to run this repo's own `bun install`/`bun test` for local development. |
-| **rizin — required** | Tested with rizin 0.9.1. Absent, `/re open` throws exactly: `omp-re: rizin not found on PATH — install rizin (https://rizin.re) or set OMPRE_RIZIN_PATH`. |
+| **rizin — required, not bundled** | Your own install, found on `PATH` or via `OMPRE_RIZIN_PATH`. Tested with rizin 0.9.1, the latest release. `/re status` shows which rizin and decompiler omp-re found. |
 | **rz-ghidra — optional, strongly recommended** | Provides `pdg`, a real Ghidra decompile. jsdec (`pdd`) is used when rz-ghidra is absent. With neither, `decompile_function` and the code viewer's `d` key return annotated disassembly whose output begins `(disassembly only — no decompiler plugin available) `. `/re status` shows which decompiler is active. |
 | Optional triage binaries | Each is independently probed on PATH at load time and simply not registered when absent: `capa` → `triage_capa`, `floss` → `triage_floss`, `diec` → `triage_die`, `yara` → `triage_yara`. |
 

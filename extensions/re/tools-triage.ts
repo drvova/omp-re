@@ -129,6 +129,12 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 		isExecutable("yara"),
 	]);
 
+	// Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
+	const noParams = z.object({});
+	const yaraParams = z.object({
+		rules_path: z.string().describe("Path to a YARA rules file."),
+	});
+
 	for (const [index, def] of PLAIN_TRIAGE_TOOLS.entries()) {
 		if (!plainAvailability[index]) continue; // absent binary — skip silently, never register a tool that always fails
 
@@ -138,7 +144,7 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 			description: def.description,
 			approval: { tier: "exec", reason: `Run ${def.bin} against the open binary.` },
 			loadMode: "essential",
-			parameters: z.object({}),
+			parameters: noParams,
 			...reRenderers({ title: `Triage: ${def.name}`, body: "json" }),
 			async execute(_id, _params, signal, _onUpdate, ctx) {
 				const file = await resolveExistingFile("file", requireBinary(getState(ctx)));
@@ -175,9 +181,7 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 				reason: `Run yara with rules ${JSON.stringify((args as { rules_path?: unknown })?.rules_path ?? "?")} against the open binary.`,
 			}),
 			loadMode: "essential",
-			parameters: z.object({
-				rules_path: z.string().describe("Path to a YARA rules file."),
-			}),
+			parameters: yaraParams,
 			...reRenderers({ title: "Triage: yara", subject: "rules_path", body: "json" }),
 			async execute(_id, params, signal, _onUpdate, ctx) {
 				if (params.rules_path.trim() === "") {

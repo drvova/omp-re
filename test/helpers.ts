@@ -6,7 +6,8 @@
  */
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
-import * as zod from "zod/v4";
+// The schema builder omp 18 injects as `pi.zod` (see pi-coding-agent extensions/loader.ts).
+import * as zod from "@oh-my-pi/omptype/zod";
 import { resolveRizinPath } from "../extensions/re/rizin.ts";
 
 /** Any readable binary works; /bin/ls exists on every Linux host and macOS. Override with OMPRE_TEST_BINARY. */

@@ -11,8 +11,9 @@ bun install --ignore-scripts
 bun test
 ```
 
-Eight test files. Five run unconditionally; three need a real `rizin` and a
-test binary, and **skip entirely** (not fail) when either is missing:
+Nine test files. The `bun install` dev dependencies pin omp **18.11.1**, so
+the host APIs under test are the ones users run. Tests that need a real
+`rizin` and a test binary **skip** (not fail) when either is missing:
 
 | File | Needs rizin? | Tests (rizin present) |
 | --- | --- | --- |
@@ -21,10 +22,17 @@ test binary, and **skip entirely** (not fail) when either is missing:
 | `evidence.test.ts` | No | 4 |
 | `audit.test.ts` | No | 5 |
 | `report.test.ts` | No | 4 |
+| `extension-sdk.test.ts` | Only its resume/replay test | 6 |
 | `rizin-integration.test.ts` | Yes (one test runs without) | 13 |
-| `tools-registry.test.ts` | Yes (the renderer tests run without) | 32 |
+| `tools-registry.test.ts` | Yes (the renderer and native-view tests run without) | 35 |
 | `tools-mutate-registry.test.ts` | Yes | 15 |
-| **Total** | | **109** |
+| **Total** | | **118** |
+
+`extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
+extension runner (no model is called) and drives `/re` commands and tools
+the way a session does. It is the suite that catches host API drift: omp 18
+changed `getAllTools()` to return tool objects, which broke `/re on` while
+every stub-based test stayed green. It runs in CI.
 
 **The default fixture is `/bin/ls`**, which exists on every Linux host and on
 macOS, so the integration suites need nothing but rizin. Point them at
@@ -38,8 +46,8 @@ loaded it asserts the decompiler's output, without one it asserts the
 labeled `(disassembly only — no decompiler plugin available)` fallback. Both
 paths were run for the 0.2.0 release.
 
-Expected shape with rizin present: **109 pass, 0 fail, 0 skip**. Without
-rizin: **54 pass, 63 skip, 0 fail** (117 reported — bun counts skipped
+Expected shape with rizin present: **118 pass, 0 fail, 0 skip**. Without
+rizin: **62 pass, 64 skip, 0 fail** (126 reported — bun counts skipped
 `describe` blocks slightly differently from executed ones). This is CI's
 permanent shape, not a degraded state to "fix".
 
@@ -94,15 +102,14 @@ them pure theatre on a hosted runner that has neither tmux nor a model.
 
 ## Loading the extension through omp itself
 
-The unit suites execute tool definitions through a stub `ExtensionAPI`. To
-check the real loader, register the extension in a throwaway omp session via
-the SDK (`createAgentSession({ additionalExtensionPaths: ["extensions/re"],
-sessionManager: SessionManager.inMemory() })`, then
-`initializeExtensions(...)` from `@oh-my-pi/pi-coding-agent`'s
-`modes/runtime-init`). Slash commands passed to `session.prompt("/re …")` and
-tools fetched with `session.getToolByName(...)` run locally with no model
-call. This is how the 0.2.0 release was verified end to end, including a
-persisted session reopened to confirm annotation replay.
+`test/extension-sdk.test.ts` shows the pattern: `createAgentSession({
+additionalExtensionPaths: ["extensions/re"], disableExtensionDiscovery: true,
+sessionManager })`, then `initializeExtensions(...)` from
+`@oh-my-pi/pi-coding-agent/modes/runtime-init`. Slash commands passed to
+`session.prompt("/re …")` and tools fetched with `session.getToolByName(...)`
+run locally with no model call. For a full install check, `omp plugin
+marketplace add /path/to/checkout` then `omp plugin install omp-re@unit221b`
+installs from a local checkout.
 
 ## Local dev loop
 

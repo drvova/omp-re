@@ -6,10 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.2.0] - 2026-10-15
 
-radare2 is replaced by [rizin](https://rizin.re), and the plugin now uses
-omp 17.2.6's native extension surfaces throughout. Verified against rizin
-0.9.1, with and without rz-ghidra, and by loading the extension through
-omp's own SDK and extension runner.
+radare2 is replaced by [rizin](https://rizin.re), and the plugin targets
+omp **18.11.1** (the latest release) and its native extension surfaces.
+rizin is not bundled: omp-re runs the rizin on your `PATH` or at
+`OMPRE_RIZIN_PATH`. Verified against rizin 0.9.1 (latest), with and without
+rz-ghidra, by loading the extension through omp 18.11.1's own SDK and
+extension runner, and by installing it with `omp plugin install`.
 
 ### Security
 
@@ -52,13 +54,21 @@ omp's own SDK and extension runner.
   it before opening a code view. Panels close before reporting that there is
   nothing to open, so those messages are no longer hidden under an overlay.
 - Bare `/re` shows the help text.
+- `/re on` works on omp 18, whose `getAllTools()` returns tool objects
+  instead of names (0.1.x's `/re on` silently re-enabled nothing there).
+- The `@oh-my-pi/*` packages are now pinned dev dependencies at `^18.11.1`
+  (they stay `*` peers at runtime), so local typechecks and tests run against
+  the current host. Tool schemas are declared as named consts so `params`
+  types infer under omp 18's zod-compatible builder.
 - Integration tests run against `/bin/ls` by default instead of an
   undistributed WannaCry sample.
 
 ### Added (omp-native)
 
 - Tool renderers (`renderCall`/`renderResult`) for every RE tool, with
-  decompiled code highlighted as C by omp's highlighter.
+  decompiled code highlighted as C by omp's highlighter, plus native views
+  (`describeCall`/`describeResult`) so Tern shows each RE tool as a native
+  tool card with a `code` body instead of a generic text card.
 - `open_binary` streams analysis progress via `onUpdate`, and the footer
   shows progress for `/re open` and session restores. Every tool honors its
   `AbortSignal`: cancelling a command stops waiting without killing rizin;
@@ -73,9 +83,13 @@ omp's own SDK and extension runner.
   moving to a branch with different annotations re-applies that branch's
   annotations (minus undone ones) to a fresh rizin process. Annotations are
   attributed to the binary that was open when they were made.
-- `agents/re-analyst.md`: a packaged `task` subagent (omp 17.2.6 forwards
+- `agents/re-analyst.md`: a packaged `task` subagent (omp forwards
   extension tools to subagents) with a structured `{binary, sha256, summary,
-  findings[{claim, ea, evidence, confidence}], gaps}` output.
+  findings[{claim, ea, evidence, confidence}], gaps}` output, marked
+  `structured: true` so the schema is enforced even with `task.structured`
+  off.
+- `test/extension-sdk.test.ts`: loads the extension through omp's real SDK
+  in CI, so host API drift fails `bun test`.
 - Per-call approval reasons for mutate and triage tools (e.g. `Rename
   function "main" to "parse_args"`); approval decisions for RE tools are
   written to the audit log.
