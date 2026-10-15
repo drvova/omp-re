@@ -33,6 +33,14 @@ extension runner, and by installing it with `omp plugin install`.
   `RzSession`/`rizin.ts`, speaking `rizin -q0` with rizin's dialect (`%v`,
   `echo`, `afvlj`, `afs @`, `aflc`, `fdj`). rizin is required; radare2 is no
   longer used.
+- **Process lifecycle on cordis.** The rizin and debug processes are now owned
+  by [cordis](https://github.com/cordiverse/cordis) *revertible effects*: one
+  root `Context` per load, a child scope per omp session, and each process a
+  `ctx.effect` whose setup returns its teardown (`runtime.ts`). Respawn
+  disposes one effect; session shutdown disposes the scope and every process
+  with it — replacing the hand-rolled nullable-field map and scattered
+  `.close()` calls. `state.ts` is now a thin facade over it, so the tool and
+  UI call sites are unchanged.
 - **Environment variables:** `OMPRE_R2_PATH` → `OMPRE_RIZIN_PATH`;
   `OMPRE_R2_ANALYSIS_TIMEOUT_MS` → `OMPRE_ANALYSIS_TIMEOUT_MS`.
 - **Decompilers:** rz-ghidra (`pdg`) then jsdec (`pdd`). rizin has no `pdc`,

@@ -16,8 +16,8 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { plainResult, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { debugTimeoutMs, RzSession, resolveRizinPath, validateAddr } from "./rizin.ts";
-import { getState, requireBinary } from "./state.ts";
+import { debugTimeoutMs, validateAddr } from "./rizin.ts";
+import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
 export function debuggerEnabled(): boolean {
@@ -52,13 +52,6 @@ function approvalReason(action: DebugAction): string {
 	if (action === "stop") return "Terminate the debugged process.";
 	if (EXECUTING_ACTIONS.has(action)) return `Resume execution of the debugged process (${action}).`;
 	return `Inspect the debugged process (${action}).`;
-}
-
-function requireDebug(state: ReturnType<typeof getState>): RzSession {
-	if (!state.dbg || state.dbg.isClosed) {
-		throw new Error("omp-re: no debug session — run the debug tool with action 'start' first (it launches the process).");
-	}
-	return state.dbg;
 }
 
 /** Clamp a positive integer parameter to a sane range. */
@@ -101,34 +94,36 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		parameters: debugParams,
 		...reRenderers({ title: "debugger", subject: "action", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
-			const state = getState(ctx);
 			const dbgTimeout = debugTimeoutMs();
 
 			if (params.action === "start") {
-				if (state.dbg && !state.dbg.isClosed) {
-					const pc = (await state.dbg.cmd("dr rip", { signal })).trim() || (await state.dbg.cmd("dr PC", { signal })).trim();
+				const existing = getState(ctx).dbg;
+				if (existing && !existing.isClosed) {
+					const pc = (await existing.cmd("dr rip", { signal })).trim() || (await existing.cmd("dr PC", { signal })).trim();
 					return plainResult(`debug: already running\n${pc}`);
 				}
-				const binary = requireBinary(state);
+				const binary = requireBinary(getState(ctx));
 				if (ctx.hasUI) ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
-				state.dbg = await RzSession.spawnDebug(resolveRizinPath(), binary, { signal });
-				const pc = (await state.dbg.cmd("dr rip", { signal })).trim();
+				const dbg = await startDebug(ctx, { signal }); // the debug process is a revertible effect on the session scope
+				const pc = (await dbg.cmd("dr rip", { signal })).trim();
 				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry. ${pc}\nSet breakpoints (break_add), then continue or step.`);
 			}
 
 			if (params.action === "stop") {
-				if (!state.dbg || state.dbg.isClosed) return plainResult("debug: no debug session to stop");
-				try {
-					await state.dbg.cmd("dk 9", { timeoutMs: 5_000, signal });
-				} catch {
-					// Best effort: closing the process below kills the debuggee regardless.
+				const dbg = getState(ctx).dbg;
+				if (dbg && !dbg.isClosed) {
+					try {
+						await dbg.cmd("dk 9", { timeoutMs: 5_000, signal });
+					} catch {
+						// Best effort: disposing the effect below kills the debuggee regardless.
+					}
 				}
-				state.dbg.close();
-				state.dbg = null;
-				return plainResult("debug: stopped — process killed and debug session closed");
+				return (await stopDebug(ctx))
+					? plainResult("debug: stopped — process killed and debug session closed")
+					: plainResult("debug: no debug session to stop");
 			}
 
-			const dbg = requireDebug(state);
+			const dbg = requireDebug(ctx);
 			const ea = params.addr !== undefined ? validateAddr(params.addr) : undefined;
 
 			switch (params.action) {
