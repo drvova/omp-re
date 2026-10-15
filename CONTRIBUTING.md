@@ -26,6 +26,12 @@ Run `bun test` with rizin installed before opening a PR that touches
 model. See [`docs/testing.md`](docs/testing.md) for what each tier actually
 needs and the exact PASS/SKIP matrix.
 
+Declare each tool's parameter schema as a named `const` before
+`pi.registerTool({...})`, never inline: omp 18's `pi.zod` builder only lets
+TypeScript infer `params` from a schema declared outside the call. Give every
+tool both renderer pairs via `reRenderers(...)` (`renderCall`/`renderResult`
+for the ANSI transcript, `describeCall`/`describeResult` for Tern).
+
 Every rizin command an RE tool sends goes through `validateAddr`,
 `validateIdent`, or `rzQuote` (`extensions/re/rizin.ts`); annotation commands
 are built only by `annotationCommands` (`extensions/re/annotations.ts`),

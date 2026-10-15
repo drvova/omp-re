@@ -3,6 +3,7 @@ name: re-analyst
 description: "Reverse-engineering analyst for one binary: opens it in rizin with omp-re's tools, triages it or investigates a specific function/capability, and returns findings that each cite the tool output and address behind them. Use for 'analyse / triage / reverse this binary' subtasks and for focused questions about one binary."
 tools: read, grep, glob
 autoload-skills: re-triage
+structured: true
 output:
   properties:
     binary:

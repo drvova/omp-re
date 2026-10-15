@@ -219,11 +219,35 @@ function markEmpty(result: ReToolResult, empty: boolean): ReToolResult {
 }
 
 export function registerReadTools(pi: ExtensionAPI): void {
+	// Schemas are named consts, not inline in registerTool({...}): omp 18's zod-compatible builder
+	// infers each tool's params type only from a schema value declared outside the call.
 	const z = pi.zod;
 	const offsetLimit = {
 		offset: z.number().int().optional().describe("Skip this many results (default 0)."),
 		limit: z.number().int().optional().describe(`Max results to return (default ${DEFAULT_LIMIT}, capped at ${MAX_LIMIT}).`),
 	};
+	const pageParams = z.object(offsetLimit);
+	const listFunctionsParams = z.object({
+		...offsetLimit,
+		sort: z.enum(["address", "size", "callers"]).optional().describe("Row order (default address)."),
+	});
+	const searchParams = z.object({
+		query: z.string().describe("Substring to match against function names."),
+		...offsetLimit,
+	});
+	const targetParams = z.object({
+		target: z.string().describe("Function name or address (e.g. main, sym.foo, 0x4da0)."),
+	});
+	const addrParams = z.object({ addr: z.string().describe("Function address or name.") });
+	const xrefParams = z.object({
+		addr: z.string().describe("Address or name to query cross-references for."),
+		...offsetLimit,
+	});
+	const stringsParams = z.object({
+		...offsetLimit,
+		filter: z.string().optional().describe("Only include strings containing this substring."),
+	});
+	const noParams = z.object({});
 
 	pi.registerTool({
 		name: "list_functions",
@@ -232,10 +256,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			"List the functions rizin detected in the open binary: ea, name, size, basic blocks, callers/callees counts, and signature. Sort by `callers` to find the most-used helpers or by `size` to find the biggest logic first.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			...offsetLimit,
-			sort: z.enum(["address", "size", "callers"]).optional().describe("Row order (default address)."),
-		}),
+		parameters: listFunctionsParams,
 		...reRenderers({ title: "Functions", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -254,10 +275,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "Search functions in the open binary by substring match on name.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			query: z.string().describe("Substring to match against function names."),
-			...offsetLimit,
-		}),
+		parameters: searchParams,
 		...reRenderers({ title: "Search functions", subject: "query", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -280,9 +298,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			"Get one function by name or address: signature, size and complexity metrics, arguments and locals, the functions it calls (by name), and the call sites that reach it.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			target: z.string().describe("Function name or address (e.g. main, sym.foo, 0x4da0)."),
-		}),
+		parameters: targetParams,
 		...reRenderers({ title: "Function", subject: "target", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -303,7 +319,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			"Decompile a function to pseudo-C with the best decompiler plugin loaded in rizin (rz-ghidra's pdg, then jsdec's pdd). When none is available — or it produces nothing for this function — returns annotated disassembly instead, labeled `(disassembly only — …)` at the very start of the output.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({ addr: z.string().describe("Function address or name.") }),
+		parameters: addrParams,
 		...reRenderers({ title: "Decompile", subject: "addr", body: "code" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -323,7 +339,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			"Disassemble a function to annotated instructions: comments, flags/labels, and incoming cross-references are folded in where rizin reports them.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({ addr: z.string().describe("Function address or name.") }),
+		parameters: addrParams,
 		...reRenderers({ title: "Disassemble", subject: "addr", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -332,11 +348,6 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			if (!disasm) throw new Error(`omp-re: disassemble_function: no instructions at ${params.addr}`);
 			return textResult(`${disasm.opCount} instructions at ${ea}`, disasm.lines.join("\n"), { ea, ctx, tool: "disassemble_function" });
 		},
-	});
-
-	const xrefParams = z.object({
-		addr: z.string().describe("Address or name to query cross-references for."),
-		...offsetLimit,
 	});
 
 	pi.registerTool({
@@ -388,7 +399,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "List imported symbols in the open binary.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
+		parameters: pageParams,
 		...reRenderers({ title: "Imports", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -405,7 +416,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "List exported symbols in the open binary.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
+		parameters: pageParams,
 		...reRenderers({ title: "Exports", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -422,10 +433,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "List strings found in the open binary's data sections, optionally filtered by substring.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({
-			...offsetLimit,
-			filter: z.string().optional().describe("Only include strings containing this substring."),
-		}),
+		parameters: stringsParams,
 		...reRenderers({ title: "Strings", subject: "filter", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -444,7 +452,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "List sections of the open binary with their permissions, sizes, and addresses.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object(offsetLimit),
+		parameters: pageParams,
 		...reRenderers({ title: "Sections", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
@@ -460,7 +468,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description: "Compute SHA-256, SHA-1, and MD5 digests of the session's open binary.",
 		approval: "read",
 		loadMode: "essential",
-		parameters: z.object({}),
+		parameters: noParams,
 		...reRenderers({ title: "Hash", body: "text" }),
 		async execute(_id, _params, signal, _onUpdate, ctx) {
 			const binaryPath = requireBinary(getState(ctx));

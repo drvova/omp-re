@@ -2,10 +2,17 @@
 
 ## rizin
 
-`omp-re` is tested against **rizin 0.9.1**. It talks to rizin over its
-`-q0` pipe protocol and uses only stock commands (`aaa`, `aflj`, `afij`,
-`pdfj`, `axtj`, `afvlj`, `afs`, `CC`, `%v`, …), so a current 0.9.x release is
-the target; older releases are untested.
+omp-re **does not ship rizin**. It spawns whatever `rizin` is on your `PATH`
+(or the binary `OMPRE_RIZIN_PATH` points at) and talks to it over its `-q0`
+pipe protocol, using only stock commands (`aaa`, `aflj`, `afij`, `pdfj`,
+`axtj`, `afvlj`, `afs`, `CC`, `%v`, …). That keeps rizin under your control:
+your package manager updates it (rizin parses hostile files, so security
+fixes matter), the plugins you already installed keep working, and the plugin
+stays small and platform-independent.
+
+It is tested against **rizin 0.9.1**, the latest release; older releases are
+untested. Prefer your OS package manager or an official release build; build
+from source only when neither has a current version.
 
 ### macOS
 
@@ -16,9 +23,9 @@ brew install rizin
 ### Linux
 
 Arch (`pacman -S rizin`) and Fedora (`dnf install rizin`) package it.
-Ubuntu 24.04's apt has **no** rizin package. Use a release build from
-[rizin's GitHub releases](https://github.com/rizinorg/rizin/releases), or
-build from source (Meson + Ninja, a few minutes on 4 cores):
+Ubuntu 24.04's apt has **no** rizin package; use a release build from
+[rizin's GitHub releases](https://github.com/rizinorg/rizin/releases). As a
+last resort, build it from source (Meson + Ninja, a few minutes on 4 cores):
 
 ```bash
 git clone --depth 1 --branch v0.9.1 https://github.com/rizinorg/rizin.git

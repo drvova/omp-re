@@ -1,16 +1,24 @@
 /**
- * omp-native transcript rendering for every RE tool: a compact call line
- * (title + the address/query it targets), and a result block with a status
- * icon, the tool's own header line ("206 functions", "decompiled 0x4da0
- * (pdg)"), and a collapsible body. Decompiler output is syntax-highlighted as
- * C with omp's own highlighter; list payloads stay collapsed behind their
- * header until expanded.
+ * omp-native transcript rendering for every RE tool, for both of omp's
+ * surfaces:
  *
- * Rendering is presentation only: the model still receives the full text
- * content, and nothing here feeds the evidence store.
+ * - `renderCall`/`renderResult` (the ANSI transcript): a compact call line
+ *   (title + the address/query it targets), and a result block with a status
+ *   icon, the tool's own header line ("206 functions", "decompiled 0x4da0
+ *   (pdg)"), and a collapsible body. Decompiler output is syntax-highlighted
+ *   as C with omp's own highlighter.
+ * - `describeCall`/`describeResult` (Tern and other TSP terminals): the same
+ *   facts as a native tool view — head with title, target, and meta; the body
+ *   as a `code` node the terminal highlights and clamps itself.
+ *
+ * Without these, omp shows RE tools as a generic card of raw text. Rendering
+ * is presentation only: the model still receives the full text content, and
+ * nothing here feeds the evidence store.
  */
 import { highlightCode, type Theme, type ToolRenderResultOptions } from "@oh-my-pi/pi-coding-agent";
 import { Text, type Component } from "@oh-my-pi/pi-tui";
+import { code, span, text } from "@oh-my-pi/pi-tui/native/describe";
+import type { NativeToolHead, NativeToolView } from "@oh-my-pi/pi-tui/tools";
 import type { ReToolDetails } from "./format.ts";
 
 /** How a result body is shown: "code" highlights C (decompiler output), "json" highlights JSON and stays collapsed, "text" shows plain lines, "none" shows only the header. */
@@ -26,6 +34,8 @@ export interface RenderSpec {
 
 const COLLAPSED_LINES = 6;
 const EXPANDED_LINES = 400;
+/** Error gist length in a native head; the full message goes in the body. */
+const ERROR_GIST_CHARS = 120;
 
 type RenderArgs = Record<string, unknown>;
 
@@ -71,16 +81,38 @@ function highlighted(code: string, lang: string, theme: Theme): string[] {
 	}
 }
 
+/** Drop the trailing truncation/artifact notice; the header meta already says so. */
+function withoutNotice(body: string): string {
+	return body.replace(/\n\n\[Output truncated:[^\n]*\]$/, "");
+}
+
 function bodyLines(style: BodyStyle, body: string, details: ReToolDetails | undefined, theme: Theme): string[] {
 	if (style === "none" || body.trim() === "") return [];
-	// Drop the trailing truncation/artifact notice; the header meta already says so.
-	const trimmed = body.replace(/\n\n\[Output truncated:[^\n]*\]$/, "");
+	const trimmed = withoutNotice(body);
 	if (style === "code" && details?.decompiler && details.decompiler !== "disasm") return highlighted(trimmed, "c", theme);
 	if (style === "json") return highlighted(trimmed, "json", theme);
 	return trimmed.split("\n").map((line) => theme.fg("toolOutput", line));
 }
 
-/** renderCall/renderResult for one RE tool, following the shape omp's built-in tools use. */
+function nativeHead(spec: RenderSpec, args: RenderArgs | undefined, meta: NativeToolHead["meta"] = []): NativeToolHead {
+	const subject = spec.subject ? args?.[spec.subject] : undefined;
+	return {
+		title: spec.title,
+		...(typeof subject === "string" && subject.length > 0 ? { target: subject } : {}),
+		meta,
+	};
+}
+
+/** The result body as a native node: C for decompiler output, JSON for list payloads, plain text otherwise. */
+function nativeBody(style: BodyStyle, body: string, details: ReToolDetails | undefined) {
+	if (style === "none" || body.trim() === "") return undefined;
+	const source = withoutNotice(body);
+	if (style === "code" && details?.decompiler && details.decompiler !== "disasm") return code(source, { lang: "c", preview: { lines: 12 } });
+	if (style === "json") return code(source, { lang: "json", preview: { lines: 6 } });
+	return code(source, { preview: { lines: 12 } });
+}
+
+/** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */
 export function reRenderers(spec: RenderSpec) {
 	return {
 		renderCall(args: RenderArgs, _options: ToolRenderResultOptions, theme: Theme): Component {
@@ -123,6 +155,41 @@ export function reRenderers(spec: RenderSpec) {
 			const hidden = lines.length - shown.length;
 			if (hidden > 0) out.push(theme.fg("dim", `… ${hidden} more line${hidden === 1 ? "" : "s"}${options.expanded ? "" : " (expand to show)"}`));
 			return new Text(out.join("\n"), 0, 0);
+		},
+
+		describeCall(args: RenderArgs): NativeToolView {
+			return { tool: nativeHead(spec, args), inline: true };
+		},
+
+		describeResult(result: RenderableResult, options: ToolRenderResultOptions, args?: RenderArgs): NativeToolView {
+			const textContent = firstText(result);
+			if (options.isPartial) {
+				const progress = textContent || `${spec.title}…`;
+				return { tool: nativeHead(spec, args, [[span(progress, "muted", { fx: "shimmer" })]]), inline: true };
+			}
+			if (result.isError) {
+				const full = textContent.trim() || "failed";
+				const first = full.split("\n", 1)[0]!.trim();
+				const gist = first.length > ERROR_GIST_CHARS ? `${first.slice(0, ERROR_GIST_CHARS - 1)}…` : first;
+				return {
+					tool: nativeHead(spec, args, [[span(`— ${gist}`, "muted")]]),
+					tone: "error",
+					inline: true,
+					...(gist === full ? {} : { body: [text([span(full, "error")], { wrap: "word" })] }),
+				};
+			}
+			const details = result.details;
+			const { header, body } = splitBody(textContent, details);
+			const meta = [
+				header,
+				...(details?.decompiler === "disasm" ? [[span("disassembly only", "warning")]] : []),
+				...(details?.truncated ? [[span("truncated", "warning")]] : []),
+				...(details?.artifactId ? [[span(`artifact://${details.artifactId}`, "muted")]] : []),
+			];
+			const node = nativeBody(spec.body, body, details);
+			return node
+				? { tool: nativeHead(spec, args, meta), body: [node], ...(details?.decompiler === "disasm" ? { tone: "warning" as const } : {}) }
+				: { tool: nativeHead(spec, args, meta), inline: true };
 		},
 	};
 }
