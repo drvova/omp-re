@@ -11,7 +11,7 @@ bun install --ignore-scripts
 bun test
 ```
 
-Fourteen test files. The `bun install` dev dependencies pin omp **18.11.1**,
+Fifteen test files. The `bun install` dev dependencies pin omp **18.11.1**,
 so the host APIs under test are the ones users run. Tests that need a real
 `rizin` and a test binary **skip** (not fail) when either is missing:
 
@@ -19,6 +19,7 @@ so the host APIs under test are the ones users run. Tests that need a real
 | --- | --- | --- |
 | `rizin-pure.test.ts` | No | 28 |
 | `runtime.test.ts` | Its lifecycle tests (the record tests run without) | 5 |
+| `app.test.ts` | No | 3 |
 | `format.test.ts` | No | 10 |
 | `evidence.test.ts` | No | 4 |
 | `audit.test.ts` | No | 5 |
@@ -31,7 +32,7 @@ so the host APIs under test are the ones users run. Tests that need a real
 | `rizin-cli.test.ts` | Its catalog and tool tests (policy and help search run without) | 24 |
 | `rzcli.test.ts` | Its integration tests (the flag-policy tests run without) | 11 |
 | `debug.test.ts` | Its integration tests (the enable-gate tests run without) | 9 |
-| **Total** | | **176** |
+| **Total** | | **179** |
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
 extension runner (no model is called) and drives `/re` commands and tools
@@ -56,8 +57,8 @@ The debugger suite (`debug.test.ts`) sets `OMPRE_ENABLE_DEBUGGER` itself and
 `ptrace` is permitted (most Linux, and containers started with it allowed).
 Its enable-gate tests run everywhere.
 
-Expected shape with rizin present: **176 pass, 0 fail, 0 skip**. Without
-rizin: **94 pass, 98 skip, 0 fail** (192 reported — bun counts skipped
+Expected shape with rizin present: **179 pass, 0 fail, 0 skip**. Without
+rizin: **97 pass, 98 skip, 0 fail** (195 reported — bun counts skipped
 `describe` blocks slightly differently from executed ones). This is CI's
 permanent shape, not a degraded state to "fix".
 
