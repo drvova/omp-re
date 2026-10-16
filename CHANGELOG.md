@@ -99,6 +99,12 @@ extension runner, and by installing it with `omp plugin install`.
   `list_relocations`, `list_flags`, `list_classes`): `iIj` identity object,
   `iej` entry points, `irj` relocations, `flj` flags (filtered), and `icj`
   classes (C++ RTTI / ObjC / Swift metadata).
+- **Asm/value/gadget search** (`search_asm`, `search_value`, `search_gadgets`):
+  `/aj` assemble-and-search, the `/v`+`/V` immediate-value family (exact or
+  range, 1/2/4/8-byte widths), and ROP/COP gadget chains via `/R`+`/C` —
+  parsed from text mode because both commands' JSON modes emit nothing in
+  0.9.1 (verified live); the gadget filter is a client-side substring match
+  on the disassembled chain.
 - Verified live against rizin 0.9.1 on Windows. Two rizin surfaces exist in
   the book but not in this build and are deliberately not wrapped: the `z`
   zignature family (the command is absent from the 0.9.1 Windows release)

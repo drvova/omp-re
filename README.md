@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![37 tools](https://img.shields.io/badge/tools-37-informational)
+![40 tools](https://img.shields.io/badge/tools-40-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 37 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 40 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -213,7 +213,7 @@ blocked, and the IOC is defanged even in the error message:
 
 ## Tool reference
 
-All 37 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 40 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
 may legitimately show fewer than 32.
@@ -234,6 +234,9 @@ may legitimately show fewer than 32.
 | `search_bytes` | read | Search raw bytes for a hex pattern (`/xj`), with nibble-mask wildcards. |
 | `search_string` | read | Search raw bytes for a literal string (encoded to hex client-side). |
 | `search_regex_bytes` | read | Search raw bytes with a rizin `/xr` regex. |
+| `search_asm` | read | Assemble instruction text and search for its bytes (`/aj`). |
+| `search_value` | read | Search immediates by exact value or range, 1/2/4/8-byte widths (`/vj`, `/Vj`). |
+| `search_gadgets` | read | ROP/COP gadget search (`/R`, `/C`; text-mode output parsed client-side). |
 | `list_types` | read | List loaded structs, enums, typedefs, or function definitions (`tsj`/`tej`/`ttj`/`tfj`), name-filtered. |
 | `define_types` | read | Define types from C statements (`td`, one declaration per entry). |
 | `cast_memory` | read | Print memory at an address interpreted as a named type (`tp`). |
@@ -286,7 +289,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the cordis context graph: process effects and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 37 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 40 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

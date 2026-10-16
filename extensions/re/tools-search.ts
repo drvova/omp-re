@@ -1,11 +1,15 @@
 /**
- * Byte search tools — the book's "Searching" chapter, exposed to the model.
+ * Search tools — the book's "Searching" chapter, exposed to the model.
  *
  * `/xj` (raw hex search, JSON) and `/xrj` (regex bytes search, JSON) are the
- * two JSON-carrying search surfaces in rizin 0.9.x; both return rows of
+ * two JSON-carrying byte-search surfaces in rizin 0.9.x; both return rows of
  * `{ address, size, flag }`. String search is hex-encoded client-side and run
  * through `/xj`, which keeps one row shape and avoids quoting hazards in the
- * persistent-session transport.
+ * persistent-session transport. `/aj` (assemble-and-search) shares the row
+ * shape, and the `/v` value-search family emits the same rows.
+ *
+ * ROP/COP gadget search (`/R`, `/C`) has broken JSON modes in 0.9.1 (empty
+ * output, verified live), so search_gadgets parses the text mode instead.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, type ReToolResult } from "./format.ts";
@@ -39,6 +43,48 @@ export async function searchCommand(rz: RzSession, command: string, label: strin
 	return markEmpty(result, rows.length === 0);
 }
 
+export interface RzGadget {
+	ea: string;
+	bytes: string;
+	gadgets: string[];
+	size: number;
+}
+
+/** Parse rizin's text-mode /R (ROP) or /C (COP) gadget output: blank-line-separated blocks, each ending with "Gadget size: N". */
+export function parseGadgets(text: string): RzGadget[] {
+	const gadgets: RzGadget[] = [];
+	let current: RzGadget | undefined;
+	for (const line of text.split("\n")) {
+		const sizeMatch = line.match(/^Gadget size: (\d+)\s*$/);
+		if (sizeMatch && current) {
+			current.size = Number.parseInt(sizeMatch[1], 10);
+			gadgets.push(current);
+			current = undefined;
+			continue;
+		}
+		const gadgetLine = line.match(/^\s*(0x[0-9a-fA-F]+)\s+([0-9a-fA-F]*)\s+(.+?)\s*$/);
+		if (gadgetLine) {
+			if (!current) current = { ea: gadgetLine[1], bytes: "", gadgets: [], size: 0 };
+			current.bytes += gadgetLine[2];
+			current.gadgets.push(gadgetLine[3].trim());
+		}
+	}
+	return gadgets;
+}
+
+/** ROP/COP gadget search over rizin's text mode (the JSON modes are broken in 0.9.1). The filter is applied client-side over the disassembled chains. */
+export async function searchGadgets(rz: RzSession, kind: "rop" | "cop", filter: string | undefined, params: { offset?: number; limit?: number }): Promise<ReToolResult> {
+	const output = await rz.cmd(kind === "rop" ? "/R" : "/C");
+	let rows = parseGadgets(output);
+	if (filter !== undefined) {
+		const needle = filter.toLowerCase();
+		rows = rows.filter((gadget) => gadget.gadgets.join("; ").toLowerCase().includes(needle));
+	}
+	const { page, total } = paginate(rows, params.offset, params.limit);
+	const result = await jsonResult(pageHeader(`${kind.toUpperCase()} gadgets`, page, total, params.offset), page);
+	return markEmpty(result, rows.length === 0);
+}
+
 export function registerSearchTools(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	const offsetLimit = {
@@ -60,6 +106,22 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 	});
 	const searchRegexParams = z.object({
 		pattern: z.string().min(1).describe("Regex over raw bytes (rizin /xr syntax)."),
+		...offsetLimit,
+	});
+	const searchAsmParams = z.object({
+		instructions: z.string().min(1).describe("Assembly text to assemble and search for (e.g. \"push rbp; ret\" for a gadget tail)."),
+		...offsetLimit,
+	});
+	const searchValueParams = z.object({
+		width: z.enum(["1", "2", "4", "8"]).describe("Value byte width (endianness auto)."),
+		value: z.number().int().min(0).optional().describe("Exact value to search for (pass value, or min+max)."),
+		min: z.number().int().min(0).optional().describe("Inclusive lower bound of a value range (with max)."),
+		max: z.number().int().min(0).optional().describe("Inclusive upper bound of a value range (with min)."),
+		...offsetLimit,
+	});
+	const searchGadgetsParams = z.object({
+		kind: z.enum(["rop", "cop"]).describe("ROP (return-oriented) or COP (call-oriented) gadgets."),
+		filter: z.string().optional().describe("Substring filter on the disassembled gadget text (e.g. \"pop rdi; ret\")."),
 		...offsetLimit,
 	});
 
@@ -107,6 +169,57 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
 			return searchCommand(rz, `/xrj ${params.pattern}`, `regex hits for ${JSON.stringify(params.pattern)}`, params);
+		},
+	});
+
+	pi.registerTool({
+		name: "search_asm",
+		label: "Search Asm",
+		description:
+			"Assemble instruction text with the binary's arch config and search for the resulting bytes (rizin /aj). Same {ea, size, flag} rows as search_bytes.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: searchAsmParams,
+		...reRenderers({ title: "Search asm", subject: "instructions", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const text = params.instructions.replace(/"/g, "");
+			return searchCommand(rz, `/aj ${text}`, `asm hits for ${JSON.stringify(params.instructions)}`, params);
+		},
+	});
+
+	pi.registerTool({
+		name: "search_value",
+		label: "Search Value",
+		description:
+			"Search for immediate values (rizin /v1j../v8j exact, /V1j../V8j range). Finds hardcoded constants, magic numbers, and pointer-sized immediates. Pass value for exact, or min+max for a range.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: searchValueParams,
+		...reRenderers({ title: "Search value", subject: "value", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			if (params.value === undefined && (params.min === undefined || params.max === undefined)) {
+				throw new Error("Pass value (exact search) or both min and max (range search).");
+			}
+			const command = params.value !== undefined ? `/v${params.width}j ${params.value}` : `/V${params.width}j ${params.min} ${params.max}`;
+			const label = params.value !== undefined ? `value ${params.value} (${params.width}B)` : `values ${params.min}..${params.max} (${params.width}B)`;
+			return searchCommand(rz, command, `hits for ${label}`, params);
+		},
+	});
+
+	pi.registerTool({
+		name: "search_gadgets",
+		label: "Search Gadgets",
+		description:
+			"Search ROP (return-oriented) or COP (call-oriented) gadgets (rizin /R, /C — parsed from text mode because their JSON modes emit nothing in rizin 0.9.1). Rows carry the gadget's entry address, raw bytes, disassembled instruction chain, and size. Optional substring filter on the disassembly.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: searchGadgetsParams,
+		...reRenderers({ title: "Search gadgets", subject: "kind", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			return searchGadgets(rz, params.kind, params.filter, params);
 		},
 	});
 }

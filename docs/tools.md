@@ -1,8 +1,8 @@
 # Tool reference
 
-All 37 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 40 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 37 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 40 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -22,7 +22,7 @@ that artifact. List results are JSON arrays with one compact row per line.
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 
-## Read tier (23 tools)
+## Read tier (26 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
@@ -43,6 +43,9 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `search_bytes` | `read` | `pattern` (hex), `offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
 | `search_string` | `read` | `pattern` (string), `offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |
 | `search_regex_bytes` | `read` | `pattern` (regex), `offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
+| `search_asm` | `read` | `instructions`, `offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
+| `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
+| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, offset?, limit?` | ROP/COP gadget chains (`/R`, `/C`) as `{ea, bytes, gadgets, size}`. The JSON modes of these two commands emit nothing in rizin 0.9.1, so text output is parsed client-side; `filter` is a substring match on the disassembled chain. |
 | `list_types` | `read` | `kind` (`struct`/`enum`/`typedef`/`function`), `filter?, offset?, limit?` | Types loaded in rizin's database (`tsj`/`tej`/`ttj`/`tfj`) — the built-in Windows type base plus debug-info and user-defined types. |
 | `define_types` | `read` | `definitions: string[]` | Define types from C statements (`td`, one declaration per entry; names used must be defined first). Rizin's errors surface verbatim. |
 | `cast_memory` | `read` | `addr`, `type` | Print memory at an address interpreted as a named type (`tp`). |

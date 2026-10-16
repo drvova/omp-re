@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchCommand } from "../extensions/re/tools-search.ts";
+import { searchCommand, searchGadgets } from "../extensions/re/tools-search.ts";
 import { castMemory, defineTypeLines, listTypeRows } from "../extensions/re/tools-types.ts";
 import { listSyscallRows, syscallLookupText } from "../extensions/re/tools-syscalls.ts";
 import type { RzSession } from "../extensions/re/rizin.ts";
@@ -116,5 +116,51 @@ describe("syscallLookupText", () => {
 	test("rejects supplying both name and number", async () => {
 		const { rz } = stubRz({});
 		await expect(syscallLookupText(rz, { name: "NtOpenProcess", number: 190 })).rejects.toThrow("exactly one");
+	});
+});
+
+describe("search_asm", () => {
+	test("assembles text and runs /aj", async () => {
+		const { rz } = stubRz({ "/aj push rbp": JSON.stringify([{ address: 5368713524, size: 1, flag: "hit.asm_text.0" }]) });
+		const result = await searchCommand(rz, "/aj push rbp", "asm hits", {});
+		const t = result.content[0].type === "text" ? result.content[0].text : "";
+		expect(t).toContain("hit.asm_text.0");
+	});
+});
+
+describe("searchGadgets", () => {
+	test("parses ROP text-mode output into rows", async () => {
+		const ropText = [
+			"  0x140001000                 c3  ret",
+			"Gadget size: 1",
+			"",
+			"  0x140001075         0d83b8f800  or eax, 0xf8b883",
+			"  0x14000107a               0000  add byte [rax], al",
+			"  0x14000107f             c20fb6  ret 0xb60f",
+			"Gadget size: 13",
+			"",
+		].join("\n");
+		const rz = { cmd: () => Promise.resolve(ropText), cmdj: () => Promise.resolve(null), cmdWithStderr: () => Promise.resolve({ output: "", stderr: "" }) } as unknown as RzSession;
+		const result = await searchGadgets(rz, "rop", undefined, {});
+		const t = result.content[0].type === "text" ? result.content[0].text : "";
+		expect(t).toContain("2 ROP gadgets");
+		expect(t).toContain('"ea":"0x140001000"');
+		expect(t).toContain('"size":13');
+	});
+
+	test("applies the disassembly filter", async () => {
+		const ropText = [
+			"  0x140001000                 c3  ret",
+			"Gadget size: 1",
+			"",
+			"  0x140001004           5fc3      pop rdi; ret",
+			"Gadget size: 2",
+			"",
+		].join("\n");
+		const rz = { cmd: () => Promise.resolve(ropText), cmdj: () => Promise.resolve(null), cmdWithStderr: () => Promise.resolve({ output: "", stderr: "" }) } as unknown as RzSession;
+		const result = await searchGadgets(rz, "rop", "pop rdi", {});
+		const t = result.content[0].type === "text" ? result.content[0].text : "";
+		expect(t).toContain("1 ROP gadgets");
+		expect(t).toContain("0x140001004");
 	});
 });
