@@ -1,6 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
+import { recordedSignatures } from "../extensions/re/entries.ts";
+import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
+import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
 import { baseRizinFlags, buildLoadFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -185,6 +188,40 @@ describe("annotationCommands", () => {
 	test("restoring an empty prototype or type is a no-op rather than an invalid command", () => {
 		expect(annotationCommands("set_prototype", "0x10", "", "int f(void)")).toEqual([]);
 		expect(annotationCommands("set_variable_type", "0x10", "", "int", "v")).toEqual([]);
+	});
+});
+
+describe("signatures", () => {
+	test("signatureApplyCommand quotes the path as a single Fs argument", () => {
+		expect(signatureApplyCommand("/sigs/libc.sig")).toBe("Fs '/sigs/libc.sig'");
+		expect(signatureApplyCommand("/my sigs/x.pat")).toBe("Fs '/my sigs/x.pat'");
+	});
+
+	test("validateSignaturePath rejects empty paths and pipe-breaking characters", () => {
+		expect(() => validateSignaturePath("")).toThrow("empty path");
+		expect(() => validateSignaturePath("a\nb")).toThrow("line break or NUL");
+		expect(() => validateSignaturePath("a\0b")).toThrow("line break or NUL");
+		expect(validateSignaturePath("/ok/path.sig")).toBe("/ok/path.sig");
+	});
+
+	test("parseAppliedCount reads rizin's `Found N FLIRT signatures` line", () => {
+		expect(parseAppliedCount("Found 12 FLIRT signatures via /x.sig")).toBe(12);
+		expect(parseAppliedCount("Found 1 FLIRT signature via /x.pat")).toBe(1);
+		expect(parseAppliedCount("Found 0 FLIRT signatures via /x.sig")).toBe(0);
+		expect(parseAppliedCount("nothing here")).toBeUndefined();
+	});
+
+	test("recordedSignatures scopes applied files to the binary open when each was recorded", () => {
+		const entries = [
+			{ type: "custom", id: "b1", customType: "re.binary", data: { path: "/bin/a" } },
+			{ type: "custom", id: "s1", customType: "re.signature", data: { path: "/sigs/one.sig" } },
+			{ type: "custom", id: "b2", customType: "re.binary", data: { path: "/bin/b" } },
+			{ type: "custom", id: "s2", customType: "re.signature", data: { path: "/sigs/two.sig" } },
+			{ type: "custom", id: "s3", customType: "re.signature", data: { path: "/sigs/three.sig" } },
+		] as unknown as Entry[];
+		expect(recordedSignatures(entries, "/bin/a")).toEqual(["/sigs/one.sig"]);
+		expect(recordedSignatures(entries, "/bin/b")).toEqual(["/sigs/two.sig", "/sigs/three.sig"]);
+		expect(recordedSignatures(entries, "/bin/none")).toEqual([]);
 	});
 });
 

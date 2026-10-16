@@ -142,6 +142,19 @@ interactive view (`rz-diff -H`/`-S`), and any argument with a line break or
 NUL. rz-gg (shellcode generation) and rz-run (launches a process) are not
 exposed — they generate or execute rather than analyze.
 
+## Signatures — `apply_signatures` (1 tool)
+
+FLIRT signatures name library functions from a signature database (book:
+analysis/signatures). `open_binary`'s analysis (`aaa`) already applies rizin's
+built-in database, so this covers what that doesn't: re-applying it on demand,
+and applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't,
+because it refuses file arguments. List the built-in database with
+`rizin_command Flt`.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `apply_signatures` | `exec` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions, so it is exec-tier. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
+
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 
 `rizin_debug` launches the open binary under rizin's debugger and drives it.

@@ -42,3 +42,27 @@ export function lastRecordedLoadOptions(entries: readonly SessionEntry[]): LoadO
 	}
 	return last;
 }
+
+/**
+ * The custom FLIRT signature files applied to `binaryPath` on this branch, in
+ * order, so a resume re-applies the same files. Scoped to the binary the same
+ * way annotations are: an `re.signature` entry belongs to whichever `re.binary`
+ * opened most recently before it.
+ */
+export function recordedSignatures(entries: readonly SessionEntry[], binaryPath: string): string[] {
+	const paths: string[] = [];
+	let current: string | undefined;
+	for (const entry of entries) {
+		if (entry.type !== "custom") continue;
+		if (entry.customType === "re.binary") {
+			const path = (entry.data as { path?: unknown } | undefined)?.path;
+			current = typeof path === "string" ? path : undefined;
+			continue;
+		}
+		if (entry.customType === "re.signature" && current === binaryPath) {
+			const path = (entry.data as { path?: unknown } | undefined)?.path;
+			if (typeof path === "string") paths.push(path);
+		}
+	}
+	return paths;
+}

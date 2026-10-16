@@ -17,6 +17,7 @@ import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
+import { registerSignatureTools } from "./tools-signatures.ts";
 import { branchEntries, lastRecordedBinaryPath, lastRecordedLoadOptions } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
@@ -262,7 +263,7 @@ function registerShell(pi: ExtensionAPI): void {
 			state.rz?.close();
 			state.rz = null;
 			state.binaryPath = recorded ?? null;
-			// Recover how this binary was loaded (raw-blob arch/bits/base) so the respawn below reloads it the same way.
+			// Recover how this binary was loaded (raw-blob arch/bits/base) so the respawn below reloads it the same way. Applied FLIRT files are recomputed from the branch entries in spawn(), like annotations.
 			state.loadOptions = recorded ? (lastRecordedLoadOptions(branchEntries(ctx)) ?? null) : null;
 		} else {
 			syncAnnotationsToBranch(ctx);
@@ -424,6 +425,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:type-tools", apply: registerTypeTools },
 		{ name: "re:syscall-tools", apply: registerSyscallTools },
 		{ name: "re:mutate-tools", apply: registerMutateTools },
+		{ name: "re:signature-tools", apply: registerSignatureTools },
 		{ name: "re:rizin-repl", apply: registerRizinTools },
 		{ name: "re:rizin-cli", apply: registerRzCliTools },
 		{ name: "re:triage-tools", apply: registerTriageTools },

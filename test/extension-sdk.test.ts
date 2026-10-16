@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES } from "../extensions/re/audit.ts";
+import { RE_ALL_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
 import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
 import { canRunRizin, logSkip, TEST_BINARY } from "./helpers.ts";
 
@@ -27,6 +27,8 @@ const ALWAYS_REGISTERED = [
 	...Object.keys(RE_READ_TOOL_NAMES),
 	...Object.keys(RE_MUTATE_TOOL_NAMES),
 	...Object.keys(RE_RIZIN_TOOL_NAMES),
+	...Object.keys(RE_EMULATE_TOOL_NAMES),
+	...Object.keys(RE_SIGNATURE_TOOL_NAMES),
 	...Object.keys(RE_SESSION_TOOL_NAMES),
 ];
 

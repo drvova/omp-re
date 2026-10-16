@@ -20,8 +20,9 @@
 import { Context } from "cordis";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
-import { branchEntries } from "./entries.ts";
+import { branchEntries, recordedSignatures } from "./entries.ts";
 import { assertRizinAvailable, type LoadOptions, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
+import { replaySignatures } from "./signatures.ts";
 
 /** The per-omp-session record. The public fields are read and written directly by the tools, UI, evidence, and audit modules exactly as before. */
 export interface ReSessionState {
@@ -123,8 +124,14 @@ class RizinBackend {
 		if (options.loadOptions) rec.loadOptions = options.loadOptions;
 		const loadOptions = options.loadOptions ?? rec.loadOptions ?? undefined;
 		const rz = await RzSession.spawn(resolveRizinPath(binaryPath, loadOptions?.bits), binaryPath, { ...options, loadOptions });
+		// Re-apply this branch's custom FLIRT files first: they name functions,
+		// and an annotation (e.g. a rename of one of those functions) layered on
+		// top must win, so signatures replay before annotations. Computed from
+		// the branch entries, like annotations, so switching binaries never
+		// carries one binary's signatures onto another.
+		const signatureFailures = await replaySignatures(rz, recordedSignatures(branchEntries(ctx), binaryPath));
 		const live = liveAnnotations(branchEntries(ctx), binaryPath);
-		const replayFailures = await replayAnnotations(rz, live);
+		const replayFailures = [...signatureFailures, ...(await replayAnnotations(rz, live))];
 
 		const scope = await this.scope(rec);
 		const previous = rec._disposeRz;

@@ -172,6 +172,8 @@ export const READ_ONLY_EXTRAS: ReadonlySet<string> = new Set([
 	"Ll", "Llj", "Llq", "Llt", "La", "Laj", "Laq", "Lat", "Lac", "Lacj",
 	"Lc", "Lcj", "Lcq", "Lct", "LC", "LCj", "LCq", "LCt", "Lh", "Lhj", "Lhq", "Lht",
 	"Li", "Lij", "Liq", "Lit", "Lp", "Lpj", "Lpq", "Lpt", "LD", "LDj", "LDq", "LDt",
+	// Signatures (book: analysis/signatures) — list the FLIRT sigdb. Applying is the apply_signatures tool; Fc/Fd/Fs/Ff read or write a file.
+	"Flt",
 ]);
 
 /**
