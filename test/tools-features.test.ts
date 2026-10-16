@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { scopedSearch, searchCommand, searchGadgets } from "../extensions/re/tools-search.ts";
+import { scopedSearch, searchCommand, searchGadgets, validateSearchArg } from "../extensions/re/tools-search.ts";
 import { castMemory, defineTypeLines, listTypeRows } from "../extensions/re/tools-types.ts";
 import { listSyscallRows, syscallLookupText } from "../extensions/re/tools-syscalls.ts";
 import type { RzSession } from "../extensions/re/rizin.ts";
@@ -47,6 +47,21 @@ describe("searchCommand", () => {
 		const result = await searchCommand(rz, "/xj 90", "hits", { offset: 2, limit: 2 });
 		const text = result.content[0].type === "text" ? result.content[0].text : "";
 		expect(text).toContain("2 of 5 hits (offset=2");
+	});
+});
+
+describe("validateSearchArg (search-argument injection guard)", () => {
+	test("rejects rizin command-injection characters so a free-form search arg can't chain a command or write a file", () => {
+		// `;`/newline chain + `!` shell, `>`/`<` redirect, `|` pipe, backtick/`$()` substitute, `@` seek/iterate, `~` grep — all verified live to reach the -q0 pipe or be refused by policy.
+		for (const bad of ["x;!touch /tmp/x", "x\n!id", "nop > /tmp/x", "x < /etc/passwd", "a | sh", "`id`", "$(id)", "x @@ sym.*", "a~b", 'say"hi', "a#b", "a\\b"]) {
+			expect(() => validateSearchArg("search_regex_bytes", bad)).toThrow(/not allowed in a search argument/);
+		}
+	});
+
+	test("allows ordinary regex / assembly / gadget-filter text", () => {
+		for (const ok of ["push rbp", "mov eax, 1", "8b4f..", "pop rdi", "4889e5", "add esp 0x10"]) {
+			expect(validateSearchArg("search_asm", ok)).toBe(ok);
+		}
 	});
 });
 

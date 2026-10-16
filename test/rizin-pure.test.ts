@@ -225,10 +225,12 @@ describe("annotationCommands", () => {
 	});
 
 	test("define_variable builds afvs/afvr from the encoded storage/location/type, and undo deletes by name", () => {
-		expect(annotationCommands("define_variable", "0x4da0", "stack 0x30 int", "", "counter")).toEqual(["afvs 0x30 counter int @ 0x4da0"]);
-		expect(annotationCommands("define_variable", "0x4da0", "stack 0x40 char *", "", "path")).toEqual(["afvs 0x40 path char * @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x30 int", "", "counter")).toEqual(["afvs 0x30 counter 'int' @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x40 char *", "", "path")).toEqual(["afvs 0x40 path 'char *' @ 0x4da0"]);
 		expect(annotationCommands("define_variable", "0x4da0", "stack -0x8", "", "tmp")).toEqual(["afvs -0x8 tmp @ 0x4da0"]);
-		expect(annotationCommands("define_variable", "0x4da0", "reg rdi int", "", "arg0")).toEqual(["afvr rdi arg0 int @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "reg rdi int", "", "arg0")).toEqual(["afvr rdi arg0 'int' @ 0x4da0"]);
+		// a redirect/seek char in the type is neutralized by the quoting (can't escape to a file write)
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x30 int > /tmp/x", "", "v")).toEqual(["afvs 0x30 v 'int > /tmp/x' @ 0x4da0"]);
 		expect(annotationCommands("define_variable", "0x4da0", "", "stack 0x30 int", "counter")).toEqual(["afv- counter @ 0x4da0"]);
 		expect(() => annotationCommands("define_variable", "0x4da0", "stack notanoffset", "", "v")).toThrow("invalid stack delta");
 		expect(() => annotationCommands("define_variable", "0x4da0", "heap 0x10", "", "v")).toThrow("invalid variable storage");

@@ -149,7 +149,8 @@ export function defineVariableCommands(name: string, encoded: string, at: string
 	const loc = sp2 === -1 ? rest : rest.slice(0, sp2);
 	const type = sp2 === -1 ? "" : rest.slice(sp2 + 1).trim();
 	if (loc === "") throw new Error("omp-re: define_variable needs a location (a stack delta or a register)");
-	const typeArg = type === "" ? "" : ` ${validateTypeLike("type", type)}`;
+	// Single-quote the type (as afvt/avga/afs do): validateTypeLike still allows `>`/`<`/`@`, which would redirect or seek through the `-q0` pipe — rzQuote makes the whole type literal.
+	const typeArg = type === "" ? "" : ` ${rzQuote(validateTypeLike("type", type))}`;
 	if (storage === "stack") {
 		if (!/^-?(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(loc)) throw new Error(`omp-re: invalid stack delta: ${JSON.stringify(loc)} — a decimal or 0x-hex offset`);
 		return [`afvs ${loc} ${name}${typeArg} ${at}`];

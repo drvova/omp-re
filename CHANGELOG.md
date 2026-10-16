@@ -177,6 +177,19 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   refused, so a register-assign dual, a control command (`dc`/`ds`), a write,
   config, shell, or script form can never be stored — the stored command can
   only log state, never drive or mutate the process.
+- The free-form search arguments — `search_regex_bytes` (regex),
+  `search_asm` (assembly), and `search_gadgets` (filter) — now pass through
+  the same forbidden-syntax guard as `rizin_command` before reaching the pipe.
+  They were interpolated into the search command raw, so a `;`/newline (chains
+  a command through the `-q0` pipe) with `!` (shell) or a `>` (file redirect)
+  could execute a command or write a file through read-tier tools that take no
+  exec approval. (`search_bytes`/`search_string`/`search_value` were never
+  affected — hex charset, client-side hex-encoding, and numeric args.)
+- `define_variable` interpolated its C type into `afvs`/`afvr` unquoted,
+  guarded only by a character check that still allowed `>`/`<`/`@`; it is now
+  single-quoted like every other type/prototype path (`set_prototype`,
+  `set_variable_type`, `define_global`), so a redirect or seek character in the
+  type is literal and can neither write a file nor seek.
 
 ## [0.2.0] - 2026-10-15
 

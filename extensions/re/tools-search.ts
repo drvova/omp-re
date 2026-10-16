@@ -14,6 +14,7 @@
  * JSON command, with rizin's own filter string on both.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { forbiddenSyntaxReason } from "./catalog.ts";
 import { jsonResult, type ReToolResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { eaFromOffset, type RzSession, validateAddr } from "./rizin.ts";
@@ -77,6 +78,23 @@ function hitRow(hit: RzSearchHit): SearchHitRow {
 	return { ea: eaFromOffset(knownAddr(hit.address) ?? 0), size: hit.size, flag: hit.flag };
 }
 
+/**
+ * Reject a free-form search argument (a regex, assembly text, or a gadget
+ * filter) that carries a rizin command-injection character before it is
+ * interpolated into the search command line. Unlike `search_bytes`
+ * (hex-charset) and `search_string` (hex-encoded), these arguments reach the
+ * `-q0` pipe verbatim, where `;`/newline chain a second command, `>`/`<`
+ * redirect to a file, and backtick/`$()` substitute — so they go through the
+ * same guard `rizin_command` applies. (`;`-separated assembly never worked
+ * through this transport anyway: rizin runs the second instruction as its own
+ * command.)
+ */
+export function validateSearchArg(kind: string, value: string): string {
+	const bad = forbiddenSyntaxReason(value);
+	if (bad) throw new Error(`omp-re: ${kind}: ${bad} is not allowed in a search argument`);
+	return value;
+}
+
 /** Core shared by the three search tools: run one JSON search command and render its hits as paginated rows. */
 export async function searchCommand(rz: RzSession, command: string, label: string, params: { offset?: number; limit?: number }): Promise<ReToolResult> {
 	const hits = (await rz.cmdj<RzSearchHit[]>(command)) ?? [];
@@ -109,9 +127,10 @@ export interface RzGadgetRow {
 /** ROP/COP gadget search, native: prime the gadget cache with a text-mode run, then take rizin's own JSON rows. The filter string is rizin's own gadget filter. */
 export async function searchGadgets(rz: RzSession, kind: "rop" | "cop", filter: string | undefined, params: { offset?: number; limit?: number }): Promise<ReToolResult> {
 	const base = kind === "rop" ? "/R" : "/C";
+	const safeFilter = filter !== undefined ? validateSearchArg("search_gadgets", filter) : undefined;
 	// 0.9.1: /Rj and /Cj emit nothing until a text-mode run populates the gadget cache.
-	await rz.cmd(filter !== undefined ? `${base} ${filter}` : base);
-	const hits = (await rz.cmdj<RzGadgetRow[]>(filter !== undefined ? `${base}j ${filter}` : `${base}j`)) ?? [];
+	await rz.cmd(safeFilter !== undefined ? `${base} ${safeFilter}` : base);
+	const hits = (await rz.cmdj<RzGadgetRow[]>(safeFilter !== undefined ? `${base}j ${safeFilter}` : `${base}j`)) ?? [];
 	const rows = hits.map((hit) => ({
 		ea: eaFromOffset(knownAddr(hit.retaddr) ?? 0),
 		size: hit.size,
@@ -209,7 +228,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		...reRenderers({ title: "Search regex", subject: "pattern", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
-			return scopedSearch(rz, `/xrj ${params.pattern}`, `regex hits for ${JSON.stringify(params.pattern)}`, params, signal);
+			return scopedSearch(rz, `/xrj ${validateSearchArg("search_regex_bytes", params.pattern)}`, `regex hits for ${JSON.stringify(params.pattern)}`, params, signal);
 		},
 	});
 
@@ -224,7 +243,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		...reRenderers({ title: "Search asm", subject: "instructions", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
-			const text = params.instructions.replace(/"/g, "");
+			const text = validateSearchArg("search_asm", params.instructions);
 			return scopedSearch(rz, `/aj ${text}`, `asm hits for ${JSON.stringify(params.instructions)}`, params, signal);
 		},
 	});

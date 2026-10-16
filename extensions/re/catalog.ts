@@ -297,13 +297,26 @@ const FORBIDDEN_SYNTAX: readonly [RegExp, string][] = [
 
 export type CommandCheck = { ok: true; name: string; line: string } | { ok: false; reason: string };
 
+/**
+ * The label of the first forbidden-syntax character in `value`, or undefined
+ * when none is present. {@link checkRizinCommand} uses this to reject a command
+ * line; tools that interpolate a free-form model string into a rizin command
+ * (e.g. the search patterns) use it to reject the same command-injection
+ * characters — `;` and a newline chain a second command through the `-q0`
+ * pipe, `>`/`<` redirect to a file, and the rest substitute or grep — before
+ * the string reaches the pipe.
+ */
+export function forbiddenSyntaxReason(value: string): string | undefined {
+	for (const [pattern, label] of FORBIDDEN_SYNTAX) if (pattern.test(value)) return label;
+	return undefined;
+}
+
 /** Decide whether `command` (plus an optional `addr` to run it at) may run through `rizin_command`, and build the exact line sent to rizin. */
 export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: string): CommandCheck {
 	const trimmed = command.trim();
 	if (trimmed === "") return { ok: false, reason: "omp-re: rizin_command: empty command" };
-	for (const [pattern, label] of FORBIDDEN_SYNTAX) {
-		if (pattern.test(trimmed)) return { ok: false, reason: `omp-re: rizin_command: ${label} is not allowed in a command` };
-	}
+	const forbidden = forbiddenSyntaxReason(trimmed);
+	if (forbidden) return { ok: false, reason: `omp-re: rizin_command: ${forbidden} is not allowed in a command` };
 	const name = trimmed.split(/\s+/, 1)[0]!;
 	// Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
 	// sorts/filters/paginates/reformats the command's table. Only the head must
