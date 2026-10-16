@@ -20,8 +20,9 @@
 import { Context } from "cordis";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
-import { branchEntries, recordedSignatures } from "./entries.ts";
-import { assertRizinAvailable, type LoadOptions, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
+import { branchEntries, recordedAnalysisPasses, recordedSignatures } from "./entries.ts";
+import { replayAnalysisPasses } from "./passes.ts";
+import { analysisTimeoutMs, assertRizinAvailable, type LoadOptions, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
 import { replaySignatures } from "./signatures.ts";
 
 /** The per-omp-session record. The public fields are read and written directly by the tools, UI, evidence, and audit modules exactly as before. */
@@ -124,14 +125,17 @@ class RizinBackend {
 		if (options.loadOptions) rec.loadOptions = options.loadOptions;
 		const loadOptions = options.loadOptions ?? rec.loadOptions ?? undefined;
 		const rz = await RzSession.spawn(resolveRizinPath(binaryPath, loadOptions?.bits), binaryPath, { ...options, loadOptions });
-		// Re-apply this branch's custom FLIRT files first: they name functions,
-		// and an annotation (e.g. a rename of one of those functions) layered on
-		// top must win, so signatures replay before annotations. Computed from
-		// the branch entries, like annotations, so switching binaries never
-		// carries one binary's signatures onto another.
-		const signatureFailures = await replaySignatures(rz, recordedSignatures(branchEntries(ctx), binaryPath));
-		const live = liveAnnotations(branchEntries(ctx), binaryPath);
-		const replayFailures = [...signatureFailures, ...(await replayAnnotations(rz, live))];
+		// Rebuild the branch's layered analysis on top of the baseline `aaa`, in
+		// dependency order so each layer can see the one before it, and so switching
+		// binaries never carries one binary's layers onto another:
+		//   1. analysis passes find functions (prelude scan, Go/ObjC recovery, …),
+		//   2. signatures name the functions that now exist,
+		//   3. annotations (renames, types, …) are the analyst's edits on top.
+		const entries = branchEntries(ctx);
+		const passFailures = await replayAnalysisPasses(rz, recordedAnalysisPasses(entries, binaryPath), analysisTimeoutMs());
+		const signatureFailures = await replaySignatures(rz, recordedSignatures(entries, binaryPath));
+		const live = liveAnnotations(entries, binaryPath);
+		const replayFailures = [...passFailures, ...signatureFailures, ...(await replayAnnotations(rz, live))];
 
 		const scope = await this.scope(rec);
 		const previous = rec._disposeRz;

@@ -16,6 +16,7 @@ import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catal
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
+import { registerAnalyzeTools } from "./tools-analyze.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
 import { registerSignatureTools } from "./tools-signatures.ts";
 import { branchEntries, lastRecordedBinaryPath, lastRecordedLoadOptions } from "./entries.ts";
@@ -426,6 +427,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:syscall-tools", apply: registerSyscallTools },
 		{ name: "re:mutate-tools", apply: registerMutateTools },
 		{ name: "re:signature-tools", apply: registerSignatureTools },
+		{ name: "re:analyze-tools", apply: registerAnalyzeTools },
 		{ name: "re:rizin-repl", apply: registerRizinTools },
 		{ name: "re:rizin-cli", apply: registerRzCliTools },
 		{ name: "re:triage-tools", apply: registerTriageTools },

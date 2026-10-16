@@ -66,3 +66,27 @@ export function recordedSignatures(entries: readonly SessionEntry[], binaryPath:
 	}
 	return paths;
 }
+
+/**
+ * The analysis passes (`analyze` tool) run against `binaryPath` on this
+ * branch, de-duplicated and in first-run order, so a resume re-runs the same
+ * passes (`aaa` runs on every spawn, but these extra passes don't). Scoped to
+ * the binary like signatures and annotations.
+ */
+export function recordedAnalysisPasses(entries: readonly SessionEntry[], binaryPath: string): string[] {
+	const passes: string[] = [];
+	let current: string | undefined;
+	for (const entry of entries) {
+		if (entry.type !== "custom") continue;
+		if (entry.customType === "re.binary") {
+			const path = (entry.data as { path?: unknown } | undefined)?.path;
+			current = typeof path === "string" ? path : undefined;
+			continue;
+		}
+		if (entry.customType === "re.analysis" && current === binaryPath) {
+			const pass = (entry.data as { pass?: unknown } | undefined)?.pass;
+			if (typeof pass === "string" && !passes.includes(pass)) passes.push(pass);
+		}
+	}
+	return passes;
+}

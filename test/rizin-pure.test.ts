@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { recordedSignatures } from "../extensions/re/entries.ts";
+import { recordedAnalysisPasses, recordedSignatures } from "../extensions/re/entries.ts";
+import { ANALYSIS_PASSES, isAnalysisPass } from "../extensions/re/passes.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
 import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
 import { baseRizinFlags, buildLoadFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
@@ -191,6 +192,17 @@ describe("annotationCommands", () => {
 	});
 });
 
+describe("analysis passes", () => {
+	test("every pass maps to an aa* command and isAnalysisPass recognizes exactly those names", () => {
+		for (const [name, command] of Object.entries(ANALYSIS_PASSES)) {
+			expect(command).toMatch(/^aa[a-z]+$/);
+			expect(isAnalysisPass(name)).toBe(true);
+		}
+		expect(isAnalysisPass("not_a_pass")).toBe(false);
+		expect(isAnalysisPass("aaa")).toBe(false);
+	});
+});
+
 describe("signatures", () => {
 	test("signatureApplyCommand quotes the path as a single Fs argument", () => {
 		expect(signatureApplyCommand("/sigs/libc.sig")).toBe("Fs '/sigs/libc.sig'");
@@ -209,6 +221,20 @@ describe("signatures", () => {
 		expect(parseAppliedCount("Found 1 FLIRT signature via /x.pat")).toBe(1);
 		expect(parseAppliedCount("Found 0 FLIRT signatures via /x.sig")).toBe(0);
 		expect(parseAppliedCount("nothing here")).toBeUndefined();
+	});
+
+	test("recordedAnalysisPasses scopes passes to the binary and de-duplicates them in order", () => {
+		const entries = [
+			{ type: "custom", id: "b1", customType: "re.binary", data: { path: "/bin/a" } },
+			{ type: "custom", id: "a1", customType: "re.analysis", data: { pass: "preludes" } },
+			{ type: "custom", id: "a2", customType: "re.analysis", data: { pass: "golang" } },
+			{ type: "custom", id: "a3", customType: "re.analysis", data: { pass: "preludes" } }, // dup
+			{ type: "custom", id: "b2", customType: "re.binary", data: { path: "/bin/b" } },
+			{ type: "custom", id: "a4", customType: "re.analysis", data: { pass: "objc" } },
+		] as unknown as Entry[];
+		expect(recordedAnalysisPasses(entries, "/bin/a")).toEqual(["preludes", "golang"]);
+		expect(recordedAnalysisPasses(entries, "/bin/b")).toEqual(["objc"]);
+		expect(recordedAnalysisPasses(entries, "/bin/none")).toEqual([]);
 	});
 
 	test("recordedSignatures scopes applied files to the binary open when each was recorded", () => {

@@ -34,7 +34,10 @@ Do not skip ahead — later steps depend on evidence the earlier ones record.
    through thousands.
 4. `list_functions` — `sort: "callers"` surfaces the most-used helpers,
    `sort: "size"` the biggest logic; then `get_function` on the handful that
-   matter (it lists what each one calls, by name, and who calls it).
+   matter (it lists what each one calls, by name, and who calls it). If the
+   list looks sparse for the binary's size (a stripped, Go, or Objective-C
+   target), run `analyze` with `preludes`, `golang`, or `objc` to recover
+   more functions before reading.
 5. `decompile_function` only on functions you have a reason to read.
 6. `triage_capa` when it is registered — it is the only source that grounds
    ATT&CK and verdict claims.

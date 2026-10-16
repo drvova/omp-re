@@ -1,8 +1,8 @@
 # Tool reference
 
-All 47 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 48 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 47 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 48 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -157,6 +157,19 @@ because it refuses file arguments. List the built-in database with
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `apply_signatures` | `exec` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions, so it is exec-tier. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
+
+## Analysis passes — `analyze` (1 tool)
+
+`open_binary`'s `aaa` is the analysis baseline. `analyze` re-runs the deeper
+or format-specific passes it skips (book: analysis/code_analysis), each
+additive — it finds functions, xrefs, names, or types; none deletes. The pass
+is recorded and re-run on resume/respawn (before signatures and annotations,
+so each layer sees the one before it), not as an undoable annotation —
+reopen the binary to return to the baseline.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `autoname` (`aan`), `types` (`aaft`), `golang` (`aalg`), `objc` (`aalor`), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
 
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 

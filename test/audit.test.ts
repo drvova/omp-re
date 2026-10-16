@@ -9,6 +9,7 @@ import {
 	RE_ALL_TOOL_NAMES,
 	RE_MUTATE_TOOL_NAMES,
 	RE_DEBUG_TOOL_NAMES,
+	RE_ANALYZE_TOOL_NAMES,
 	RE_EMULATE_TOOL_NAMES,
 	RE_EVIDENCE_TOOL_NAMES,
 	RE_SIGNATURE_TOOL_NAMES,
@@ -21,7 +22,7 @@ import {
 } from "../extensions/re/audit.ts";
 
 describe("RE_ALL_TOOL_NAMES", () => {
-	test("contains exactly 47 names and is the union of read (28), mutate (8), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (1), and session (1)", () => {
+	test("contains exactly 48 names and is the union of read (28), mutate (8), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (1), analyze (1), and session (1)", () => {
 		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(28);
 		expect(Object.keys(RE_MUTATE_TOOL_NAMES)).toHaveLength(8);
 		expect(Object.keys(RE_RIZIN_TOOL_NAMES)).toHaveLength(2);
@@ -30,10 +31,11 @@ describe("RE_ALL_TOOL_NAMES", () => {
 		expect(Object.keys(RE_DEBUG_TOOL_NAMES)).toHaveLength(1);
 		expect(Object.keys(RE_EMULATE_TOOL_NAMES)).toHaveLength(1);
 		expect(Object.keys(RE_SIGNATURE_TOOL_NAMES)).toHaveLength(1);
+		expect(Object.keys(RE_ANALYZE_TOOL_NAMES)).toHaveLength(1);
 		expect(Object.keys(RE_SESSION_TOOL_NAMES)).toHaveLength(1);
 
 		const allNames = Object.keys(RE_ALL_TOOL_NAMES);
-		expect(allNames).toHaveLength(47);
+		expect(allNames).toHaveLength(48);
 
 		const expectedUnion = new Set([
 			...Object.keys(RE_READ_TOOL_NAMES),
@@ -44,6 +46,7 @@ describe("RE_ALL_TOOL_NAMES", () => {
 			...Object.keys(RE_DEBUG_TOOL_NAMES),
 			...Object.keys(RE_EMULATE_TOOL_NAMES),
 			...Object.keys(RE_SIGNATURE_TOOL_NAMES),
+			...Object.keys(RE_ANALYZE_TOOL_NAMES),
 			...Object.keys(RE_SESSION_TOOL_NAMES),
 		]);
 		expect(new Set(allNames)).toEqual(expectedUnion);
@@ -56,8 +59,8 @@ describe("RE_ALL_TOOL_NAMES", () => {
 		}
 	});
 
-	test("the emulator, debugger, and signature-apply tool are audited and toggled by /re off, but never recorded as evidence", () => {
-		for (const name of ["rizin_emulate", "rizin_debug", "apply_signatures"]) {
+	test("the emulator, debugger, signature-apply, and analyze tools are audited and toggled by /re off, but never recorded as evidence", () => {
+		for (const name of ["rizin_emulate", "rizin_debug", "apply_signatures", "analyze"]) {
 			expect(RE_ALL_TOOL_NAMES[name]).toBe(true);
 			expect(RE_EVIDENCE_TOOL_NAMES[name]).toBeUndefined();
 		}
