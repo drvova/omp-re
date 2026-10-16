@@ -17,8 +17,16 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { getState } from "./state.ts";
 
-/** The 12 read-tier RE tools (tools-read.ts). */
+/**
+ * Every read-tier RE tool — the ones registered with `approval: "read"`,
+ * across tools-read.ts, tools-search.ts, tools-types.ts, tools-syscalls.ts,
+ * and tools-info.ts. This list IS the read tier: it gates evidence recording
+ * (RE_EVIDENCE_TOOL_NAMES), audit logging, and `/re off`/`/re on`, so a read
+ * tool missing from it silently records no evidence, is never audited, and
+ * isn't disabled by `/re off`. Keep it in sync as read tools are added.
+ */
 export const RE_READ_TOOL_NAMES: Record<string, true> = {
+	// tools-read.ts
 	list_functions: true,
 	search_functions: true,
 	get_function: true,
@@ -31,6 +39,26 @@ export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	list_strings: true,
 	list_segments: true,
 	hash_binary: true,
+	// tools-search.ts
+	search_bytes: true,
+	search_string: true,
+	search_regex_bytes: true,
+	search_asm: true,
+	search_value: true,
+	search_gadgets: true,
+	// tools-types.ts
+	list_types: true,
+	define_types: true,
+	cast_memory: true,
+	// tools-syscalls.ts
+	list_syscalls: true,
+	syscall_lookup: true,
+	// tools-info.ts
+	get_binary_info: true,
+	list_entrypoints: true,
+	list_relocations: true,
+	list_flags: true,
+	list_classes: true,
 };
 
 /** The 5 write-tier annotation tools (tools-mutate.ts). */
@@ -69,6 +97,11 @@ export const RE_DEBUG_TOOL_NAMES: Record<string, true> = {
 	rizin_debug: true,
 };
 
+/** The RzIL emulator (tools-emulate.ts): one exec-tier tool that interprets the target's code inside rizin. In the audit gate so its runs are always logged; not evidence (it is an action, like the debugger). */
+export const RE_EMULATE_TOOL_NAMES: Record<string, true> = {
+	rizin_emulate: true,
+};
+
 /** Tools whose successful output is an observation of the binary and becomes a `re.evidence` record (evidence.ts). `rizin_help` is not (help text says nothing about the binary); `rizin_cli` is not (it also does arithmetic and standalone assembly — cite binary facts through the dedicated tools or rizin_command). */
 export const RE_EVIDENCE_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
@@ -80,7 +113,7 @@ export const RE_SESSION_TOOL_NAMES: Record<string, true> = {
 	open_binary: true,
 };
 
-/** All 26 RE-suite tool names (read + mutate + triage + rizin REPL + rizin CLI + debugger + session-setup) — the audit log's gate. `debug` is counted here even though it registers only when enabled, so turning it on never bypasses the log. */
+/** Every RE-suite tool name (read + mutate + triage + rizin REPL + rizin CLI + debugger + emulator + session-setup) — the gate for the audit log, the status band, and `/re off`/`/re on`. `debug` is counted here even though it registers only when enabled, so turning it on never bypasses the log. */
 export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
 	...RE_MUTATE_TOOL_NAMES,
@@ -88,6 +121,7 @@ export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_RIZIN_TOOL_NAMES,
 	...RE_RZCLI_TOOL_NAMES,
 	...RE_DEBUG_TOOL_NAMES,
+	...RE_EMULATE_TOOL_NAMES,
 	...RE_SESSION_TOOL_NAMES,
 };
 

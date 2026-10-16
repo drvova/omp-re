@@ -9,6 +9,8 @@ import {
 	RE_ALL_TOOL_NAMES,
 	RE_MUTATE_TOOL_NAMES,
 	RE_DEBUG_TOOL_NAMES,
+	RE_EMULATE_TOOL_NAMES,
+	RE_EVIDENCE_TOOL_NAMES,
 	RE_READ_TOOL_NAMES,
 	RE_RIZIN_TOOL_NAMES,
 	RE_RZCLI_TOOL_NAMES,
@@ -18,17 +20,18 @@ import {
 } from "../extensions/re/audit.ts";
 
 describe("RE_ALL_TOOL_NAMES", () => {
-	test("contains exactly 29 names and is the union of read (12), mutate (8), rizin (2), rizin CLI (1), triage (4), debug (1), and session (1)", () => {
-		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(12);
+	test("contains exactly 46 names and is the union of read (28), mutate (8), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), and session (1)", () => {
+		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(28);
 		expect(Object.keys(RE_MUTATE_TOOL_NAMES)).toHaveLength(8);
 		expect(Object.keys(RE_RIZIN_TOOL_NAMES)).toHaveLength(2);
 		expect(Object.keys(RE_RZCLI_TOOL_NAMES)).toHaveLength(1);
 		expect(Object.keys(RE_TRIAGE_TOOL_NAMES)).toHaveLength(4);
 		expect(Object.keys(RE_DEBUG_TOOL_NAMES)).toHaveLength(1);
+		expect(Object.keys(RE_EMULATE_TOOL_NAMES)).toHaveLength(1);
 		expect(Object.keys(RE_SESSION_TOOL_NAMES)).toHaveLength(1);
 
 		const allNames = Object.keys(RE_ALL_TOOL_NAMES);
-		expect(allNames).toHaveLength(29);
+		expect(allNames).toHaveLength(46);
 
 		const expectedUnion = new Set([
 			...Object.keys(RE_READ_TOOL_NAMES),
@@ -37,9 +40,24 @@ describe("RE_ALL_TOOL_NAMES", () => {
 			...Object.keys(RE_RZCLI_TOOL_NAMES),
 			...Object.keys(RE_TRIAGE_TOOL_NAMES),
 			...Object.keys(RE_DEBUG_TOOL_NAMES),
+			...Object.keys(RE_EMULATE_TOOL_NAMES),
 			...Object.keys(RE_SESSION_TOOL_NAMES),
 		]);
 		expect(new Set(allNames)).toEqual(expectedUnion);
+	});
+
+	test("the search / types / syscall / binary-info read tools ground evidence (not just the original twelve)", () => {
+		for (const name of ["search_bytes", "search_value", "search_gadgets", "list_types", "cast_memory", "list_syscalls", "get_binary_info", "list_flags", "list_classes"]) {
+			expect(RE_EVIDENCE_TOOL_NAMES[name]).toBe(true);
+			expect(RE_ALL_TOOL_NAMES[name]).toBe(true);
+		}
+	});
+
+	test("the emulator and debugger are audited and toggled by /re off, but never recorded as evidence", () => {
+		for (const name of ["rizin_emulate", "rizin_debug"]) {
+			expect(RE_ALL_TOOL_NAMES[name]).toBe(true);
+			expect(RE_EVIDENCE_TOOL_NAMES[name]).toBeUndefined();
+		}
 	});
 });
 
