@@ -113,12 +113,21 @@ describe("listTypeRows", () => {
 });
 
 describe("defineTypeLines", () => {
-	test("sends one td per definition and reports silence", async () => {
+	test("sends one double-quoted td per definition and reports silence", async () => {
 		const { rz, ran } = stubRz({});
 		const result = await defineTypeLines(rz, ["struct cfg { int v; };", "typedef struct cfg cfg_t;"]);
-		expect(ran.filter((c) => c.startsWith("td "))).toEqual(["td struct cfg { int v; };", "td typedef struct cfg cfg_t;"]);
+		// Double-quoted so rizin's line splitter doesn't cut the member `;`s.
+		expect(ran.filter((c) => c.startsWith("td "))).toEqual(['td "struct cfg { int v; };"', 'td "typedef struct cfg cfg_t;"']);
 		const text = result.content[0].type === "text" ? result.content[0].text : "";
 		expect(text).toContain("2 definition(s) accepted silently");
+	});
+
+	test("refuses a definition that could break out of the quoting", async () => {
+		const { rz } = stubRz({});
+		// A raw `"` would close the quote early; backtick/`$`/`\` could substitute or escape. None appears in a real C type.
+		for (const bad of ['struct X { int a; }" ; !id', "struct Y { char *p; } `id`", "struct Z { int $x; }", "struct W { int a; }\\"]) {
+			await expect(defineTypeLines(rz, [bad])).rejects.toThrow("may not contain");
+		}
 	});
 
 	test("surfaces rizin stderr for rejected definitions", async () => {

@@ -122,6 +122,13 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
 
 ### Fixed
 
+- `define_types` sent `td <definition>` unquoted, so rizin's command parser
+  split a multi-member struct on its member `;`s and rejected the whole
+  definition ("Error while parsing command") — the tool only ever worked for
+  single-member/semicolon-free types, and its stub-only tests never ran a real
+  `td`. The definition is now double-quoted (`td "<definition>"`) so the `;`s
+  survive, with a `"`/backtick/`$`/`\`/control-char guard so the quoting can't
+  be broken out of, and a live test defines a real multi-member struct.
 - The search / types / syscall / binary-info read tools and the RzIL emulator
   were never added to the suite's tool roster, so those read tools recorded no
   `re.evidence` (breaking the report gate's grounding for anything found

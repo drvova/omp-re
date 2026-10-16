@@ -7,6 +7,7 @@ import { resolveDecompiler } from "../extensions/re/decompile.ts";
 import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
 import { scopedSearch, searchCommand } from "../extensions/re/tools-search.ts";
+import { defineTypeLines } from "../extensions/re/tools-types.ts";
 import { canRunRizin, logSkip, makeHarness, rizinPath, TEST_BINARY } from "./helpers.ts";
 
 /** The hit total from a search result's header ("N hits" / "N of M hits" — M is the total). */
@@ -155,6 +156,15 @@ describe.skipIf(!canRunRizin)("rizin_command read-only extras (chapter B) agains
 	test("`tn` lists noreturn functions bare but is refused with an argument (which would add one)", () => {
 		expect(checkRizinCommand(catalog, "tn")).toMatchObject({ ok: true });
 		expect(checkRizinCommand(catalog, "tn sym.main")).toMatchObject({ ok: false });
+	});
+
+	test("define_types defines a multi-member struct through the real transport (the `;`s survive the line splitter)", async () => {
+		// Unquoted, rizin's command parser would cut this on its member `;`s and reject it; defineTypeLines double-quotes it.
+		await defineTypeLines(session, ["struct omp_re_cfg { int flags; char *name; unsigned long id; };"]);
+		const structs = (await session.cmdj<{ name?: string; members?: Record<string, string> }[]>("tsj")) ?? [];
+		const defined = structs.find((s) => s.name === "omp_re_cfg");
+		expect(defined).toBeDefined();
+		expect(Object.keys(defined?.members ?? {})).toEqual(["flags", "name", "id"]);
 	});
 
 	test("the p= statistical/entropy histograms are allowed (despite the `=`) and run read-only", async () => {
