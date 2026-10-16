@@ -346,6 +346,81 @@ export function isRunnable(name: string): boolean {
 	return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
 }
 
+/**
+ * Read-only debugger-state commands a breakpoint on-hit command (`dbc`, the
+ * `break_command` debug action) may run. The static {@link checkRizinCommand}
+ * policy refuses the whole `d*` family because `rizin_command` drives a static
+ * session; but an on-hit command runs inside the live debugger, where logging
+ * registers, maps, the backtrace, or heap state on each hit is the point.
+ *
+ * Every entry here was read off rizin 0.9.1's own `?*j` summaries as a pure
+ * read: register/arena views (`dr*` show forms — the assign dual `dr reg=val`
+ * carries `=`, refused below), memory-map/module/library listings (`dm*`
+ * list/show — the `dm+`/`dm-`/`dmp`/`dml`/`dmd*` allocate/map/dump forms are
+ * distinct tokens left out), heap reads (`dmhg*`/`dmhj*`), backtrace (`dbt*`
+ * display — not the `dbtd`/`dbte`/`dbts` trace toggles), process/thread and
+ * debug-info listings (`dp`/`dpt`/`dpl`/`dpT`/`dpe`, `di*` — not `dpa`/`dpf`
+ * attach, `dpk` signal, `dp-` detach), the signal-handler listings and name/
+ * number resolvers (`dkl*`/`dkN`/`dkn` — not `dk` send, `dko` set), and the
+ * file-descriptor listing (`ddl*` only — `ddr`/`ddw`/`dds`/`ddd`/`dd` read/
+ * write/seek/open fds, left out). Matched by exact first token, so a setter
+ * sibling (`dra+`, `draw`, `drx`, `drpo`) never slips through, and any `=`
+ * (register assignment, `dm=`/`dr=`/`dp=` select/display) is refused outright.
+ */
+const DEBUG_READ_COMMANDS: ReadonlySet<string> = new Set([
+	// Registers & arenas (show forms; `dr reg=val` assign carries `=`, refused below).
+	"dr", "drj", "drq", "drt", "drr", "drrj", "dro", "droj", "droq", "drot",
+	"drd", "dri", "drc", "drcc", "drA", "drAj", "drF", "drR", "drT",
+	"drp", "drpj", "drpc", "dra", "draS", "drab",
+	// Memory maps, modules, libraries, sections.
+	"dm", "dmj", "dmq", "dmt", "dm.", "dmm", "dmmj", "dmm.", "dmm.j",
+	"dmi", "dmij", "dmiq", "dmi.", "dmi.j", "dmia", "dmiaj", "dmiaq", "dmS", "dmSj",
+	// Heap reads.
+	"dmh", "dmhg", "dmhgj", "dmhgb", "dmhgc", "dmhgm", "dmhgl", "dmhgt", "dmhja", "dmhjb", "dmhjc",
+	// Backtrace display.
+	"dbt", "dbtj", "dbtq", "dbtt", "dbtv", "dbta",
+	// Process / threads / debug info.
+	"dp", "dpj", "dpt", "dpe", "dpl", "dplj", "dplt", "dpT", "dpTj", "dpTt", "di", "dij", "diq",
+	// Signal-handler listings and name/number resolvers.
+	"dkl", "dklj", "dklq", "dklt", "dkN", "dkn",
+	// File-descriptor listing (list only).
+	"ddl", "ddlj", "ddlt",
+]);
+
+/**
+ * Decide whether `command` may run as a breakpoint on-hit command (`dbc`). It
+ * accepts either a vetted read-only debugger-state read ({@link
+ * DEBUG_READ_COMMANDS}) or anything the static read-only policy already allows
+ * (print/info/search), so an on-hit command can log the debugger's live state
+ * or a static view. The forbidden-syntax guards apply either way, and any `=`
+ * is refused so the register-assign dual (`dr rax=0`) can never write.
+ */
+export function checkDebugOnHitCommand(catalog: RzCatalog, command: string): CommandCheck {
+	const trimmed = command.trim();
+	if (trimmed === "") return { ok: false, reason: "omp-re: break_command: empty command" };
+	for (const [pattern, label] of FORBIDDEN_SYNTAX) {
+		if (pattern.test(trimmed)) return { ok: false, reason: `omp-re: break_command: ${label} is not allowed in an on-hit command` };
+	}
+	const name = trimmed.split(/\s+/, 1)[0]!;
+	if (DEBUG_READ_COMMANDS.has(name)) {
+		// `=` is the only way these turn into a write (register assignment) or a stateful select (`dm=`/`dp=`); refuse it.
+		if (trimmed.includes("=")) {
+			return { ok: false, reason: `omp-re: break_command: ${JSON.stringify(name)} with \`=\` would assign/select (a write); use the bare read form to log state` };
+		}
+		if (!isKnownCommand(catalog, name)) {
+			return { ok: false, reason: `omp-re: break_command: this rizin has no command ${JSON.stringify(name)} — look it up with rizin_help` };
+		}
+		return { ok: true, name, line: trimmed };
+	}
+	// Not a debugger read — fall back to the static read-only policy (print/info/search), which does its own validation.
+	const check = checkRizinCommand(catalog, command);
+	if (check.ok) return check;
+	return {
+		ok: false,
+		reason: `omp-re: break_command: ${JSON.stringify(name)} is not a read-only on-hit command. Allowed: read-only debugger state (registers \`drj\`/\`drr\`, maps \`dmj\`, modules \`dmmj\`, backtrace \`dbtj\`, heap \`dmhg\`), or a static read (print/info/search).`,
+	};
+}
+
 function describeArgs(spec: RzCommandSpec): string[] {
 	return (spec.args ?? []).map((arg) => {
 		const facts = [

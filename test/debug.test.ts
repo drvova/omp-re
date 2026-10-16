@@ -184,6 +184,11 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(approval({ action: "registers" }).reason).toContain("Inspect");
 		expect(approval({ action: "disassemble" }).reason).toContain("Inspect");
 		expect(approval({ action: "heap_chunks" }).reason).toContain("Inspect");
+		expect(approval({ action: "registers_telescope" }).reason).toContain("Inspect");
+		expect(approval({ action: "resolve_symbol" }).reason).toContain("Inspect");
+		expect(approval({ action: "break_condition" }).reason).toContain("Inspect");
+		expect(approval({ action: "break_command" }).reason).toContain("Inspect");
+		expect(approval({ action: "break_add_hw" }).reason).toContain("Modify");
 		expect(approval({ action: "trace_start" }).reason).toContain("trace session");
 		expect(approval({ action: "step_back" }).reason).toContain("backward");
 		expect(approval({ action: "continue_back" }).reason).toContain("backward");
@@ -257,6 +262,38 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(out.length).toBeGreaterThan(0);
 		expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
 	}, 20_000);
+
+	test("registers_telescope resolves registers, and resolve_symbol looks up a loaded symbol", async () => {
+		expect(textOf(await run("registers_telescope"))).toMatch(/rsp|rip|pc/i);
+		// resolve_symbol returns rizin's lookup (a match or its 'not mapped' note); never a desync.
+		expect(textOf(await run("resolve_symbol", { name: "write" })).length).toBeGreaterThan(0);
+	}, 20_000);
+
+	test("breakpoint management: hardware bp, condition, on-hit command, enable/disable", async () => {
+		await run("break_add", { addr: "entry0" });
+		// hardware breakpoint
+		expect(textOf(await run("break_add_hw", { addr: "main" }))).toContain('"hw":true');
+		// condition with a `>` that must stay literal (single-quoted), not a redirect
+		expect(textOf(await run("break_condition", { addr: "entry0", condition: "rax>0" }))).toContain('"cond":"rax>0"');
+		// on-hit command, gated read-only
+		expect(textOf(await run("break_command", { addr: "entry0", command: "drj" }))).toContain('"data":"drj"');
+		// disable then enable
+		expect(textOf(await run("break_disable", { addr: "entry0" }))).toContain('"enabled":false');
+		expect(textOf(await run("break_enable", { addr: "entry0" }))).toContain('"enabled":true');
+	}, 20_000);
+
+	test("break_command refuses shell/write/control on-hit commands but allows a debugger-state read", async () => {
+		await run("break_add", { addr: "main" });
+		// shell escape, memory write, and a static write are all refused
+		expect((await captureError(run("break_command", { addr: "main", command: "!id" }))).message).toMatch(/not a read-only on-hit command|not allowed/);
+		expect((await captureError(run("break_command", { addr: "main", command: "w hello" }))).message).toMatch(/not a read-only on-hit command|not allowed/);
+		// debugger control (continue) is refused — on-hit commands log state, they never drive the process
+		expect((await captureError(run("break_command", { addr: "main", command: "dc" }))).message).toMatch(/not a read-only on-hit command/);
+		// the register-assign dual (`dr reg=val`) is caught by the `=` guard, not allowed as a bare read
+		expect((await captureError(run("break_command", { addr: "main", command: "dr rax=0" }))).message).toMatch(/would assign\/select/);
+		// but a vetted debugger-state read the static policy forbids (maps) is allowed here
+		expect(textOf(await run("break_command", { addr: "main", command: "dmj" }))).toContain('"data":"dmj"');
+	});
 
 	test("reverse debugging: record a trace, step forward, then step_back returns to an earlier PC", async () => {
 		expect(textOf(await run("trace_start"))).toMatch(/trace session|step backward/i);

@@ -69,6 +69,16 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   inside an isolated VM from the host, the open binary serving as the symbol
   source. The pid and URI are validated; `attach` is refused together with
   `run`.
+- **Breakpoint management and live symbol resolution** (book:
+  debugger/getting_started). `rizin_debug` gains `break_add_hw` (hardware
+  breakpoint via debug registers — breaks on read-only / self-modifying /
+  packed pages without patching int3 bytes), `break_enable` / `break_disable`,
+  `break_condition` (stop only when an expression such as `rax>0` holds, passed
+  literally so comparison operators are not shell redirects), `break_command`
+  (run a read-only rizin command on each hit — e.g. `drj` to log registers),
+  `registers_telescope` (each register resolved to what it points at), and
+  `resolve_symbol` (the live, post-ASLR address of a loaded symbol such as
+  libc `system`).
 - **`rizin_command` read-only unlock.** Whole read-only families the book
   documents are now reachable: configuration reads (`e <key>`, `el`, `elj`,
   `et`, `es`), analysis-hint listings (`ahl`), metadata and string listings
@@ -95,6 +105,12 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   `e key=value` is refused, and `tn`/`Ld`/`Lo` run only in their list form.
   The ROP/JOP/COP constraint queries keep their `=` arguments. Every newly
   allowed command was confirmed read-only against a real rizin.
+- `break_command`'s on-hit command (`dbc`, which reruns on every breakpoint
+  hit) is restricted to vetted read-only debugger-state reads plus the static
+  print/info/search policy. Matched by exact command token with any `=`
+  refused, so a register-assign dual, a control command (`dc`/`ds`), a write,
+  config, shell, or script form can never be stored — the stored command can
+  only log state, never drive or mutate the process.
 
 ## [0.2.0] - 2026-10-15
 

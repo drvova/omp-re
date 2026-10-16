@@ -191,7 +191,7 @@ shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?` | Drives one debug action (below). `addr` is validated like every other address. |
+| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?` | Drives one debug action (below). `addr` is validated like every other address. |
 
 Actions:
 
@@ -207,14 +207,25 @@ Actions:
 - **Reverse debugging:** `trace_start` / `trace_stop` record a trace;
   `step_back` (`count`) / `continue_back` then move backward through it (they
   error until a trace is recorded).
-- **Registers & memory:** `registers`, `write_register` (`reg`=`value`),
+- **Registers & memory:** `registers`, `registers_telescope` (each register
+  resolved to what it points at), `write_register` (`reg`=`value`),
   `read_memory` (`size` bytes at `addr`), `write_memory` (`bytes` hex at
   `addr`, into the live process), `disassemble` (`count` instructions at
   `addr`, default the PC — reads *live* memory, so it shows self-modified or
-  unpacked code the static view can't).
+  unpacked code the static view can't), `resolve_symbol` (`name`, optional
+  `lib`) — the live, post-ASLR address of a loaded symbol such as libc
+  `system`.
 - **Breakpoints & watchpoints:** `break_add` / `break_remove` / `break_list`,
-  `watch_add` (hardware watchpoint at `addr`, `perm` r/w/rw, `size` 1/2/4/8 —
-  removed with `break_remove`), `backtrace`.
+  `break_add_hw` (hardware breakpoint via debug registers — breaks on
+  read-only / self-modifying / packed pages without patching int3 bytes),
+  `break_enable` / `break_disable` (toggle the breakpoint at `addr`),
+  `break_condition` (`condition`, e.g. `rax>0` — stop only when it holds; the
+  expression is passed literally so `>`/`<`/`==` are not shell redirects),
+  `break_command` (`command` — run a **read-only** rizin command on each hit,
+  e.g. `drj` to log registers or `dbtj` the backtrace; restricted to vetted
+  debugger-state reads plus static print/info/search, never shell, writes,
+  config, or debugger control), `watch_add` (hardware watchpoint at `addr`,
+  `perm` r/w/rw, `size` 1/2/4/8 — removed with `break_remove`), `backtrace`.
 - **Process state:** `maps`, `modules`, `libraries`, `sections`, `processes`,
   `threads`, `fds`, `signals`, `windows`.
 - **Heaps:** `heaps` / `heap_blocks` (Windows), `heap_arenas` / `heap_chunks`

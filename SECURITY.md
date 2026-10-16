@@ -171,11 +171,23 @@ of the suite holds:
   debuggee on `stop` and on session shutdown.
 - Every action is `exec`-tier, and the approval reason says plainly whether
   it resumes execution (`start`, `continue`, `continue_to_syscall`, `step`),
-  modifies the live process (`write_register`, `write_memory`, `watch_add`),
-  or only inspects (`registers`, `read_memory`, `disassemble`, `backtrace`,
-  the heap and process-state actions). Addresses, register names, register
-  values, and hex byte strings are all validated before anything reaches the
-  process.
+  modifies the live process (`write_register`, `write_memory`, `watch_add`,
+  `break_add_hw`), or only inspects (`registers`, `read_memory`,
+  `disassemble`, `backtrace`, the heap and process-state actions). Addresses,
+  register names, register values, and hex byte strings are all validated
+  before anything reaches the process.
+- `break_command` stores a rizin command that reruns on **every** breakpoint
+  hit (`dbc`), so its command string is gated the way `rizin_command` is —
+  but, running inside the live debugger, it additionally allows a vetted set
+  of read-only debugger-state reads (register/arena views, memory-map/module/
+  library/heap listings, backtraces, process/thread/fd/signal listings; see
+  `checkDebugOnHitCommand` in `catalog.ts`). Matched by exact command token,
+  with any `=` refused, so a register-assign dual (`dr rax=0`), a control
+  command (`dc`/`ds`), a write, config, shell, or script form can never be
+  stored — the on-hit command can only log state, never drive or mutate the
+  process. `break_condition` passes its expression to rizin single-quoted, so
+  comparison operators in the condition stay literal and never become
+  redirects.
 - It is a **plain debugger** — breakpoints and watchpoints, stepping,
   reading and writing registers and memory, disassembling live memory,
   recording a trace and stepping backward through it (reverse debugging),

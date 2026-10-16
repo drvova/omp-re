@@ -14,9 +14,10 @@
  * see SECURITY.md.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { checkDebugOnHitCommand, loadCatalog } from "./catalog.ts";
 import { plainResult, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { debugTimeoutMs, rizinBitsMismatch, validateAddr, type RzSession } from "./rizin.ts";
+import { debugTimeoutMs, rizinBitsMismatch, rzQuote, validateAddr, type RzSession } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
@@ -42,13 +43,20 @@ const DEBUG_ACTIONS = [
 	"step_back",
 	"continue_back",
 	"registers",
+	"registers_telescope",
 	"write_register",
 	"read_memory",
 	"write_memory",
 	"disassemble",
+	"resolve_symbol",
 	"break_add",
+	"break_add_hw",
 	"break_remove",
 	"break_list",
+	"break_enable",
+	"break_disable",
+	"break_condition",
+	"break_command",
 	"watch_add",
 	"backtrace",
 	"maps",
@@ -75,8 +83,8 @@ const EXECUTING_ACTIONS = new Set<DebugAction>(["start", "continue", "continue_u
 /** Actions that move the process BACKWARD through a recorded trace (reverse debugging). */
 const REVERSE_ACTIONS = new Set<DebugAction>(["step_back", "continue_back"]);
 
-/** Actions that modify the live process (registers or memory) or arm a watchpoint, as opposed to resuming or inspecting it. */
-const MODIFYING_ACTIONS = new Set<DebugAction>(["write_register", "write_memory", "watch_add"]);
+/** Actions that modify the live process (registers or memory) or arm a hardware watchpoint/breakpoint, as opposed to resuming or inspecting it. */
+const MODIFYING_ACTIONS = new Set<DebugAction>(["write_register", "write_memory", "watch_add", "break_add_hw"]);
 
 function approvalReason(action: DebugAction): string {
 	if (action === "start") return "Launch the target under a debugger — this EXECUTES it on this machine.";
@@ -106,6 +114,12 @@ function validateHexBytes(bytes: string): string {
 	const b = bytes.replace(/\s+/g, "");
 	if (!/^[0-9a-fA-F]+$/.test(b) || b.length % 2 !== 0) throw new Error(`omp-re: debug: bad hex bytes ${JSON.stringify(bytes)} — an even number of hex digits, e.g. 9090 or 4889e5`);
 	return b;
+}
+
+/** A library or symbol name for `dmi` (allows the dots/versioning of lib names like libc.so.6). */
+function validateSymbolQuery(name: string): string {
+	if (!/^[A-Za-z0-9_.+-]+$/.test(name)) throw new Error(`omp-re: debug: bad symbol/library name ${JSON.stringify(name)}`);
+	return name;
 }
 
 /** A watchpoint permission for `dbw <perm>`. */
@@ -255,9 +269,9 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				"continue_to_syscall / continue_to_call / continue_to_ret: resume until the next syscall, call, or return.",
 				"step: one instruction (or `count`). step_over: step over calls.",
 				"trace_start / trace_stop: record a trace so you can go backward. step_back / continue_back: step or continue BACKWARD through the recorded trace (reverse debugging).",
-				"registers: all register values. write_register: set `reg` to `value`.",
-				"read_memory: `size` bytes at `addr`. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory.",
-				"break_add / break_remove: breakpoint at `addr`. break_list: list breakpoints and watchpoints. watch_add: watchpoint at `addr` (perm r/w/rw, size). backtrace: call stack.",
+				"registers: all register values. registers_telescope: each register resolved to what it points at. write_register: set `reg` to `value`.",
+				"read_memory: `size` bytes at `addr`. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory. resolve_symbol: live address of `name` (optionally in `lib`).",
+				"break_add / break_add_hw (hardware) / break_remove at `addr`. break_list: list breakpoints and watchpoints. break_enable / break_disable at `addr`. break_condition: only stop when `condition` holds. break_command: run a read-only `command` on hit. watch_add: watchpoint at `addr` (perm r/w/rw, size). backtrace: call stack.",
 				"maps / modules / libraries / sections / processes / threads / fds / signals / windows: inspect process state.",
 				"heaps / heap_blocks: Windows heaps. heap_arenas / heap_chunks / heap_bins: glibc heap (arena in `addr`/`bin` where relevant).",
 				"stop: kill the process and end the debug session.",
@@ -270,6 +284,10 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		value: z.string().optional().describe("New register value for write_register (decimal or 0x hex)."),
 		bytes: z.string().optional().describe("Hex bytes for write_memory, e.g. 9090 or 4889e5 (written to the live process at addr)."),
 		perm: z.string().optional().describe("Watchpoint access for watch_add: r, w, or rw (default rw)."),
+		condition: z.string().optional().describe("Breakpoint condition for break_condition, e.g. `rax==0` or `rdi>0x10` — the breakpoint stops only when it holds."),
+		command: z.string().optional().describe("A read-only rizin command for break_command to run each time the breakpoint is hit (e.g. `drj` to log registers, `dmj` maps, `dbtj` backtrace). Restricted to vetted debugger-state reads plus the static print/info/search reads — never shell, writes, config, or debugger control."),
+		lib: z.string().optional().describe("Library name for resolve_symbol (optional), e.g. libc."),
+		name: z.string().optional().describe("Symbol name for resolve_symbol, e.g. system — resolves its live (post-ASLR) address."),
 		run: z
 			.object({
 				args: z.array(z.string()).optional().describe("Program arguments (arg0..argN)."),
@@ -425,6 +443,11 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					const out = (await dbg.cmd("drj", { signal })).trim();
 					return textResult("debug: registers", out || "(no registers)", { ctx, tool: "rizin_debug" });
 				}
+				case "registers_telescope": {
+					// `drr` resolves each register to what it points at (string/symbol/pointer chain) — far more informative than raw values.
+					const out = (await dbg.cmd("drr", { signal })).trim();
+					return textResult("debug: registers_telescope", out || "(no registers)", { ctx, tool: "rizin_debug" });
+				}
 				case "write_register": {
 					if (params.reg === undefined || params.value === undefined) throw new Error("omp-re: debug write_register needs reg and value");
 					const reg = validateRegName(params.reg);
@@ -454,6 +477,13 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					const out = (await dbg.cmd(`pdj ${n}${at ? ` @ ${at}` : ""}`, { signal })).trim();
 					return textResult(`debug: disassemble ${n}${at ? ` @ ${at}` : " @ pc"}`, out || "(no output)", { ctx, tool: "rizin_debug" });
 				}
+				case "resolve_symbol": {
+					// `dmi [lib] <name>` resolves the live (post-ASLR) address of a loaded symbol, e.g. libc `system`.
+					if (params.name === undefined && params.lib === undefined) throw new Error("omp-re: debug resolve_symbol needs a name (and optionally a lib)");
+					const parts = [params.lib, params.name].filter((p): p is string => p !== undefined).map(validateSymbolQuery);
+					const out = (await dbg.cmd(`dmi ${parts.join(" ")}`, { signal })).trim();
+					return textResult(`debug: resolve_symbol ${parts.join(" ")}`, out || "(no match — the library may not be mapped yet; continue past the loader)", { ctx, tool: "rizin_debug" });
+				}
 				case "break_add": {
 					if (!ea) throw new Error("omp-re: debug break_add needs addr");
 					await dbg.cmd(`db @ ${ea}`, { signal });
@@ -469,6 +499,38 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				case "break_list": {
 					const list = (await dbg.cmd("dblj", { signal })).trim();
 					return textResult("debug: break_list", list || "(no breakpoints)", { ctx, tool: "rizin_debug" });
+				}
+				case "break_add_hw": {
+					// Hardware breakpoint (debug registers) — breaks on read-only / self-modifying / packed pages without patching int3 bytes.
+					if (!ea) throw new Error("omp-re: debug break_add_hw needs addr");
+					await dbg.cmd(`dbH @ ${ea}`, { signal });
+					const list = (await dbg.cmd("dblj", { signal })).trim();
+					return textResult(`debug: break_add_hw ${ea}`, list || "(no breakpoints)", { ctx, tool: "rizin_debug" });
+				}
+				case "break_enable":
+				case "break_disable": {
+					if (!ea) throw new Error(`omp-re: debug ${params.action} needs addr`);
+					await dbg.cmd(`${params.action === "break_enable" ? "dbe" : "dbd"} @ ${ea}`, { signal });
+					const list = (await dbg.cmd("dblj", { signal })).trim();
+					return textResult(`debug: ${params.action} ${ea}`, list || "(no breakpoints)", { ctx, tool: "rizin_debug" });
+				}
+				case "break_condition": {
+					// `dbC '<expr>'` conditions the breakpoint at ea — single-quoted so `>`/`<`/`==` in the expression are literal, not rizin redirects/compares.
+					if (!ea) throw new Error("omp-re: debug break_condition needs addr");
+					if (params.condition === undefined) throw new Error("omp-re: debug break_condition needs condition");
+					await dbg.cmd(`dbC ${rzQuote(params.condition)} @ ${ea}`, { signal });
+					const list = (await dbg.cmd("dblj", { signal })).trim();
+					return textResult(`debug: break_condition ${ea}`, list || "(no breakpoints)", { ctx, tool: "rizin_debug" });
+				}
+				case "break_command": {
+					// Run a command each time the breakpoint hits (e.g. log registers). Gated through the read-only on-hit policy (vetted debugger-state reads + static print/info/search) so it can never reach `!` shell, writes, config, or debugger control.
+					if (!ea) throw new Error("omp-re: debug break_command needs addr");
+					if (params.command === undefined) throw new Error("omp-re: debug break_command needs command");
+					const check = checkDebugOnHitCommand(await loadCatalog(), params.command);
+					if (!check.ok) throw new Error(`omp-re: debug break_command: ${check.reason}`);
+					await dbg.cmd(`dbc ${check.line} @ ${ea}`, { signal });
+					const list = (await dbg.cmd("dblj", { signal })).trim();
+					return textResult(`debug: break_command ${ea}`, list || "(no breakpoints)", { ctx, tool: "rizin_debug" });
 				}
 				case "watch_add": {
 					// `dbw <perm> [<size>]` arms a hardware watchpoint at the seek; remove it with break_remove (it lives in the breakpoint list).
