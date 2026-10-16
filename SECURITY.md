@@ -87,7 +87,10 @@ and it refuses before anything reaches rizin unless the command:
   (config reads `e`/`el`/`et`/`es`, analysis-hint and metadata/string
   listings, class reads, address info, type/union/xref reads, plugin
   listings, the FLIRT sigdb listing) that was each confirmed read-only
-  against a real rizin;
+  against a real rizin, or is one of the `p=`/`p==` statistical-histogram
+  prints (entropy, chi-square, printable/string density, byte histograms)
+  allowed by name despite the `=` guard — with the interactive visual (`…v`)
+  variants excluded so none can block the command pipe;
 - is not a get/set dual used in its set form: `e <key>` reads a value but
   `e <key>=<value>` (a config write) is refused, and the positional duals
   `tn`/`Ld`/`Lo` run only with no argument (an argument makes them add or

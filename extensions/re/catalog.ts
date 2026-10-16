@@ -260,6 +260,18 @@ const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afb
 const DENIED_COMMAND = /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
 
 /**
+ * The `p=`/`p==` statistical-histogram family (book: print_modes) — entropy
+ * (`p=e`, `p=rj` rising/falling), chi-square, printable, strings, 0x00/0xFF
+ * density, and the byte histogram — all read-only prints over the current
+ * block/range. They carry `=` in the command name, which {@link
+ * DENIED_COMMAND}'s get/set guard would otherwise veto, so {@link isRunnable}
+ * allows them by this pattern instead. The interactive visual variants (the
+ * `…v` forms, which drive an ncurses UI and would block the pipe) are excluded
+ * by the trailing-`v` negative lookahead.
+ */
+const ENTROPY_MAP = /^p={1,2}(?![0-9A-Za-z]*v$)[0-9A-Za-z]*$/;
+
+/**
  * Syntax refused anywhere in a raw command, because it would leave the single
  * read-only command: `;` chains, `|` pipes to a shell, `>`/`<` redirect,
  * backticks and `$(`/`${` substitute, `~` greps (and breaks `-q0` framing),
@@ -343,6 +355,7 @@ export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: st
 /** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). The NOARG_DUALS run read-only with no argument, so they count as runnable here; `checkRizinCommand` enforces the no-argument constraint. */
 export function isRunnable(name: string): boolean {
 	if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) return true;
+	if (ENTROPY_MAP.test(name)) return true;
 	return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
 }
 

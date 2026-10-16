@@ -156,6 +156,19 @@ describe.skipIf(!canRunRizin)("rizin_command read-only extras (chapter B) agains
 		expect(checkRizinCommand(catalog, "tn")).toMatchObject({ ok: true });
 		expect(checkRizinCommand(catalog, "tn sym.main")).toMatchObject({ ok: false });
 	});
+
+	test("the p= statistical/entropy histograms are allowed (despite the `=`) and run read-only", async () => {
+		for (const command of ["p= 16", "p=e 16", "p==e 16", "p=rj", "p=d"]) {
+			const check = checkRizinCommand(catalog, command);
+			expect(check).toMatchObject({ ok: true });
+			await session.cmd((check as { line: string }).line);
+			expect((await session.cmd("echo aligned")).trim()).toBe("aligned"); // no stream desync
+		}
+		// interactive visual variants (`…v`) and a `=`-write form stay refused
+		expect(checkRizinCommand(catalog, "p==ev")).toMatchObject({ ok: false });
+		expect(checkRizinCommand(catalog, "p==v")).toMatchObject({ ok: false });
+		expect(checkRizinCommand(catalog, "p=e=5")).toMatchObject({ ok: false });
+	});
 });
 
 describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {

@@ -105,10 +105,14 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   `et`, `es`), analysis-hint listings (`ahl`), metadata and string listings
   (`C`, `Csl`, …), class reads (`acl`, `aci`, `acg`, `acvl`, `acvf`), address
   info (`ai`), type reads (unions, enums, typedefs, calling-convention lists,
-  type cross-references, typeclasses), and plugin listings
-  (`Ll`/`La`/`Lc`/`LC`/`Lh`/`Li`/`Lp`/`LD`). A command the installed rizin
-  catalogs that was blocked only by command shape now runs; coverage measured
-  against rizin 0.9.1 rose from 800 to 926 of ~2020 commands.
+  type cross-references, typeclasses), plugin listings
+  (`Ll`/`La`/`Lc`/`LC`/`Lh`/`Li`/`Lp`/`LD`), and the `p=`/`p==` statistical
+  histograms (book: print_modes) — entropy (`p=e`, `p=rj` rising/falling edges),
+  chi-square, printable, string-density, and byte histograms, for spotting
+  packed or encrypted regions — allowed past the get/set `=` guard while their
+  interactive visual (`…v`) variants stay refused. A command the installed
+  rizin catalogs that was blocked only by command shape now runs; coverage
+  measured against rizin 0.9.1 rose from 800 to 968 of ~2020 commands.
 
 ### Fixed
 

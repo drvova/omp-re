@@ -460,6 +460,12 @@ describe("checkRizinCommand (no rizin needed)", () => {
 		expect(isKnownCommand(CATALOG, "iz")).toBe(true);
 		expect(isKnownCommand(CATALOG, "pdzz")).toBe(false);
 	});
+
+	test("the p= histogram family is runnable despite its `=`, but the interactive `…v` and `=`-write forms are not", () => {
+		expect(["p=", "p==", "p=e", "p==e", "p=rj", "p=d", "p=A", "p=C"].every(isRunnable)).toBe(true);
+		// `…v` is the interactive ncurses variant (would block the pipe); `p=e=5` smuggles a second `=`.
+		expect(["p==v", "p==ev", "p==Av", "p=e=5", "p=e;x"].some(isRunnable)).toBe(false);
+	});
 });
 
 describe("searchCatalog (no rizin needed)", () => {
