@@ -155,10 +155,13 @@ three (the per-OS rizin install, `rizin -v` resolving its DLLs on Windows, and
 fixed:
 
 - **Windows output paths**: the confined-output logic (`output.ts`) hardcoded a
-  `/` separator and rejected the drive-letter colon, so every file-emitting
-  capability (dump_memory, trace save/load, export_project, create_signature)
-  threw on Windows. Fixed to use `path.sep` and normalize rizin-facing paths to
-  forward slashes (`toRizinPath`).
+  `/` separator, so every file-emitting capability (dump_memory, trace
+  save/load, export_project, create_signature) threw on Windows. Fixed to use
+  `path.sep`. Separately, the runner's temp dir is an 8.3 short name
+  (`C:\Users\RUNNER~1\...`) and `~` is rizin's grep operator, so a raw path
+  mis-parsed; rizin-written paths now go through `rizinPathArg` (forward-slash
+  normalized and single-quoted, so rizin takes them literally), while the tool
+  still reports and `stat`s the native path.
 - **Windows line endings**: rizin and the `rz-*` tools emit CRLF on Windows; the
   pipe transport (`rizin.ts`) and `rizin_cli` now normalize `\r\n` → `\n` so
   parsers and exact assertions see the same bytes as on POSIX.
@@ -166,10 +169,13 @@ fixed:
   still holds a file open (EBUSY), so cleanups use `rmDirSafe` (Node's
   `maxRetries`/`retryDelay` back-off, a no-op on POSIX).
 
-Known residual: one Windows case (`set_comment` → `/re undo` → final clear) read
-back a stale section line instead of an empty comment — a suspected
-Windows-pipe-timing desync that doesn't reproduce off Windows; left to confirm
-on the next dispatch.
+Known residual: after the path/CRLF/teardown fixes the Windows leg is down to
+one failure — `set_comment` → `/re undo` → final clear reads back a `.text`
+section line instead of an empty comment. The undo issues a single
+marker-synced `CC- @ <ea>` (clear), so a following `CC. @ <ea>` returning a
+section listing defies the command's semantics; it reproduces only on Windows.
+Kept visible (not silenced) pending a Windows host to run `CC- @ main; CC. @
+main` interactively.
 
 ## Loading the extension through omp itself
 

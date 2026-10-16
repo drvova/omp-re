@@ -170,8 +170,11 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   confined output directory (`output.ts`) used a hardcoded `/` separator and
   rejected the drive-letter colon, so every file-emitting capability
   (`dump_memory`, trace save/load, `export_project`, `create_signature`) threw
-  on Windows; it now uses `path.sep` for containment and normalizes
-  rizin-facing paths to forward slashes (which rizin accepts everywhere). The
+  on Windows; it now uses `path.sep` for containment. A rizin-written path is
+  passed through `rizinPathArg` — forward-slash normalized and single-quoted —
+  so rizin takes it literally even when the runner's temp dir is an 8.3 short
+  name like `C:\Users\RUNNER~1\...` (raw, rizin reads the `~` as its grep
+  operator); the tool still reports/stats the native path. The
   NUL-framed pipe transport and `rizin_cli` normalize rizin's Windows CRLF
   output to `\n` so parsers and the model never see a stray `\r`. The debugger
   integration tests gate off on macOS (a hosted runner can't give rizin

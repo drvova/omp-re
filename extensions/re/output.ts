@@ -16,31 +16,38 @@
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import { rzQuote } from "./rizin.ts";
 
 /**
- * rizin's command parser takes forward-slash paths on every platform, so the
- * rizin-facing output path is normalized to forward slashes: a Windows
- * `C:\…\omp-re-out\x` becomes `C:/…/omp-re-out/x`, which rizin accepts
- * verbatim and which carries no backslash for {@link assertRizinSafePath} to
- * trip on. Node's own fs calls accept the forward-slash form on Windows too,
- * so a caller can still stat/read the returned path.
+ * A rizin command argument for an output path: forward-slash normalized (rizin
+ * accepts `/` on every platform) and single-quoted, so rizin takes the whole
+ * path literally. This matters on Windows, where a temp dir is an 8.3 short
+ * name like `C:\Users\RUNNER~1\...`: raw, rizin reads the `~` as its grep
+ * operator (and `;`/`|`/`>` as separators), so `Ps C:/…/RUNNER~1/x` writes to
+ * the wrong place or errors. Quoting makes every byte literal — the same guard
+ * annotations and `Fs` already use. Callers keep the native path for Node's own
+ * fs calls and for what they report to the user.
  */
+export function rizinPathArg(path: string): string {
+	return rzQuote(toRizinPath(path));
+}
+
+/** Forward-slash form of a path, which rizin accepts on every platform. Used by {@link rizinPathArg} and by callers that build their own rizin argument. */
 export function toRizinPath(path: string): string {
 	return path.replace(/\\/g, "/");
 }
 
 /**
- * Assert a (forward-slash normalized) path is safe to hand to rizin as a
- * command argument: ordinary characters only, no whitespace or command
- * metacharacters that rizin's parser could turn into a second command (`;`,
- * `|`, `` ` ``, `$`, redirects, `@`, quotes). `/`, `.`, `_`, `-` and the
- * Windows drive colon are allowed — none is a rizin separator or substitution
- * character. The model-supplied part is already a {@link safeBasename}; this
- * also catches a hostile `OMPRE_OUTPUT_DIR`.
+ * Reject a path that can't ride the NUL-framed pipe. The path reaches rizin
+ * only through {@link rizinPathArg} (single-quoted), so every shell
+ * metacharacter — and a Windows drive colon, backslash or `~` short-name — is
+ * already made literal there; the one thing quoting can't survive is a line
+ * break or NUL, which would end the pipe line. (The model-supplied part is a
+ * {@link safeBasename} besides.)
  */
 function assertRizinSafePath(path: string): void {
-	if (!/^[A-Za-z0-9_.:/-]+$/.test(path)) {
-		throw new Error(`omp-re: the output directory path ${JSON.stringify(path)} contains characters that can't be passed to rizin safely — set OMPRE_OUTPUT_DIR to a path of letters, digits, '/', '.', '_', '-' and (on Windows) a drive letter`);
+	if (/[\r\n\0]/.test(path)) {
+		throw new Error(`omp-re: the output path ${JSON.stringify(path)} contains a line break or NUL`);
 	}
 }
 
@@ -79,13 +86,13 @@ export async function prepareOutputPath(basename: string): Promise<string> {
 }
 
 /**
- * Like {@link prepareOutputPath}, but returns a forward-slash normalized path
- * and asserts it is safe to hand to rizin as a command argument. Used when
- * rizin itself writes the file (e.g. a project `.rzdb`), so the path — not
- * just the bytes — reaches rizin.
+ * Like {@link prepareOutputPath}: the native absolute path for `basename`,
+ * directory created. Used when rizin itself writes the file (a project
+ * `.rzdb`, a signature `.pat`), so the caller reports/stats this path and
+ * hands rizin {@link rizinPathArg}(it) for the command.
  */
 export async function rizinOutputPath(basename: string): Promise<string> {
-	const full = toRizinPath(await prepareOutputPath(basename));
+	const full = await prepareOutputPath(basename);
 	assertRizinSafePath(full);
 	return full;
 }
@@ -102,8 +109,7 @@ export async function outputSubdir(basename: string, create: boolean): Promise<s
 	if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
 		throw new Error(`omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`);
 	}
-	const rizinSafe = toRizinPath(full);
-	assertRizinSafePath(rizinSafe);
+	assertRizinSafePath(full);
 	if (create) await mkdir(full, { recursive: true });
-	return rizinSafe;
+	return full; // native path — the caller wraps it with rizinPathArg for the rizin command
 }
