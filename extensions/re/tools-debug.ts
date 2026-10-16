@@ -13,12 +13,42 @@
  * debuggee. Run untrusted samples only in an isolated, disposable environment;
  * see SECURITY.md.
  */
+import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { checkDebugOnHitCommand, loadCatalog } from "./catalog.ts";
 import { plainResult, textResult } from "./format.ts";
+import { prepareOutputPath } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { debugTimeoutMs, rizinBitsMismatch, rzQuote, validateAddr, type RzSession } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
+
+/** Largest memory dump dump_memory will pull over the command pipe (16 MiB); a bigger region is rejected with its size so the caller can narrow it. */
+const MAX_DUMP_BYTES = 16 * 1024 * 1024;
+/** Bytes per `p8` read when dumping, so one huge command never crosses the transport. */
+const DUMP_CHUNK = 0x10000;
+
+/**
+ * Read `size` bytes of the live process at `ea` over the command pipe, in
+ * {@link DUMP_CHUNK}-sized `p8` reads. Returns the raw bytes. A short read
+ * (unmapped page partway through) stops the dump at what was actually read,
+ * reported by the caller.
+ */
+async function readLiveBytes(dbg: RzSession, ea: string, size: number, signal?: AbortSignal): Promise<Buffer> {
+	const parts: Buffer[] = [];
+	let read = 0;
+	while (read < size) {
+		const want = Math.min(DUMP_CHUNK, size - read);
+		const hex = (await dbg.cmd(`p8 ${want} @ ${ea}+${read}`, { signal })).trim();
+		if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length === 0) break; // unmapped / end of readable memory
+		const chunk = Buffer.from(hex, "hex");
+		if (chunk.length === 0) break;
+		parts.push(chunk);
+		read += chunk.length;
+		if (chunk.length < want) break; // short read: hit an unmapped page
+	}
+	return Buffer.concat(parts);
+}
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
 export function debuggerEnabled(): boolean {
@@ -46,6 +76,7 @@ const DEBUG_ACTIONS = [
 	"registers_telescope",
 	"write_register",
 	"read_memory",
+	"dump_memory",
 	"write_memory",
 	"disassemble",
 	"resolve_symbol",
@@ -94,6 +125,7 @@ function approvalReason(action: DebugAction): string {
 	if (REVERSE_ACTIONS.has(action)) return `Move the debugged process backward through the recorded trace (${action}).`;
 	if (EXECUTING_ACTIONS.has(action)) return `Resume execution of the debugged process (${action}).`;
 	if (MODIFYING_ACTIONS.has(action)) return `Modify the debugged process (${action}).`;
+	if (action === "dump_memory") return "Read a region of the debugged process's live memory and write it to a file in omp-re's output directory.";
 	return `Inspect the debugged process (${action}).`;
 }
 
@@ -270,7 +302,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				"step: one instruction (or `count`). step_over: step over calls.",
 				"trace_start / trace_stop: record a trace so you can go backward. step_back / continue_back: step or continue BACKWARD through the recorded trace (reverse debugging).",
 				"registers: all register values. registers_telescope: each register resolved to what it points at. write_register: set `reg` to `value`.",
-				"read_memory: `size` bytes at `addr`. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory. resolve_symbol: live address of `name` (optionally in `lib`).",
+				"read_memory: `size` bytes at `addr` (returned inline as hex). dump_memory: write `size` bytes of live memory at `addr` to a file in omp-re's output directory (for an unpacked/decrypted region too large to return inline) — returns its path, size, and SHA-256. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory. resolve_symbol: live address of `name` (optionally in `lib`).",
 				"break_add / break_add_hw (hardware) / break_remove at `addr`. break_list: list breakpoints and watchpoints. break_enable / break_disable at `addr`. break_condition: only stop when `condition` holds. break_command: run a read-only `command` on hit. watch_add: watchpoint at `addr` (perm r/w/rw, size). backtrace: call stack.",
 				"maps / modules / libraries / sections / processes / threads / fds / signals / windows: inspect process state.",
 				"heaps / heap_blocks: Windows heaps. heap_arenas / heap_chunks / heap_bins: glibc heap (arena in `addr`/`bin` where relevant).",
@@ -279,7 +311,8 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		),
 		addr: z.string().optional().describe("Address or symbol for continue_until, read_memory, write_memory, disassemble, break_add, break_remove, watch_add, heap_chunks/heap_bins (arena/bin)."),
 		count: z.number().optional().describe("Instruction count for step / step_over (default 1), or instructions to show for disassemble (default 16)."),
-		size: z.number().optional().describe("Bytes to read for read_memory (default 64), or watchpoint size for watch_add (1/2/4/8)."),
+		size: z.number().optional().describe("Bytes to read for read_memory (default 64) or dump_memory (required, up to 16 MiB), or watchpoint size for watch_add (1/2/4/8)."),
+		file: z.string().optional().describe("For dump_memory: output filename (a bare name, no path) written to omp-re's output directory; omit for an auto-generated name."),
 		reg: z.string().optional().describe("Register name for write_register, e.g. rip, rax, eflags."),
 		value: z.string().optional().describe("New register value for write_register (decimal or 0x hex)."),
 		bytes: z.string().optional().describe("Hex bytes for write_memory, e.g. 9090 or 4889e5 (written to the live process at addr)."),
@@ -461,6 +494,27 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					const n = clampInt(params.size, 64, 4096);
 					const out = (await dbg.cmd(`pxj ${n} @ ${ea}`, { signal })).trim();
 					return textResult(`debug: read_memory ${n} @ ${ea}`, out || "(no output)", { ctx, tool: "rizin_debug" });
+				}
+				case "dump_memory": {
+					if (!ea) throw new Error("omp-re: debug dump_memory needs addr");
+					if (params.size === undefined || !Number.isFinite(params.size) || params.size <= 0) throw new Error("omp-re: debug dump_memory needs a positive size (bytes)");
+					const size = Math.floor(params.size);
+					if (size > MAX_DUMP_BYTES) throw new Error(`omp-re: debug dump_memory: ${size} bytes exceeds the ${MAX_DUMP_BYTES}-byte limit; dump a smaller region`);
+					// Resolve a concrete numeric base so the generated filename and the reads agree even for a symbol/expression addr.
+					const base = (await dbg.cmd(`?v ${ea}`, { signal })).trim() || ea;
+					const name = params.file !== undefined ? params.file : `dump_${base.replace(/^0x/, "")}_${size}.bin`;
+					const path = await prepareOutputPath(name); // validates the basename; throws before any read on a bad name
+					const bytes = await readLiveBytes(dbg, ea, size, signal);
+					if (bytes.length === 0) throw new Error(`omp-re: debug dump_memory: read nothing at ${ea} (unmapped or unreadable); no file written`);
+					await writeFile(path, bytes);
+					const sha = createHash("sha256").update(bytes).digest("hex");
+					const preview = bytes.subarray(0, 32).toString("hex");
+					const short = bytes.length < size ? ` (short read: ${size} requested, memory ended)` : "";
+					return textResult(
+						`debug: dump_memory ${bytes.length} bytes @ ${ea}`,
+						`wrote ${bytes.length} bytes${short} to ${path}\nsha256: ${sha}\nfirst bytes: ${preview}`,
+						{ ctx, tool: "rizin_debug" },
+					);
 				}
 				case "write_memory": {
 					if (!ea) throw new Error("omp-re: debug write_memory needs addr");

@@ -199,7 +199,7 @@ shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?` | Drives one debug action (below). `addr` is validated like every other address. |
+| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?`, `file?` | Drives one debug action (below). `addr` is validated like every other address. |
 
 Actions:
 
@@ -217,8 +217,11 @@ Actions:
   error until a trace is recorded).
 - **Registers & memory:** `registers`, `registers_telescope` (each register
   resolved to what it points at), `write_register` (`reg`=`value`),
-  `read_memory` (`size` bytes at `addr`), `write_memory` (`bytes` hex at
-  `addr`, into the live process), `disassemble` (`count` instructions at
+  `read_memory` (`size` bytes at `addr`, returned inline as hex),
+  `dump_memory` (`size` bytes of live memory at `addr` written to a file in
+  omp-re's output directory — for an unpacked/decrypted region too large to
+  return inline; returns the path, size, and SHA-256), `write_memory` (`bytes`
+  hex at `addr`, into the live process), `disassemble` (`count` instructions at
   `addr`, default the PC — reads *live* memory, so it shows self-modified or
   unpacked code the static view can't), `resolve_symbol` (`name`, optional
   `lib`) — the live, post-ASLR address of a loaded symbol such as libc
@@ -248,6 +251,12 @@ process and are called out as such in the approval reason. A
 at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
 no facilities for evading detection or hiding the debuggee; see
 [`SECURITY.md`](../SECURITY.md#rizin_debug).
+
+`dump_memory` is the one tool that emits a file (the sample itself is still
+never written). Dumps go to `OMPRE_OUTPUT_DIR` — or `<tmpdir>/omp-re-out` when
+unset — under a bare filename it validates; it never writes to a path the
+model chose, so it can't traverse out of that directory or clobber an
+arbitrary file.
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 

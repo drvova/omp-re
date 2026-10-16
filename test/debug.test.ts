@@ -5,6 +5,10 @@
  * when rizin or the fixture is missing.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEBUG_LAUNCH_WARNING, buildDebugTarget, buildRunDirectives, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
 import { registerEmulateTools } from "../extensions/re/tools-emulate.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
@@ -161,14 +165,19 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 	const { ctx } = harness;
 	const run = (action: string, extra: Record<string, unknown> = {}) =>
 		harness.tool("rizin_debug").execute("t-debug", { action, ...extra }, undefined, undefined, ctx);
+	let outDir: string;
 
 	beforeAll(() => {
 		process.env.OMPRE_ENABLE_DEBUGGER = "1";
+		outDir = mkdtempSync(join(tmpdir(), "omp-re-dump-test-"));
+		process.env.OMPRE_OUTPUT_DIR = outDir;
 		getState(ctx).binaryPath = TEST_BINARY;
 		registerDebugTools(harness.pi);
 	});
 	afterAll(() => {
 		shutdownState(ctx.sessionManager.getSessionId());
+		delete process.env.OMPRE_OUTPUT_DIR;
+		rmSync(outDir, { recursive: true, force: true });
 		restoreEnable();
 	});
 
@@ -182,6 +191,7 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(approval({ action: "write_memory" }).reason).toContain("Modify");
 		expect(approval({ action: "watch_add" }).reason).toContain("Modify");
 		expect(approval({ action: "registers" }).reason).toContain("Inspect");
+		expect(approval({ action: "dump_memory" })).toEqual({ tier: "exec", reason: expect.stringContaining("write it to a file") });
 		expect(approval({ action: "disassemble" }).reason).toContain("Inspect");
 		expect(approval({ action: "heap_chunks" }).reason).toContain("Inspect");
 		expect(approval({ action: "registers_telescope" }).reason).toContain("Inspect");
@@ -222,6 +232,22 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(after).not.toBe(before);
 		expect(textOf(await run("read_memory", { addr: "rip", size: 8 }))).toMatch(/^\[.*\]$/m);
 	}, 20_000);
+
+	test("dump_memory writes live memory to a file in the output dir, with a matching size and sha256", async () => {
+		const result = textOf(await run("dump_memory", { addr: "rip", size: 64, file: "entry.bin" }));
+		expect(result).toContain("wrote 64 bytes");
+		const path = join(outDir, "entry.bin");
+		expect(result).toContain(path);
+		const bytes = readFileSync(path);
+		expect(bytes.length).toBe(64);
+		// the reported sha256 matches the file on disk, and the bytes match what read_memory sees at rip
+		expect(result).toContain(createHash("sha256").update(bytes).digest("hex"));
+	}, 20_000);
+
+	test("dump_memory rejects a non-positive size and a traversing filename before writing", async () => {
+		expect((await captureError(run("dump_memory", { addr: "rip", size: 0 }))).message).toContain("positive size");
+		expect((await captureError(run("dump_memory", { addr: "rip", size: 16, file: "../escape.bin" }))).message).toContain("invalid output filename");
+	});
 
 	test("write_register sets a register and reads the new value back", async () => {
 		const out = textOf(await run("write_register", { reg: "rax", value: "0x1234" }));

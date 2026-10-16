@@ -96,6 +96,14 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   inside an isolated VM from the host, the open binary serving as the symbol
   source. The pid and URI are validated; `attach` is refused together with
   `run`.
+- **`dump_memory`** (book: debugger). `rizin_debug` can write a region of the
+  debugged process's live memory to a file — for an unpacked or decrypted
+  payload too large to return inline — reporting its path, size, and SHA-256.
+  The sample on disk is still never written; dumps go to a single confined
+  directory (`OMPRE_OUTPUT_DIR`, or `<tmpdir>/omp-re-out`) under a validated
+  bare filename, never a model-chosen path, so a dump can't traverse out or
+  clobber another file. The bytes are read over the pipe and written in
+  TypeScript, so rizin is never handed a path to write.
 - **Breakpoint management and live symbol resolution** (book:
   debugger/getting_started). `rizin_debug` gains `break_add_hw` (hardware
   breakpoint via debug registers — breaks on read-only / self-modifying /

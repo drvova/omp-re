@@ -42,6 +42,16 @@ read-only and none of these tools ever writes back to the sample on disk.
 The annotations themselves are recorded in the omp session and replayed into
 rizin when the session is resumed.
 
+The sample is never written. The only file omp-re itself emits is a memory
+dump from the debugger (`rizin_debug`'s `dump_memory`, for extracting an
+unpacked or decrypted region too large to return inline). It goes to a single
+confined directory — `OMPRE_OUTPUT_DIR`, or `<tmpdir>/omp-re-out` when unset —
+under a basename validated to letters, digits, `.`, `_` and `-` (no
+separators, no `..`, not absolute). The model never supplies the output path,
+so the dump cannot traverse out of that directory or overwrite an arbitrary
+file, and the bytes are read in TypeScript and written directly (rizin is
+never handed a file path to write).
+
 `-N` additionally skips the user's `rizinrc` and startup scripts, so a global
 eval var or alias in the operator's config can't silently change the command
 output omp-re parses; plugins still load (that needs `-NN`, which omp-re never
@@ -175,10 +185,11 @@ of the suite holds:
 - Every action is `exec`-tier, and the approval reason says plainly whether
   it resumes execution (`start`, `continue`, `continue_to_syscall`, `step`),
   modifies the live process (`write_register`, `write_memory`, `watch_add`,
-  `break_add_hw`), or only inspects (`registers`, `read_memory`,
-  `disassemble`, `backtrace`, the heap and process-state actions). Addresses,
-  register names, register values, and hex byte strings are all validated
-  before anything reaches the process.
+  `break_add_hw`), reads live memory out to a file (`dump_memory` — see the
+  confined output directory above), or only inspects (`registers`,
+  `read_memory`, `disassemble`, `backtrace`, the heap and process-state
+  actions). Addresses, register names, register values, and hex byte strings
+  are all validated before anything reaches the process.
 - `break_command` stores a rizin command that reruns on **every** breakpoint
   hit (`dbc`), so its command string is gated the way `rizin_command` is —
   but, running inside the live debugger, it additionally allows a vetted set
