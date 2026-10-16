@@ -17,7 +17,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { statSync } from "node:fs";
 import { basename } from "node:path";
 import { textResult } from "./format.ts";
-import { rizinOutputPath } from "./output.ts";
+import { rizinOutputPath, rizinPathArg } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
@@ -45,7 +45,7 @@ export function registerProjectTools(pi: ExtensionAPI): void {
 			const requested = params.file ?? `${basename(binaryPath)}.rzdb`;
 			const name = /\.rzdb$/i.test(requested) ? requested : `${requested}.rzdb`;
 			const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin
-			const { stderr } = await rz.cmdWithStderr(`Ps ${path}`, { signal });
+			const { stderr } = await rz.cmdWithStderr(`Ps ${rizinPathArg(path)}`, { signal });
 			if (stderr.trim()) throw new Error(`omp-re: export_project: ${stderr.trim()}`);
 			let size = 0;
 			try {

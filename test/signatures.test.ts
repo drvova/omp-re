@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordedSignatures } from "../extensions/re/entries.ts";
+import { rizinPathArg } from "../extensions/re/output.ts";
 import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { registerSignatureTools } from "../extensions/re/tools-signatures.ts";
 import { ensureRizin, getState, shutdownState } from "../extensions/re/state.ts";
@@ -110,7 +111,7 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
 		const made = readFileSync(path, "utf8");
 		expect(made.length).toBeGreaterThan(0);
 		// The created file is a real FLIRT signature: applying it to the same binary matches (rizin loads it without error).
-		expect((await rz.cmdWithStderr(`Fs ${path}`)).stderr.trim()).toBe("");
+		expect((await rz.cmdWithStderr(`Fs ${rizinPathArg(path)}`)).stderr.trim()).toBe("");
 	}, 30_000);
 
 	test("derives a .pat name from the binary when no file is given, and refuses a traversing name", async () => {

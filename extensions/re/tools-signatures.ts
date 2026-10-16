@@ -20,7 +20,7 @@ import { basename } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { branchEntries, recordedSignatures } from "./entries.ts";
 import { textResult } from "./format.ts";
-import { rizinOutputPath } from "./output.ts";
+import { rizinOutputPath, rizinPathArg } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "./signatures.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
@@ -94,7 +94,7 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
 			const requested = params.file ?? `${basename(binaryPath)}.pat`;
 			const name = /\.(pat|sig)$/i.test(requested) ? requested : `${requested}.pat`;
 			const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin
-			const { stderr } = await rz.cmdWithStderr(`Fc ${path}`, { signal });
+			const { stderr } = await rz.cmdWithStderr(`Fc ${rizinPathArg(path)}`, { signal });
 			if (stderr.trim()) throw new Error(`omp-re: create_signature: ${stderr.trim()}`);
 			let size = 0;
 			try {
@@ -104,7 +104,7 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
 			}
 			if (size === 0) throw new Error(`omp-re: create_signature: the signature file at ${path} is empty (no functions to signature)`);
 			// Read it back (Fd dumps the file's signatures) to confirm it is a valid FLIRT file and count what it holds.
-			const dumped = (await rz.cmdWithStderr(`Fd ${path}`, { signal })).output.trim();
+			const dumped = (await rz.cmdWithStderr(`Fd ${rizinPathArg(path)}`, { signal })).output.trim();
 			const sigCount = dumped ? dumped.split("\n").filter((l) => l.trim() !== "").length : 0;
 			return textResult(
 				`create_signature: ${name}`,

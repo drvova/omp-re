@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { outputDir, prepareOutputPath, safeBasename, toRizinPath } from "../extensions/re/output.ts";
+import { outputDir, prepareOutputPath, rizinPathArg, safeBasename, toRizinPath } from "../extensions/re/output.ts";
 
 describe("safeBasename", () => {
 	test("accepts bare names of safe characters", () => {
@@ -24,6 +24,14 @@ describe("toRizinPath", () => {
 		expect(toRizinPath("/tmp/omp-re-out/a.rzdb")).toBe("/tmp/omp-re-out/a.rzdb");
 		// A drive-colon path is what reaches rizin on Windows; it must survive normalization as safe characters only.
 		expect(/^[A-Za-z0-9_.:/-]+$/.test(toRizinPath("C:\\Temp\\omp-re-out\\dump.bin"))).toBe(true);
+	});
+});
+
+describe("rizinPathArg", () => {
+	test("single-quotes a forward-slashed path so rizin takes a ~ short-name, drive colon, or space literally", () => {
+		// A Windows 8.3 temp path: raw, rizin would read `~` as its grep operator.
+		expect(rizinPathArg("C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\omp-re-out\\a.rzdb")).toBe("'C:/Users/RUNNER~1/AppData/Local/Temp/omp-re-out/a.rzdb'");
+		expect(rizinPathArg("/tmp/omp-re-out/a.rzdb")).toBe("'/tmp/omp-re-out/a.rzdb'");
 	});
 });
 
