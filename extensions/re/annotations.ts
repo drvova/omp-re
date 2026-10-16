@@ -17,7 +17,15 @@ import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { customEntries } from "./entries.ts";
 import { rzQuote, validateAddr, validateIdent, validateText, validateTypeLike, type RzSession } from "./rizin.ts";
 
-export type AnnotationKind = "rename_function" | "rename_variable" | "set_comment" | "set_prototype" | "set_variable_type";
+export type AnnotationKind =
+	| "rename_function"
+	| "rename_variable"
+	| "set_comment"
+	| "set_prototype"
+	| "set_variable_type"
+	| "define_function"
+	| "set_calling_convention"
+	| "set_flag";
 
 export interface AnnotationData {
 	kind: string;
@@ -57,6 +65,15 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 		case "set_variable_type":
 			if (!target) throw new Error("omp-re: set_variable_type annotation is missing the variable name");
 			return to === "" ? [] : [`afvt ${rzQuote(validateIdent("var", target))} ${rzQuote(validateTypeLike("type", to))} ${at}`];
+		case "define_function":
+			// `to` is a non-empty sentinel (the function name rizin assigned) when a function should exist, "" when it should not.
+			return to === "" ? [`af- ${at}`] : [`af ${at}`];
+		case "set_calling_convention":
+			// A function always has some convention, so both the forward value and the restored one are non-empty cc names.
+			return [`afc ${validateIdent("cc", to)} ${at}`];
+		case "set_flag":
+			// The flag at `ea` is named `to` (was `from`): drop the old name, add the new. Either side may be "" (no flag).
+			return [...(from === "" ? [] : [`f- ${validateIdent("flag", from)}`]), ...(to === "" ? [] : [`f ${validateIdent("flag", to)} ${at}`])];
 		default:
 			throw new Error(`omp-re: unknown annotation kind: ${kind}`);
 	}

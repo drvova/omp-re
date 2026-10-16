@@ -60,10 +60,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 	});
 
 	test("every mutate tool declares write approval with a per-call reason", () => {
-		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type"]) {
+		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag"]) {
 			const approval = harness.tool(name).approval as (args: unknown) => { tier: string; reason?: string };
 			expect(typeof approval).toBe("function");
-			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int" });
+			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl" });
 			expect(decision.tier).toBe("write");
 			expect(decision.reason).toContain("main");
 		}
@@ -189,5 +189,111 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 		test("nothing is left to undo once every annotation is reverted", async () => {
 			expect((await captureError(undoLastAnnotation(pi, ctx))).message).toBe("omp-re: no annotation left to undo");
 		});
+	});
+});
+
+describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_function, set_calling_convention, set_flag", () => {
+	const harness = makeHarness("omp-re-tools-analysis-edit-test");
+	const { pi, ctx, entries } = harness;
+	const run = (name: string, params: Record<string, unknown>) => harness.tool(name).execute(`call-${name}`, params, undefined, undefined, ctx);
+	let rz: RzSession;
+	let binaryPath: string;
+	let mainEa: string;
+	let freeEa: string; // an address with no flag, for set_flag
+
+	const fnStart = async (ea: string): Promise<string | undefined> => {
+		const fn = (await rz.cmdj<{ offset: number }[]>(`afij @ ${ea}`))?.[0];
+		return fn ? eaFromOffset(addrOf(fn as never)!) : undefined;
+	};
+	const flagName = async (ea: string): Promise<string> => (await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`))?.name ?? "";
+	const ccOf = async (ea: string): Promise<string> => (await rz.cmd(`afc @ ${ea}`)).trim();
+
+	registerMutateTools(pi);
+
+	beforeAll(async () => {
+		binaryPath = await resolveBinaryPath(TEST_BINARY);
+		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
+		rz = await RzSession.spawn(rizinPath, binaryPath);
+		const state = getState(ctx);
+		state.binaryPath = binaryPath;
+		state.rz = rz;
+		mainEa = eaFromOffset(addrOf((await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never)!);
+		// First address at or after main with no flag — set_flag's clean add/remove path.
+		const base = Number.parseInt(mainEa, 16);
+		freeEa = mainEa;
+		for (let off = 1; off <= 512; off++) {
+			const cand = eaFromOffset(base + off);
+			if ((await flagName(cand)) === "") {
+				freeEa = cand;
+				break;
+			}
+		}
+	});
+
+	afterAll(() => {
+		shutdownState(ctx.sessionManager.getSessionId());
+	});
+
+	test("set_calling_convention lands, independently verified, and /re undo restores the old one", async () => {
+		const before = await ccOf(mainEa);
+		const target = before === "ms" ? "amd64" : "ms"; // any other listed cc
+		const result = await run("set_calling_convention", { addr: "main", cc: target });
+		expect(textOf(result)).toBe(`set_calling_convention: ${JSON.stringify(before)} -> ${JSON.stringify(target)} @ ${mainEa}`);
+		expect(await ccOf(mainEa)).toBe(target);
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "set_calling_convention", ea: mainEa, oldValue: before, newValue: target });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await ccOf(mainEa)).toBe(before);
+	});
+
+	test("set_calling_convention rejects an unknown convention with rizin's own error", async () => {
+		const err = await captureError(run("set_calling_convention", { addr: "main", cc: "nonexistent_cc" }));
+		expect(err.message).toContain("set_calling_convention");
+		// the function's convention is unchanged
+		expect(await ccOf(mainEa)).not.toBe("nonexistent_cc");
+	});
+
+	test("set_flag adds a named label, independently verified, and /re undo removes it", async () => {
+		const old = await flagName(freeEa);
+		const result = await run("set_flag", { addr: freeEa, name: "omp_re_label" });
+		expect(textOf(result)).toBe(`set_flag: ${JSON.stringify(old)} -> "omp_re_label" @ ${freeEa}`);
+		expect(await flagName(freeEa)).toBe("omp_re_label");
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await flagName(freeEa)).toBe(old);
+	});
+
+	test("define_function creates a function where rizin missed one, and /re undo removes it", async () => {
+		// Undefine main to create the gap, define it back through the tool, verify, undo, then restore main for anyone else.
+		await rz.cmd(`af- @ ${mainEa}`);
+		expect(await fnStart(mainEa)).not.toBe(mainEa);
+
+		const result = await run("define_function", { addr: mainEa });
+		expect(textOf(result)).toContain(`@ ${mainEa}`);
+		expect(await fnStart(mainEa)).toBe(mainEa);
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "define_function", ea: mainEa, oldValue: "" });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await fnStart(mainEa)).not.toBe(mainEa);
+	});
+
+	test("define_function refuses when a function already begins at the address", async () => {
+		await rz.cmd(`af @ ${mainEa}`); // ensure one exists
+		const err = await captureError(run("define_function", { addr: mainEa }));
+		expect(err.message).toContain("already begins at");
+	});
+
+	test("a defined function survives the rizin process dying: the respawn replays it", async () => {
+		// Pick a second function, undefine it, define through the tool, then crash+respawn.
+		const fns = (await rz.cmdj<{ offset: number }[]>("aflj"))!;
+		const victim = eaFromOffset(fns.map((f) => f.offset).find((o) => eaFromOffset(o) !== mainEa)!);
+		await rz.cmd(`af- @ ${victim}`);
+		await run("define_function", { addr: victim });
+		expect(await fnStart(victim)).toBe(victim);
+
+		rz.close();
+		rz = await ensureRizin(ctx);
+		expect(await fnStart(victim)).toBe(victim);
+		await undoLastAnnotation(pi, ctx);
 	});
 });

@@ -53,6 +53,23 @@ async function signatureAt(rz: RzSession, ea: string, signal?: AbortSignal): Pro
 	return (await rz.cmd(`afs @ ${ea}`, { signal })).trim().replace(/;\s*$/, "");
 }
 
+/** The function whose start address is exactly `ea`, or undefined when none begins there (`afij` returns the function *containing* ea, which may start earlier). */
+async function functionStartingAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<AfijRow | undefined> {
+	const fn = (await rz.cmdj<AfijRow[]>(`afij @ ${ea}`, { signal }))?.[0];
+	return fn && eaFromOffset(addrOf(fn) ?? -1) === ea ? fn : undefined;
+}
+
+/** The current calling convention of the function at `ea` (`afc` with no argument prints it). */
+async function callingConventionAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<string> {
+	return (await rz.cmd(`afc @ ${ea}`, { signal })).trim();
+}
+
+/** The name of the flag at `ea`, or "" when none (`fdj` prints `{offset,name,realname}` for the flag there). */
+async function flagAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<string> {
+	const flag = await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`, { signal });
+	return flag && typeof flag.name === "string" ? flag.name : "";
+}
+
 /** Tolerate only rizin's own cosmetic re-punctuation (spacing, trailing `;`) when comparing signatures/types — never a semantic difference. */
 function normalizeCType(value: string): string {
 	return value.trim().replace(/;+\s*$/, "").replace(/\s+/g, "");
@@ -100,6 +117,17 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		addr: fnAddr(),
 		var: z.string().describe("Variable name."),
 		type: z.string().describe("New C-style type, e.g. `char *` or `struct sockaddr_in *`."),
+	});
+	const defineFunctionParams = z.object({
+		addr: z.string().describe("Address (or name/expression) where a function begins that rizin's auto-analysis missed."),
+	});
+	const setCallingConventionParams = z.object({
+		addr: fnAddr(),
+		cc: z.string().describe("Calling convention name, e.g. `amd64`, `ms`, `cdecl`, `stdcall` — see the list from rizin_command afcl."),
+	});
+	const setFlagParams = z.object({
+		addr: z.string().describe("Address (or name/expression) to label."),
+		name: z.string().describe("Flag name (identifier characters, dots allowed), e.g. `str.banner` or `decrypt_key`."),
 	});
 
 	pi.registerTool({
@@ -243,6 +271,86 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			const data = { kind: "set_variable_type", ea: fn.ea, oldValue: old.type, newValue: landed.type, target: varName };
 			recordAnnotation(pi, ctx, data);
 			return mutateResult("set_variable_type", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "define_function",
+		label: "Define Function",
+		description:
+			"Define a function at an address rizin's auto-analysis missed (obfuscated call targets, hand-written stubs, code reached only indirectly). Runs `af`, then verifies a function now begins exactly there. Reversible with /re undo (which runs `af-`).",
+		approval: (args) => ({ tier: "write", reason: `Define a function at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: defineFunctionParams,
+		...reRenderers({ title: "Define function", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const existing = await functionStartingAt(rz, ea, signal);
+			if (existing) throw new Error(`omp-re: define_function: a function already begins at ${ea} (${JSON.stringify(existing.name ?? null)}); nothing to define`);
+
+			await apply(rz, annotationCommands("define_function", ea, "function", ""), signal);
+
+			const landed = await functionStartingAt(rz, ea, signal);
+			if (!landed) throw new Error(`omp-re: define_function: rizin did not create a function at ${ea} (it may not be valid code there)`);
+			const name = typeof landed.name === "string" ? landed.name : "function";
+			const data = { kind: "define_function", ea, oldValue: "", newValue: name };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("define_function", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_calling_convention",
+		label: "Set Calling Convention",
+		description:
+			"Set a function's calling convention (how arguments and the return value are passed), which corrects argument recovery in the decompiler and call sites. Verifies what rizin stored; an unknown convention is rejected with rizin's own error (list them with rizin_command afcl). Reversible with /re undo.",
+		approval: (args) => ({ tier: "write", reason: `Set the calling convention of ${describeArg(args, "addr")} to ${describeArg(args, "cc")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setCallingConventionParams,
+		...reRenderers({ title: "Calling convention", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const cc = validateIdent("cc", params.cc.trim());
+			const fn = await functionAt(rz, params.addr, signal);
+			const oldValue = await callingConventionAt(rz, fn.ea, signal);
+
+			await apply(rz, annotationCommands("set_calling_convention", fn.ea, cc, oldValue), signal);
+
+			const readBack = await callingConventionAt(rz, fn.ea, signal);
+			if (readBack !== cc) {
+				throw new Error(`omp-re: set_calling_convention: mutation did not land: expected ${JSON.stringify(cc)}, rizin has ${JSON.stringify(readBack)} (unknown convention? see rizin_command afcl)`);
+			}
+			const data = { kind: "set_calling_convention", ea: fn.ea, oldValue, newValue: readBack };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_calling_convention", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_flag",
+		label: "Set Flag",
+		description:
+			"Name an address with a flag (rizin's named label), so disassembly, xrefs, and your own commands can refer to it by name. Replaces any flag already at that address. Verifies the flag landed. Reversible with /re undo.",
+		approval: (args) => ({ tier: "write", reason: `Flag ${describeArg(args, "addr")} as ${describeArg(args, "name")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setFlagParams,
+		...reRenderers({ title: "Flag", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const name = validateIdent("name", params.name);
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const oldValue = await flagAt(rz, ea, signal);
+
+			await apply(rz, annotationCommands("set_flag", ea, name, oldValue), signal);
+
+			const readBack = await flagAt(rz, ea, signal);
+			if (readBack !== name) {
+				throw new Error(`omp-re: set_flag: mutation did not land: expected flag ${JSON.stringify(name)} at ${ea}, rizin has ${JSON.stringify(readBack || null)}`);
+			}
+			const data = { kind: "set_flag", ea, oldValue, newValue: name };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_flag", data);
 		},
 	});
 }

@@ -157,6 +157,25 @@ describe("annotationCommands", () => {
 		expect(annotationCommands("set_comment", "0x10", "x; !id", "")).toEqual(["CC- @ 0x10", "CC 'x; !id' @ 0x10"]);
 	});
 
+	test("define_function toggles af/af- on whether a function should exist", () => {
+		// forward (to = non-empty sentinel) defines; undo (to = "") deletes.
+		expect(annotationCommands("define_function", "0x4da0", "fcn.00004da0", "")).toEqual(["af @ 0x4da0"]);
+		expect(annotationCommands("define_function", "0x4da0", "", "fcn.00004da0")).toEqual(["af- @ 0x4da0"]);
+	});
+
+	test("set_calling_convention just sets afc, both directions", () => {
+		expect(annotationCommands("set_calling_convention", "0x4da0", "ms", "amd64")).toEqual(["afc ms @ 0x4da0"]);
+		expect(annotationCommands("set_calling_convention", "0x4da0", "amd64", "ms")).toEqual(["afc amd64 @ 0x4da0"]);
+		expect(() => annotationCommands("set_calling_convention", "0x4da0", "bad;id", "amd64")).toThrow("omp-re: invalid cc");
+	});
+
+	test("set_flag drops the old flag name and adds the new, either side maybe empty", () => {
+		expect(annotationCommands("set_flag", "0x61000", "decrypt_key", "")).toEqual(["f decrypt_key @ 0x61000"]);
+		expect(annotationCommands("set_flag", "0x61000", "", "decrypt_key")).toEqual(["f- decrypt_key"]);
+		expect(annotationCommands("set_flag", "0x61000", "new.name", "old.name")).toEqual(["f- old.name", "f new.name @ 0x61000"]);
+		expect(() => annotationCommands("set_flag", "0x61000", "bad name", "")).toThrow("omp-re: invalid flag");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");

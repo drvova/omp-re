@@ -61,7 +61,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 reports its total so the model knows a view is partial. An empty page is
 marked as compactable, so omp can drop it from context once it has been read.
 
-## Mutate tier (5 tools)
+## Mutate tier (8 tools)
 
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
@@ -79,6 +79,9 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_comment` | `write` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
 | `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
 | `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
+| `define_function` | `write` | `addr` | Define a function where auto-analysis missed one (`af`); refuses when a function already begins there, verifies one now does. `/re undo` runs `af-`. |
+| `set_calling_convention` | `write` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
+| `set_flag` | `write` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; `/re undo` restores the previous flag (or removes it). |
 
 ## rizin REPL (2 tools)
 
