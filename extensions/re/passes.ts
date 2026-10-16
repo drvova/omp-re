@@ -13,16 +13,20 @@
  */
 import type { RzSession } from "./rizin.ts";
 
-/** Analysis passes exposed by the `analyze` tool, each a rizin `aa*` command. All are additive (they find functions/xrefs/names or match types); none deletes analysis. */
+/** Analysis passes exposed by the `analyze` tool, each a rizin analysis command. All are additive (they find functions/xrefs/names, match types, or recover classes); none deletes analysis. */
 export const ANALYSIS_PASSES = {
 	calls: "aac", // analyze function calls
 	xrefs: "aar", // analyze cross-references
 	pointers: "aav", // analyze values that reference a section/map (pointers)
 	preludes: "aap", // find functions by prologue byte patterns (recovers stripped code)
+	all_functions: "aaf", // analyze all functions
+	data_refs: "aad", // analyze data references to code
 	autoname: "aan", // name functions from the strings/calls they use
 	types: "aaft", // recursive type matching across all functions
+	struct_offsets: "aat", // convert immediates to linked structure-member offsets across functions
 	golang: "aalg", // recover Go functions and strings
 	objc: "aalor", // recover Objective-C references from selector usage
+	rtti_classes: "avrr", // recover C++ class info from all RTTI
 	emulate_functions: "aaef", // analyze references by emulating every function (slow)
 } as const;
 

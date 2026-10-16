@@ -216,9 +216,9 @@ describe("annotationCommands", () => {
 });
 
 describe("analysis passes", () => {
-	test("every pass maps to an aa* command and isAnalysisPass recognizes exactly those names", () => {
+	test("every pass maps to an analysis command and isAnalysisPass recognizes exactly those names", () => {
 		for (const [name, command] of Object.entries(ANALYSIS_PASSES)) {
-			expect(command).toMatch(/^aa[a-z]+$/);
+			expect(command).toMatch(/^(aa[a-z]+|avrr)$/); // aa* passes, plus avrr (RTTI class recovery)
 			expect(isAnalysisPass(name)).toBe(true);
 		}
 		expect(isAnalysisPass("not_a_pass")).toBe(false);

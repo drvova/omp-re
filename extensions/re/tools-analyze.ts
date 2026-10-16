@@ -26,9 +26,9 @@ export function registerAnalyzeTools(pi: ExtensionAPI): void {
 		pass: z.enum(PASS_NAMES).describe(
 			[
 				"calls: analyze function calls. xrefs: cross-references. pointers: values that reference a section/map.",
-				"preludes: recover functions by prologue byte patterns (finds code in stripped binaries aaa missed).",
-				"autoname: name functions from the strings/calls they use. types: recursive type matching across functions.",
-				"golang: recover Go functions and strings. objc: recover Objective-C references from selector usage.",
+				"preludes: recover functions by prologue byte patterns (finds code in stripped binaries aaa missed). all_functions: analyze all functions. data_refs: data references to code.",
+				"autoname: name functions from the strings/calls they use. types: recursive type matching across functions. struct_offsets: rewrite immediates as linked struct-member offsets.",
+				"golang: recover Go functions and strings. objc: recover Objective-C references from selector usage. rtti_classes: recover C++ classes from RTTI.",
 				"emulate_functions: analyze references by emulating every function with ESIL (thorough but slow).",
 			].join("\n"),
 		),

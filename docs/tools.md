@@ -179,7 +179,7 @@ reopen the binary to return to the baseline.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `autoname` (`aan`), `types` (`aaft`), `golang` (`aalg`), `objc` (`aalor`), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
+| `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `all_functions` (`aaf`), `data_refs` (`aad`), `autoname` (`aan`), `types` (`aaft`), `struct_offsets` (`aat`), `golang` (`aalg`), `objc` (`aalor`), `rtti_classes` (`avrr` — C++ classes from RTTI), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
 
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 

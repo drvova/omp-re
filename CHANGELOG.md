@@ -28,7 +28,9 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   `objc`, and `emulate_functions`. It reports the function count before and
   after, surfaces rizin's own message for a pass that doesn't apply, and is
   re-run on resume/respawn (before signatures and annotations) so the
-  recovered analysis is faithful across a restart.
+  recovered analysis is faithful across a restart. Passes: calls, xrefs,
+  pointers, preludes, all_functions, data_refs, autoname, types,
+  struct_offsets, golang, objc, rtti_classes (C++ from RTTI), emulate_functions.
 
 - **Load options for raw/headerless targets.** `open_binary` accepts
   `arch`/`bits`/`base`/`map`/`format` (rizin's `-a`/`-b`/`-B`/`-m`/`-F`), so
