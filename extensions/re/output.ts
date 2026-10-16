@@ -17,6 +17,19 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+/**
+ * Assert a path is safe to hand to rizin as a command argument: a resolved
+ * path of ordinary characters, no whitespace or command metacharacters that
+ * rizin's parser could turn into a second command (`;`, `|`, `` ` ``, `$`,
+ * redirects, `@`, quotes). The model-supplied part is already a
+ * {@link safeBasename}; this also catches a hostile `OMPRE_OUTPUT_DIR`.
+ */
+function assertRizinSafePath(path: string): void {
+	if (!/^[A-Za-z0-9_./-]+$/.test(path)) {
+		throw new Error(`omp-re: the output directory path ${JSON.stringify(path)} contains characters that can't be passed to rizin safely — set OMPRE_OUTPUT_DIR to a path of letters, digits, '/', '.', '_' and '-'`);
+	}
+}
+
 /** The directory omp-re writes output artifacts to (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`). */
 export function outputDir(): string {
 	const configured = (process.env.OMPRE_OUTPUT_DIR ?? "").trim();
@@ -46,5 +59,22 @@ export async function prepareOutputPath(basename: string): Promise<string> {
 		throw new Error(`omp-re: refusing to write outside the output directory: ${JSON.stringify(basename)}`);
 	}
 	await mkdir(dir, { recursive: true });
+	return full;
+}
+
+/**
+ * The absolute path of a subdirectory `basename` inside {@link outputDir},
+ * safe to hand to rizin. With `create`, the directory is made; without it (a
+ * load), the caller checks existence. Used for trace sessions, which rizin
+ * writes and reads itself (so the path, not just the bytes, reaches rizin).
+ */
+export async function outputSubdir(basename: string, create: boolean): Promise<string> {
+	const dir = outputDir();
+	const full = resolve(dir, safeBasename(basename));
+	if (full !== join(dir, basename) || !full.startsWith(`${dir}/`)) {
+		throw new Error(`omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`);
+	}
+	assertRizinSafePath(full);
+	if (create) await mkdir(full, { recursive: true });
 	return full;
 }

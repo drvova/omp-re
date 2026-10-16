@@ -200,6 +200,8 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(approval({ action: "break_command" }).reason).toContain("Inspect");
 		expect(approval({ action: "break_add_hw" }).reason).toContain("Modify");
 		expect(approval({ action: "trace_start" }).reason).toContain("trace session");
+		expect(approval({ action: "trace_save" }).reason).toContain("output directory");
+		expect(approval({ action: "trace_load" }).reason).toContain("saved debug trace");
 		expect(approval({ action: "step_back" }).reason).toContain("backward");
 		expect(approval({ action: "continue_back" }).reason).toContain("backward");
 		expect(approval({ action: "stop" }).reason).toContain("Terminate");
@@ -331,6 +333,25 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(textOf(await run("registers"))).not.toBe(forward);
 		await run("trace_stop");
 	}, 25_000);
+
+	test("trace_save writes the session to the output dir and trace_load restores it", async () => {
+		await run("trace_start");
+		await run("step", { count: 3 });
+		const saved = textOf(await run("trace_save", { file: "t_session" }));
+		const dir = join(outDir, "t_session");
+		expect(saved).toContain(dir);
+		// rizin writes the session's sdbs into the directory
+		expect(readFileSync(join(dir, "session.sdb")).length).toBeGreaterThan(0);
+		// load it back without error
+		expect(textOf(await run("trace_load", { file: "t_session" }))).toContain("loaded the trace session");
+		await run("trace_stop");
+	}, 25_000);
+
+	test("trace_load requires a file and refuses a traversing or missing name", async () => {
+		expect((await captureError(run("trace_load"))).message).toContain("needs file");
+		expect((await captureError(run("trace_load", { file: "../escape" }))).message).toContain("invalid output filename");
+		expect((await captureError(run("trace_load", { file: "nope_not_saved" }))).message).toContain("no saved trace");
+	});
 
 	test("the glibc heap actions return a result without desyncing (even with no heap mapped yet)", async () => {
 		// Early in a tiny process there may be no glibc arena; the tool returns

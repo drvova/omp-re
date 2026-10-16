@@ -89,6 +89,10 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
 - **Reverse debugging** (book: debugger/revdebug). `trace_start` / `trace_stop`
   record a trace session; `step_back` and `continue_back` then move the process
   backward through it — stepping back from a crash or a watchpoint hit.
+  `trace_save` / `trace_load` persist a recorded session to (and restore it
+  from) a directory in omp-re's confined output directory, so an expensive
+  recording survives across debug sessions; the directory path is validated
+  and never model-chosen.
 - **Remote and attach debugging** (book: remote_access). `rizin_debug`'s
   `start` can now control an existing target instead of launching: `attach:
   {pid}` attaches to a running process, and `attach: {remote: "gdb://host:port"}`

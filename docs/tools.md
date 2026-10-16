@@ -214,7 +214,10 @@ Actions:
   `step_over` (`count` instructions).
 - **Reverse debugging:** `trace_start` / `trace_stop` record a trace;
   `step_back` (`count`) / `continue_back` then move backward through it (they
-  error until a trace is recorded).
+  error until a trace is recorded). `trace_save` / `trace_load` (`file`)
+  persist the recorded session to, and restore it from, a directory in
+  omp-re's output directory — so an expensive recording survives across debug
+  sessions.
 - **Registers & memory:** `registers`, `registers_telescope` (each register
   resolved to what it points at), `write_register` (`reg`=`value`),
   `read_memory` (`size` bytes at `addr`, returned inline as hex),

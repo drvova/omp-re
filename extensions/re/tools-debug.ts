@@ -14,11 +14,12 @@
  * see SECURITY.md.
  */
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { checkDebugOnHitCommand, loadCatalog } from "./catalog.ts";
 import { plainResult, textResult } from "./format.ts";
-import { prepareOutputPath } from "./output.ts";
+import { outputSubdir, prepareOutputPath } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { debugTimeoutMs, rizinBitsMismatch, rzQuote, validateAddr, type RzSession } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
@@ -70,6 +71,8 @@ const DEBUG_ACTIONS = [
 	"step_over",
 	"trace_start",
 	"trace_stop",
+	"trace_save",
+	"trace_load",
 	"step_back",
 	"continue_back",
 	"registers",
@@ -122,6 +125,8 @@ function approvalReason(action: DebugAction): string {
 	if (action === "stop") return "Terminate the debugged process.";
 	if (action === "trace_start") return "Start recording a debug trace session (enables stepping backward).";
 	if (action === "trace_stop") return "Stop the debug trace session.";
+	if (action === "trace_save") return "Write the recorded debug trace session to a directory in omp-re's output directory.";
+	if (action === "trace_load") return "Load a previously saved debug trace session from omp-re's output directory.";
 	if (REVERSE_ACTIONS.has(action)) return `Move the debugged process backward through the recorded trace (${action}).`;
 	if (EXECUTING_ACTIONS.has(action)) return `Resume execution of the debugged process (${action}).`;
 	if (MODIFYING_ACTIONS.has(action)) return `Modify the debugged process (${action}).`;
@@ -300,7 +305,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				"continue: resume until a breakpoint, signal, or exit. continue_until: resume to `addr`.",
 				"continue_to_syscall / continue_to_call / continue_to_ret: resume until the next syscall, call, or return.",
 				"step: one instruction (or `count`). step_over: step over calls.",
-				"trace_start / trace_stop: record a trace so you can go backward. step_back / continue_back: step or continue BACKWARD through the recorded trace (reverse debugging).",
+				"trace_start / trace_stop: record a trace so you can go backward. step_back / continue_back: step or continue BACKWARD through the recorded trace (reverse debugging). trace_save / trace_load: persist the recorded trace to (and restore it from) a directory in omp-re's output directory, named by `file`.",
 				"registers: all register values. registers_telescope: each register resolved to what it points at. write_register: set `reg` to `value`.",
 				"read_memory: `size` bytes at `addr` (returned inline as hex). dump_memory: write `size` bytes of live memory at `addr` to a file in omp-re's output directory (for an unpacked/decrypted region too large to return inline) — returns its path, size, and SHA-256. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory. resolve_symbol: live address of `name` (optionally in `lib`).",
 				"break_add / break_add_hw (hardware) / break_remove at `addr`. break_list: list breakpoints and watchpoints. break_enable / break_disable at `addr`. break_condition: only stop when `condition` holds. break_command: run a read-only `command` on hit. watch_add: watchpoint at `addr` (perm r/w/rw, size). backtrace: call stack.",
@@ -312,7 +317,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		addr: z.string().optional().describe("Address or symbol for continue_until, read_memory, write_memory, disassemble, break_add, break_remove, watch_add, heap_chunks/heap_bins (arena/bin)."),
 		count: z.number().optional().describe("Instruction count for step / step_over (default 1), or instructions to show for disassemble (default 16)."),
 		size: z.number().optional().describe("Bytes to read for read_memory (default 64) or dump_memory (required, up to 16 MiB), or watchpoint size for watch_add (1/2/4/8)."),
-		file: z.string().optional().describe("For dump_memory: output filename (a bare name, no path) written to omp-re's output directory; omit for an auto-generated name."),
+		file: z.string().optional().describe("A bare name (no path) inside omp-re's output directory: the output file for dump_memory (omit for an auto-generated name), or the trace-session directory for trace_save/trace_load (required for trace_load)."),
 		reg: z.string().optional().describe("Register name for write_register, e.g. rip, rax, eflags."),
 		value: z.string().optional().describe("New register value for write_register (decimal or 0x hex)."),
 		bytes: z.string().optional().describe("Hex bytes for write_memory, e.g. 9090 or 4889e5 (written to the live process at addr)."),
@@ -460,6 +465,22 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				case "trace_stop": {
 					await dbg.cmd("dts-", { signal });
 					return plainResult("debug: trace_stop — trace session ended");
+				}
+				case "trace_save": {
+					// `dtst <dir>` writes the trace session (registers/memory/checkpoints/session sdbs) into a directory.
+					const name = params.file !== undefined ? params.file : `trace_${Date.now()}`;
+					const dir = await outputSubdir(name, true); // validates the basename and makes the dir, before touching rizin
+					const { stderr } = await dbg.cmdWithStderr(`dtst ${dir}`, { signal });
+					if (stderr.trim()) throw new Error(`omp-re: debug trace_save: ${stderr.trim()}`);
+					return textResult(`debug: trace_save ${name}`, `wrote the trace session to ${dir}\nRestore it later with trace_load file=${JSON.stringify(name)}.`, { ctx, tool: "rizin_debug" });
+				}
+				case "trace_load": {
+					if (params.file === undefined) throw new Error("omp-re: debug trace_load needs file (a trace directory from a prior trace_save)");
+					const dir = await outputSubdir(params.file, false);
+					if (!existsSync(dir)) throw new Error(`omp-re: debug trace_load: no saved trace at ${dir} (save one first with trace_save)`);
+					const { stderr } = await dbg.cmdWithStderr(`dtsf ${dir}`, { signal });
+					if (stderr.trim()) throw new Error(`omp-re: debug trace_load: ${stderr.trim()}`);
+					return textResult(`debug: trace_load ${params.file}`, `loaded the trace session from ${dir}\nStep backward with step_back / continue_back.`, { ctx, tool: "rizin_debug" });
 				}
 				case "step_back": {
 					const n = clampInt(params.count, 1, 100_000);
