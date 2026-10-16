@@ -17,12 +17,12 @@ import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
-import { branchEntries, lastRecordedBinaryPath } from "./entries.ts";
+import { branchEntries, lastRecordedBinaryPath, lastRecordedLoadOptions } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { writeReport } from "./report.ts";
-import { resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
+import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
 import { registerInfoTools } from "./tools-info.ts";
@@ -48,6 +48,18 @@ import {
 interface OpenOptions {
 	signal?: AbortSignal;
 	onProgress?: (elapsedMs: number) => void;
+	loadOptions?: LoadOptions;
+}
+
+/** Collect the open_binary load params into a LoadOptions, or undefined when none were given (ordinary header autodetection). */
+function toLoadOptions(params: { arch?: string; bits?: 8 | 16 | 32 | 64; base?: string; map?: string; format?: string }): LoadOptions | undefined {
+	const load: LoadOptions = {};
+	if (params.arch !== undefined) load.arch = params.arch;
+	if (params.bits !== undefined) load.bits = params.bits;
+	if (params.base !== undefined) load.base = params.base;
+	if (params.map !== undefined) load.map = params.map;
+	if (params.format !== undefined) load.format = params.format;
+	return Object.keys(load).length > 0 ? load : undefined;
 }
 
 /**
@@ -63,8 +75,10 @@ async function openBinary(pi: ExtensionAPI, ctx: ExtensionContext, inputPath: st
 	const resolved = await resolveBinaryPath(inputPath);
 	const { replayFailures } = await spawnRizin(ctx, resolved, options);
 	const replayed = liveAnnotations(branchEntries(ctx), resolved).length;
-	pi.appendEntry("re.binary", { path: resolved });
-	pi.sendMessage({ customType: "re.binary", content: `[re: opened ${resolved}]`, display: true, details: { path: resolved } });
+	// Persist the load settings in the entry too, so a resume reopens a raw blob the same way (header autodetection carries nothing).
+	const details = options.loadOptions ? { path: resolved, load: options.loadOptions } : { path: resolved };
+	pi.appendEntry("re.binary", details);
+	pi.sendMessage({ customType: "re.binary", content: `[re: opened ${resolved}]`, display: true, details });
 	await refreshStatusBand(ctx);
 	// rizin is the user's own install: say so up front if it lacks a command omp-re's tools send.
 	const missingCommands = await loadCatalog().then(missingRequiredCommands, () => []);
@@ -89,8 +103,12 @@ function clearAnalysisStatus(ctx: ExtensionContext): void {
 	if (ctx.hasUI) ctx.ui.setStatus("re", undefined);
 }
 
-function describeOpen(result: OpenResult): string {
+function describeOpen(result: OpenResult & { loadOptions?: LoadOptions }): string {
 	const lines = [`Binary opened: ${result.path}`];
+	if (result.loadOptions) {
+		const parts = Object.entries(result.loadOptions).map(([k, v]) => `${k}=${v}`);
+		if (parts.length > 0) lines.push(`Loaded with forced settings (${parts.join(", ")}).`);
+	}
 	if (result.replayed > 0) lines.push(`Re-applied ${result.replayed - result.replayFailures.length} of ${result.replayed} annotation(s) recorded earlier for this binary.`);
 	for (const failure of result.replayFailures) lines.push(`  could not re-apply ${failure}`);
 	if (result.missingCommands.length > 0) lines.push(missingCommandsWarning(result.missingCommands));
@@ -182,12 +200,19 @@ function registerShell(pi: ExtensionAPI): void {
 		return new Text(theme.fg("accent", `[re: opened ${typeof path === "string" ? path : "?"}]`), 0, 0);
 	});
 
-	const openBinaryParams = pi.zod.object({ path: pi.zod.string().describe("Path to the binary file to open.") });
+	const openBinaryParams = pi.zod.object({
+		path: pi.zod.string().describe("Path to the binary file to open."),
+		arch: pi.zod.string().optional().describe("Force the architecture for a raw/headerless target (rizin -a), e.g. x86, arm, mips. Omit for a normal file with a header."),
+		bits: pi.zod.union([pi.zod.literal(8), pi.zod.literal(16), pi.zod.literal(32), pi.zod.literal(64)]).optional().describe("Force the word size (rizin -b): 8, 16, 32, or 64. Pair with arch for flat shellcode."),
+		base: pi.zod.string().optional().describe("Rebase a formatted image (PE/ELF) at this address (rizin -B), e.g. 0x400000. For a raw/headerless file use `map` instead."),
+		map: pi.zod.string().optional().describe("Map a raw/flat file at this address (rizin -m), e.g. 0x400000 — the right option for headerless shellcode or firmware dumps."),
+		format: pi.zod.string().optional().describe("Force the bin plugin (rizin -F), e.g. elf, pe, mach0, or `any` to open raw bytes with no format."),
+	});
 	pi.registerTool({
 		name: "open_binary",
 		label: "Open binary",
 		description:
-			"Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (hash_binary, list_functions, decompile_function, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open.",
+			"Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (hash_binary, list_functions, decompile_function, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open. For a raw/headerless target (flat shellcode, firmware, a ROM dump) pass arch/bits/base/format so rizin loads it correctly instead of autodetecting from a header it doesn't have.",
 		approval: "read",
 		loadMode: "essential",
 		parameters: openBinaryParams,
@@ -197,8 +222,9 @@ function registerShell(pi: ExtensionAPI): void {
 			const progress = (elapsedMs: number) =>
 				onUpdate?.(plainResult(`Analyzing ${name} with rizin… ${Math.round(elapsedMs / 1000)}s`));
 			onUpdate?.(plainResult(`Analyzing ${name} with rizin…`));
-			const result = await openBinary(pi, ctx, params.path, { signal, onProgress: progress });
-			return plainResult(describeOpen(result));
+			const loadOptions = toLoadOptions(params);
+			const result = await openBinary(pi, ctx, params.path, { signal, onProgress: progress, loadOptions });
+			return plainResult(describeOpen({ ...result, loadOptions }));
 		},
 	});
 
@@ -236,6 +262,8 @@ function registerShell(pi: ExtensionAPI): void {
 			state.rz?.close();
 			state.rz = null;
 			state.binaryPath = recorded ?? null;
+			// Recover how this binary was loaded (raw-blob arch/bits/base) so the respawn below reloads it the same way.
+			state.loadOptions = recorded ? (lastRecordedLoadOptions(branchEntries(ctx)) ?? null) : null;
 		} else {
 			syncAnnotationsToBranch(ctx);
 		}

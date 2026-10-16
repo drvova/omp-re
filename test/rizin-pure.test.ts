@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { baseRizinFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { baseRizinFlags, buildLoadFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -30,6 +30,30 @@ describe("validateAddr", () => {
 		expect(() => validateAddr("main~{}")).toThrow();
 		expect(() => validateAddr("main|cat")).toThrow();
 		expect(() => validateAddr("'main'")).toThrow();
+	});
+});
+
+describe("buildLoadFlags", () => {
+	test("no options ⇒ no flags (header autodetection)", () => {
+		expect(buildLoadFlags()).toEqual([]);
+		expect(buildLoadFlags({})).toEqual([]);
+	});
+
+	test("maps arch/bits/base/map/format to rizin's own flags", () => {
+		expect(buildLoadFlags({ arch: "x86", bits: 32 })).toEqual(["-a", "x86", "-b", "32"]);
+		expect(buildLoadFlags({ base: "0x400000" })).toEqual(["-B", "0x400000"]);
+		expect(buildLoadFlags({ map: "0x400000" })).toEqual(["-m", "0x400000"]);
+		expect(buildLoadFlags({ format: "any" })).toEqual(["-F", "any"]);
+	});
+
+	test("rejects a bits value that isn't 8/16/32/64", () => {
+		expect(() => buildLoadFlags({ bits: 7 as unknown as 8 })).toThrow("omp-re: load: invalid bits");
+	});
+
+	test("rejects a flag-shaped or injection-shaped arch/format", () => {
+		expect(() => buildLoadFlags({ arch: "-rm" })).toThrow("omp-re: load: invalid arch");
+		expect(() => buildLoadFlags({ format: "a b" })).toThrow("omp-re: load: invalid format");
+		expect(() => buildLoadFlags({ base: "0x1; id" })).toThrow("omp-re: invalid address");
 	});
 });
 

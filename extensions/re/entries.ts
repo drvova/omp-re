@@ -8,6 +8,7 @@
  * re-applied to rizin.
  */
 import type { CustomEntry, ExtensionContext, SessionEntry } from "@oh-my-pi/pi-coding-agent";
+import type { LoadOptions } from "./rizin.ts";
 
 export function branchEntries(ctx: ExtensionContext): SessionEntry[] {
 	return ctx.sessionManager.getBranch();
@@ -24,6 +25,20 @@ export function lastRecordedBinaryPath(entries: readonly SessionEntry[]): string
 	for (const entry of customEntries(entries, "re.binary")) {
 		const path = (entry.data as { path?: unknown } | undefined)?.path;
 		if (typeof path === "string") last = path;
+	}
+	return last;
+}
+
+/**
+ * The load options (`-a/-b/-B/-F`) recorded with the latest `re.binary` entry,
+ * so a resume reopens a raw/headerless target the same way it was first
+ * opened. Undefined when the last open used plain header autodetection.
+ */
+export function lastRecordedLoadOptions(entries: readonly SessionEntry[]): LoadOptions | undefined {
+	let last: LoadOptions | undefined;
+	for (const entry of customEntries(entries, "re.binary")) {
+		const load = (entry.data as { load?: unknown } | undefined)?.load;
+		last = load && typeof load === "object" && !Array.isArray(load) ? (load as LoadOptions) : undefined;
 	}
 	return last;
 }

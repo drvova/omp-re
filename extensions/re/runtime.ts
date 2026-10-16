@@ -21,7 +21,7 @@ import { Context } from "cordis";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
 import { branchEntries } from "./entries.ts";
-import { assertRizinAvailable, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
+import { assertRizinAvailable, type LoadOptions, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
 
 /** The per-omp-session record. The public fields are read and written directly by the tools, UI, evidence, and audit modules exactly as before. */
 export interface ReSessionState {
@@ -32,6 +32,8 @@ export interface ReSessionState {
 	/** The DEBUG session (rizin -d), which has launched the target process. Separate from `rz`, created only by the `debug` tool, never auto-respawned (that would silently re-run the program). */
 	dbg: RzSession | null;
 	binaryPath: string | null;
+	/** Explicit load settings (`-a/-b/-B/-F`) for a headerless/raw target, reused on every respawn so a resume or crash recovery loads the blob the same way. Null means header autodetection. */
+	loadOptions: LoadOptions | null;
 	/** annotationFingerprint() of the annotations applied to `rz`; compared after branch/tree changes. */
 	appliedAnnotations: string;
 	auditHmacWarned: boolean;
@@ -59,6 +61,7 @@ function newState(sessionId: string): ReSessionState {
 		spawning: null,
 		dbg: null,
 		binaryPath: null,
+		loadOptions: null,
 		appliedAnnotations: "",
 		auditHmacWarned: false,
 		evidenceCount: 0,
@@ -116,7 +119,10 @@ class RizinBackend {
 		// Fail with omp-re's own messages (binary gone since the session recorded it, rizin not installed) rather than a bare spawn error.
 		await resolveBinaryPath(binaryPath);
 		await assertRizinAvailable();
-		const rz = await RzSession.spawn(resolveRizinPath(binaryPath), binaryPath, options);
+		// A fresh open carries explicit load options; a respawn/resume (none passed) reuses what this session last opened the binary with.
+		if (options.loadOptions) rec.loadOptions = options.loadOptions;
+		const loadOptions = options.loadOptions ?? rec.loadOptions ?? undefined;
+		const rz = await RzSession.spawn(resolveRizinPath(binaryPath, loadOptions?.bits), binaryPath, { ...options, loadOptions });
 		const live = liveAnnotations(branchEntries(ctx), binaryPath);
 		const replayFailures = await replayAnnotations(rz, live);
 
@@ -162,13 +168,16 @@ class RizinBackend {
 		const rec = this.record(ctx.sessionManager.getSessionId());
 		if (rec.dbg && !rec.dbg.isClosed) return rec.dbg;
 		const binaryPath = this.requireBinary(rec);
-		const rizinPath = resolveRizinPath(binaryPath);
+		// The debug launch loads the target the same way the static session did
+		// (raw blob arch/bits/base), so stepping agrees with the analysis.
+		const loadOptions = rec.loadOptions ?? undefined;
+		const rizinPath = resolveRizinPath(binaryPath, loadOptions?.bits);
 		// The debugger executes the process: a build whose bits don't match the
 		// target produces wrong-arch semantics (file-relative VM bases,
 		// esp-vs-rsp) — say so loudly instead of letting them pass as results.
 		const mismatch = await rizinBitsMismatch(binaryPath);
 		if (mismatch) ctx.ui?.notify?.(`omp-re: ${mismatch}`, "warning");
-		const dbg = await RzSession.spawnDebug(rizinPath, binaryPath, options);
+		const dbg = await RzSession.spawnDebug(rizinPath, binaryPath, { ...options, loadOptions });
 		const scope = await this.scope(rec);
 		rec._disposeDbg = scope.effect(() => () => {
 			if (!dbg.isClosed) dbg.close(); // closing the debug rizin also kills the launched debuggee

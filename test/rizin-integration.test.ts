@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveDecompiler } from "../extensions/re/decompile.ts";
 import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
 import { canRunRizin, logSkip, makeHarness, rizinPath, TEST_BINARY } from "./helpers.ts";
+
+/** A flat x86-32 blob with no header: `mov eax,1; add eax,2; ret`. */
+const FLAT_X86_32 = Buffer.from([0xb8, 0x01, 0x00, 0x00, 0x00, 0x83, 0xc0, 0x02, 0xc3]);
 
 logSkip("rizin-integration tests");
 
@@ -84,6 +90,58 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
 		const first = await resolveDecompiler(session);
 		expect([null, "pdg", "pdd"]).toContain(first);
 		expect(await resolveDecompiler(session)).toBe(first);
+	});
+});
+
+describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
+	let dir: string;
+	let blob: string;
+
+	beforeAll(() => {
+		dir = mkdtempSync(join(tmpdir(), "omp-re-raw-"));
+		blob = join(dir, "blob.bin");
+		writeFileSync(blob, FLAT_X86_32);
+	});
+
+	afterAll(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("arch+bits load options disassemble a flat blob that autodetects as the wrong arch", async () => {
+		// Autodetection reads the file as 64-bit (no header), so the x86-32 ret
+		// would decode differently; the load options pin the real arch.
+		const s = await RzSession.spawn(rizinPath, blob, { loadOptions: { arch: "x86", bits: 32 } });
+		try {
+			const ops = (await s.cmdj<{ opcode: string }[]>("pdj 3 @ 0"))!;
+			expect(ops.map((o) => o.opcode.split(" ")[0])).toEqual(["mov", "add", "ret"]);
+		} finally {
+			s.close();
+		}
+	});
+
+	test("map loads a raw file at a base address (the -m form rizin wants for headerless files)", async () => {
+		const s = await RzSession.spawn(rizinPath, blob, { loadOptions: { arch: "x86", bits: 32, map: "0x400000" } });
+		try {
+			const op = (await s.cmdj<{ opcode: string }[]>("pdj 1 @ 0x400000"))![0]!;
+			expect(op.opcode).toContain("mov");
+		} finally {
+			s.close();
+		}
+	});
+
+	test("spawnRizin stores the load options so a respawn reloads the blob the same way", async () => {
+		const harness = makeHarness("rizin-integration-load");
+		const { ctx, entries } = harness;
+		entries.push({ type: "custom", id: "bin-raw", customType: "re.binary", data: { path: blob, load: { arch: "x86", bits: 32 } } });
+		try {
+			await spawnRizin(ctx, blob, { loadOptions: { arch: "x86", bits: 32 } });
+			getState(ctx).rz!.close(); // force a respawn with no options passed — it must reuse the stored ones
+			const rz = await ensureRizin(ctx);
+			const op = (await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"))![0]!;
+			expect(op.opcode.split(" ")[0]).toBe("mov");
+		} finally {
+			shutdownState(ctx.sessionManager.getSessionId());
+		}
 	});
 });
 
