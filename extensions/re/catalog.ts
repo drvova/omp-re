@@ -140,8 +140,11 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * queries. Everything else (writes `w`, config `e`, open `o`, shell `!`,
  * scripting `#!`/`.`/`(`, debugger `d`, seek, and every analysis mutation) is
  * refused; annotations go through the dedicated, undoable mutate tools.
+ * Inside `ax`, only the read-only listings pass: `axt`/`axf` (refs to/from),
+ * `axl[jq]` (all refs), `axgj?` (refs graph) — `ax`/`axc`/`axC`/`axd`/`axs`
+ * add refs, `ax-` deletes, `axm` copies.
  */
-const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd)/;
+const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd)/;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:

@@ -40,6 +40,11 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
 	"/x": { args_str: " <hex>", summary: "Search hex string", args: [{ type: "string", name: "hex", required: true }] },
 	"/F": { args_str: " <file>", summary: "Search the content of a file.", args: [{ type: "string", name: "file", required: true }] },
 	"/m": { args_str: " [<magic-file>]", summary: "Magic constants search.", args: [{ type: "string", name: "magic-file" }] },
+	axl: { summary: "List all xrefs" },
+	axlj: { summary: "List all xrefs (JSON mode)" },
+	axlq: { summary: "List all xrefs (quiet mode)" },
+	axg: { summary: "Show xrefs graph to reach function at current seek" },
+	axgj: { summary: "Show xrefs graph to reach function at current seek (JSON mode)" },
 	"/R": { args_str: " [<re>]", summary: "Search rop gadgets", description: "Find gadgets ending in ret" },
 	izj: { summary: "List strings in data sections (JSON mode)" },
 	agc: { args_str: " [<format>]", summary: "Global callgraph" },
@@ -111,6 +116,15 @@ describe("checkRizinCommand (no rizin needed)", () => {
 			expect(reason).toMatch(/is not available here|is not allowed in a command/);
 		}
 		expect(refusal("afn evil")).toContain("rename_function");
+	});
+
+	test("inside ax, only the read-only listings run; adds, deletes, and copies stay refused", () => {
+		for (const command of ["axl", "axlj", "axlq", "axg", "axgj"]) {
+			expect(checkRizinCommand(CATALOG, command)).toMatchObject({ ok: true, name: command });
+		}
+		for (const command of ["ax 0x40", "axc 0x40", "axC 0x40", "axd 0x40", "axs 0x40", "ax- 0x40", "ax-*", "axm 0x40"]) {
+			expect(refusal(command)).toMatch(/is not available here/);
+		}
 	});
 
 	test("refuses raw-byte printers, which would break the NUL-framed pipe", () => {
