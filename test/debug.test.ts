@@ -106,7 +106,7 @@ describe.skipIf(!canRunRizin)("emulate tool against a real rizin session", () =>
 		// Build-agnostic: the suite's rizin may be the 32-bit build (maps at
 		// 0x425ff0, names the stack pointer esp), or the 64-bit one — so assert
 		// on PC numerically and never on register names or padding.
-		const initVars = JSON.parse(textOf(await run("init", { addr: "entry0" })).replace(/^emulate: VM initialized at .+\n/, ""));
+		const initVars = JSON.parse(textOf(await run("init", { addr: "entry0" })).replace(/^emulate: VM initialized at .+\n(?:rizin build is [^\n]*\n)?/, ""));
 		const pc0 = parseInt(String(initVars.PC), 16);
 		expect(pc0).toBeGreaterThan(0);
 		await run("set_var", { name: "PC", value: `0x${(pc0 + 0x10).toString(16)}` });
@@ -127,7 +127,7 @@ describe.skipIf(!canRunRizin)("emulate tool against a real rizin session", () =>
 		expect(pcWrites.length).toBeGreaterThan(0);
 		const target = String(pcWrites[pcWrites.length - 1].new);
 		await run("init", { addr: "entry0" });
-		const vars = JSON.parse(textOf(await run("step_until", { addr: target })).replace(/^emulate: step_until .+\n/, ""));
+		const vars = JSON.parse(textOf(await run("step_until", { addr: target })).replace(/^emulate: step_until .+\n(?:rizin build is [^\n]*\n)?/, ""));
 		expect(parseInt(String(vars.PC), 16)).toBe(parseInt(target, 16));
 	}, 30_000);
 });

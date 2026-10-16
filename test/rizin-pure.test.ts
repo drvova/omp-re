@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { baseRizinFlags, eaFromOffset, isExecutable, normalizeAddr, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { baseRizinFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 describe("validateAddr", () => {
 	test("accepts hex addresses, flag names, and arithmetic", () => {
@@ -209,5 +211,90 @@ describe("isExecutable", () => {
 		expect(await isExecutable("C:/Windows/System32/where.exe")).toBe(true);
 		expect(await isExecutable("C:/Windows/System32/where")).toBe(true); // extensionless form
 		expect(await isExecutable("C:/Windows/System32/no-such-tool-here")).toBe(false);
+	});
+});
+
+describe("parseRizinVersionArch", () => {
+	test("parses the -v arch suffix and common legacy spellings", () => {
+		expect(parseRizinVersionArch("rizin 0.9.1 @ windows-x86-64")).toBe(64);
+		expect(parseRizinVersionArch("rizin 0.9.1 @ windows-x86-32")).toBe(32);
+		expect(parseRizinVersionArch("rizin 0.9.1 @ linux-x86-64")).toBe(64);
+		expect(parseRizinVersionArch("rizin 0.9.1 @ macos-arm64")).toBe(64);
+		expect(parseRizinVersionArch("rizin 0.9.1 @ linux-x86")).toBe(32);
+		expect(parseRizinVersionArch("rizin 0.9.1 @ linux-x86_64")).toBe(64);
+		expect(parseRizinVersionArch("rizin 0.9.1 @ somewhere-else")).toBeUndefined();
+	});
+});
+
+describe("readBinaryBits", () => {
+	let dir: string;
+	const write = (name: string, bytes: number[]): string => {
+		const p = `${dir}/${name}`;
+		writeFileSync(p, Buffer.from(bytes));
+		return p;
+	};
+	const pe = (machine: number): number[] => {
+		const b = Array.from({ length: 0x48 }, () => 0);
+		b[0] = 0x4d; b[1] = 0x5a; // MZ
+		b[0x3c] = 0x40; // e_lfanew = 0x40
+		b[0x40] = 0x50; b[0x41] = 0x45; // PE\0\0
+		b[0x44] = machine & 0xff; b[0x45] = machine >> 8;
+		return b;
+	};
+	const elf = (cls: number): number[] => [0x7f, 0x45, 0x4c, 0x46, cls, 0, 0, 0];
+
+	beforeAll(() => { dir = mkdtempSync(`${tmpdir()}/omp-re-bits-`); });
+	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+	test("classifies PE, ELF, and Mach-O headers", () => {
+		expect(readBinaryBits(write("pe64.bin", pe(0x8664)))).toBe(64);
+		expect(readBinaryBits(write("peArm64.bin", pe(0xaa64)))).toBe(64);
+		expect(readBinaryBits(write("pe32.bin", pe(0x014c)))).toBe(32);
+		expect(readBinaryBits(write("peArm.bin", pe(0x01c0)))).toBe(32);
+		expect(readBinaryBits(write("peBad.bin", pe(0xffff)))).toBeUndefined();
+		expect(readBinaryBits(write("elf64.bin", elf(2)))).toBe(64);
+		expect(readBinaryBits(write("elf32.bin", elf(1)))).toBe(32);
+		expect(readBinaryBits(write("macho64.bin", [0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]))).toBe(64);
+		expect(readBinaryBits(write("macho32.bin", [0xce, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]))).toBe(32);
+		expect(readBinaryBits(write("junk.bin", [1, 2, 3, 4]))).toBeUndefined();
+		expect(readBinaryBits(`${dir}/does-not-exist.bin`)).toBeUndefined();
+	});
+});
+
+describe("resolveRizinPath bits-aware precedence", () => {
+	const saved: Record<string, string | undefined> = {};
+	const KEYS = ["OMPRE_RIZIN_PATH", "OMPRE_RIZIN_PATH_64", "OMPRE_RIZIN_PATH_32"];
+	afterEach(() => {
+		for (const k of KEYS) {
+			if (saved[k] === undefined) delete process.env[k];
+			else process.env[k] = saved[k];
+		}
+	});
+	const setEnv = (vars: Record<string, string | undefined>) => {
+		for (const [k, v] of Object.entries(vars)) {
+			saved[k] = process.env[k];
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+	};
+
+	test("per-bits override wins for matching targets, general path otherwise", () => {
+		setEnv({ OMPRE_RIZIN_PATH: "C:/base/rizin.exe", OMPRE_RIZIN_PATH_64: "C:/rz64/rizin.exe", OMPRE_RIZIN_PATH_32: undefined });
+		expect(resolveRizinPath()).toBe("C:/base/rizin.exe");
+		// A 64-bit PE picks the 64 build; a 32-bit PE with only the 64 override set falls back.
+		const pe = (machine: number) => {
+			const b = Array.from({ length: 0x48 }, () => 0);
+			b[0] = 0x4d; b[1] = 0x5a; b[0x3c] = 0x40; b[0x40] = 0x50; b[0x41] = 0x45;
+			b[0x44] = machine & 0xff; b[0x45] = machine >> 8;
+			return Buffer.from(b);
+		};
+		const dir = mkdtempSync(`${tmpdir()}/omp-re-rz-`);
+		const p64 = `${dir}/t64.exe`; writeFileSync(p64, pe(0x8664));
+		const p32 = `${dir}/t32.exe`; writeFileSync(p32, pe(0x014c));
+		expect(resolveRizinPath(p64)).toBe("C:/rz64/rizin.exe");
+		expect(resolveRizinPath(p32)).toBe("C:/base/rizin.exe");
+		setEnv({ OMPRE_RIZIN_PATH_32: "C:/rz32/rizin.exe" });
+		expect(resolveRizinPath(p32)).toBe("C:/rz32/rizin.exe");
+		rmSync(dir, { recursive: true, force: true });
 	});
 });

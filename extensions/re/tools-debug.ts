@@ -16,7 +16,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { plainResult, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { debugTimeoutMs, validateAddr } from "./rizin.ts";
+import { debugTimeoutMs, rizinBitsMismatch, validateAddr } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
@@ -215,7 +215,10 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				const dbg = await startDebug(ctx, { signal, runDirectives }); // the debug process is a revertible effect on the session scope
 				const pc = (await dbg.cmd("dr rip", { signal })).trim();
 				const runNote = runDirectives ? ` Target env: ${runDirectives.join(", ")}.` : "";
-				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}\nSet breakpoints (break_add), then continue or step.`);
+				// Already surfaced as a warning by startDebug; repeat in the result so
+				// the text record carries it.
+				const bitsNote = (await rizinBitsMismatch(binary)) ?? "";
+				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}${bitsNote ? `\n${bitsNote}` : ""}\nSet breakpoints (break_add), then continue or step.`);
 			}
 
 			if (params.action === "stop") {

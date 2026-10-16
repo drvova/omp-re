@@ -9,8 +9,8 @@
  * exactly one request at a time over the pipe.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { constants as fsConstants, openSync as fsOpenSync, readSync as fsReadSync, closeSync as fsCloseSync } from "node:fs";
 import { access, realpath as fsRealpath } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
 
 /** Allowed characters in an address/expression interpolated after `@`: hex, flag names, and
  * arithmetic (sym.main+0x10, $$). `@` itself is excluded so no value can smuggle in rizin's
@@ -401,8 +401,98 @@ export class RzSession {
 	}
 }
 
-export function resolveRizinPath(): string {
+export function resolveRizinPath(binaryPath?: string): string {
+	// The open binary's bits decide which build runs it: the bits-sensitive
+	// surfaces (the debugger executes the process; the RzIL VM inherits the
+	// build's addressing) misbehave when the build's bits don't match the
+	// target — a 32-bit rizin emulates a 64-bit PE at a file-relative base
+	// with `esp`. Per-bits overrides win, then the general one, then PATH.
+	if (binaryPath) {
+		const bits = readBinaryBits(binaryPath);
+		if (bits === 64 && process.env.OMPRE_RIZIN_PATH_64?.trim()) return process.env.OMPRE_RIZIN_PATH_64.trim();
+		if (bits === 32 && process.env.OMPRE_RIZIN_PATH_32?.trim()) return process.env.OMPRE_RIZIN_PATH_32.trim();
+	}
 	return process.env.OMPRE_RIZIN_PATH?.trim() || "rizin";
+}
+
+/**
+ * The target's pointer width from its file header — no session needed, so
+ * spawn paths can use it. ELF (class byte), PE (machine type: x64/ARM64 =
+ * 64, x86/ARM = 32) and Mach-O (magic) are covered; fat Mach-O and unknown
+ * formats answer undefined rather than guessing.
+ */
+export function readBinaryBits(path: string): 32 | 64 | undefined {
+	let fd: number | undefined;
+	try {
+		fd = fsOpenSync(path, "r");
+		const buf = Buffer.alloc(1024);
+		const read = fsReadSync(fd, buf, 0, buf.length, 0);
+		if (read < 4) return undefined;
+		if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) {
+			// ELF: EI_CLASS — 1 = ELF32, 2 = ELF64.
+			return buf[4] === 1 ? 32 : buf[4] === 2 ? 64 : undefined;
+		}
+		if (buf[0] === 0x4d && buf[1] === 0x5a) {
+			// PE: MZ → e_lfanew (u32 LE at 0x3C) → "PE\0\0" → machine (u16 LE).
+			const lfanew = buf.readUInt32LE(0x3c);
+			if (lfanew <= 0 || lfanew + 6 > read) return undefined;
+			if (buf.readUInt32LE(lfanew) !== 0x00004550) return undefined;
+			switch (buf.readUInt16LE(lfanew + 4)) {
+				case 0x8664: // IMAGE_FILE_MACHINE_AMD64
+				case 0xaa64: // ARM64
+					return 64;
+				case 0x014c: // i386
+				case 0x01c0: // ARM
+					return 32;
+				default:
+					return undefined;
+			}
+		}
+		const magic = buf.readUInt32LE(0);
+		if (magic === 0xfeedfacf) return 64; // Mach-O 64
+		if (magic === 0xfeedface) return 32; // Mach-O 32
+		return undefined; // fat/universal Mach-O and unknown formats: don't guess
+	} catch {
+		return undefined;
+	} finally {
+		if (fd !== undefined) fsCloseSync(fd);
+	}
+}
+
+/** The build's pointer width from `rizin -v`'s first line ("rizin 0.9.1 @ windows-x86-64"), or undefined when it doesn't say. */
+export function parseRizinVersionArch(version: string): 32 | 64 | undefined {
+	const m = /-(32|64)(?:\s|$)/.exec(version);
+	if (m) return m[1] === "64" ? 64 : 32;
+	// 64-bit names checked before 32-bit ones: "x86_64" contains "x86".
+	if (/x86_64|aarch64|arm64/.test(version)) return 64;
+	if (/x86|arm(?![_-]?[6-9])|i386/.test(version)) return 32;
+	return undefined;
+}
+
+const buildBitsCache: Record<string, 32 | 64 | undefined> = {};
+
+/** The resolved rizin's build bits, from `-v` (parsed once per path). */
+export async function rizinBuildBits(rizinPath: string): Promise<32 | 64 | undefined> {
+	if (rizinPath in buildBitsCache) return buildBitsCache[rizinPath];
+	try {
+		const proc = Bun.spawn([rizinPath, "-v"], { stdout: "pipe", stderr: "ignore" });
+		const out = await new Response(proc.stdout).text();
+		await proc.exited;
+		const bits = parseRizinVersionArch(out.split("\n")[0]?.trim() ?? "");
+		buildBitsCache[rizinPath] = bits;
+		return bits;
+	} catch {
+		buildBitsCache[rizinPath] = undefined;
+		return undefined;
+	}
+}
+
+/** A human note when the resolved rizin build's bits don't match the open binary's, or undefined when they match (or either side is unknown). */
+export async function rizinBitsMismatch(binaryPath: string): Promise<string | undefined> {
+	const buildBits = await rizinBuildBits(resolveRizinPath(binaryPath));
+	const targetBits = readBinaryBits(binaryPath);
+	if (buildBits === undefined || targetBits === undefined || buildBits === targetBits) return undefined;
+	return `rizin build is ${buildBits}-bit but the target is ${targetBits}-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_${targetBits} to a matching build.`;
 }
 
 /**

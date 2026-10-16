@@ -21,7 +21,7 @@ import { Context } from "cordis";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
 import { branchEntries } from "./entries.ts";
-import { assertRizinAvailable, raceAbort, RzSession, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
+import { assertRizinAvailable, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
 
 /** The per-omp-session record. The public fields are read and written directly by the tools, UI, evidence, and audit modules exactly as before. */
 export interface ReSessionState {
@@ -116,7 +116,7 @@ class RizinBackend {
 		// Fail with omp-re's own messages (binary gone since the session recorded it, rizin not installed) rather than a bare spawn error.
 		await resolveBinaryPath(binaryPath);
 		await assertRizinAvailable();
-		const rz = await RzSession.spawn(resolveRizinPath(), binaryPath, options);
+		const rz = await RzSession.spawn(resolveRizinPath(binaryPath), binaryPath, options);
 		const live = liveAnnotations(branchEntries(ctx), binaryPath);
 		const replayFailures = await replayAnnotations(rz, live);
 
@@ -162,7 +162,13 @@ class RizinBackend {
 		const rec = this.record(ctx.sessionManager.getSessionId());
 		if (rec.dbg && !rec.dbg.isClosed) return rec.dbg;
 		const binaryPath = this.requireBinary(rec);
-		const dbg = await RzSession.spawnDebug(resolveRizinPath(), binaryPath, options);
+		const rizinPath = resolveRizinPath(binaryPath);
+		// The debugger executes the process: a build whose bits don't match the
+		// target produces wrong-arch semantics (file-relative VM bases,
+		// esp-vs-rsp) — say so loudly instead of letting them pass as results.
+		const mismatch = await rizinBitsMismatch(binaryPath);
+		if (mismatch) ctx.ui?.notify?.(`omp-re: ${mismatch}`, "warning");
+		const dbg = await RzSession.spawnDebug(rizinPath, binaryPath, options);
 		const scope = await this.scope(rec);
 		rec._disposeDbg = scope.effect(() => () => {
 			if (!dbg.isClosed) dbg.close(); // closing the debug rizin also kills the launched debuggee

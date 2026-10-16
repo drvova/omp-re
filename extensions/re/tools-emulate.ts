@@ -12,8 +12,8 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { ensureRizin } from "./state.ts";
-import { debugTimeoutMs, validateAddr, type RzSession } from "./rizin.ts";
+import { ensureRizin, getState, requireBinary } from "./state.ts";
+import { debugTimeoutMs, rizinBitsMismatch, validateAddr, type RzSession } from "./rizin.ts";
 
 const EMULATE_ACTIONS = ["init", "step", "step_until", "vars", "set_var"] as const;
 type EmulateAction = (typeof EMULATE_ACTIONS)[number];
@@ -96,7 +96,12 @@ export function registerEmulateTools(pi: ExtensionAPI): void {
 					const ea = validateAddr(params.addr);
 					await rz.cmd(`aezi @ ${ea}`, { signal });
 					const vars = (await rz.cmd("aezvj", { signal })).trim();
-					return textResult(`emulate: VM initialized at ${ea}`, vars || "(no VM state)", { ctx, tool: "rizin_emulate" });
+					// The VM inherits the rizin build's addressing: a mismatched build
+					// emulates at a file-relative base with the build-width register
+					// names. Say so in the result the agent will read.
+					const binary = requireBinary(getState(ctx));
+					const bitsNote = (await rizinBitsMismatch(binary)) ?? "";
+					return textResult(`emulate: VM initialized at ${ea}`, `${bitsNote ? `${bitsNote}\n` : ""}${vars || "(no VM state)"}`, { ctx, tool: "rizin_emulate" });
 				}
 				case "step": {
 					const n = clampCount(params.count);
