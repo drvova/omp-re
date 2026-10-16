@@ -20,9 +20,16 @@ name: Cross-OS
 #
 # Never add a malware sample here — the fixture is a trivial program built from
 # test/fixtures/sample.c on the runner.
+#
+# Runs on every push to main (alongside the fast ci.yml) and on manual
+# dispatch. It installs rizin on three runners per run, so if the Actions-minute
+# cost becomes a concern, narrow the push trigger with a `paths:` filter
+# (e.g. extensions/re/**, test/**, this file) or move it to a schedule.
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 env:
   RIZIN_VERSION: "0.9.1"
