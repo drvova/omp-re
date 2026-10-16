@@ -1,8 +1,8 @@
 # Tool reference
 
-All 57 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 58 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 57 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 58 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -16,11 +16,12 @@ model and saved in full to the session's artifact store; the result ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
 that artifact. List results are JSON arrays with one compact row per line.
 
-## Session-setup (1 tool)
+## Session (2 tools)
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
+| `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
 
 ## Read tier (30 tools)
 

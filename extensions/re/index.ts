@@ -29,6 +29,7 @@ import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } f
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
 import { registerInfoTools } from "./tools-info.ts";
+import { registerProjectTools } from "./tools-project.ts";
 import { registerReadTools } from "./tools-read.ts";
 import { registerSearchTools } from "./tools-search.ts";
 import { registerSyscallTools } from "./tools-syscalls.ts";
@@ -430,6 +431,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:mutate-tools", apply: registerMutateTools },
 		{ name: "re:signature-tools", apply: registerSignatureTools },
 		{ name: "re:analyze-tools", apply: registerAnalyzeTools },
+		{ name: "re:project-tools", apply: registerProjectTools },
 		{ name: "re:rizin-repl", apply: registerRizinTools },
 		{ name: "re:rizin-cli", apply: registerRzCliTools },
 		{ name: "re:triage-tools", apply: registerTriageTools },

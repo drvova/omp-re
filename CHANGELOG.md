@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 56.
+40 to 58.
 
 ### Added
 
@@ -100,6 +100,14 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   inside an isolated VM from the host, the open binary serving as the symbol
   source. The pid and URI are validated; `attach` is refused together with
   `run`.
+- **`export_project`** (book: projects). Save the current analysis — functions,
+  names, comments, flags, types, and every annotation omp-re has applied — as a
+  rizin project (`.rzdb`, via `Ps`), so it can be opened in interactive rizin or
+  Cutter (`rizin -p <file>`). Written to omp-re's confined output directory
+  (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`), never the sample and never a
+  model-chosen path. Export only: omp-re manages analysis state through its own
+  session log, so loading a project (which would be a second, divergent source
+  of truth on respawn) is deliberately not offered.
 - **`dump_memory`** (book: debugger). `rizin_debug` can write a region of the
   debugged process's live memory to a file — for an unpacked or decrypted
   payload too large to return inline — reporting its path, size, and SHA-256.

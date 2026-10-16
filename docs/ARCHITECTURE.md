@@ -96,7 +96,9 @@ offer.
 | `tools-rizin.ts` | `rizin_help` / `rizin_command` (the REPL bridge) |
 | `tools-rzcli.ts` | `rizin_cli` (the standalone `rz-*` tools) |
 | `tools-debug.ts` | `rizin_debug` (opt-in dynamic analysis) |
+| `tools-project.ts` | `export_project` (save the analysis as a rizin project) |
 | `tools-triage.ts` | capa / floss / die / yara |
+| `output.ts` | The one confined directory omp-re writes artifacts to (dumps, traces, projects) |
 | `decompile.ts` | Extensible decompiler probe (`OMPRE_DECOMPILER`) |
 | `evidence.ts` | Content-addressed evidence store + `tool_result` hook |
 | `audit.ts` | The RE tool-name sets (the audit gate) + signed audit log |

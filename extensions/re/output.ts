@@ -63,6 +63,17 @@ export async function prepareOutputPath(basename: string): Promise<string> {
 }
 
 /**
+ * Like {@link prepareOutputPath}, but also asserts the full path is safe to
+ * hand to rizin as a command argument. Used when rizin itself writes the file
+ * (e.g. a project `.rzdb`), so the path — not just the bytes — reaches rizin.
+ */
+export async function rizinOutputPath(basename: string): Promise<string> {
+	const full = await prepareOutputPath(basename);
+	assertRizinSafePath(full);
+	return full;
+}
+
+/**
  * The absolute path of a subdirectory `basename` inside {@link outputDir},
  * safe to hand to rizin. With `create`, the directory is made; without it (a
  * load), the caller checks existence. Used for trace sessions, which rizin
