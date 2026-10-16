@@ -165,15 +165,33 @@ shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `rizin_debug` | `exec` (the reason says plainly when a step executes vs. inspects) | `action: enum`, `addr?`, `count?`, `size?` | Drives one debug action (below). `addr` is validated like every other address. |
+| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?` | Drives one debug action (below). `addr` is validated like every other address. |
 
-Actions: `start` (launch, stopped at entry), `continue` / `continue_until`
-(resume), `step` / `step_over` (`count` instructions), `registers`,
-`read_memory` (`size` bytes at `addr`), `break_add` / `break_remove` /
-`break_list`, `backtrace`, `stop` (kill and end the session). Every action
-needs a session started first except `start`; nothing is ever launched
-implicitly. A `continue`/`step` that never returns (a debuggee blocked on
-input) is killed at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
+Actions:
+
+- **Execution:** `start` (launch, stopped at entry), `continue` /
+  `continue_until` (`addr`), `continue_to_syscall` / `continue_to_call` /
+  `continue_to_ret`, `step` / `step_over` (`count` instructions).
+- **Registers & memory:** `registers`, `write_register` (`reg`=`value`),
+  `read_memory` (`size` bytes at `addr`), `write_memory` (`bytes` hex at
+  `addr`, into the live process), `disassemble` (`count` instructions at
+  `addr`, default the PC — reads *live* memory, so it shows self-modified or
+  unpacked code the static view can't).
+- **Breakpoints & watchpoints:** `break_add` / `break_remove` / `break_list`,
+  `watch_add` (hardware watchpoint at `addr`, `perm` r/w/rw, `size` 1/2/4/8 —
+  removed with `break_remove`), `backtrace`.
+- **Process state:** `maps`, `modules`, `libraries`, `sections`, `processes`,
+  `threads`, `fds`, `signals`, `windows`.
+- **Heaps:** `heaps` / `heap_blocks` (Windows), `heap_arenas` / `heap_chunks`
+  (optional arena in `addr`) / `heap_bins` (optional
+  `tcache`/`fast`/`unsorted`/`small`/`large` in `addr`) — glibc.
+- **Lifecycle:** `stop` (kill and end the session).
+
+Every action needs a session started first except `start`; nothing is ever
+launched implicitly. The `write_*` and `watch_add` actions change the live
+process and are called out as such in the approval reason. A
+`continue`/`step` that never returns (a debuggee blocked on input) is killed
+at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
 no facilities for evading detection or hiding the debuggee; see
 [`SECURITY.md`](../SECURITY.md#rizin_debug).
 

@@ -32,13 +32,20 @@ const DEBUG_ACTIONS = [
 	"start",
 	"continue",
 	"continue_until",
+	"continue_to_syscall",
+	"continue_to_call",
+	"continue_to_ret",
 	"step",
 	"step_over",
 	"registers",
+	"write_register",
 	"read_memory",
+	"write_memory",
+	"disassemble",
 	"break_add",
 	"break_remove",
 	"break_list",
+	"watch_add",
 	"backtrace",
 	"maps",
 	"modules",
@@ -51,18 +58,51 @@ const DEBUG_ACTIONS = [
 	"windows",
 	"heaps",
 	"heap_blocks",
+	"heap_arenas",
+	"heap_chunks",
+	"heap_bins",
 	"stop",
 ] as const;
 type DebugAction = (typeof DEBUG_ACTIONS)[number];
 
-/** Actions that resume the debuggee (versus inspect it or manage breakpoints). */
-const EXECUTING_ACTIONS = new Set<DebugAction>(["start", "continue", "continue_until", "step", "step_over"]);
+/** Actions that resume the debuggee (versus inspect it, manage breakpoints, or modify its state while stopped). */
+const EXECUTING_ACTIONS = new Set<DebugAction>(["start", "continue", "continue_until", "continue_to_syscall", "continue_to_call", "continue_to_ret", "step", "step_over"]);
+
+/** Actions that modify the live process (registers or memory) or arm a watchpoint, as opposed to resuming or inspecting it. */
+const MODIFYING_ACTIONS = new Set<DebugAction>(["write_register", "write_memory", "watch_add"]);
 
 function approvalReason(action: DebugAction): string {
 	if (action === "start") return "Launch the target under a debugger — this EXECUTES it on this machine.";
 	if (action === "stop") return "Terminate the debugged process.";
 	if (EXECUTING_ACTIONS.has(action)) return `Resume execution of the debugged process (${action}).`;
+	if (MODIFYING_ACTIONS.has(action)) return `Modify the debugged process (${action}).`;
 	return `Inspect the debugged process (${action}).`;
+}
+
+/** A register name for `dr <reg>=...`. */
+function validateRegName(reg: string): string {
+	if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(reg)) throw new Error(`omp-re: debug: bad register name ${JSON.stringify(reg)}`);
+	return reg;
+}
+
+/** A register value for `dr <reg>=<value>`: decimal or 0x hex. */
+function validateRegValue(value: string): string {
+	if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/.test(value)) throw new Error(`omp-re: debug: bad register value ${JSON.stringify(value)} — use decimal or 0x hex`);
+	return value;
+}
+
+/** Hex bytes for `wx <bytes>`: an even-length string of hex digits, no spaces. */
+function validateHexBytes(bytes: string): string {
+	const b = bytes.replace(/\s+/g, "");
+	if (!/^[0-9a-fA-F]+$/.test(b) || b.length % 2 !== 0) throw new Error(`omp-re: debug: bad hex bytes ${JSON.stringify(bytes)} — an even number of hex digits, e.g. 9090 or 4889e5`);
+	return b;
+}
+
+/** A watchpoint permission for `dbw <perm>`. */
+function validateWatchPerm(perm: string | undefined): string {
+	const p = (perm ?? "rw").toLowerCase();
+	if (p !== "r" && p !== "w" && p !== "rw") throw new Error(`omp-re: debug: watch perm must be r, w, or rw (got ${JSON.stringify(perm)})`);
+	return p;
 }
 
 /** Clamp a positive integer parameter to a sane range. */
@@ -172,15 +212,23 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 			[
 				"start: launch the open binary under the debugger, stopped at entry (EXECUTES it).",
 				"continue: resume until a breakpoint, signal, or exit. continue_until: resume to `addr`.",
+				"continue_to_syscall / continue_to_call / continue_to_ret: resume until the next syscall, call, or return.",
 				"step: one instruction (or `count`). step_over: step over calls.",
-				"registers: all register values. read_memory: `size` bytes at `addr`.",
-				"break_add / break_remove: breakpoint at `addr`. break_list: list them. backtrace: call stack.",
+				"registers: all register values. write_register: set `reg` to `value`.",
+				"read_memory: `size` bytes at `addr`. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory.",
+				"break_add / break_remove: breakpoint at `addr`. break_list: list breakpoints and watchpoints. watch_add: watchpoint at `addr` (perm r/w/rw, size). backtrace: call stack.",
+				"maps / modules / libraries / sections / processes / threads / fds / signals / windows: inspect process state.",
+				"heaps / heap_blocks: Windows heaps. heap_arenas / heap_chunks / heap_bins: glibc heap (arena in `addr`/`bin` where relevant).",
 				"stop: kill the process and end the debug session.",
 			].join("\n"),
 		),
-		addr: z.string().optional().describe("Address or symbol for continue_until, read_memory, break_add, break_remove."),
-		count: z.number().optional().describe("Instruction count for step / step_over (default 1)."),
-		size: z.number().optional().describe("Bytes to read for read_memory (default 64)."),
+		addr: z.string().optional().describe("Address or symbol for continue_until, read_memory, write_memory, disassemble, break_add, break_remove, watch_add, heap_chunks/heap_bins (arena/bin)."),
+		count: z.number().optional().describe("Instruction count for step / step_over (default 1), or instructions to show for disassemble (default 16)."),
+		size: z.number().optional().describe("Bytes to read for read_memory (default 64), or watchpoint size for watch_add (1/2/4/8)."),
+		reg: z.string().optional().describe("Register name for write_register, e.g. rip, rax, eflags."),
+		value: z.string().optional().describe("New register value for write_register (decimal or 0x hex)."),
+		bytes: z.string().optional().describe("Hex bytes for write_memory, e.g. 9090 or 4889e5 (written to the live process at addr)."),
+		perm: z.string().optional().describe("Watchpoint access for watch_add: r, w, or rw (default rw)."),
 		run: z
 			.object({
 				args: z.array(z.string()).optional().describe("Program arguments (arg0..argN)."),
@@ -204,7 +252,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		name: "rizin_debug",
 		label: "debugger",
 		description:
-			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints, continue, single-step, read registers and memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, windows, and heaps. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
+			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
 		approval: (args) => {
 			const action = (args && typeof args === "object" ? (args as { action?: unknown }).action : undefined) as DebugAction | undefined;
 			return { tier: "exec", reason: action ? approvalReason(action) : "Drive the debugged process." };
@@ -262,6 +310,21 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					const pc = await programCounter(dbg, signal);
 					return textResult(`debug: continue_until ${ea}`, `${out || "(resumed)"}\n${pc}`);
 				}
+				case "continue_to_syscall": {
+					const out = (await dbg.cmd("dcs", { timeoutMs: dbgTimeout, signal })).trim();
+					const pc = await programCounter(dbg, signal);
+					return textResult("debug: continue_to_syscall", `${out || "(resumed)"}\n${pc}`);
+				}
+				case "continue_to_call": {
+					const out = (await dbg.cmd("dcc", { timeoutMs: dbgTimeout, signal })).trim();
+					const pc = await programCounter(dbg, signal);
+					return textResult("debug: continue_to_call", `${out || "(resumed)"}\n${pc}`);
+				}
+				case "continue_to_ret": {
+					const out = (await dbg.cmd("dcr", { timeoutMs: dbgTimeout, signal })).trim();
+					const pc = await programCounter(dbg, signal);
+					return textResult("debug: continue_to_ret", `${out || "(resumed)"}\n${pc}`);
+				}
 				case "step": {
 					const n = clampInt(params.count, 1, 100_000);
 					await dbg.cmd(`ds ${n}`, { timeoutMs: dbgTimeout, signal });
@@ -278,11 +341,34 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					const out = (await dbg.cmd("drj", { signal })).trim();
 					return textResult("debug: registers", out || "(no registers)", { ctx, tool: "rizin_debug" });
 				}
+				case "write_register": {
+					if (params.reg === undefined || params.value === undefined) throw new Error("omp-re: debug write_register needs reg and value");
+					const reg = validateRegName(params.reg);
+					const value = validateRegValue(params.value);
+					await dbg.cmd(`dr ${reg}=${value}`, { signal });
+					const readBack = (await dbg.cmd(`dr ${reg}`, { signal })).trim();
+					return textResult(`debug: write_register ${reg}=${value}`, readBack || "(set)", { ctx, tool: "rizin_debug" });
+				}
 				case "read_memory": {
 					if (!ea) throw new Error("omp-re: debug read_memory needs addr");
 					const n = clampInt(params.size, 64, 4096);
 					const out = (await dbg.cmd(`pxj ${n} @ ${ea}`, { signal })).trim();
 					return textResult(`debug: read_memory ${n} @ ${ea}`, out || "(no output)", { ctx, tool: "rizin_debug" });
+				}
+				case "write_memory": {
+					if (!ea) throw new Error("omp-re: debug write_memory needs addr");
+					if (params.bytes === undefined) throw new Error("omp-re: debug write_memory needs bytes (hex)");
+					const hex = validateHexBytes(params.bytes);
+					await dbg.cmd(`wx ${hex} @ ${ea}`, { signal });
+					const readBack = (await dbg.cmd(`p8 ${hex.length / 2} @ ${ea}`, { signal })).trim();
+					return textResult(`debug: write_memory ${hex.length / 2} bytes @ ${ea}`, `wrote ${hex}; now reads ${readBack}`, { ctx, tool: "rizin_debug" });
+				}
+				case "disassemble": {
+					// Live memory: shows self-modified / unpacked code that the static view can't.
+					const n = clampInt(params.count, 16, 1024);
+					const at = ea ?? (await programCounter(dbg, signal)).split("=")[1]?.trim() ?? undefined;
+					const out = (await dbg.cmd(`pdj ${n}${at ? ` @ ${at}` : ""}`, { signal })).trim();
+					return textResult(`debug: disassemble ${n}${at ? ` @ ${at}` : " @ pc"}`, out || "(no output)", { ctx, tool: "rizin_debug" });
 				}
 				case "break_add": {
 					if (!ea) throw new Error("omp-re: debug break_add needs addr");
@@ -299,6 +385,15 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				case "break_list": {
 					const list = (await dbg.cmd("dblj", { signal })).trim();
 					return textResult("debug: break_list", list || "(no breakpoints)", { ctx, tool: "rizin_debug" });
+				}
+				case "watch_add": {
+					// `dbw <perm> [<size>]` arms a hardware watchpoint at the seek; remove it with break_remove (it lives in the breakpoint list).
+					if (!ea) throw new Error("omp-re: debug watch_add needs addr");
+					const perm = validateWatchPerm(params.perm);
+					const sizeArg = params.size !== undefined ? ` ${clampInt(params.size, 4, 8)}` : "";
+					await dbg.cmd(`dbw ${perm}${sizeArg} @ ${ea}`, { signal });
+					const list = (await dbg.cmd("dblj", { signal })).trim();
+					return textResult(`debug: watch_add ${perm} @ ${ea}`, list || "(no watchpoints)", { ctx, tool: "rizin_debug" });
 				}
 				case "backtrace": {
 					const bt = (await dbg.cmd("dbtj", { signal })).trim();
@@ -342,7 +437,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					const out = (await dbg.cmd("dW", { signal })).trim();
 					return textResult("debug: windows", out || "(no windows)", { ctx, tool: "rizin_debug" });
 				}
-				// Windows heap inspection (book: debugger/memory_maps — dmh* display
+				// Windows heap inspection (book: debugger/heap — dmhw* display
 				// commands, no mutation subcommand). heaps lists the process heaps;
 				// heap_blocks lists allocated blocks in a heap (optional addr).
 				case "heaps": {
@@ -352,6 +447,23 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				case "heap_blocks": {
 					const out = (await dbg.cmd(`dmhwbj${ea ? ` @ ${ea}` : ""}`, { signal })).trim();
 					return textResult(`debug: heap_blocks${ea ? ` @ ${ea}` : ""}`, out || "(no blocks)", { ctx, tool: "rizin_debug" });
+				}
+				// glibc heap inspection (book: debugger/heap — dmhg* display
+				// commands). These report "Can't find glibc mapped in memory" until
+				// the loader has run and something has allocated; continue first.
+				case "heap_arenas": {
+					const out = (await dbg.cmd("dmhga", { signal })).trim();
+					return textResult("debug: heap_arenas", out || "(no arenas — continue until glibc is mapped and has allocated)", { ctx, tool: "rizin_debug" });
+				}
+				case "heap_chunks": {
+					const out = (await dbg.cmd(`dmhgj${ea ? ` @ ${ea}` : ""}`, { signal })).trim();
+					return textResult(`debug: heap_chunks${ea ? ` @ ${ea}` : ""}`, out || "(no chunks — continue until glibc is mapped and has allocated)", { ctx, tool: "rizin_debug" });
+				}
+				case "heap_bins": {
+					// `dmhgd [<bin_type>]`: all bins, or one of tcache/fast/unsorted/small/large via `bin` (reuses addr as the bin selector).
+					const bin = params.addr !== undefined && /^(tcache|fast|unsorted|small|large)$/.test(params.addr) ? ` ${params.addr}` : "";
+					const out = (await dbg.cmd(`dmhgd${bin}`, { signal })).trim();
+					return textResult(`debug: heap_bins${bin}`, out || "(no bin info — continue until glibc is mapped and has allocated)", { ctx, tool: "rizin_debug" });
 				}
 				default:
 					throw new Error(`omp-re: debug: unknown action ${JSON.stringify(params.action)}`);

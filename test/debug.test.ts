@@ -148,11 +148,18 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		restoreEnable();
 	});
 
-	test("every action is exec-tier, with execution called out for resumes", () => {
+	test("every action is exec-tier, with execution, modification, and inspection called out distinctly", () => {
 		const approval = harness.tool("rizin_debug").approval as (a: unknown) => { tier: string; reason: string };
 		expect(approval({ action: "start" })).toEqual({ tier: "exec", reason: expect.stringContaining("EXECUTES it") });
 		expect(approval({ action: "continue" }).reason).toContain("Resume execution");
+		expect(approval({ action: "continue_to_syscall" }).reason).toContain("Resume execution");
+		expect(approval({ action: "continue_to_ret" }).reason).toContain("Resume execution");
+		expect(approval({ action: "write_register" }).reason).toContain("Modify");
+		expect(approval({ action: "write_memory" }).reason).toContain("Modify");
+		expect(approval({ action: "watch_add" }).reason).toContain("Modify");
 		expect(approval({ action: "registers" }).reason).toContain("Inspect");
+		expect(approval({ action: "disassemble" }).reason).toContain("Inspect");
+		expect(approval({ action: "heap_chunks" }).reason).toContain("Inspect");
 		expect(approval({ action: "stop" }).reason).toContain("Terminate");
 	});
 
@@ -182,6 +189,55 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		const after = textOf(await run("registers"));
 		expect(after).not.toBe(before);
 		expect(textOf(await run("read_memory", { addr: "rip", size: 8 }))).toMatch(/^\[.*\]$/m);
+	}, 20_000);
+
+	test("write_register sets a register and reads the new value back", async () => {
+		const out = textOf(await run("write_register", { reg: "rax", value: "0x1234" }));
+		expect(out).toMatch(/rax = 0x0*1234/);
+	});
+
+	test("write_memory writes bytes to the live process and reads them back", async () => {
+		const out = textOf(await run("write_memory", { addr: "rsp", bytes: "deadbeef" }));
+		expect(out).toContain("deadbeef");
+		expect(textOf(await run("read_memory", { addr: "rsp", size: 4 }))).toMatch(/^\[.*\]$/m);
+	});
+
+	test("disassemble returns live instructions as JSON (at the PC by default)", async () => {
+		const out = textOf(await run("disassemble", { count: 3 }));
+		expect(out).toMatch(/"opcode"/);
+	});
+
+	test("watch_add arms a hardware watchpoint that break_list shows", async () => {
+		const out = textOf(await run("watch_add", { addr: "rsp", perm: "rw", size: 4 }));
+		expect(out).toContain("rsp");
+		// It lives in the breakpoint list as a hardware watchpoint; break_remove takes it off.
+		expect(textOf(await run("break_list"))).toContain('"hw":true');
+	});
+
+	test("write_register rejects a bad register name and value before touching rizin", async () => {
+		expect((await captureError(run("write_register", { reg: "rax;id", value: "1" }))).message).toContain("bad register name");
+		expect((await captureError(run("write_register", { reg: "rax", value: "0xzz" }))).message).toContain("bad register value");
+	});
+
+	test("write_memory rejects non-hex or odd-length bytes", async () => {
+		expect((await captureError(run("write_memory", { addr: "rsp", bytes: "zz" }))).message).toContain("bad hex bytes");
+		expect((await captureError(run("write_memory", { addr: "rsp", bytes: "9" }))).message).toContain("bad hex bytes");
+	});
+
+	test("continue_to_syscall resumes the process to the next syscall", async () => {
+		const out = textOf(await run("continue_to_syscall"));
+		// It either stops at a syscall (PC line) or reports the resume; never a desync.
+		expect(out.length).toBeGreaterThan(0);
+		expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
+	}, 20_000);
+
+	test("the glibc heap actions return a result without desyncing (even with no heap mapped yet)", async () => {
+		// Early in a tiny process there may be no glibc arena; the tool returns
+		// rizin's own note instead of erroring, and the stream stays aligned.
+		for (const action of ["heap_arenas", "heap_chunks", "heap_bins"]) {
+			expect(textOf(await run(action)).length).toBeGreaterThan(0);
+		}
+		expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
 	}, 20_000);
 
 	test("addr is validated like every other tool", async () => {
