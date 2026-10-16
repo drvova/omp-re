@@ -25,6 +25,9 @@ import { resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
 import { registerReadTools } from "./tools-read.ts";
+import { registerSearchTools } from "./tools-search.ts";
+import { registerSyscallTools } from "./tools-syscalls.ts";
+import { registerTypeTools } from "./tools-types.ts";
 import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
@@ -386,6 +389,9 @@ function registerShell(pi: ExtensionAPI): void {
 export default async function (pi: ExtensionAPI): Promise<void> {
 	await composeApp(pi, [
 		{ name: "re:read-tools", apply: registerReadTools },
+		{ name: "re:search-tools", apply: registerSearchTools },
+		{ name: "re:type-tools", apply: registerTypeTools },
+		{ name: "re:syscall-tools", apply: registerSyscallTools },
 		{ name: "re:mutate-tools", apply: registerMutateTools },
 		{ name: "re:rizin-repl", apply: registerRizinTools },
 		{ name: "re:rizin-cli", apply: registerRzCliTools },

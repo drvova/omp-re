@@ -17,30 +17,30 @@ import { reRenderers } from "./render.ts";
 import { addrOf, eaFromOffset, resolveNumericAddr, validateAddr, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
-const DEFAULT_LIMIT = 200;
-const MAX_LIMIT = 1000;
+export const DEFAULT_LIMIT = 200;
+export const MAX_LIMIT = 1000;
 
 /** Clamp a user-supplied limit: unset/invalid/non-positive falls back to DEFAULT_LIMIT; everything else caps at MAX_LIMIT. */
-function clampLimit(limit: number | undefined): number {
+export function clampLimit(limit: number | undefined): number {
 	if (limit === undefined || !Number.isFinite(limit) || limit <= 0) return DEFAULT_LIMIT;
 	return Math.min(limit, MAX_LIMIT);
 }
 
 /** offset<0 clamps to 0; offset>=len returns an empty page (never null). Always reports total so callers can tell the model the view is partial. */
-function paginate<T>(items: T[], offset: number | undefined, limit: number | undefined): { page: T[]; total: number } {
+export function paginate<T>(items: T[], offset: number | undefined, limit: number | undefined): { page: T[]; total: number } {
 	const start = Math.max(0, offset ?? 0);
 	const total = items.length;
 	if (start >= total) return { page: [], total };
 	return { page: items.slice(start, start + clampLimit(limit)), total };
 }
 
-function pageHeader(label: string, page: unknown[], total: number, offset: number | undefined): string {
+export function pageHeader(label: string, page: unknown[], total: number, offset: number | undefined): string {
 	if (page.length >= total) return `${page.length} ${label}`;
 	return `${page.length} of ${total} ${label} (offset=${offset ?? 0}; use offset/limit to page through the rest)`;
 }
 
 /** rizin reports a few "no address" sentinels as UINT64_MAX (e.g. the NULL section in iSj), which a JS number can't even represent exactly. Anything beyond the safe-integer range is treated as unknown, never printed as an address. */
-function knownAddr(value: number | undefined): number | undefined {
+export function knownAddr(value: number | undefined): number | undefined {
 	return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
@@ -214,7 +214,7 @@ function withXrefEa(items: RzXref[]): (RzXref & { fromEa?: string; toEa?: string
 }
 
 /** An empty page is still evidence ("no xrefs to X" is a finding), but omp may elide it from context once consumed. */
-function markEmpty(result: ReToolResult, empty: boolean): ReToolResult {
+export function markEmpty(result: ReToolResult, empty: boolean): ReToolResult {
 	return empty ? { ...result, useless: true } : result;
 }
 
