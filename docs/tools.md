@@ -1,8 +1,8 @@
 # Tool reference
 
-All 32 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 37 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 32 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 37 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -22,7 +22,7 @@ that artifact. List results are JSON arrays with one compact row per line.
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 
-## Read tier (18 tools)
+## Read tier (23 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
@@ -48,6 +48,11 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `cast_memory` | `read` | `addr`, `type` | Print memory at an address interpreted as a named type (`tp`). |
 | `list_syscalls` | `read` | `filter?, offset?, limit?` | The active syscall profile (`aslj`) — on a PE binary, the Windows Nt* interface, as `{name, swi, num}` rows. |
 | `syscall_lookup` | `read` | `name` or `number` (exactly one) | Resolve a syscall name to its number (`asn`) or number to its name (`asr`). |
+| `get_binary_info` | `read` | (none) | Binary identity object (`iIj`): arch, bits, base address, format, class, compiler, sizes, checksums. |
+| `list_entrypoints` | `read` | (none) | Entry points (`iej`) as `{ea, type, headerAddr}`. |
+| `list_relocations` | `read` | `offset?, limit?` | Load-time relocations (`irj`) as `{ea, type}`. |
+| `list_flags` | `read` | `filter?, offset?, limit?` | All flags rizin knows (`flj`) as `{ea, name, size}` — analysis, reloc, and section labels. |
+| `list_classes` | `read` | `filter?, offset?, limit?` | Classes from binary metadata (`icj`) — C++ RTTI, Objective-C, Swift; empty on plain C binaries. |
 
 `offset`/`limit` default to 0/200 and cap at 1000; every paginated result
 reports its total so the model knows a view is partial. An empty page is

@@ -24,6 +24,7 @@ import { writeReport } from "./report.ts";
 import { resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
+import { registerInfoTools } from "./tools-info.ts";
 import { registerReadTools } from "./tools-read.ts";
 import { registerSearchTools } from "./tools-search.ts";
 import { registerSyscallTools } from "./tools-syscalls.ts";
@@ -389,6 +390,7 @@ function registerShell(pi: ExtensionAPI): void {
 export default async function (pi: ExtensionAPI): Promise<void> {
 	await composeApp(pi, [
 		{ name: "re:read-tools", apply: registerReadTools },
+		{ name: "re:info-tools", apply: registerInfoTools },
 		{ name: "re:search-tools", apply: registerSearchTools },
 		{ name: "re:type-tools", apply: registerTypeTools },
 		{ name: "re:syscall-tools", apply: registerSyscallTools },
