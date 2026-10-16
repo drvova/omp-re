@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkRizinCommand, isKnownCommand, loadCatalog, NOARG_DUALS, READ_ONLY_EXTRAS, type RzCatalog } from "../extensions/re/catalog.ts";
 import { resolveDecompiler } from "../extensions/re/decompile.ts";
 import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
@@ -90,6 +91,48 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
 		const first = await resolveDecompiler(session);
 		expect([null, "pdg", "pdd"]).toContain(first);
 		expect(await resolveDecompiler(session)).toBe(first);
+	});
+});
+
+describe.skipIf(!canRunRizin)("rizin_command read-only extras (chapter B) against the real catalog", () => {
+	let catalog: RzCatalog;
+	let session: RzSession;
+
+	beforeAll(async () => {
+		catalog = await loadCatalog(rizinPath);
+		session = await RzSession.spawn(rizinPath, TEST_BINARY);
+	});
+
+	afterAll(() => {
+		session.close();
+	});
+
+	test("every extra and no-arg dual exists in the installed rizin (no drift in the hardcoded set)", () => {
+		const absent = [...READ_ONLY_EXTRAS, ...NOARG_DUALS].filter((cmd) => !isKnownCommand(catalog, cmd));
+		expect(absent).toEqual([]);
+	});
+
+	test("the policy accepts the new reads and the real rizin runs them without error", async () => {
+		for (const command of ["elj", "ahlj", "aij", "aclj", "Cj", "Cslj", "tj", "tuj", "tcc", "Llj", "LDj"]) {
+			const check = checkRizinCommand(catalog, command);
+			expect(check.ok).toBe(true);
+			// A read-only command returns output or an empty frame — never a stream-desyncing error.
+			const out = await session.cmd(command);
+			expect((await session.cmd("echo aligned")).trim()).toBe("aligned");
+			expect(out).not.toMatch(/Wrong number of arguments/);
+		}
+	});
+
+	test("`e asm.arch` reads the value through the host, `e asm.bits=32` is refused before rizin", async () => {
+		const check = checkRizinCommand(catalog, "e asm.arch");
+		expect(check.ok).toBe(true);
+		expect((await session.cmd((check as { line: string }).line)).trim()).toBe("x86");
+		expect(checkRizinCommand(catalog, "e asm.bits=32")).toMatchObject({ ok: false });
+	});
+
+	test("`tn` lists noreturn functions bare but is refused with an argument (which would add one)", () => {
+		expect(checkRizinCommand(catalog, "tn")).toMatchObject({ ok: true });
+		expect(checkRizinCommand(catalog, "tn sym.main")).toMatchObject({ ok: false });
 	});
 });
 

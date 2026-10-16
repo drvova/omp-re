@@ -135,6 +135,59 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
 }
 
 /**
+ * Read-only commands that the family-shaped {@link ALLOWED_COMMAND} regex does
+ * not cover, allowed by exact name. Every entry was confirmed read-only
+ * against rizin 0.9.1 by running it on a sample: it either lists/shows or
+ * returns a benign "needs an argument" usage, and never mutates. Grouped by
+ * the book chapter that documents the family.
+ *
+ * The get/set duals are handled separately: `e <key>` (Configuration) reads a
+ * value, and a `key=value` argument — the only way `e` writes — is refused in
+ * {@link checkRizinCommand}; the positional duals (`tn`, `Ld`, `Lo`) live in
+ * {@link NOARG_DUALS} and run only with no argument.
+ */
+export const READ_ONLY_EXTRAS: ReadonlySet<string> = new Set([
+	// Configuration (book: configuration/*) — read a value / list / type / spaces.
+	"e", "el", "elj", "elq", "ell", "elJ", "et", "es",
+	// Analysis hints (book: analysis/code_analysis) — list only; the aha/ahb/… setters and ah- stay out.
+	"ahl", "ahlj", "ahl.", "ahl.j",
+	// Address information (book: analysis/code_analysis) — `aii` (add global import) stays out.
+	"ai", "aij",
+	// Classes (book: analysis/vtables) — the list/show/graph reads; bare `ac`/`acn`/`acm`/`acb`/`acv` add or rename.
+	"acl", "aclj", "acll", "aci", "acij", "acil", "acg", "acbl", "acvl", "acvf",
+	// Metadata & strings (book: disassembling/adding_metadata) — list/show forms; the setters (Cs/Cd/Ch/Cm/Ct/Cf, CS create, C-) stay out, and comments go through set_comment.
+	"C", "Cj", "Cl",
+	"Csl", "Cslj", "Cslq", "Cs.", "Cs.j", "Cs.q", "Cs.l",
+	"Cdl", "Cdlj", "Cd.", "Cfl", "Cflj", "Chl", "Chlj", "Cml", "Cmlj", "Ctl", "Ctlj", "CSl", "CSlj", "CSlq",
+	// Types (book: analysis/types) — lists, unions, enums, typedefs, calling-convention lists, type xrefs, typeclass reads.
+	// The writers stay out: td/tdf (define → define_types tool), tfc (set cc), tn (NOARG_DUALS), tks (set typeclass), to/toe/tos (load file), tr (rename), t- (delete).
+	"t", "tj", "tl",
+	"tu", "tuj", "tul", "tuc", "tud",
+	"te", "tej", "teb", "tec", "ted", "tef",
+	"tt", "ttj", "ttc",
+	"tf", "tfj", "tc", "tcd", "tcc", "tccj", "tcck", "tccl",
+	"tx", "txf", "txg", "txl",
+	"tk", "tkl", "tklj", "tkll", "tklt",
+	// Plugin listings (book: plugins/*) — list only. The bare `L`/`L-` load/unload a plugin file; `Lo`/`Ld` are in NOARG_DUALS.
+	"Ll", "Llj", "Llq", "Llt", "La", "Laj", "Laq", "Lat", "Lac", "Lacj",
+	"Lc", "Lcj", "Lcq", "Lct", "LC", "LCj", "LCq", "LCt", "Lh", "Lhj", "Lhq", "Lht",
+	"Li", "Lij", "Liq", "Lit", "Lp", "Lpj", "Lpq", "Lpt", "LD", "LDj", "LDq", "LDt",
+]);
+
+/**
+ * Commands that list when given no argument and mutate when given one:
+ * `tn[j]` lists noreturn functions / adds one, `Ld[jqt]`/`Lo[jqt]` list
+ * debug/IO plugins / set the backend or register a plugin. They run through
+ * `rizin_command` only with no argument; {@link checkRizinCommand} refuses
+ * them with an argument.
+ */
+export const NOARG_DUALS: ReadonlySet<string> = new Set([
+	"tn", "tnj",
+	"Ld", "Ldj", "Ldq", "Ldt",
+	"Lo", "Loj", "Loq", "Lot",
+]);
+
+/**
  * Commands `rizin_command` may run: read-only families — print (`p`), info
  * (`i`), search (`/`), graphs and listings under `a`, comment and flag
  * queries. Everything else (writes `w`, config `e`, open `o`, shell `!`,
@@ -172,6 +225,11 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * `ts[jlcd]?`), sdb namespace dump (`kj`) and magic search (`pm[j]?` —
  * bare-only: the fileArg mechanism refuses its `<file/directory>` form like
  * `/m`, so DENIED no longer needs `pm`).
+ *
+ * Commands whose shape this family regex can't capture are listed by exact
+ * name in {@link READ_ONLY_EXTRAS} (config/hints/meta/classes/types/plugin
+ * listings) and {@link NOARG_DUALS} (list-vs-set positional duals), both
+ * checked by {@link isRunnable} and gated in {@link checkRizinCommand}.
  */
 const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
 
@@ -257,6 +315,16 @@ export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: st
 	if (/(^|\s)interactive(\s|$)/.test(trimmed)) {
 		return { ok: false, reason: "omp-re: rizin_command: interactive output modes would wait for keyboard input" };
 	}
+	// The argument text after the command name (table spec already stripped from `checked`).
+	const argPortion = trimmed.slice(name.length).trim();
+	// Configuration: `e <key>` reads a value; `e <key>=<value>` sets it. Reading is fine; setting is a write.
+	if (checked === "e" && argPortion.includes("=")) {
+		return { ok: false, reason: "omp-re: rizin_command: setting config variables (`e key=value`) is a write and is not allowed; `e <key>` reads a value, `el`/`elj` list them" };
+	}
+	// Get/set positional duals: they list with no argument and mutate with one.
+	if (NOARG_DUALS.has(checked) && argPortion !== "") {
+		return { ok: false, reason: `omp-re: rizin_command: ${checked} runs read-only only with no argument (an argument makes it set/add); it lists when run bare` };
+	}
 	// A command whose catalog entry takes a file or path argument (`/m <magic-file>`) reads from disk; it runs only with none given.
 	const fileArg = catalog.get(checked)?.args?.find((arg) => /file|path|dir/i.test(arg.name));
 	if (fileArg && trimmed !== name) {
@@ -265,8 +333,9 @@ export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: st
 	return { ok: true, name: specNote ? `${checked}${specNote}` : checked, line: addr ? `${trimmed} @ ${validateAddr(addr)}` : trimmed };
 }
 
-/** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). */
+/** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). The NOARG_DUALS run read-only with no argument, so they count as runnable here; `checkRizinCommand` enforces the no-argument constraint. */
 export function isRunnable(name: string): boolean {
+	if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) return true;
 	return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
 }
 
