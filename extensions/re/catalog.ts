@@ -150,12 +150,28 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * `f.l[jq]?`, `fi[jqt]?`, `fg`, `fsl[jq]?`, `fssl[j]?`, `ftl[jl]?`,
  * `fz.[j]?`, `fzl[j]?` — the get/set duals `fL/fN/fc/fC/ft/fs` stay out),
  * and DWARF line info (`id[jq]?` — `idp*` still refuses the PDB loads).
+ * From the full-book sweep (research log in .scratch/rizin-native-feature-map.md),
+ * exact-key additions (anchored `$` — the STATEFUL siblings stay out):
+ * compares (`cc`, `ccc`, `ccd`, `cX[j]`, `cu[1248d]?` —
+ * `cf[j]` reads its `<file>` argument from disk and stays out with `/F`;
+ * `ca/cat/cb/c1/cj` unverified, stay out), expression
+ * evaluators (`%v`, `%vi[1248]?`, `%X/%x/%b64/%b/%o/%u/%l[q]?/%h/%f/%s/%btw`,
+ * `%P/%p/%w`, `%B[jqt]?` boundary listings, `%$`, `%j` — the `$?`-writers
+ * (`%=`/`%==`/`%+`/`%-`/`%!`/`%%`), tabs (`%0/%1`) and input forms
+ * (`%i*`) stay out), yank reads (`y/yj/yq/ys/yx` — `yp` prints raw bytes
+ * like `pr`, `yy/yt/yz/yf` write), syscall lookups (`as/asl[j]/asn/asr` — `asc/asca` write files), IO
+ * listings (`ol[jqt]?`, `obl[jqt]?`, `oml[jqQt]?` — bare `om` creates maps),
+ * mark/meta reads (`md[jt]?`, `mi[jqt]?`, `ml[jqt]?`, `C.[jl]?` — `m/m+/m-`
+ * write marks), seek-history listing (`sh/shj` — `shu/shr` move), `px`
+ * aliases (`x/xj/xc`) and analysis-plugin listing (`aL[jc]?`). The `pf` read
+ * forms pass with the print family; DENIED's lookahead keeps the
+ * definition/write/load forms (`pfa/pfo/pfw/pfn/pf-`) out.
  */
-const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd)/;
+const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:
- * `pf` defines/applies/writes formats and loads files, `po` writes operations
+ * `po` writes operations
  * into the buffer, `pkill` kills processes, `pm` reads a magic file path,
  * `pr`/`prz`/`prg` and `p6d` print raw bytes (a NUL byte ends a `-q0` frame
  * and desyncs the session; `px`, `p8`, `prx` show the same bytes), `/F`
@@ -163,9 +179,14 @@ const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afb
  * file, `afb[ce]` set block colors/edges (`afbr` lists exits — read-only),
  * `afii` adds imports, `ica` applies
  * class flags, `idp` loads/downloads/extracts PDB files. A command name
- * carrying `+ - = ! *` adds, removes, or sets.
+ * carrying `+ - = ! *` adds, removes, or sets. The `pf` read forms
+ * (`pf[jq]`, `pf.[jq]`, `pfc`, `pfd`, `pfs`, `pfv`, and bare `pf`) are
+ * allowed by the print family above; the lookahead exempts exactly those
+ * endings so every other `pf*` — `pfa` (defines flag names), `pfo` (loads a
+ * format file), `pfw` (writes data), `pfn` (defines formats), `pf-` — is
+ * still denied.
  */
-const DENIED_COMMAND = /^(pf|po|pw|pkill|pm|pr(?![xc])|p6d|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
+const DENIED_COMMAND = /^(po|pw|pkill|pm|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
 
 /**
  * Syntax refused anywhere in a raw command, because it would leave the single
