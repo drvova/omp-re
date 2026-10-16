@@ -236,7 +236,7 @@ may legitimately show fewer than 32.
 | `search_regex_bytes` | read | Search raw bytes with a rizin `/xr` regex. |
 | `search_asm` | read | Assemble instruction text and search for its bytes (`/aj`). |
 | `search_value` | read | Search immediates by exact value or range, 1/2/4/8-byte widths (`/vj`, `/Vj`). |
-| `search_gadgets` | read | ROP/COP gadget search (`/R`, `/C`; text-mode output parsed client-side). |
+| `search_gadgets` | read | ROP/COP gadget search (`/R` prime + `/Rj`/`/Cj` native JSON; rizin's own filter string). |
 | `list_types` | read | List loaded structs, enums, typedefs, or function definitions (`tsj`/`tej`/`ttj`/`tfj`), name-filtered. |
 | `define_types` | read | Define types from C statements (`td`, one declaration per entry). |
 | `cast_memory` | read | Print memory at an address interpreted as a named type (`tp`). |

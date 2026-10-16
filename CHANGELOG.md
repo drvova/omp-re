@@ -101,10 +101,10 @@ extension runner, and by installing it with `omp plugin install`.
   classes (C++ RTTI / ObjC / Swift metadata).
 - **Asm/value/gadget search** (`search_asm`, `search_value`, `search_gadgets`):
   `/aj` assemble-and-search, the `/v`+`/V` immediate-value family (exact or
-  range, 1/2/4/8-byte widths), and ROP/COP gadget chains via `/R`+`/C` —
-  parsed from text mode because both commands' JSON modes emit nothing in
-  0.9.1 (verified live); the gadget filter is a client-side substring match
-  on the disassembled chain.
+  range, 1/2/4/8-byte widths), and ROP/COP gadget chains natively — a
+  text-mode `/R`/`/C` run primes rizin's gadget cache, then `/Rj`/`/Cj`
+  returns native JSON rows (per-opcode offsets and types included); the
+  filter is rizin's own gadget filter string.
 - Verified live against rizin 0.9.1 on Windows. Two rizin surfaces exist in
   the book but not in this build and are deliberately not wrapped: the `z`
   zignature family (the command is absent from the 0.9.1 Windows release)

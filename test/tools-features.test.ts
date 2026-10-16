@@ -129,38 +129,44 @@ describe("search_asm", () => {
 });
 
 describe("searchGadgets", () => {
-	test("parses ROP text-mode output into rows", async () => {
-		const ropText = [
-			"  0x140001000                 c3  ret",
-			"Gadget size: 1",
-			"",
-			"  0x140001075         0d83b8f800  or eax, 0xf8b883",
-			"  0x14000107a               0000  add byte [rax], al",
-			"  0x14000107f             c20fb6  ret 0xb60f",
-			"Gadget size: 13",
-			"",
-		].join("\n");
-		const rz = { cmd: () => Promise.resolve(ropText), cmdj: () => Promise.resolve(null), cmdWithStderr: () => Promise.resolve({ output: "", stderr: "" }) } as unknown as RzSession;
+	test("primes the gadget cache, then takes native /Rj JSON rows", async () => {
+		const ran: string[] = [];
+		const nativeJson = JSON.stringify([
+			{ opcodes: [{ offset: 5368713216, size: 1, opcode: "ret", type: "ret" }], retaddr: 5368713216, size: 1 },
+			{ opcodes: [{ offset: 5368713220, size: 2, opcode: "pop rdi; ret", type: "pop" }], retaddr: 5368713220, size: 2 },
+		]);
+		const rz = {
+			cmd: (c: string) => {
+				ran.push(c);
+				return Promise.resolve("");
+			},
+			cmdj: (c: string) => {
+				ran.push(c);
+				return Promise.resolve(c === "/Rj" ? JSON.parse(nativeJson) : null);
+			},
+			cmdWithStderr: () => Promise.resolve({ output: "", stderr: "" }),
+		} as unknown as RzSession;
 		const result = await searchGadgets(rz, "rop", undefined, {});
+		expect(ran).toEqual(["/R", "/Rj"]);
 		const t = result.content[0].type === "text" ? result.content[0].text : "";
 		expect(t).toContain("2 ROP gadgets");
-		expect(t).toContain('"ea":"0x140001000"');
-		expect(t).toContain('"size":13');
+		expect(t).toContain("0x140001000");
 	});
 
-	test("applies the disassembly filter", async () => {
-		const ropText = [
-			"  0x140001000                 c3  ret",
-			"Gadget size: 1",
-			"",
-			"  0x140001004           5fc3      pop rdi; ret",
-			"Gadget size: 2",
-			"",
-		].join("\n");
-		const rz = { cmd: () => Promise.resolve(ropText), cmdj: () => Promise.resolve(null), cmdWithStderr: () => Promise.resolve({ output: "", stderr: "" }) } as unknown as RzSession;
-		const result = await searchGadgets(rz, "rop", "pop rdi", {});
-		const t = result.content[0].type === "text" ? result.content[0].text : "";
-		expect(t).toContain("1 ROP gadgets");
-		expect(t).toContain("0x140001004");
+	test("passes the filter to both native commands", async () => {
+		const ran: string[] = [];
+		const rz = {
+			cmd: (c: string) => {
+				ran.push(c);
+				return Promise.resolve("");
+			},
+			cmdj: (c: string) => {
+				ran.push(c);
+				return Promise.resolve([]);
+			},
+			cmdWithStderr: () => Promise.resolve({ output: "", stderr: "" }),
+		} as unknown as RzSession;
+		await searchGadgets(rz, "rop", "pop rdi", {});
+		expect(ran).toEqual(["/R pop rdi", "/Rj pop rdi"]);
 	});
 });

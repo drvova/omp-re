@@ -45,7 +45,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `search_regex_bytes` | `read` | `pattern` (regex), `offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
 | `search_asm` | `read` | `instructions`, `offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
 | `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
-| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, offset?, limit?` | ROP/COP gadget chains (`/R`, `/C`) as `{ea, bytes, gadgets, size}`. The JSON modes of these two commands emit nothing in rizin 0.9.1, so text output is parsed client-side; `filter` is a substring match on the disassembled chain. |
+| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, offset?, limit?` | ROP/COP gadget chains natively: a text-mode run primes rizin's gadget cache, then `/Rj`/`/Cj` returns `{ea, size, gadgets}` rows (each opcode carries its own address and type). `filter` is rizin's own gadget filter string. |
 | `list_types` | `read` | `kind` (`struct`/`enum`/`typedef`/`function`), `filter?, offset?, limit?` | Types loaded in rizin's database (`tsj`/`tej`/`ttj`/`tfj`) — the built-in Windows type base plus debug-info and user-defined types. |
 | `define_types` | `read` | `definitions: string[]` | Define types from C statements (`td`, one declaration per entry; names used must be defined first). Rizin's errors surface verbatim. |
 | `cast_memory` | `read` | `addr`, `type` | Print memory at an address interpreted as a named type (`tp`). |

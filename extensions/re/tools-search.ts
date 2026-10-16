@@ -8,8 +8,10 @@
  * persistent-session transport. `/aj` (assemble-and-search) shares the row
  * shape, and the `/v` value-search family emits the same rows.
  *
- * ROP/COP gadget search (`/R`, `/C`) has broken JSON modes in 0.9.1 (empty
- * output, verified live), so search_gadgets parses the text mode instead.
+ * ROP/COP gadget search (`/R`, `/C`) is native JSON too — but in 0.9.1 the
+ * `/Rj`/`/Cj` modes only emit after a text-mode run primes the gadget cache,
+ * so search_gadgets runs the prime command (output discarded) and then the
+ * JSON command, with rizin's own filter string on both.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, type ReToolResult } from "./format.ts";
@@ -43,43 +45,30 @@ export async function searchCommand(rz: RzSession, command: string, label: strin
 	return markEmpty(result, rows.length === 0);
 }
 
-export interface RzGadget {
-	ea: string;
-	bytes: string;
-	gadgets: string[];
+export interface RzGadgetOpcode {
+	offset: number;
+	size: number;
+	opcode: string;
+	type: string;
+}
+
+export interface RzGadgetRow {
+	opcodes: RzGadgetOpcode[];
+	retaddr: number;
 	size: number;
 }
 
-/** Parse rizin's text-mode /R (ROP) or /C (COP) gadget output: blank-line-separated blocks, each ending with "Gadget size: N". */
-export function parseGadgets(text: string): RzGadget[] {
-	const gadgets: RzGadget[] = [];
-	let current: RzGadget | undefined;
-	for (const line of text.split("\n")) {
-		const sizeMatch = line.match(/^Gadget size: (\d+)\s*$/);
-		if (sizeMatch && current) {
-			current.size = Number.parseInt(sizeMatch[1], 10);
-			gadgets.push(current);
-			current = undefined;
-			continue;
-		}
-		const gadgetLine = line.match(/^\s*(0x[0-9a-fA-F]+)\s+([0-9a-fA-F]*)\s+(.+?)\s*$/);
-		if (gadgetLine) {
-			if (!current) current = { ea: gadgetLine[1], bytes: "", gadgets: [], size: 0 };
-			current.bytes += gadgetLine[2];
-			current.gadgets.push(gadgetLine[3].trim());
-		}
-	}
-	return gadgets;
-}
-
-/** ROP/COP gadget search over rizin's text mode (the JSON modes are broken in 0.9.1). The filter is applied client-side over the disassembled chains. */
+/** ROP/COP gadget search, native: prime the gadget cache with a text-mode run, then take rizin's own JSON rows. The filter string is rizin's own gadget filter. */
 export async function searchGadgets(rz: RzSession, kind: "rop" | "cop", filter: string | undefined, params: { offset?: number; limit?: number }): Promise<ReToolResult> {
-	const output = await rz.cmd(kind === "rop" ? "/R" : "/C");
-	let rows = parseGadgets(output);
-	if (filter !== undefined) {
-		const needle = filter.toLowerCase();
-		rows = rows.filter((gadget) => gadget.gadgets.join("; ").toLowerCase().includes(needle));
-	}
+	const base = kind === "rop" ? "/R" : "/C";
+	// 0.9.1: /Rj and /Cj emit nothing until a text-mode run populates the gadget cache.
+	await rz.cmd(filter !== undefined ? `${base} ${filter}` : base);
+	const hits = (await rz.cmdj<RzGadgetRow[]>(filter !== undefined ? `${base}j ${filter}` : `${base}j`)) ?? [];
+	const rows = hits.map((hit) => ({
+		ea: eaFromOffset(knownAddr(hit.retaddr) ?? 0),
+		size: hit.size,
+		gadgets: hit.opcodes.map((op) => op.opcode),
+	}));
 	const { page, total } = paginate(rows, params.offset, params.limit);
 	const result = await jsonResult(pageHeader(`${kind.toUpperCase()} gadgets`, page, total, params.offset), page);
 	return markEmpty(result, rows.length === 0);
@@ -212,7 +201,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		name: "search_gadgets",
 		label: "Search Gadgets",
 		description:
-			"Search ROP (return-oriented) or COP (call-oriented) gadgets (rizin /R, /C — parsed from text mode because their JSON modes emit nothing in rizin 0.9.1). Rows carry the gadget's entry address, raw bytes, disassembled instruction chain, and size. Optional substring filter on the disassembly.",
+			"Search ROP (return-oriented) or COP (call-oriented) gadgets natively (rizin /R + /Rj, /C + /Cj). Rows carry the gadget's entry address, size, and disassembled instruction chain. Optional filter string (rizin's own gadget filter, e.g. \"pop rdi; ret\" or a regex-free substring).",
 		approval: "read",
 		loadMode: "essential",
 		parameters: searchGadgetsParams,
