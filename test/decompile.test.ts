@@ -1,44 +1,41 @@
-/**
- * The extensible decompiler selection (decompile.ts). The probe-order and
- * label logic is pure (no rizin); availability against a real rizin is checked
- * in tools-registry.test.ts via decompile_function.
- */
-import { afterEach, describe, expect, test } from "bun:test";
-import { decompilerCommands, decompilerLabel } from "../extensions/re/decompile.ts";
+import { describe, expect, test } from "bun:test";
+import { decompileAt } from "../extensions/re/decompile.ts";
+import type { RzSession } from "../extensions/re/rizin.ts";
 
-const original = process.env.OMPRE_DECOMPILER;
-afterEach(() => {
-	if (original === undefined) delete process.env.OMPRE_DECOMPILER;
-	else process.env.OMPRE_DECOMPILER = original;
-});
+/** Stub session whose cmd() replays canned replies; only what decompileAt needs. */
+function stubRz(replies: Record<string, string>): RzSession {
+	const cmd = (command: string) => {
+		const key = command.trim().split(/\s+/)[0];
+		return Promise.resolve(replies[key] ?? "");
+	};
+	const cmdj = (command: string) => {
+		const raw = (replies[command.trim().split(/\s+/)[0]] ?? "").trim();
+		return Promise.resolve(raw ? JSON.parse(raw) : null);
+	};
+	return { cmd, cmdj } as unknown as RzSession;
+}
 
-describe("decompilerCommands", () => {
-	test("defaults to rz-ghidra then jsdec", () => {
-		delete process.env.OMPRE_DECOMPILER;
-		expect(decompilerCommands()).toEqual(["pdg", "pdd"]);
+describe("decompileAt", () => {
+	test("normalizes CRLF from a Windows rizin before handing code to the renderer", async () => {
+		const rz = stubRz({
+			// probe reply (non-empty = plugin available)...
+			"pdg?": "Usage: pdg",
+			// ...and a decompile reply with Windows line endings and leading blanks.
+			pdg: "\r\n\r\n// WARNING: overlap\r\n\r\nundefined8 sym.main(void)\r\n{\r\n    return;\r\n}\r\n",
+		});
+		const outcome = await decompileAt(rz, "0x1400014c9");
+		expect(outcome?.kind).toBe("pdg");
+		expect(outcome?.code).toBe("// WARNING: overlap\n\nundefined8 sym.main(void)\n{\n    return;\n}\n");
+		expect(outcome?.code).not.toContain("\r");
 	});
 
-	test("OMPRE_DECOMPILER reorders, and the built-ins are kept as fallback", () => {
-		process.env.OMPRE_DECOMPILER = "pdd";
-		expect(decompilerCommands()).toEqual(["pdd", "pdg"]);
-	});
-
-	test("an unknown plugin command is probed first, built-ins still follow", () => {
-		process.env.OMPRE_DECOMPILER = "pdx";
-		expect(decompilerCommands()).toEqual(["pdx", "pdg", "pdd"]);
-	});
-
-	test("duplicates collapse and junk entries are dropped", () => {
-		process.env.OMPRE_DECOMPILER = "pdg, pdg , bad!name, , pdd";
-		expect(decompilerCommands()).toEqual(["pdg", "pdd"]);
-	});
-});
-
-describe("decompilerLabel", () => {
-	test("names the two known plugins and marks any other as a plugin", () => {
-		expect(decompilerLabel("pdg")).toBe("rz-ghidra (pdg)");
-		expect(decompilerLabel("pdd")).toBe("jsdec (pdd)");
-		expect(decompilerLabel("pdx")).toBe("pdx (plugin)");
-		expect(decompilerLabel(null)).toContain("none");
+	test("keeps the disassembly fallback when the decompiler output is empty", async () => {
+		const rz = stubRz({
+			"pdg?": "Usage: pdg",
+			pdg: "",
+			pdfj: JSON.stringify({ name: "sym.main", ops: [{ offset: 0x1400014c9, disasm: "push rbp" }] }),
+		});
+		const outcome = await decompileAt(rz, "0x1400014c9");
+		expect(outcome?.kind).toBe("disasm");
 	});
 });

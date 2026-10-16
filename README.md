@@ -156,10 +156,10 @@ function:
 
 ### Decompile and cross-references
 
-`d` inside the code view toggles decompiled C. Without a decompiler plugin
-the view degrades honestly to annotated disassembly, labeled
-`(disassembly only — no decompiler plugin available)`, rather than pretending
-to have a real decompile — see [Prerequisites](#prerequisites).
+`d` inside the code view toggles decompiled C from rz-ghidra. Without a
+decompiler plugin the same view degrades honestly to annotated disassembly,
+labeled `(disassembly only — no decompiler plugin available)`, rather than
+pretending to have a real decompile — see [Prerequisites](#prerequisites).
 
 ![Decompiled view of main()](docs/img/decompile.png)
 

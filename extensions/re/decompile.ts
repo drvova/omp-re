@@ -109,7 +109,7 @@ export async function resolveDecompiler(rz: RzSession, signal?: AbortSignal): Pr
 export async function decompileAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<DecompileOutcome | null> {
 	const kind = await resolveDecompiler(rz, signal);
 	if (kind) {
-		const code = (await rz.cmd(`${kind} @ ${ea}`, { timeoutMs: DECOMPILE_TIMEOUT_MS, signal })).replace(/^\n+/, "");
+		const code = (await rz.cmd(`${kind} @ ${ea}`, { timeoutMs: DECOMPILE_TIMEOUT_MS, signal })).replace(/\r\n/g, "\n").replace(/^\n+/, "");
 		if (code.trim().length > 0) return { kind, code };
 	}
 	const disasm = await disassembleAt(rz, ea, signal);
