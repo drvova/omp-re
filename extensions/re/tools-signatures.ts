@@ -15,9 +15,12 @@
  * is not an undoable annotation: reopening and re-running `aaa` is how you
  * start clean.
  */
+import { statSync } from "node:fs";
+import { basename } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { branchEntries, recordedSignatures } from "./entries.ts";
 import { textResult } from "./format.ts";
+import { rizinOutputPath } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "./signatures.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
@@ -66,6 +69,48 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
 				if (!already.includes(path)) pi.appendEntry("re.signature", { path });
 			}
 			return textResult(`apply_signatures: ${path}`, count === undefined ? out || "(applied)" : `Applied ${count} FLIRT signature(s) from ${path}.`);
+		},
+	});
+
+	const createParams = z.object({
+		file: z
+			.string()
+			.optional()
+			.describe("Output filename (a bare name, no path) written to omp-re's output directory; omit for one derived from the binary's name. End it `.pat` (text patterns, the default) or `.sig` (compiled)."),
+	});
+
+	pi.registerTool({
+		name: "create_signature",
+		label: "Create Signature",
+		description:
+			"Build a FLIRT signature file (`Fc`) from the current binary's analyzed functions, to recognize those same functions in other samples (e.g. tracking a routine across a malware family). Written to omp-re's output directory as a `.pat` (text patterns) or `.sig` (compiled). Apply it elsewhere with apply_signatures (source 'file'). Reads the analysis and writes a file — it does not modify the analysis or the sample.",
+		approval: () => ({ tier: "exec" as const, reason: "Create a FLIRT signature file from the current analysis in omp-re's output directory — the analysis and the sample are not modified." }),
+		loadMode: "essential",
+		parameters: createParams,
+		...reRenderers({ title: "create_signature", subject: "file", body: "text" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const binaryPath = requireBinary(getState(ctx));
+			const requested = params.file ?? `${basename(binaryPath)}.pat`;
+			const name = /\.(pat|sig)$/i.test(requested) ? requested : `${requested}.pat`;
+			const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin
+			const { stderr } = await rz.cmdWithStderr(`Fc ${path}`, { signal });
+			if (stderr.trim()) throw new Error(`omp-re: create_signature: ${stderr.trim()}`);
+			let size = 0;
+			try {
+				size = statSync(path).size;
+			} catch {
+				throw new Error(`omp-re: create_signature: rizin reported no error but wrote no signature file at ${path} (are there analyzed functions? run analyze/open_binary first)`);
+			}
+			if (size === 0) throw new Error(`omp-re: create_signature: the signature file at ${path} is empty (no functions to signature)`);
+			// Read it back (Fd dumps the file's signatures) to confirm it is a valid FLIRT file and count what it holds.
+			const dumped = (await rz.cmdWithStderr(`Fd ${path}`, { signal })).output.trim();
+			const sigCount = dumped ? dumped.split("\n").filter((l) => l.trim() !== "").length : 0;
+			return textResult(
+				`create_signature: ${name}`,
+				`wrote ${sigCount} function signature(s) to ${path} (${size} bytes)\nApply it to another sample with apply_signatures (source 'file', path ${path}).`,
+				{ ctx, tool: "create_signature" },
+			);
 		},
 	});
 }

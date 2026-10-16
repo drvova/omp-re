@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 58.
+40 to 59.
 
 ### Added
 
@@ -100,6 +100,14 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   inside an isolated VM from the host, the open binary serving as the symbol
   source. The pid and URI are validated; `attach` is refused together with
   `run`.
+- **`create_signature`** (book: analysis/signatures). Build a FLIRT signature
+  (`Fc`) from the current binary's analyzed functions — the creation
+  counterpart to `apply_signatures` — to recognize those functions in other
+  samples (e.g. tracking a routine across a malware family). Written to
+  omp-re's confined output directory as a `.pat` (text patterns) or `.sig`
+  (compiled), then applied elsewhere with `apply_signatures` (`source: file`).
+  Reads the analysis and emits a file; it modifies neither the analysis nor the
+  sample.
 - **`export_project`** (book: projects). Save the current analysis — functions,
   names, comments, flags, types, and every annotation omp-re has applied — as a
   rizin project (`.rzdb`, via `Ps`), so it can be opened in interactive rizin or

@@ -1,8 +1,8 @@
 # Tool reference
 
-All 58 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 59 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 58 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 59 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -164,18 +164,19 @@ analyzes. rz-run is not exposed as a CLI tool either, but its directives
 environment through `rizin_debug`'s `run` option — the one place omp-re
 executes a sample.
 
-## Signatures — `apply_signatures` (1 tool)
+## Signatures (2 tools)
 
 FLIRT signatures name library functions from a signature database (book:
 analysis/signatures). `open_binary`'s analysis (`aaa`) already applies rizin's
 built-in database, so this covers what that doesn't: re-applying it on demand,
-and applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't,
-because it refuses file arguments. List the built-in database with
-`rizin_command Flt`.
+applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't, because
+it refuses file arguments — and creating a new signature from the analyzed
+functions. List the built-in database with `rizin_command Flt`.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `apply_signatures` | `exec` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions, so it is exec-tier. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
+| `create_signature` | `exec` | `file?` | Builds a FLIRT signature (`Fc`) from the current binary's analyzed functions — to recognize them in other samples (tracking a routine across a malware family) — written to omp-re's output directory as `.pat` (text patterns, default) or `.sig` (compiled). Reads the analysis, modifies nothing. Apply it elsewhere with `apply_signatures` (`source: file`). |
 
 ## Analysis passes — `analyze` (1 tool)
 

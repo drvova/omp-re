@@ -112,9 +112,10 @@ export const RE_EMULATE_TOOL_NAMES: Record<string, true> = {
 	rizin_emulate: true,
 };
 
-/** FLIRT signature application (tools-signatures.ts): one exec-tier tool that renames matched library functions. Audited and toggled, but not evidence (it changes analysis rather than observing it). */
+/** FLIRT signatures (tools-signatures.ts): `apply_signatures` renames matched library functions (changes analysis); `create_signature` writes a FLIRT file from the analyzed functions (changes nothing, emits an artifact). Both exec-tier, audited and toggled, but not evidence. */
 export const RE_SIGNATURE_TOOL_NAMES: Record<string, true> = {
 	apply_signatures: true,
+	create_signature: true,
 };
 
 /** Analysis passes (tools-analyze.ts): one exec-tier tool that re-runs an `aa*` pass to recover more functions/xrefs/types. Audited and toggled, but not evidence (it changes analysis rather than observing it). */

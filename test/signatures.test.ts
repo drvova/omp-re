@@ -7,7 +7,7 @@
  * that it is re-applied after the rizin process dies (resume/crash).
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordedSignatures } from "../extensions/re/entries.ts";
@@ -76,4 +76,45 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
 		rz = await ensureRizin(ctx);
 		expect(await flirtFlagExists()).toBe(true);
 	});
+});
+
+describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
+	const harness = makeHarness("omp-re-create-sig-test");
+	const { pi, ctx } = harness;
+	const run = (params: Record<string, unknown>) => harness.tool("create_signature").execute("call-create", params, undefined, undefined, ctx);
+	let rz: RzSession;
+	let binaryPath: string;
+	let outDir: string;
+
+	registerSignatureTools(pi);
+
+	beforeAll(async () => {
+		outDir = mkdtempSync(join(tmpdir(), "omp-re-csig-"));
+		process.env.OMPRE_OUTPUT_DIR = outDir;
+		binaryPath = await resolveBinaryPath(TEST_BINARY);
+		rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa`, so there are functions to signature
+		getState(ctx).binaryPath = binaryPath;
+		getState(ctx).rz = rz;
+	});
+	afterAll(() => {
+		delete process.env.OMPRE_OUTPUT_DIR;
+		shutdownState(ctx.sessionManager.getSessionId());
+		rmSync(outDir, { recursive: true, force: true });
+	});
+
+	test("writes a non-empty FLIRT .pat the apply path can then consume", async () => {
+		const result = textOf(await run({ file: "fixture" })); // `.pat` appended
+		const path = join(outDir, "fixture.pat");
+		expect(result).toContain(path);
+		expect(result).toMatch(/wrote \d+ function signature\(s\)/);
+		const made = readFileSync(path, "utf8");
+		expect(made.length).toBeGreaterThan(0);
+		// The created file is a real FLIRT signature: applying it to the same binary matches (rizin loads it without error).
+		expect((await rz.cmdWithStderr(`Fs ${path}`)).stderr.trim()).toBe("");
+	}, 30_000);
+
+	test("derives a .pat name from the binary when no file is given, and refuses a traversing name", async () => {
+		expect(textOf(await run({}))).toMatch(/\.pat \(\d+ bytes\)/);
+		expect((await captureError(run({ file: "../escape.pat" }))).message).toContain("invalid output filename");
+	}, 30_000);
 });
