@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { baseRizinFlags, eaFromOffset, normalizeAddr, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { baseRizinFlags, eaFromOffset, isExecutable, normalizeAddr, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 
 describe("validateAddr", () => {
 	test("accepts hex addresses, flag names, and arithmetic", () => {
@@ -197,5 +197,17 @@ describe("baseRizinFlags", () => {
 		expect(baseRizinFlags()).not.toContain("-N");
 		expect(baseRizinFlags()[0]).toBe("-q0");
 		restore();
+	});
+});
+
+describe("isExecutable", () => {
+	test("a Windows sibling tool resolved without its extension still counts as executable", async () => {
+		// regressions: availableRzCliTools silently dropped every rz-* tool (and
+		// assertRizinAvailable false-negatived) when OMPRE_RIZIN_PATH pointed at
+		// "…/bin/rizin" — the sibling is rz-hash.exe, which access() cannot see.
+		if (process.platform !== "win32") return;
+		expect(await isExecutable("C:/Windows/System32/where.exe")).toBe(true);
+		expect(await isExecutable("C:/Windows/System32/where")).toBe(true); // extensionless form
+		expect(await isExecutable("C:/Windows/System32/no-such-tool-here")).toBe(false);
 	});
 });

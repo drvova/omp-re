@@ -413,15 +413,18 @@ export function resolveRizinTool(tool: string): string {
 	return slash === -1 ? tool : `${rizin.slice(0, slash + 1)}${tool}`;
 }
 
-/** Whether `name` resolves to an executable, either as a path or via PATH. */
+/** Whether `name` resolves to an executable, either as a path or via PATH. On Windows a path without an extension also tries the `.exe` form: a sibling tool resolved from OMPRE_RIZIN_PATH is "C:/dir/rz-hash", which access() cannot see but every spawn API runs fine. */
 export async function isExecutable(name: string): Promise<boolean> {
-	if (!name.includes("/")) return Bun.which(name) !== null;
-	try {
-		await access(name, fsConstants.X_OK);
-		return true;
-	} catch {
-		return false;
+	if (!name.includes("/")) return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
+	for (const candidate of process.platform === "win32" && !/\.(exe|cmd|bat)$/i.test(name) ? [name, `${name}.exe`] : [name]) {
+		try {
+			await access(candidate, fsConstants.X_OK);
+			return true;
+		} catch {
+			// try the next candidate
+		}
 	}
+	return false;
 }
 
 export async function assertRizinAvailable(): Promise<void> {
