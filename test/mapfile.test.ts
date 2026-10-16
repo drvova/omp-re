@@ -4,14 +4,14 @@
  * rizin session; skipped when rizin or the fixture is missing.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordedMapFiles } from "../extensions/re/entries.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { registerMapFileTools } from "../extensions/re/tools-mapfile.ts";
-import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
+import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, rmDirSafe, TEST_BINARY, textOf } from "./helpers.ts";
 
 logSkip("map_file tests");
 
@@ -38,7 +38,7 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
 	});
 	afterAll(() => {
 		shutdownState(ctx.sessionManager.getSessionId());
-		rmSync(dir, { recursive: true, force: true });
+		rmDirSafe(dir);
 	});
 
 	test("declares exec-tier and says the file on disk is not modified", () => {

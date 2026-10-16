@@ -230,9 +230,11 @@ export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
 			const bin = resolveRizinTool(def.tool);
 			const result = await pi.exec(bin, argv, { timeout: RZ_CLI_TIMEOUT_MS, signal });
 			const header = `${def.tool} ${argv.join(" ")}`.trim();
-			const stdout = result.stdout.replace(/\n+$/, "");
+			// rz-* tools on Windows end lines with CRLF; normalize to LF so the
+			// model (and exact assertions) never see a stray `\r`.
+			const stdout = result.stdout.replace(/\r\n/g, "\n").replace(/\n+$/, "");
 			if (stdout === "") {
-				const err = result.stderr.trim();
+				const err = result.stderr.replace(/\r\n/g, "\n").trim();
 				// Many of these tools report "no match" / "no difference" with a non-zero exit and nothing on stdout; only treat stderr as an error.
 				return err
 					? { ...plainResult(`${header}\n(no output; ${def.tool} said:)\n${err}`), isError: true }

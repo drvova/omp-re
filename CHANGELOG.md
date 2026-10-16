@@ -166,6 +166,17 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
 
 ### Fixed
 
+- **Cross-OS portability (surfaced by the Windows/macOS CI matrix).** The
+  confined output directory (`output.ts`) used a hardcoded `/` separator and
+  rejected the drive-letter colon, so every file-emitting capability
+  (`dump_memory`, trace save/load, `export_project`, `create_signature`) threw
+  on Windows; it now uses `path.sep` for containment and normalizes
+  rizin-facing paths to forward slashes (which rizin accepts everywhere). The
+  NUL-framed pipe transport and `rizin_cli` normalize rizin's Windows CRLF
+  output to `\n` so parsers and the model never see a stray `\r`. The debugger
+  integration tests gate off on macOS (a hosted runner can't give rizin
+  `task_for_pid`; override with `OMPRE_FORCE_DEBUGGER=1`) and the CI Linux leg
+  relaxes `kernel.yama.ptrace_scope` so the attach-by-PID test runs for real.
 - `define_types` sent `td <definition>` unquoted, so rizin's command parser
   split a multi-member struct on its member `;`s and rejected the whole
   definition ("Error while parsing command") — the tool only ever worked for

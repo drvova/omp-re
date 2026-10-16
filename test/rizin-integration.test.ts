@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkRizinCommand, isKnownCommand, loadCatalog, NOARG_DUALS, READ_ONLY_EXTRAS, type RzCatalog } from "../extensions/re/catalog.ts";
@@ -8,7 +8,7 @@ import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
 import { scopedSearch, searchCommand } from "../extensions/re/tools-search.ts";
 import { defineTypeLines } from "../extensions/re/tools-types.ts";
-import { canRunRizin, logSkip, makeHarness, rizinPath, TEST_BINARY } from "./helpers.ts";
+import { canRunRizin, logSkip, makeHarness, rizinPath, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
 /** The hit total from a search result's header ("N hits" / "N of M hits" — M is the total). */
 function hitTotal(result: { content: { type: string; text?: string }[] }): number {
@@ -192,7 +192,7 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
 	});
 
 	afterAll(() => {
-		rmSync(dir, { recursive: true, force: true });
+		rmDirSafe(dir);
 	});
 
 	test("arch+bits load options disassemble a flat blob that autodetects as the wrong arch", async () => {
@@ -296,7 +296,7 @@ describe.skipIf(!canRunRizin)("session state: respawn, replay, and branch sync",
 			expect((await rz.cmd("p8 16 @ 0x50000")).trim().toLowerCase()).toBe(expected);
 		} finally {
 			entries.splice(entries.findIndex((e) => e.id === "map-0"), 1);
-			rmSync(dir, { recursive: true, force: true });
+			rmDirSafe(dir);
 		}
 	});
 });

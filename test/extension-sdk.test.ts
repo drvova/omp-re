@@ -10,14 +10,14 @@
  * stub-based test stayed green). The rizin-free half runs in CI.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
 import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
 import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
-import { canRunRizin, logSkip, TEST_BINARY } from "./helpers.ts";
+import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
@@ -112,7 +112,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	setAgentDir(originalAgentDir);
-	await rm(agentDir, { recursive: true, force: true });
+	rmDirSafe(agentDir);
 });
 
 describe("loaded by omp's SDK (no rizin needed)", () => {

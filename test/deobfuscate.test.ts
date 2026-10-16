@@ -4,13 +4,13 @@
  * (the transform runs under the write cache and is reset).
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deobfuscateCommand, registerDeobfuscateTools } from "../extensions/re/tools-deobfuscate.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
-import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
+import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, rmDirSafe, TEST_BINARY, textOf } from "./helpers.ts";
 
 logSkip("deobfuscate tests");
 
@@ -58,7 +58,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
 
 	afterAll(() => {
 		shutdownState(ctx.sessionManager.getSessionId());
-		rmSync(dir, { recursive: true, force: true });
+		rmDirSafe(dir);
 	});
 
 	test("it is read-tier (observational, reverts) with a reason naming the transform", () => {
