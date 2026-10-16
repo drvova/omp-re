@@ -129,53 +129,61 @@ them pure theatre on a hosted runner that has neither tmux nor a model.
 ## Cross-OS coverage — `.github/workflows/cross-os.yml`
 
 The default `test` job is deliberately rizin-free, so the OS-specific paths —
-above all the debugger (`debug.test.ts` executes the fixture under rizin's
-debugger) and the PE/Mach-O format handling — are never exercised on a hosted
-runner. `cross-os.yml` is the tier that does: a **manually dispatched**
-(`workflow_dispatch`) matrix over `ubuntu-latest`, `macos-latest`, and
-`windows-latest` that installs rizin **v0.9.1** on each (Linux: the portable
-static release tarball — there is no `.deb`; macOS: `brew install rizin`;
-Windows: the `rizin-windows-shared64` release zip) and runs the full suite.
-This is how the plugin gets real Windows/macOS coverage without owning those
-machines — CI borrows the runner per dispatch.
+the debugger (`debug.test.ts` executes the fixture under rizin's debugger) and
+PE format handling — are never exercised on a hosted runner. `cross-os.yml` is
+the tier that does: a matrix over `ubuntu-latest` and `windows-latest` that
+installs rizin **v0.9.1** on each (Linux: the portable static release tarball —
+there is no `.deb`; Windows: the `rizin-windows-shared64` release zip) and runs
+the full suite. It runs on every push to `main` and on manual dispatch, so the
+plugin gets real Windows coverage without owning a Windows machine — CI borrows
+the runner per run.
 
-Because `/bin/ls` is absent on Windows and SIP-protected against the debugger
-on macOS, each OS compiles **`test/fixtures/sample.c`** (a trivial program
-with a `main`, locals, a called function, and a string — everything the
-integration setups look up) and points `OMPRE_TEST_BINARY` at it. Ground truth
-is still read from rizin at runtime. The debugger suite self-enables
-`OMPRE_ENABLE_DEBUGGER`, so the workflow does **not** set it globally (that
-would break `extension-sdk.test.ts`'s default-off assertion). Never add a
-malware sample — the fixture is built on the runner.
+Because `/bin/ls` is absent on Windows, each OS compiles
+**`test/fixtures/sample.c`** (a trivial program with a `main`, locals, a called
+function, and a string — everything the integration setups look up) and points
+`OMPRE_TEST_BINARY` at it. Ground truth is still read from rizin at runtime. The
+debugger suite self-enables `OMPRE_ENABLE_DEBUGGER`, so the workflow does
+**not** set it globally (that would break `extension-sdk.test.ts`'s default-off
+assertion); on Linux it relaxes `kernel.yama.ptrace_scope` so the attach-by-PID
+test can attach to a non-child. Never add a malware sample — the fixture is
+built on the runner.
 
-The workflow was authored on Linux; its Windows/macOS legs were validated on the
-**first dispatch**, which confirmed the install/build scaffolding works on all
-three (the per-OS rizin install, `rizin -v` resolving its DLLs on Windows, and
-`clang` producing a runnable PE) and surfaced three real cross-OS issues, all
-fixed:
+**Why no macOS leg.** macOS was in the matrix for its first runs and then
+dropped. Its one unique value, the debugger, can't run on a hosted macOS runner
+(rizin's Darwin backend needs `task_for_pid`, refused to a non-root,
+un-codesigned rizin — `debug.test.ts` gates its live-debug blocks off on macOS
+for exactly this). With the debugger gated off the leg still wedged `bun test`
+for ~20 minutes for a cause that couldn't be diagnosed from CI: a timed-out job
+is *cancelled*, and GitHub serves no downloadable log for a cancelled job, so
+the hang point was never visible. Its remaining coverage (Mach-O static
+analysis) overlaps Linux's ELF coverage, so the leg was removed. `debug.test.ts`
+keeps its `process.platform === "darwin"` gate, so a local macOS dev run still
+skips the debugger cleanly (override with `OMPRE_FORCE_DEBUGGER=1` on a
+codesigned rizin).
 
-- **Windows output paths**: the confined-output logic (`output.ts`) hardcoded a
-  `/` separator, so every file-emitting capability (dump_memory, trace
-  save/load, export_project, create_signature) threw on Windows. Fixed to use
-  `path.sep`. Separately, the runner's temp dir is an 8.3 short name
-  (`C:\Users\RUNNER~1\...`) and `~` is rizin's grep operator, so a raw path
-  mis-parsed; rizin-written paths now go through `rizinPathArg` (forward-slash
-  normalized and single-quoted, so rizin takes them literally), while the tool
-  still reports and `stat`s the native path.
-- **Windows line endings**: rizin and the `rz-*` tools emit CRLF on Windows; the
-  pipe transport (`rizin.ts`) and `rizin_cli` now normalize `\r\n` → `\n` so
-  parsers and exact assertions see the same bytes as on POSIX.
-- **Windows test teardown**: a temp dir can't be `rm`'d while the rizin child
-  still holds a file open (EBUSY), so cleanups use `rmDirSafe` (Node's
+The first runs surfaced several real Windows issues, all fixed — a useful
+record of what a Windows host needs:
+
+- **Output paths**: the confined-output logic (`output.ts`) hardcoded a `/`
+  separator, so every file-emitting capability (dump_memory, trace save/load,
+  export_project, create_signature) threw on Windows. Fixed to use `path.sep`.
+  Separately, the runner's temp dir is an 8.3 short name (`C:\Users\RUNNER~1\…`)
+  and `~` is rizin's grep operator, so a raw path mis-parsed; rizin-written
+  paths go through `rizinPathArg` (forward-slash normalized and single-quoted),
+  while the tool still reports and `stat`s the native path. The one exception is
+  `trace_save`/`trace_load`: `dtst` creates a directory via rizin's
+  `rz_sys_mkdirp`, which chokes on a forward-slash drive prefix (`mkdirp fail
+  'C:'`), so those pass the **native** quoted path instead.
+- **Line endings**: rizin and the `rz-*` tools emit CRLF on Windows; the pipe
+  transport (`rizin.ts`) and `rizin_cli` normalize `\r\n` → `\n`.
+- **Test teardown**: a temp dir can't be `rm`'d while the rizin child still
+  holds a file open (EBUSY), so cleanups use `rmDirSafe` (Node's
   `maxRetries`/`retryDelay` back-off, a no-op on POSIX).
-
-Known residual: after the path/CRLF/teardown fixes the Windows leg is down to
-one failure — `set_comment` → `/re undo` → final clear reads back a `.text`
-section line instead of an empty comment. The undo issues a single
-marker-synced `CC- @ <ea>` (clear), so a following `CC. @ <ea>` returning a
-section listing defies the command's semantics; it reproduces only on Windows.
-Kept visible (not silenced) pending a Windows host to run `CC- @ main; CC. @
-main` interactively.
+- **A fixture-specific test assumption**: `set_comment`'s undo test asserted the
+  comment history bottoms out at `""`, but on the Windows fixture `main` sits on
+  the `.text` section start, which rizin auto-annotates with a `CCu` comment —
+  so the baseline there is that section comment, not empty. The test now
+  captures the baseline and asserts undo restores to it.
 
 ## Loading the extension through omp itself
 
