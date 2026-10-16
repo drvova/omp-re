@@ -16,9 +16,50 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, type ReToolResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { eaFromOffset, type RzSession } from "./rizin.ts";
+import { eaFromOffset, type RzSession, validateAddr } from "./rizin.ts";
 import { ensureRizin } from "./state.ts";
 import { DEFAULT_LIMIT, MAX_LIMIT, knownAddr, markEmpty, pageHeader, paginate } from "./tools-read.ts";
+
+interface AfijBounds {
+	name?: string;
+	offset?: number;
+	size?: number;
+	minbound?: number;
+	maxbound?: number;
+}
+
+/** The [from, to) extent of the function at `nameOrAddr`, for scoping a search to it. Uses the function's full bounds (minbound/maxbound), falling back to offset+size. */
+async function functionRange(rz: RzSession, nameOrAddr: string, signal?: AbortSignal): Promise<{ from: number; to: number; name: string }> {
+	const fn = (await rz.cmdj<AfijBounds[]>(`afij @ ${validateAddr(nameOrAddr)}`, { signal }))?.[0];
+	if (!fn) throw new Error(`omp-re: no function at ${JSON.stringify(nameOrAddr)} to scope the search to`);
+	const from = fn.minbound ?? fn.offset;
+	const to = fn.maxbound ?? (fn.offset !== undefined && fn.size !== undefined ? fn.offset + fn.size : undefined);
+	if (from === undefined || to === undefined || to <= from) throw new Error(`omp-re: could not determine the bounds of the function at ${JSON.stringify(nameOrAddr)}`);
+	return { from, to, name: fn.name ?? nameOrAddr };
+}
+
+/**
+ * Run `fn` with rizin's search restricted to [from, to), then restore the
+ * previous search scope no matter what. rizin searches honor `search.in` +
+ * `search.from`/`search.to`; this sets them to a range and puts the prior
+ * values back in a finally, so a scoped search never leaks its scope into the
+ * next one (the session is shared).
+ */
+async function withSearchScope<T>(rz: RzSession, from: number, to: number, signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+	const savedIn = (await rz.cmd("e search.in", { signal })).trim() || "io.maps";
+	const savedFrom = (await rz.cmd("e search.from", { signal })).trim() || "0";
+	const savedTo = (await rz.cmd("e search.to", { signal })).trim() || "0";
+	try {
+		await rz.cmd(`e search.in=range`, { signal });
+		await rz.cmd(`e search.from=${from}`, { signal });
+		await rz.cmd(`e search.to=${to}`, { signal });
+		return await fn();
+	} finally {
+		await rz.cmd(`e search.in=${savedIn}`);
+		await rz.cmd(`e search.from=${savedFrom}`);
+		await rz.cmd(`e search.to=${savedTo}`);
+	}
+}
 
 export interface RzSearchHit {
 	address: number;
@@ -43,6 +84,13 @@ export async function searchCommand(rz: RzSession, command: string, label: strin
 	const rows = page.map(hitRow);
 	const result = await jsonResult(pageHeader(label, rows, total, params.offset), rows);
 	return markEmpty(result, rows.length === 0);
+}
+
+/** Run a {@link searchCommand}, optionally scoped to the function named by `in_function` (whole binary when omitted). */
+export async function scopedSearch(rz: RzSession, command: string, label: string, params: { in_function?: string; offset?: number; limit?: number }, signal?: AbortSignal): Promise<ReToolResult> {
+	if (params.in_function === undefined) return searchCommand(rz, command, label, params);
+	const range = await functionRange(rz, params.in_function, signal);
+	return withSearchScope(rz, range.from, range.to, signal, () => searchCommand(rz, command, `${label} in ${range.name}`, params));
 }
 
 export interface RzGadgetOpcode {
@@ -77,6 +125,10 @@ export async function searchGadgets(rz: RzSession, kind: "rop" | "cop", filter: 
 export function registerSearchTools(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	const offsetLimit = {
+		in_function: z
+			.string()
+			.optional()
+			.describe("Restrict the search to the function at this address or name (its full extent); omit to search the whole binary."),
 		offset: z.number().int().optional().describe("Skip this many results (default 0)."),
 		limit: z.number().int().optional().describe(`Max results to return (default ${DEFAULT_LIMIT}, capped at ${MAX_LIMIT}).`),
 	};
@@ -126,7 +178,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
 			const hex = params.pattern.replace(/\s+/g, "");
-			return searchCommand(rz, `/xj ${hex}`, `hits for ${params.pattern}`, params);
+			return scopedSearch(rz, `/xj ${hex}`, `hits for ${params.pattern}`, params, signal);
 		},
 	});
 
@@ -142,7 +194,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
 			const hex = Buffer.from(params.pattern, "utf8").toString("hex");
-			return searchCommand(rz, `/xj ${hex}`, `hits for ${JSON.stringify(params.pattern)}`, params);
+			return scopedSearch(rz, `/xj ${hex}`, `hits for ${JSON.stringify(params.pattern)}`, params, signal);
 		},
 	});
 
@@ -157,7 +209,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		...reRenderers({ title: "Search regex", subject: "pattern", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
-			return searchCommand(rz, `/xrj ${params.pattern}`, `regex hits for ${JSON.stringify(params.pattern)}`, params);
+			return scopedSearch(rz, `/xrj ${params.pattern}`, `regex hits for ${JSON.stringify(params.pattern)}`, params, signal);
 		},
 	});
 
@@ -173,7 +225,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
 			const text = params.instructions.replace(/"/g, "");
-			return searchCommand(rz, `/aj ${text}`, `asm hits for ${JSON.stringify(params.instructions)}`, params);
+			return scopedSearch(rz, `/aj ${text}`, `asm hits for ${JSON.stringify(params.instructions)}`, params, signal);
 		},
 	});
 
@@ -193,7 +245,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 			}
 			const command = params.value !== undefined ? `/v${params.width}j ${params.value}` : `/V${params.width}j ${params.min} ${params.max}`;
 			const label = params.value !== undefined ? `value ${params.value} (${params.width}B)` : `values ${params.min}..${params.max} (${params.width}B)`;
-			return searchCommand(rz, command, `hits for ${label}`, params);
+			return scopedSearch(rz, command, `hits for ${label}`, params, signal);
 		},
 	});
 
@@ -208,7 +260,9 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		...reRenderers({ title: "Search gadgets", subject: "kind", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const rz = await ensureRizin(ctx, { signal });
-			return searchGadgets(rz, params.kind, params.filter, params);
+			if (params.in_function === undefined) return searchGadgets(rz, params.kind, params.filter, params);
+			const range = await functionRange(rz, params.in_function, signal);
+			return withSearchScope(rz, range.from, range.to, signal, () => searchGadgets(rz, params.kind, params.filter, params));
 		},
 	});
 }

@@ -6,7 +6,15 @@ import { checkRizinCommand, isKnownCommand, loadCatalog, NOARG_DUALS, READ_ONLY_
 import { resolveDecompiler } from "../extensions/re/decompile.ts";
 import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
+import { scopedSearch, searchCommand } from "../extensions/re/tools-search.ts";
 import { canRunRizin, logSkip, makeHarness, rizinPath, TEST_BINARY } from "./helpers.ts";
+
+/** The hit total from a search result's header ("N hits" / "N of M hits" — M is the total). */
+function hitTotal(result: { content: { type: string; text?: string }[] }): number {
+	const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
+	const m = [...text.matchAll(/(\d+) hits/g)].at(-1);
+	return m ? Number(m[1]) : -1;
+}
 
 /** A flat x86-32 blob with no header: `mov eax,1; add eax,2; ret`. */
 const FLAT_X86_32 = Buffer.from([0xb8, 0x01, 0x00, 0x00, 0x00, 0x83, 0xc0, 0x02, 0xc3]);
@@ -91,6 +99,20 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
 		const first = await resolveDecompiler(session);
 		expect([null, "pdg", "pdd"]).toContain(first);
 		expect(await resolveDecompiler(session)).toBe(first);
+	});
+
+	test("scopedSearch narrows a byte search to one function and leaves the global scope untouched", async () => {
+		await session.cmd("aaa");
+		const before = (await session.cmd("e search.in")).trim();
+		const whole = hitTotal(await searchCommand(session, "/xj ff", "hits", { limit: 1 }));
+		const scoped = hitTotal(await scopedSearch(session, "/xj ff", "hits", { in_function: "main", limit: 1 }));
+		expect(whole).toBeGreaterThan(0);
+		// scoping to one function returns no more hits than the whole binary (usually far fewer)
+		expect(scoped).toBeGreaterThanOrEqual(0);
+		expect(scoped).toBeLessThanOrEqual(whole);
+		// the search scope is restored, so a later unscoped search is unaffected
+		expect((await session.cmd("e search.in")).trim()).toBe(before);
+		expect(hitTotal(await searchCommand(session, "/xj ff", "hits", { limit: 1 }))).toBe(whole);
 	});
 });
 

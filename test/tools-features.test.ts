@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchCommand, searchGadgets } from "../extensions/re/tools-search.ts";
+import { scopedSearch, searchCommand, searchGadgets } from "../extensions/re/tools-search.ts";
 import { castMemory, defineTypeLines, listTypeRows } from "../extensions/re/tools-types.ts";
 import { listSyscallRows, syscallLookupText } from "../extensions/re/tools-syscalls.ts";
 import type { RzSession } from "../extensions/re/rizin.ts";
@@ -47,6 +47,58 @@ describe("searchCommand", () => {
 		const result = await searchCommand(rz, "/xj 90", "hits", { offset: 2, limit: 2 });
 		const text = result.content[0].type === "text" ? result.content[0].text : "";
 		expect(text).toContain("2 of 5 hits (offset=2");
+	});
+});
+
+describe("scopedSearch", () => {
+	test("scopes a search to a function's bounds and restores the prior scope", async () => {
+		const { rz, ran } = stubRz({
+			"afij @ main": JSON.stringify([{ name: "main", minbound: 0x1000, maxbound: 0x1200 }]),
+			"e search.in": "io.maps",
+			"e search.from": "0",
+			"e search.to": "0",
+			"/xj 90": JSON.stringify([{ address: 0x1100, size: 1, flag: "hit" }]),
+		});
+		const result = await scopedSearch(rz, "/xj 90", "hits", { in_function: "main" });
+		// scope set to the resolved [minbound, maxbound) range, then put back
+		expect(ran).toContain("e search.in=range");
+		expect(ran).toContain("e search.from=4096");
+		expect(ran).toContain("e search.to=4608");
+		expect(ran).toContain("e search.in=io.maps");
+		expect(ran).toContain("e search.from=0");
+		expect(ran).toContain("e search.to=0");
+		// the search ran within the scope window and the label names the function
+		expect(ran).toContain("/xj 90");
+		const text = result.content[0].type === "text" ? result.content[0].text : "";
+		expect(text).toContain("in main");
+	});
+
+	test("restores the scope even when the search throws", async () => {
+		const ran: string[] = [];
+		const cmd = (command: string) => {
+			ran.push(command);
+			if (command === "e search.in") return Promise.resolve("io.maps");
+			return Promise.resolve("0");
+		};
+		const cmdj = (command: string) => {
+			ran.push(command);
+			if (command === "afij @ main") return Promise.resolve([{ name: "main", minbound: 0x1000, maxbound: 0x1200 }] as never);
+			throw new Error("boom");
+		};
+		const rz = { cmd, cmdj } as unknown as RzSession;
+		await expect(scopedSearch(rz, "/xj 90", "hits", { in_function: "main" })).rejects.toThrow("boom");
+		expect(ran).toContain("e search.in=io.maps"); // restored in the finally
+	});
+
+	test("without in_function, runs the bare search and touches no scope config", async () => {
+		const { rz, ran } = stubRz({ "/xj 90": "[]" });
+		await scopedSearch(rz, "/xj 90", "hits", {});
+		expect(ran).toEqual(["/xj 90"]);
+	});
+
+	test("a function that can't be resolved is reported, not silently unscoped", async () => {
+		const { rz } = stubRz({ "afij @ nope": "[]" });
+		await expect(scopedSearch(rz, "/xj 90", "hits", { in_function: "nope" })).rejects.toThrow("no function at");
 	});
 });
 

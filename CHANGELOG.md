@@ -38,6 +38,12 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   instead of being autodetected as the build default. The settings are
   validated, persisted in the `re.binary` entry, and reused on every respawn
   and resume; an explicit `bits` also steers 32/64 build selection.
+- **Function-scoped search.** Every `search_*` tool (bytes, string, regex,
+  asm, value, gadgets) accepts `in_function` (an address or name) to restrict
+  the search to one function's extent instead of the whole binary (book:
+  searching) — rizin's `search.in=range` with the function's bounds. The prior
+  search scope is always restored afterward, so a scoped search never leaks
+  into the next one on the shared session.
 - **`define_variable`.** Define a local variable or argument rizin's analysis
   didn't recover — a stack slot (`afvs`, by frame delta) or a register variable
   (`afvr`, by register), with an optional C type — so the decompiler and

@@ -42,12 +42,12 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `list_segments` | `read` | `offset?, limit?` | Sections with permissions, sizes, and addresses. |
 | `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the open binary. |
 | `deobfuscate` | `read` | `addr, size, op, key?, algo?, iv?` | Reveal obfuscated bytes in place: xor/add/sub/or/and with a `key`, an endian swap, or `decrypt` with `algo`+`key`(+`iv`) — shown as hex and string. Runs under the write cache and resets it, so the file is never modified. |
-| `search_bytes` | `read` | `pattern` (hex), `offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
-| `search_string` | `read` | `pattern` (string), `offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |
-| `search_regex_bytes` | `read` | `pattern` (regex), `offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
-| `search_asm` | `read` | `instructions`, `offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
-| `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
-| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, offset?, limit?` | ROP/COP gadget chains natively: a text-mode run primes rizin's gadget cache, then `/Rj`/`/Cj` returns `{ea, size, gadgets}` rows (each opcode carries its own address and type). `filter` is rizin's own gadget filter string. |
+| `search_bytes` | `read` | `pattern` (hex), `in_function?, offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
+| `search_string` | `read` | `pattern` (string), `in_function?, offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |
+| `search_regex_bytes` | `read` | `pattern` (regex), `in_function?, offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
+| `search_asm` | `read` | `instructions`, `in_function?, offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
+| `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `in_function?, offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
+| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, in_function?, offset?, limit?` | ROP/COP gadget chains natively: a text-mode run primes rizin's gadget cache, then `/Rj`/`/Cj` returns `{ea, size, gadgets}` rows (each opcode carries its own address and type). `filter` is rizin's own gadget filter string. |
 | `list_types` | `read` | `kind` (`struct`/`enum`/`typedef`/`function`), `filter?, offset?, limit?` | Types loaded in rizin's database (`tsj`/`tej`/`ttj`/`tfj`) — the built-in Windows type base plus debug-info and user-defined types. |
 | `define_types` | `read` | `definitions: string[]` | Define types from C statements (`td`, one declaration per entry; names used must be defined first). Rizin's errors surface verbatim. |
 | `cast_memory` | `read` | `addr`, `type` | Print memory at an address interpreted as a named type (`tp`). |
@@ -62,6 +62,11 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 `offset`/`limit` default to 0/200 and cap at 1000; every paginated result
 reports its total so the model knows a view is partial. An empty page is
 marked as compactable, so omp can drop it from context once it has been read.
+
+Every `search_*` tool accepts `in_function` (an address or name): the search
+is restricted to that function's extent (rizin's `search.in=range` plus
+`search.from`/`search.to`), and the previous scope is always restored
+afterward. Omit it to search the whole binary.
 
 ## Mutate tier (14 tools)
 
