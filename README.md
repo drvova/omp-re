@@ -262,11 +262,13 @@ blocked, and the IOC is defanged even in the error message:
 All 61 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
-may legitimately show fewer than 32.
+may legitimately show fewer than 61.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
-| `open_binary` | session-setup | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. |
+| `open_binary` | session | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. |
+| `export_project` | session (exec) | Save the analysis as a rizin project (`.rzdb`, `Ps`) to open in rizin or Cutter. |
+| `map_file` | session (exec) | Open an additional file into the session at a virtual address (`o`), re-mapped on respawn. |
 | `list_functions` | read | List analyzed functions; sort by address, size, or callers. |
 | `search_functions` | read | Search functions by name substring. |
 | `get_function` | read | One function: signature, metrics, args/locals, named call targets, callers. |
@@ -276,6 +278,7 @@ may legitimately show fewer than 32.
 | `get_xrefs_from` | read | Cross-references originating from an instruction. |
 | `list_imports` | read | List imported symbols. |
 | `list_exports` | read | List exported symbols. |
+| `list_symbols` | read | List the full symbol table (`isj`), name-filtered — local/internal functions and data symbols. |
 | `list_strings` | read | List strings, optionally filtered. |
 | `search_bytes` | read | Search raw bytes for a hex pattern (`/xj`), with nibble-mask wildcards. |
 | `search_string` | read | Search raw bytes for a literal string (encoded to hex client-side). |
@@ -295,11 +298,27 @@ may legitimately show fewer than 32.
 | `list_classes` | read | Classes from binary metadata — C++ RTTI, ObjC, Swift (`icj`). |
 | `list_segments` | read | List sections with permissions and addresses. |
 | `hash_binary` | read | SHA-256/SHA-1/MD5 of the binary. |
+| `deobfuscate` | read | Reveal obfuscated bytes in place (xor/add/sub/or/and, endian swap, or RC4/AES decrypt), shown as hex and string, under the write cache (the file is never modified). |
+| `get_graph` | read | Rizin's analysis graphs as JSON: control-flow, callgraph, xref, or import graph (`agf`/`agc`/`agx`/`agi`). |
 | `rename_function` | mutate | Rename a function, with read-back verification. |
 | `rename_variable` | mutate | Rename a local variable or argument, with read-back verification. |
 | `set_comment` | mutate | Set (or clear) a comment at an address. |
 | `set_prototype` | mutate | Set a function's C prototype. |
 | `set_variable_type` | mutate | Set a local variable's C type. |
+| `define_function` | mutate | Define a function where auto-analysis missed one (`af`). |
+| `define_variable` | mutate | Define a stack/register local rizin's analysis missed (`afvs`/`afvr`). |
+| `define_global` | mutate | Name and type a global variable at a data address (`avga`). |
+| `set_calling_convention` | mutate | Set a function's calling convention (`afc`). |
+| `set_flag` | mutate | Name an address with a flag (`f`). |
+| `set_arch_hint` | mutate | Hint the architecture/word size to disassemble a region as (`aha`/`ahb`). |
+| `set_hint` | mutate | Correct how rizin reads an instruction — immediate base, opcode type/size, jump target, return value (`ah*`). |
+| `set_data` | mutate | Mark bytes as a data element/array (`Cd`). |
+| `set_string` | mutate | Mark bytes as a string (`Cs`). |
+| `set_format` | mutate | Overlay a pf struct format on a region (`Cf`). |
+| `analyze` | analyze (exec) | Re-run a rizin analysis pass beyond the baseline `aaa` (preludes, Go/ObjC recovery, pointers, types, emulation, …). |
+| `apply_signatures` | signatures (exec) | Name library functions from FLIRT signatures — the built-in sigdb or a custom `.sig`/`.pat`. |
+| `create_signature` | signatures (exec) | Build a FLIRT signature (`Fc`) from the analyzed functions, to recognize them in other samples. |
+| `rizin_emulate` | emulate (exec) | Emulate code in rizin's RzIL VM — init, step, read/set VM state (no OS process runs). |
 | `rizin_help` | rizin REPL (read) | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
 | `rizin_command` | rizin REPL (exec) | Run one read-only rizin command the dedicated tools don't cover (`pdsf`, `agc`, `px`, `ph entropy`, `/x`, `/R`, `aoe`, …). |
 | `rizin_cli` | rizin CLI (exec) | Run a standalone rizin CLI tool (`rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax`) with its own arguments. |
