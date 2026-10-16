@@ -7,14 +7,12 @@
  * default to a bounded page (DEFAULT_LIMIT, capped at MAX_LIMIT), always say
  * when a view is partial, and spill anything truncated to a session artifact.
  */
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { decompileAt } from "./decompile.ts";
 import { disassembleAt } from "./disasm.ts";
 import { jsonResult, plainResult, prefixedTextResult, textResult, type ReToolResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { addrOf, eaFromOffset, resolveNumericAddr, validateAddr, type RzSession } from "./rizin.ts";
+import { addrOf, eaFromOffset, resolveNumericAddr, resolveRizinTool, validateAddr, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
 export const DEFAULT_LIMIT = 200;
@@ -471,37 +469,23 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		parameters: noParams,
 		...reRenderers({ title: "Hash", body: "text" }),
 		async execute(_id, _params, signal, _onUpdate, ctx) {
+			// Native hashing: rizin's own rz-hash (same distribution, sibling of the
+			// rizin binary) over the file on disk — one invocation, all three algos,
+			// JSON out.
 			const binaryPath = requireBinary(getState(ctx));
-			const digest = await hashFile(binaryPath, signal);
-			return plainResult(`sha256=${digest.sha256}\nsha1=${digest.sha1}\nmd5=${digest.md5}\nsize=${digest.size}`, "0x0");
+			const result = await pi.exec(resolveRizinTool("rz-hash"), ["-a", "sha256,sha1,md5", "-j", binaryPath], { signal });
+			if (result.code !== 0 || result.stdout.trim() === "") {
+				throw new Error(`omp-re: rz-hash failed (exit ${result.code}): ${result.stderr.trim() || "no output"}`);
+			}
+			const parsed = JSON.parse(result.stdout.trim()) as Record<string, { name: string; value: string; to: number }[]>;
+			const rows = Object.values(parsed)[0] ?? [];
+			const byName = new Map(rows.map((row) => [row.name, row]));
+			const sha256 = byName.get("sha256");
+			const sha1 = byName.get("sha1");
+			const md5 = byName.get("md5");
+			if (!sha256 || !sha1 || !md5) throw new Error(`omp-re: rz-hash returned no sha256/sha1/md5 rows: ${result.stdout.trim()}`);
+			return plainResult(`sha256=${sha256.value}\nsha1=${sha1.value}\nmd5=${md5.value}\nsize=${sha256.to}`, "0x0");
 		},
 	});
 }
 
-interface FileDigest {
-	sha256: string;
-	sha1: string;
-	md5: string;
-	size: number;
-}
-
-function hashFile(path: string, signal?: AbortSignal): Promise<FileDigest> {
-	const { promise, resolve, reject } = Promise.withResolvers<FileDigest>();
-	const sha256 = createHash("sha256");
-	const sha1 = createHash("sha1");
-	const md5 = createHash("md5");
-	let size = 0;
-	const stream = createReadStream(path, { signal });
-	stream.on("data", (chunk: string | Buffer) => {
-		const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-		size += bytes.length;
-		sha256.update(bytes);
-		sha1.update(bytes);
-		md5.update(bytes);
-	});
-	stream.on("end", () => {
-		resolve({ sha256: sha256.digest("hex"), sha1: sha1.digest("hex"), md5: md5.digest("hex"), size });
-	});
-	stream.on("error", (err) => reject(new Error(`omp-re: hash_binary: read failed: ${err.message}`)));
-	return promise;
-}

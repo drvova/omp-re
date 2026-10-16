@@ -29,6 +29,12 @@ extension runner, and by installing it with `omp plugin install`.
 
 ### Changed
 
+- `hash_binary` computes its digests natively with rizin's own `rz-hash` (the
+  sibling binary of `rizin` itself, one `-j` invocation for sha256/sha1/md5)
+  instead of reading the file and hashing it in node. The digests are
+  byte-identical to the previous output; the tool no longer reimplements a
+  hasher rizin already ships.
+
 - **Backend: radare2 → rizin.** `R2Session`/`r2.ts` become
   `RzSession`/`rizin.ts`, speaking `rizin -q0` with rizin's dialect (`%v`,
   `echo`, `afvlj`, `afs @`, `aflc`, `fdj`). rizin is required; radare2 is no
