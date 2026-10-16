@@ -283,6 +283,22 @@ describe.skipIf(!canRunRizin)("session state: respawn, replay, and branch sync",
 		const rz = await ensureRizin(ctx);
 		expect((await rz.cmdj<{ name: string }[]>(`afij @ ${fnEa}`))![0]!.name).toBe(fnName);
 	});
+
+	test("a file mapped into the session is recorded and re-mapped on respawn", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "omp-re-map-"));
+		const blob = join(dir, "overlay.bin");
+		writeFileSync(blob, "OVERLAYMAPDATA42"); // 16 bytes
+		const expected = Buffer.from("OVERLAYMAPDATA42").toString("hex");
+		try {
+			entries.push({ type: "custom", id: "map-0", customType: "re.mapfile", data: { path: blob, addr: "0x50000" } });
+			getState(ctx).rz!.close(); // force a respawn; replayMapFiles must re-apply the map
+			const rz = await ensureRizin(ctx);
+			expect((await rz.cmd("p8 16 @ 0x50000")).trim().toLowerCase()).toBe(expected);
+		} finally {
+			entries.splice(entries.findIndex((e) => e.id === "map-0"), 1);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("resolveBinaryPath", () => {

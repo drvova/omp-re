@@ -20,7 +20,8 @@
 import { Context } from "cordis";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
-import { branchEntries, recordedAnalysisPasses, recordedSignatures } from "./entries.ts";
+import { branchEntries, recordedAnalysisPasses, recordedMapFiles, recordedSignatures } from "./entries.ts";
+import { replayMapFiles } from "./mapfiles.ts";
 import { replayAnalysisPasses } from "./passes.ts";
 import { analysisTimeoutMs, assertRizinAvailable, type LoadOptions, raceAbort, RzSession, rizinBitsMismatch, resolveBinaryPath, resolveRizinPath, type SpawnOptions } from "./rizin.ts";
 import { replaySignatures } from "./signatures.ts";
@@ -128,14 +129,16 @@ class RizinBackend {
 		// Rebuild the branch's layered analysis on top of the baseline `aaa`, in
 		// dependency order so each layer can see the one before it, and so switching
 		// binaries never carries one binary's layers onto another:
+		//   0. mapped files bring extra address space into the session,
 		//   1. analysis passes find functions (prelude scan, Go/ObjC recovery, …),
 		//   2. signatures name the functions that now exist,
 		//   3. annotations (renames, types, …) are the analyst's edits on top.
 		const entries = branchEntries(ctx);
+		const mapFailures = await replayMapFiles(rz, recordedMapFiles(entries, binaryPath));
 		const passFailures = await replayAnalysisPasses(rz, recordedAnalysisPasses(entries, binaryPath), analysisTimeoutMs());
 		const signatureFailures = await replaySignatures(rz, recordedSignatures(entries, binaryPath));
 		const live = liveAnnotations(entries, binaryPath);
-		const replayFailures = [...passFailures, ...signatureFailures, ...(await replayAnnotations(rz, live))];
+		const replayFailures = [...mapFailures, ...passFailures, ...signatureFailures, ...(await replayAnnotations(rz, live))];
 
 		const scope = await this.scope(rec);
 		const previous = rec._disposeRz;

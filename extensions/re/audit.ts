@@ -130,10 +130,11 @@ export const RE_EVIDENCE_TOOL_NAMES: Record<string, true> = {
 	rizin_command: true,
 };
 
-/** Session-management tools that are neither analysis (no evidence to record — opening a binary or exporting the session asserts nothing about its contents) nor mutation, but still worth an audit-trail line. */
+/** Session-management tools that are neither analysis (no evidence to record — opening a binary, mapping a file in, or exporting the session asserts nothing about the primary binary's contents) nor mutation, but still worth an audit-trail line. */
 export const RE_SESSION_TOOL_NAMES: Record<string, true> = {
 	open_binary: true,
 	export_project: true,
+	map_file: true,
 };
 
 /** Every RE-suite tool name (read + mutate + triage + rizin REPL + rizin CLI + debugger + emulator + session-setup) — the gate for the audit log, the status band, and `/re off`/`/re on`. `debug` is counted here even though it registers only when enabled, so turning it on never bypasses the log. */

@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { recordedAnalysisPasses, recordedSignatures } from "../extensions/re/entries.ts";
+import { recordedAnalysisPasses, recordedMapFiles, recordedSignatures } from "../extensions/re/entries.ts";
+import { mapFileCommand, validateMapPerm } from "../extensions/re/mapfiles.ts";
 import { ANALYSIS_PASSES, isAnalysisPass } from "../extensions/re/passes.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
 import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
@@ -315,6 +316,36 @@ describe("signatures", () => {
 		expect(recordedSignatures(entries, "/bin/a")).toEqual(["/sigs/one.sig"]);
 		expect(recordedSignatures(entries, "/bin/b")).toEqual(["/sigs/two.sig", "/sigs/three.sig"]);
 		expect(recordedSignatures(entries, "/bin/none")).toEqual([]);
+	});
+
+	test("recordedMapFiles scopes maps to the binary, de-duplicates by path+addr, and keeps order", () => {
+		const entries = [
+			{ type: "custom", id: "b1", customType: "re.binary", data: { path: "/bin/a" } },
+			{ type: "custom", id: "m1", customType: "re.mapfile", data: { path: "/dumps/x.bin", addr: "0x50000" } },
+			{ type: "custom", id: "m2", customType: "re.mapfile", data: { path: "/dumps/x.bin", addr: "0x50000" } }, // dup
+			{ type: "custom", id: "m3", customType: "re.mapfile", data: { path: "/dumps/y.bin", addr: "0x60000", perm: "rx" } },
+			{ type: "custom", id: "b2", customType: "re.binary", data: { path: "/bin/b" } },
+			{ type: "custom", id: "m4", customType: "re.mapfile", data: { path: "/dumps/z.bin", addr: "0x70000" } },
+		] as unknown as Entry[];
+		expect(recordedMapFiles(entries, "/bin/a")).toEqual([
+			{ path: "/dumps/x.bin", addr: "0x50000" },
+			{ path: "/dumps/y.bin", addr: "0x60000", perm: "rx" },
+		]);
+		expect(recordedMapFiles(entries, "/bin/b")).toEqual([{ path: "/dumps/z.bin", addr: "0x70000" }]);
+		expect(recordedMapFiles(entries, "/bin/none")).toEqual([]);
+	});
+});
+
+describe("mapFileCommand", () => {
+	test("builds `o <file> <addr> [perm]` with the path single-quoted and the address/perm validated", () => {
+		expect(mapFileCommand({ path: "/tmp/blob.bin", addr: "0x50000" })).toBe("o '/tmp/blob.bin' 0x50000");
+		expect(mapFileCommand({ path: "/tmp/blob.bin", addr: "0x50000", perm: "rx" })).toBe("o '/tmp/blob.bin' 0x50000 rx");
+		// a path with a space or quote stays inside the single-quoted argument (can't inject a second command)
+		expect(mapFileCommand({ path: "/tmp/a b.bin", addr: "0x1000" })).toBe("o '/tmp/a b.bin' 0x1000");
+		expect(mapFileCommand({ path: "/t/x'; !id", addr: "0x1000" })).toBe("o '/t/x\\'; !id' 0x1000");
+		expect(() => mapFileCommand({ path: "/tmp/x", addr: "0x1000", perm: "bad" })).toThrow("invalid permission");
+		expect(() => mapFileCommand({ path: "/tmp/x", addr: "main;!id" })).toThrow("invalid address");
+		expect(() => validateMapPerm("rwz")).toThrow("invalid permission");
 	});
 });
 

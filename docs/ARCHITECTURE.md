@@ -97,6 +97,7 @@ offer.
 | `tools-rzcli.ts` | `rizin_cli` (the standalone `rz-*` tools) |
 | `tools-debug.ts` | `rizin_debug` (opt-in dynamic analysis) |
 | `tools-project.ts` | `export_project` (save the analysis as a rizin project) |
+| `tools-mapfile.ts` / `mapfiles.ts` | `map_file` (open a file into the session) and its respawn-replay |
 | `tools-triage.ts` | capa / floss / die / yara |
 | `output.ts` | The one confined directory omp-re writes artifacts to (dumps, traces, projects) |
 | `decompile.ts` | Extensible decompiler probe (`OMPRE_DECOMPILER`) |

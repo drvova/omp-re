@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 60.
+40 to 61.
 
 ### Added
 
@@ -100,6 +100,15 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   inside an isolated VM from the host, the open binary serving as the symbol
   source. The pid and URI are validated; `attach` is refused together with
   `run`.
+- **`map_file`** (book: basic_commands/mapping_files). Open an additional file
+  into the current session at a virtual address (`o <file> <addr>`) alongside
+  the primary binary — overlay a dumped/unpacked region over the packed image,
+  or map a library for cross-module analysis. The file is mapped read-only
+  (`o`, never `o+`, so it is never written on disk), and the map is recorded as
+  a `re.mapfile` entry re-applied on every resume/respawn before the analysis
+  passes (so they see the mapped region), like analysis passes and signatures.
+  Not an undoable annotation: reopen the binary to drop it. The dominant
+  "analyze a dump" workflow stays with `open_binary` + load options.
 - **`get_graph`** (book: analysis/graphs). Rizin's analysis graphs as JSON: a
   function's control-flow graph (`agf`), the callgraph from a function (`agc`),
   the cross-reference graph around an address (`agx`), or the program's import

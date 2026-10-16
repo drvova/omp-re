@@ -42,6 +42,14 @@ read-only and none of these tools ever writes back to the sample on disk.
 The annotations themselves are recorded in the omp session and replayed into
 rizin when the session is resumed.
 
+`map_file` opens a *second* file into the session (`o <file> <addr>`, book:
+basic_commands/mapping_files) — a dump, a library, a blob to analyze alongside
+the primary binary. Reading a file the model names is the same trust boundary
+as `open_binary` (which opens the sample itself); the path is realpath-checked
+for readability and single-quoted so it cannot inject a command. It is opened
+with `o`, never `o+`, so the mapped file stays read-only on disk — mapping
+never writes it.
+
 The sample is never written. The only file omp-re itself emits is a memory
 dump from the debugger (`rizin_debug`'s `dump_memory`, for extracting an
 unpacked or decrypted region too large to return inline). It goes to a single

@@ -90,3 +90,28 @@ export function recordedAnalysisPasses(entries: readonly SessionEntry[], binaryP
 	}
 	return passes;
 }
+
+/**
+ * The files mapped into the session (`map_file`) against `binaryPath` on this
+ * branch, de-duplicated by path+address and in first-map order, so a resume
+ * re-maps them. Scoped to the binary like signatures and annotations.
+ */
+export function recordedMapFiles(entries: readonly SessionEntry[], binaryPath: string): { path: string; addr: string; perm?: string }[] {
+	const maps: { path: string; addr: string; perm?: string }[] = [];
+	let current: string | undefined;
+	for (const entry of entries) {
+		if (entry.type !== "custom") continue;
+		if (entry.customType === "re.binary") {
+			const path = (entry.data as { path?: unknown } | undefined)?.path;
+			current = typeof path === "string" ? path : undefined;
+			continue;
+		}
+		if (entry.customType === "re.mapfile" && current === binaryPath) {
+			const data = entry.data as { path?: unknown; addr?: unknown; perm?: unknown } | undefined;
+			if (typeof data?.path === "string" && typeof data.addr === "string" && !maps.some((m) => m.path === data.path && m.addr === data.addr)) {
+				maps.push({ path: data.path, addr: data.addr, ...(typeof data.perm === "string" ? { perm: data.perm } : {}) });
+			}
+		}
+	}
+	return maps;
+}
