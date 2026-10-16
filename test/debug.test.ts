@@ -6,6 +6,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DEBUG_LAUNCH_WARNING, buildRunDirectives, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
+import { registerEmulateTools } from "../extensions/re/tools-emulate.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -80,6 +81,55 @@ describe("buildRunDirectives (no rizin needed)", () => {
 			expect(() => buildRunDirectives(run)).toThrow(/omp-re: debug: run/);
 		}
 	});
+});
+
+
+describe.skipIf(!canRunRizin)("emulate tool against a real rizin session", () => {
+	const harness = makeHarness("emulate-test-session");
+	const { ctx } = harness;
+	const run = (action: string, extra: Record<string, unknown> = {}) =>
+		harness.tool("rizin_emulate").execute("t-emulate", { action, ...extra }, undefined, undefined, ctx);
+
+	beforeAll(() => {
+		getState(ctx).binaryPath = TEST_BINARY;
+		registerEmulateTools(harness.pi);
+	});
+	afterAll(() => shutdownState(ctx.sessionManager.getSessionId()));
+
+	test("stepping actions are exec-tier and call the interpretation out", () => {
+		const approval = harness.tool("rizin_emulate").approval as (a: unknown) => { tier: string; reason: string };
+		expect(approval({ action: "step" })).toEqual({ tier: "exec", reason: expect.stringContaining("interpreted") });
+		expect(approval({ action: "vars" }).reason).toContain("Read the RzIL VM state");
+	});
+
+	test("init at entry0, set a VM variable, step, and watch the VM advance", async () => {
+		// Build-agnostic: the suite's rizin may be the 32-bit build (maps at
+		// 0x425ff0, names the stack pointer esp), or the 64-bit one — so assert
+		// on PC numerically and never on register names or padding.
+		const initVars = JSON.parse(textOf(await run("init", { addr: "entry0" })).replace(/^emulate: VM initialized at .+\n/, ""));
+		const pc0 = parseInt(String(initVars.PC), 16);
+		expect(pc0).toBeGreaterThan(0);
+		await run("set_var", { name: "PC", value: `0x${(pc0 + 0x10).toString(16)}` });
+		const afterSet = JSON.parse(textOf(await run("vars")).replace(/^emulate: vars\n/, ""));
+		expect(parseInt(String(afterSet.PC), 16)).toBe(pc0 + 0x10);
+		const stepped = textOf(await run("step", { count: 2 }));
+		expect(stepped).toContain("pc_write");
+		const vars = JSON.parse(textOf(await run("vars")).replace(/^emulate: vars\n/, ""));
+		expect(parseInt(String(vars.PC), 16)).not.toBe(pc0 + 0x10);
+	}, 30_000);
+
+	test("step_until reaches a step-discovered PC (base-free)", async () => {
+		// Learn where one instruction lands, reset, then run step_until to that
+		// same PC — self-consistent regardless of the image base the session maps.
+		await run("init", { addr: "entry0" });
+		const changes = JSON.parse(textOf(await run("step", { count: 1 })).replace(/^emulate: step 1\n/, ""));
+		const pcWrites = changes.filter((c: { type?: string }) => c.type === "pc_write");
+		expect(pcWrites.length).toBeGreaterThan(0);
+		const target = String(pcWrites[pcWrites.length - 1].new);
+		await run("init", { addr: "entry0" });
+		const vars = JSON.parse(textOf(await run("step_until", { addr: target })).replace(/^emulate: step_until .+\n/, ""));
+		expect(parseInt(String(vars.PC), 16)).toBe(parseInt(target, 16));
+	}, 30_000);
 });
 
 describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {

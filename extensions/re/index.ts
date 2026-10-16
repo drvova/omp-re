@@ -16,6 +16,7 @@ import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catal
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
+import { registerEmulateTools } from "./tools-emulate.ts";
 import { branchEntries, lastRecordedBinaryPath } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
@@ -399,6 +400,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:rizin-cli", apply: registerRzCliTools },
 		{ name: "re:triage-tools", apply: registerTriageTools },
 		{ name: "re:debugger", apply: registerDebugTools },
+		{ name: "re:emulator", apply: registerEmulateTools },
 		{ name: "re:evidence", apply: registerEvidenceStore },
 		{ name: "re:audit", apply: registerAuditLog },
 		{ name: "re:preserve", apply: registerPreservation },
