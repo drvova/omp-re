@@ -40,6 +40,15 @@ const DEBUG_ACTIONS = [
 	"break_remove",
 	"break_list",
 	"backtrace",
+	"maps",
+	"modules",
+	"libraries",
+	"sections",
+	"processes",
+	"threads",
+	"fds",
+	"signals",
+	"windows",
 	"stop",
 ] as const;
 type DebugAction = (typeof DEBUG_ACTIONS)[number];
@@ -85,7 +94,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		name: "rizin_debug",
 		label: "debugger",
 		description:
-			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints, continue, single-step, read registers and memory, backtrace. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
+			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints, continue, single-step, read registers and memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, and windows. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
 		approval: (args) => {
 			const action = (args && typeof args === "object" ? (args as { action?: unknown }).action : undefined) as DebugAction | undefined;
 			return { tier: "exec", reason: action ? approvalReason(action) : "Drive the debugged process." };
@@ -179,6 +188,44 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				case "backtrace": {
 					const bt = (await dbg.cmd("dbtj", { signal })).trim();
 					return textResult("debug: backtrace", bt || "(no backtrace)", { ctx, tool: "rizin_debug" });
+				}
+				// Inspection actions from the book's debugger chapters — each one
+				// read-only command, no parameters, JSON where rizin offers it.
+				case "maps": {
+					const out = (await dbg.cmd("dmj", { signal })).trim();
+					return textResult("debug: maps", out || "(no maps)", { ctx, tool: "rizin_debug" });
+				}
+				case "modules": {
+					const out = (await dbg.cmd("dmmj", { signal })).trim();
+					return textResult("debug: modules", out || "(no modules — continue past the loader to see them)", { ctx, tool: "rizin_debug" });
+				}
+				case "libraries": {
+					const out = (await dbg.cmd("dmij", { signal })).trim();
+					return textResult("debug: libraries", out || "(no libraries)", { ctx, tool: "rizin_debug" });
+				}
+				case "sections": {
+					const out = (await dbg.cmd("dmSj", { signal })).trim();
+					return textResult("debug: sections", out || "(no sections)", { ctx, tool: "rizin_debug" });
+				}
+				case "processes": {
+					const out = (await dbg.cmd("dpj", { signal })).trim();
+					return textResult("debug: processes", out || "(no processes)", { ctx, tool: "rizin_debug" });
+				}
+				case "threads": {
+					const out = (await dbg.cmd("dpTj", { signal })).trim();
+					return textResult("debug: threads", out || "(no threads)", { ctx, tool: "rizin_debug" });
+				}
+				case "fds": {
+					const out = (await dbg.cmd("ddlj", { signal })).trim();
+					return textResult("debug: fds", out || "(no file descriptors)", { ctx, tool: "rizin_debug" });
+				}
+				case "signals": {
+					const out = (await dbg.cmd("dklj", { signal })).trim();
+					return textResult("debug: signals", out || "(no signal info)", { ctx, tool: "rizin_debug" });
+				}
+				case "windows": {
+					const out = (await dbg.cmd("dW", { signal })).trim();
+					return textResult("debug: windows", out || "(no windows)", { ctx, tool: "rizin_debug" });
 				}
 				default:
 					throw new Error(`omp-re: debug: unknown action ${JSON.stringify(params.action)}`);
