@@ -116,6 +116,18 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 	});
 
 	describe("set_comment", () => {
+		// rizin auto-annotates certain offsets with a `CCu` comment (a section
+		// start shows up in CClj as e.g. "[00] -r-x section size N named .text").
+		// On the Windows fixture `main` sits exactly on the `.text` start, so
+		// `CC. @ main` is non-empty before we touch it — the comment history
+		// bottoms out at that baseline, not at "". Capture it and assert undo
+		// restores to the baseline (which is "" on a fixture whose main carries
+		// no pre-existing comment, so this is unchanged there).
+		let baselineComment: string;
+		beforeAll(async () => {
+			baselineComment = (await rz.cmd(`CC. @ ${mainEa}`)).trim();
+		});
+
 		test("replaces rather than appends, independently verified via CC.", async () => {
 			await run("set_comment", { addr: mainEa, text: "first" });
 			await run("set_comment", { addr: mainEa, text: "second" });
@@ -141,7 +153,7 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 			await undoLastAnnotation(pi, ctx);
 			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("first");
 			await undoLastAnnotation(pi, ctx);
-			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("");
+			expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe(baselineComment);
 		});
 	});
 
