@@ -84,6 +84,28 @@ extension runner, and by installing it with `omp plugin install`.
 
 ### Added (using all of rizin)
 
+- **Byte search** (`search_bytes`, `search_string`, `search_regex_bytes`):
+  raw-byte search via `/xj` and `/xrj` — hex patterns with `..` nibble-mask
+  wildcards, literal strings (hex-encoded client-side so one row shape covers
+  all modes), and byte regexes; paginated `{ea, size, flag}` rows.
+- **Types** (`list_types`, `define_types`, `cast_memory`): rizin's type
+  database via `tsj`/`tej`/`ttj`/`tfj` (name-filtered, paginated — includes
+  the built-in Windows type base), C definitions via `td` (one statement per
+  entry, rizin's errors surfaced verbatim), and `tp` memory casting.
+- **Syscalls** (`list_syscalls`, `syscall_lookup`): the active syscall
+  profile via `aslj` (on a PE binary, the Windows Nt* interface), and single
+  syscall resolution by name (`asn`) or number (`asr`).
+- **Binary info** (`get_binary_info`, `list_entrypoints`,
+  `list_relocations`, `list_flags`, `list_classes`): `iIj` identity object,
+  `iej` entry points, `irj` relocations, `flj` flags (filtered), and `icj`
+  classes (C++ RTTI / ObjC / Swift metadata).
+- Verified live against rizin 0.9.1 on Windows. Two rizin surfaces exist in
+  the book but not in this build and are deliberately not wrapped: the `z`
+  zignature family (the command is absent from the 0.9.1 Windows release)
+  and ESIL emulation (`ae*`, deprecated upstream in 0.9.x and non-functional
+  through the persistent-session transport); both return as tools when the
+  build supports them.
+
 - `rizin_cli`: one `exec`-tier tool fronting rizin's standalone command-line
   programs with their own arguments — `rz-bin` (headers/imports/strings
   without full analysis), `rz-diff` (compare two binaries), `rz-hash`
