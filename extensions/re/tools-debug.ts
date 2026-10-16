@@ -19,7 +19,7 @@ import { writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { checkDebugOnHitCommand, loadCatalog } from "./catalog.ts";
 import { plainResult, textResult } from "./format.ts";
-import { outputSubdir, prepareOutputPath, rizinPathArg } from "./output.ts";
+import { outputSubdir, prepareOutputPath } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { debugTimeoutMs, rizinBitsMismatch, rzQuote, validateAddr, type RzSession } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
@@ -470,7 +470,11 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					// `dtst <dir>` writes the trace session (registers/memory/checkpoints/session sdbs) into a directory.
 					const name = params.file !== undefined ? params.file : `trace_${Date.now()}`;
 					const dir = await outputSubdir(name, true); // validates the basename and makes the dir, before touching rizin
-					const { stderr } = await dbg.cmdWithStderr(`dtst ${rizinPathArg(dir)}`, { signal });
+					// Quote the NATIVE path (not forward-slashed): `dtst` runs rizin's
+					// rz_sys_mkdirp, which on Windows chokes on a forward-slash drive
+					// prefix (`mkdirp fail 'C:'` on `C:/...`) but handles the native
+					// `C:\...` drive root. Quoting keeps the `~` 8.3 short-name literal.
+					const { stderr } = await dbg.cmdWithStderr(`dtst ${rzQuote(dir)}`, { signal });
 					if (stderr.trim()) throw new Error(`omp-re: debug trace_save: ${stderr.trim()}`);
 					return textResult(`debug: trace_save ${name}`, `wrote the trace session to ${dir}\nRestore it later with trace_load file=${JSON.stringify(name)}.`, { ctx, tool: "rizin_debug" });
 				}
@@ -478,7 +482,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					if (params.file === undefined) throw new Error("omp-re: debug trace_load needs file (a trace directory from a prior trace_save)");
 					const dir = await outputSubdir(params.file, false);
 					if (!existsSync(dir)) throw new Error(`omp-re: debug trace_load: no saved trace at ${dir} (save one first with trace_save)`);
-					const { stderr } = await dbg.cmdWithStderr(`dtsf ${rizinPathArg(dir)}`, { signal });
+					const { stderr } = await dbg.cmdWithStderr(`dtsf ${rzQuote(dir)}`, { signal });
 					if (stderr.trim()) throw new Error(`omp-re: debug trace_load: ${stderr.trim()}`);
 					return textResult(`debug: trace_load ${params.file}`, `loaded the trace session from ${dir}\nStep backward with step_back / continue_back.`, { ctx, tool: "rizin_debug" });
 				}
