@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 48.
+40 to 49.
 
 ### Added
 
@@ -26,10 +26,13 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   instead of being autodetected as the build default. The settings are
   validated, persisted in the `re.binary` entry, and reused on every respawn
   and resume; an explicit `bits` also steers 32/64 build selection.
-- **Three analysis-edit mutate tools**, each with the resolve → write →
+- **Four analysis-edit mutate tools**, each with the resolve → write →
   read-back → verify contract, `/re undo`, and replay: `define_function`
   (`af` where auto-analysis missed one), `set_calling_convention` (`afc`,
-  which corrects argument recovery), and `set_flag` (`f`, naming an address).
+  which corrects argument recovery), `set_flag` (`f`, naming an address), and
+  `set_arch_hint` (`aha`/`ahb`, to disassemble a region as a different
+  architecture or word size — ARM/Thumb switches, mixed-arch firmware; book:
+  analysis/cpu_platform_profiles).
 - **FLIRT signatures.** `apply_signatures` re-applies rizin's built-in sigdb
   (`Fa`) or applies a custom `.sig`/`.pat` file (`Fs`); a custom-file
   application is recorded and re-applied on resume/respawn. `rizin_command`

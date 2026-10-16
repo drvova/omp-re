@@ -25,7 +25,8 @@ export type AnnotationKind =
 	| "set_variable_type"
 	| "define_function"
 	| "set_calling_convention"
-	| "set_flag";
+	| "set_flag"
+	| "set_arch_hint";
 
 export interface AnnotationData {
 	kind: string;
@@ -74,9 +75,27 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 		case "set_flag":
 			// The flag at `ea` is named `to` (was `from`): drop the old name, add the new. Either side may be "" (no flag).
 			return [...(from === "" ? [] : [`f- ${validateIdent("flag", from)}`]), ...(to === "" ? [] : [`f ${validateIdent("flag", to)} ${at}`])];
+		case "set_arch_hint":
+			// `to` encodes the arch/bits hint at `ea` as `arch=<a>` and/or `bits=<n>` joined by `;`; "" means no hint (undo deletes both).
+			return to === "" ? [`aha- ${at}`, `ahb- ${at}`] : archHintCommands(to, at);
 		default:
 			throw new Error(`omp-re: unknown annotation kind: ${kind}`);
 	}
+}
+
+/** Build the `aha <arch>` / `ahb <bits>` commands from an encoded arch-hint value (`arch=arm;bits=16`). Each part is validated so a malformed hint fails here, not at rizin. */
+export function archHintCommands(encoded: string, at: string): string[] {
+	const cmds: string[] = [];
+	for (const part of encoded.split(";")) {
+		const [key, value] = part.split("=", 2);
+		if (key === "arch") cmds.push(`aha ${validateIdent("arch", value ?? "")} ${at}`);
+		else if (key === "bits") {
+			if (!/^(8|16|32|64)$/.test(value ?? "")) throw new Error(`omp-re: invalid arch hint bits: ${JSON.stringify(value)} — one of 8, 16, 32, 64`);
+			cmds.push(`ahb ${value} ${at}`);
+		} else throw new Error(`omp-re: invalid arch hint ${JSON.stringify(part)} — use arch=<name> and/or bits=<n>`);
+	}
+	if (cmds.length === 0) throw new Error("omp-re: set_arch_hint needs arch and/or bits");
+	return cmds;
 }
 
 /**

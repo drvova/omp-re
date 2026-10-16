@@ -180,6 +180,15 @@ describe("annotationCommands", () => {
 		expect(() => annotationCommands("set_flag", "0x61000", "bad name", "")).toThrow("omp-re: invalid flag");
 	});
 
+	test("set_arch_hint builds aha/ahb from the encoded value, and undo deletes both", () => {
+		expect(annotationCommands("set_arch_hint", "0x1000", "arch=arm;bits=16", "")).toEqual(["aha arm @ 0x1000", "ahb 16 @ 0x1000"]);
+		expect(annotationCommands("set_arch_hint", "0x1000", "bits=32", "")).toEqual(["ahb 32 @ 0x1000"]);
+		expect(annotationCommands("set_arch_hint", "0x1000", "arch=mips", "")).toEqual(["aha mips @ 0x1000"]);
+		expect(annotationCommands("set_arch_hint", "0x1000", "", "arch=arm;bits=16")).toEqual(["aha- @ 0x1000", "ahb- @ 0x1000"]);
+		expect(() => annotationCommands("set_arch_hint", "0x1000", "bits=7", "")).toThrow("invalid arch hint bits");
+		expect(() => annotationCommands("set_arch_hint", "0x1000", "flavor=spicy", "")).toThrow("invalid arch hint");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");

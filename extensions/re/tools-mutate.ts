@@ -70,6 +70,12 @@ async function flagAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<
 	return flag && typeof flag.name === "string" ? flag.name : "";
 }
 
+/** The arch/bits hint at `ea`, or undefined when none (`ahl.j` prints `[{addr,arch?,bits?}]` for the hints there). */
+async function archHintAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<{ arch?: string; bits?: number } | undefined> {
+	const hints = await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`, { signal });
+	return Array.isArray(hints) && hints.length > 0 ? hints[0] : undefined;
+}
+
 /** Tolerate only rizin's own cosmetic re-punctuation (spacing, trailing `;`) when comparing signatures/types — never a semantic difference. */
 function normalizeCType(value: string): string {
 	return value.trim().replace(/;+\s*$/, "").replace(/\s+/g, "");
@@ -128,6 +134,11 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 	const setFlagParams = z.object({
 		addr: z.string().describe("Address (or name/expression) to label."),
 		name: z.string().describe("Flag name (identifier characters, dots allowed), e.g. `str.banner` or `decrypt_key`."),
+	});
+	const setArchHintParams = z.object({
+		addr: z.string().describe("Address (or name/expression) where the hint applies."),
+		arch: z.string().optional().describe("Architecture to disassemble as from here, e.g. `arm`, `x86` (sets an `aha` hint)."),
+		bits: z.union([z.literal(8), z.literal(16), z.literal(32), z.literal(64)]).optional().describe("Word size from here, e.g. 16 for ARM Thumb (sets an `ahb` hint)."),
 	});
 
 	pi.registerTool({
@@ -351,6 +362,38 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			const data = { kind: "set_flag", ea, oldValue, newValue: name };
 			recordAnnotation(pi, ctx, data);
 			return mutateResult("set_flag", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_arch_hint",
+		label: "Set Arch Hint",
+		description:
+			"Hint the architecture and/or word size to disassemble from an address, for a region that differs from the file's default — most often ARM/Thumb switches (bits 16) or mixed-arch firmware. Sets `aha`/`ahb`, verifies the hint landed, and is reversible with /re undo (which deletes it).",
+		approval: (args) => ({ tier: "write", reason: `Hint arch/bits at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setArchHintParams,
+		...reRenderers({ title: "Arch hint", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			if (params.arch === undefined && params.bits === undefined) throw new Error("omp-re: set_arch_hint needs arch and/or bits");
+			const rz = await ensureRizin(ctx, { signal });
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const parts: string[] = [];
+			if (params.arch !== undefined) parts.push(`arch=${validateIdent("arch", params.arch)}`);
+			if (params.bits !== undefined) parts.push(`bits=${params.bits}`);
+			const encoded = parts.join(";");
+
+			await apply(rz, annotationCommands("set_arch_hint", ea, encoded, ""), signal);
+
+			const landed = await archHintAt(rz, ea, signal);
+			const archOk = params.arch === undefined || landed?.arch === params.arch;
+			const bitsOk = params.bits === undefined || landed?.bits === params.bits;
+			if (!landed || !archOk || !bitsOk) {
+				throw new Error(`omp-re: set_arch_hint: mutation did not land: expected ${JSON.stringify(encoded)}, rizin has ${JSON.stringify(landed ?? null)}`);
+			}
+			const data = { kind: "set_arch_hint", ea, oldValue: "", newValue: encoded };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_arch_hint", data);
 		},
 	});
 }

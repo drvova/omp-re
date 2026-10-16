@@ -60,10 +60,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 	});
 
 	test("every mutate tool declares write approval with a per-call reason", () => {
-		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag"]) {
+		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag", "set_arch_hint"]) {
 			const approval = harness.tool(name).approval as (args: unknown) => { tier: string; reason?: string };
 			expect(typeof approval).toBe("function");
-			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl" });
+			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl", arch: "arm", bits: 16 });
 			expect(decision.tier).toBe("write");
 			expect(decision.reason).toContain("main");
 		}
@@ -261,6 +261,17 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 
 		await undoLastAnnotation(pi, ctx);
 		expect(await flagName(freeEa)).toBe(old);
+	});
+
+	test("set_arch_hint sets an arch/bits hint (Thumb), independently verified, and /re undo removes it", async () => {
+		const hintAt = async (ea: string): Promise<{ arch?: string; bits?: number } | undefined> => (await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`))?.[0];
+		expect(await hintAt(mainEa)).toBeUndefined();
+		const result = await run("set_arch_hint", { addr: "main", arch: "arm", bits: 16 });
+		expect(textOf(result)).toBe(`set_arch_hint: "" -> "arch=arm;bits=16" @ ${mainEa}`);
+		expect(await hintAt(mainEa)).toMatchObject({ arch: "arm", bits: 16 });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await hintAt(mainEa)).toBeUndefined();
 	});
 
 	test("define_function creates a function where rizin missed one, and /re undo removes it", async () => {

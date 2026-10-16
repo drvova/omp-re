@@ -71,6 +71,7 @@ export const RE_MUTATE_TOOL_NAMES: Record<string, true> = {
 	define_function: true,
 	set_calling_convention: true,
 	set_flag: true,
+	set_arch_hint: true,
 };
 
 /** The 4 exec-tier triage tools (tools-triage.ts). */

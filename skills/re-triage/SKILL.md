@@ -111,8 +111,9 @@ its context.
 
 `rename_function`, `rename_variable`, `set_comment`, `set_prototype`,
 `set_variable_type`, `define_function` (for a function rizin missed),
-`set_calling_convention` (to fix argument recovery), and `set_flag` (to name
-an address) write back into the rizin session and record annotations. Each
+`set_calling_convention` (to fix argument recovery), `set_flag` (to name
+an address), and `set_arch_hint` (to disassemble a region as a different
+arch/word size, e.g. ARM Thumb) write back into the rizin session and record annotations. Each
 verifies its own read-back and reports what rizin actually stored. `/re undo`
 reverts the last one. Annotations are re-applied automatically when the
 session is resumed or rizin restarts. `apply_signatures` names library
