@@ -8,10 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 53.
+40 to 54.
 
 ### Added
 
+- **`deobfuscate`.** Reveal obfuscated bytes in place — xor/add/sub/or/and
+  with a key, an endian swap, or a cipher `decrypt` (RC4/AES via rizin's
+  `woD`) over a window, shown as hex and string. The transform runs under
+  rizin's write cache and is reset immediately, so the file on disk is never
+  modified (consistent with "mutations never touch the file"). Read-tier and
+  recorded as evidence — the single highest-payoff capability for unmasking
+  xor-hidden strings and embedded configs (book: basic_commands/write).
 - **`list_symbols`.** The full symbol table (`is`) — local/internal functions
   and data symbols with name/type/bind/size/address, filterable by name — the
   read-tier companion to `list_imports`/`list_exports` it was missing.

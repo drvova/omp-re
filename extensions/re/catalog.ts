@@ -129,6 +129,10 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 "irj",
 "flj",
 "icj",
+// deobfuscate tool: block transforms + decrypt under the write cache
+"wox",
+"woD",
+"wc-",
 ];
 
 export function missingRequiredCommands(catalog: RzCatalog): string[] {

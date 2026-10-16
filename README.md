@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![53 tools](https://img.shields.io/badge/tools-53-informational)
+![54 tools](https://img.shields.io/badge/tools-54-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 53 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 54 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -164,6 +164,12 @@ signatures: `aaa` applies rizin's built-in database on open, and this
 re-applies it or applies a custom `.sig`/`.pat` file you provide (re-applied
 automatically on resume). `rizin_command Flt` lists the built-in database.
 
+`deobfuscate` reveals hidden bytes in place: xor/add/sub a window with a key,
+swap endianness, or decrypt it with a named cipher (RC4, AES) — shown as hex
+and as a string, so an xor-masked URL or an embedded config becomes readable.
+The transform runs under rizin's write cache and is reset immediately, so the
+file on disk is never modified.
+
 `open_binary` runs rizin's baseline analysis (`aaa`); `analyze` re-runs the
 deeper passes it skips — prelude scans that recover functions in stripped
 binaries, Go and Objective-C recovery, pointer analysis, recursive type
@@ -253,7 +259,7 @@ blocked, and the IOC is defanged even in the error message:
 
 ## Tool reference
 
-All 53 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 54 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
 may legitimately show fewer than 32.
@@ -329,7 +335,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the cordis context graph: process effects and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 53 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 54 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

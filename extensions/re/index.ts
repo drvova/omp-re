@@ -17,6 +17,7 @@ import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { registerAnalyzeTools } from "./tools-analyze.ts";
+import { registerDeobfuscateTools } from "./tools-deobfuscate.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
 import { registerSignatureTools } from "./tools-signatures.ts";
 import { branchEntries, lastRecordedBinaryPath, lastRecordedLoadOptions } from "./entries.ts";
@@ -423,6 +424,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:read-tools", apply: registerReadTools },
 		{ name: "re:info-tools", apply: registerInfoTools },
 		{ name: "re:search-tools", apply: registerSearchTools },
+		{ name: "re:deobfuscate", apply: registerDeobfuscateTools },
 		{ name: "re:type-tools", apply: registerTypeTools },
 		{ name: "re:syscall-tools", apply: registerSyscallTools },
 		{ name: "re:mutate-tools", apply: registerMutateTools },

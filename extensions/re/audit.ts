@@ -60,6 +60,8 @@ export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	list_relocations: true,
 	list_flags: true,
 	list_classes: true,
+	// tools-deobfuscate.ts
+	deobfuscate: true,
 };
 
 /** The 5 write-tier annotation tools (tools-mutate.ts). */
