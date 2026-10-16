@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { outputDir, prepareOutputPath, safeBasename } from "../extensions/re/output.ts";
+import { outputDir, prepareOutputPath, safeBasename, toRizinPath } from "../extensions/re/output.ts";
 
 describe("safeBasename", () => {
 	test("accepts bare names of safe characters", () => {
@@ -15,6 +15,15 @@ describe("safeBasename", () => {
 		for (const bad of ["../etc/passwd", "a/b", "a\\b", "/abs", "..", ".", "", "  ", "na me", "a;b", "`id`"]) {
 			expect(() => safeBasename(bad)).toThrow(/invalid output filename/);
 		}
+	});
+});
+
+describe("toRizinPath", () => {
+	test("normalizes Windows separators to the forward slashes rizin accepts, and leaves POSIX paths alone", () => {
+		expect(toRizinPath("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\omp-re-out\\a.rzdb")).toBe("C:/Users/runneradmin/AppData/Local/Temp/omp-re-out/a.rzdb");
+		expect(toRizinPath("/tmp/omp-re-out/a.rzdb")).toBe("/tmp/omp-re-out/a.rzdb");
+		// A drive-colon path is what reaches rizin on Windows; it must survive normalization as safe characters only.
+		expect(/^[A-Za-z0-9_.:/-]+$/.test(toRizinPath("C:\\Temp\\omp-re-out\\dump.bin"))).toBe(true);
 	});
 });
 

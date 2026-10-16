@@ -4,7 +4,7 @@
  * artifact store, so tool definitions can be executed exactly as omp would
  * call them: execute(toolCallId, params, signal, onUpdate, ctx).
  */
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 // The schema builder omp 18 injects as `pi.zod` (see pi-coding-agent extensions/loader.ts).
 import * as zod from "@oh-my-pi/omptype/zod";
@@ -30,6 +30,21 @@ export function logSkip(suite: string): void {
 		...(binaryAvailable ? [] : [`test binary not found at ${TEST_BINARY} (set OMPRE_TEST_BINARY)`]),
 	];
 	console.log(`omp-re: skipping ${suite} — ${reasons.join("; ")}`);
+}
+
+/**
+ * Remove a temp dir recursively, tolerating the Windows lag between killing a
+ * rizin child that held a file open and the OS releasing the handle — until
+ * then `rm` throws EBUSY. Node's own maxRetries/retryDelay back-off covers it;
+ * on POSIX there is nothing to retry. It is only teardown, so a residual
+ * failure is swallowed rather than failing an otherwise-green test.
+ */
+export function rmDirSafe(dir: string): void {
+	try {
+		rmSync(dir, { recursive: true, force: true, maxRetries: 15, retryDelay: 100 });
+	} catch {
+		// A temp dir the OS will reclaim; never worth failing a green run over.
+	}
 }
 
 export interface StubEntry {

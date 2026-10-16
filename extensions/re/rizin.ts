@@ -277,7 +277,10 @@ export class RzSession {
 		if (!this.pending) return;
 		const nul = this.buf.indexOf(0x00);
 		if (nul === -1) return;
-		const frame = this.buf.subarray(0, nul).toString("utf8");
+		// rizin on Windows terminates output lines with CRLF; normalize to LF so
+		// parsers and exact/anchored assertions see the same bytes as on POSIX
+		// (the frame delimiter is the NUL, never the line ending).
+		const frame = this.buf.subarray(0, nul).toString("utf8").replace(/\r\n/g, "\n");
 		this.buf = this.buf.subarray(nul + 1);
 		const { resolve } = this.pending;
 		this.pending = null;

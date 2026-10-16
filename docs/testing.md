@@ -56,7 +56,19 @@ paths were run for the 0.2.0 release.
 The debugger suite (`debug.test.ts`) sets `OMPRE_ENABLE_DEBUGGER` itself and
 **executes the fixture** under rizin's debugger; it needs a host where
 `ptrace` is permitted (most Linux, and containers started with it allowed).
-Its enable-gate tests run everywhere.
+Its enable-gate tests run everywhere. Two environment constraints the cross-OS
+matrix surfaced:
+
+- **macOS**: rizin's debugger can't get `task_for_pid` on a hosted runner (no
+  codesigned/entitled rizin, no root), so the live-debug blocks would hang on
+  each command until timeout. They are **gated off on macOS** (`process.platform
+  === "darwin"`); set `OMPRE_FORCE_DEBUGGER=1` to force them on a host with a
+  codesigned rizin. The emulation suite (RzIL VM, no `ptrace`) still runs.
+- **Linux**: the attach-by-PID test attaches to a process that is not a child
+  of rizin, which `kernel.yama.ptrace_scope=1` (the hosted-runner default)
+  forbids. The cross-OS workflow sets `ptrace_scope=0` on the Linux leg so it
+  runs for real; on a locked-down box without that, only that one test can't
+  attach.
 
 Expected shape with rizin present: **184 pass, 0 fail, 0 skip**. Without
 rizin: **102 pass, 98 skip, 0 fail** (200 reported — bun counts skipped
@@ -136,13 +148,28 @@ is still read from rizin at runtime. The debugger suite self-enables
 would break `extension-sdk.test.ts`'s default-off assertion). Never add a
 malware sample — the fixture is built on the runner.
 
-The workflow is authored on Linux and validated there (Linux leg mirrors the
-local run); its Windows/macOS legs are validated on the **first dispatch**.
-Known first-run tweak points, commented in the file: the per-OS rizin install,
-`clang` producing a runnable PE on Windows, and macOS debugging a self-built
-binary (rizin's debugger may need `sudo` or a codesigned rizin for
-`task_for_pid` — if only the macOS `debug.test.ts` launch tests fail, that is
-the cause).
+The workflow was authored on Linux; its Windows/macOS legs were validated on the
+**first dispatch**, which confirmed the install/build scaffolding works on all
+three (the per-OS rizin install, `rizin -v` resolving its DLLs on Windows, and
+`clang` producing a runnable PE) and surfaced three real cross-OS issues, all
+fixed:
+
+- **Windows output paths**: the confined-output logic (`output.ts`) hardcoded a
+  `/` separator and rejected the drive-letter colon, so every file-emitting
+  capability (dump_memory, trace save/load, export_project, create_signature)
+  threw on Windows. Fixed to use `path.sep` and normalize rizin-facing paths to
+  forward slashes (`toRizinPath`).
+- **Windows line endings**: rizin and the `rz-*` tools emit CRLF on Windows; the
+  pipe transport (`rizin.ts`) and `rizin_cli` now normalize `\r\n` → `\n` so
+  parsers and exact assertions see the same bytes as on POSIX.
+- **Windows test teardown**: a temp dir can't be `rm`'d while the rizin child
+  still holds a file open (EBUSY), so cleanups use `rmDirSafe` (Node's
+  `maxRetries`/`retryDelay` back-off, a no-op on POSIX).
+
+Known residual: one Windows case (`set_comment` → `/re undo` → final clear) read
+back a stale section line instead of an empty comment — a suspected
+Windows-pipe-timing desync that doesn't reproduce off Windows; left to confirm
+on the next dispatch.
 
 ## Loading the extension through omp itself
 

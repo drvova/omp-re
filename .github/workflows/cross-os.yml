@@ -14,15 +14,25 @@ name: Cross-OS
 #      uses the portable static tarball, macOS uses Homebrew, Windows the
 #      release zip);
 #   2. clang producing a runnable PE on windows-latest;
-#   3. macOS debugging a self-built binary — rizin's debugger may need `sudo`
-#      or a codesigned rizin for task_for_pid; if the debug.test.ts launch
-#      tests fail only on macOS, that is the cause (see docs/testing.md).
+#   3. macOS debugging a self-built binary — the first run confirmed rizin's
+#      debugger can't get task_for_pid on a hosted macOS runner (no codesigned
+#      rizin, no root), so debug.test.ts now gates its live-debug blocks off on
+#      macOS (overridable with OMPRE_FORCE_DEBUGGER=1; see docs/testing.md). The
+#      macOS leg still covers Mach-O static analysis, emulation, and every
+#      non-debugger tool.
 #
 # Never add a malware sample here — the fixture is a trivial program built from
 # test/fixtures/sample.c on the runner.
+#
+# Runs on every push to main (alongside the fast ci.yml) and on manual
+# dispatch. It installs rizin on three runners per run, so if the Actions-minute
+# cost becomes a concern, narrow the push trigger with a `paths:` filter
+# (e.g. extensions/re/**, test/**, this file) or move it to a schedule.
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 env:
   RIZIN_VERSION: "0.9.1"
@@ -88,6 +98,17 @@ jobs:
 
       - run: bun install --ignore-scripts
       - run: bun run check
+
+      # The debugger's attach-by-pid test attaches to a process that is not a
+      # child of rizin; hosted Linux runners default to
+      # kernel.yama.ptrace_scope=1, which forbids attaching to a non-descendant.
+      # Relax it so the debugger integration suite runs for real. (macOS gates
+      # the debugger off instead — task_for_pid needs a codesigned rizin or
+      # root; see docs/testing.md. Windows permits the attach as-is.)
+      - name: Allow ptrace attach by PID (Linux)
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.yama.ptrace_scope=0
+
       # No OMPRE_ENABLE_DEBUGGER here: debug.test.ts sets and restores it itself,
       # and extension-sdk.test.ts asserts the default-off behavior — setting it
       # globally would break that assertion.

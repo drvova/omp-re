@@ -22,6 +22,14 @@ function restoreEnable() {
 	else process.env.OMPRE_ENABLE_DEBUGGER = originalEnable;
 }
 
+// macOS hosted runners don't grant rizin's debugger task_for_pid without a
+// codesigned/entitled rizin or root, so a live debug drive (which executes the
+// fixture) hangs on each command until timeout. Gate the integration blocks off
+// there — launch/attach work on Linux (ptrace) and Windows, only macOS is
+// excluded. Override with OMPRE_FORCE_DEBUGGER=1 on a host with a codesigned
+// rizin (see docs/testing.md). The pure enable-gate tests below always run.
+const debuggerSupported = process.platform !== "darwin" || /^(1|true|yes|on)$/i.test((process.env.OMPRE_FORCE_DEBUGGER ?? "").trim());
+
 describe("debuggerEnabled (no rizin needed)", () => {
 	afterEach(restoreEnable);
 
@@ -160,7 +168,7 @@ describe.skipIf(!canRunRizin)("emulate tool against a real rizin session", () =>
 	}, 30_000);
 });
 
-describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
+describe.skipIf(!canRunRizin || !debuggerSupported)("debug tool against a real debug session", () => {
 	const harness = makeHarness("debug-test-session");
 	const { ctx } = harness;
 	const run = (action: string, extra: Record<string, unknown> = {}) =>
@@ -373,7 +381,7 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 	});
 });
 
-describe.skipIf(!canRunRizin)("debug attach to a running process", () => {
+describe.skipIf(!canRunRizin || !debuggerSupported)("debug attach to a running process", () => {
 	const harness = makeHarness("debug-attach-test-session");
 	const { ctx } = harness;
 	const run = (action: string, extra: Record<string, unknown> = {}) =>
