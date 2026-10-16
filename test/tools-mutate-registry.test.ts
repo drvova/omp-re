@@ -1,5 +1,5 @@
 /**
- * Coverage for the 5 mutate-tier tools and `/re undo`, against real rizin.
+ * Coverage for the 13 mutate-tier tools and `/re undo`, against real rizin.
  *
  * Every case asserts real success plus an independent read-back via raw
  * rz.cmd/cmdj (bypassing the tool's own verification), so a regression in a
@@ -60,7 +60,7 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 	});
 
 	test("every mutate tool declares write approval with a per-call reason", () => {
-		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag", "set_arch_hint", "set_data", "set_string", "set_format"]) {
+		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag", "set_arch_hint", "set_hint", "set_data", "set_string", "set_format"]) {
 			const approval = harness.tool(name).approval as (args: unknown) => { tier: string; reason?: string };
 			expect(typeof approval).toBe("function");
 			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl", arch: "arm", bits: 16, size: 4, format: "xxdd" });
@@ -272,6 +272,30 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 
 		await undoLastAnnotation(pi, ctx);
 		expect(await hintAt(mainEa)).toBeUndefined();
+	});
+
+	test("set_hint sets analysis hints (immediate base, opcode type), records the read-back value, and /re undo removes each", async () => {
+		const hintKey = async (ea: string, key: string): Promise<unknown> => (await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`))?.[0]?.[key];
+		// immediate_base: input `h` is stored as the numeric code 16; the tool records the read-back, not the request
+		expect(await hintKey(mainEa, "immbase")).toBeUndefined();
+		const r1 = await run("set_hint", { addr: "main", hint: "immediate_base", value: "h" });
+		expect(textOf(r1)).toBe(`set_hint: immediate_base: "" -> "16" @ ${mainEa}`);
+		expect(await hintKey(mainEa, "immbase")).toBe(16);
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "set_hint", ea: mainEa, oldValue: "", newValue: "16", target: "immediate_base" });
+		await undoLastAnnotation(pi, ctx);
+		expect(await hintKey(mainEa, "immbase")).toBeUndefined();
+
+		// opcode_type round-trips the string verbatim
+		const r2 = await run("set_hint", { addr: "main", hint: "opcode_type", value: "nop" });
+		expect(textOf(r2)).toBe(`set_hint: opcode_type: "" -> "nop" @ ${mainEa}`);
+		expect(await hintKey(mainEa, "type")).toBe("nop");
+		await undoLastAnnotation(pi, ctx);
+		expect(await hintKey(mainEa, "type")).toBeUndefined();
+	});
+
+	test("set_hint rejects a malformed value for the chosen hint before touching rizin", async () => {
+		expect((await captureError(run("set_hint", { addr: "main", hint: "opcode_size", value: "0" }))).message).toContain("invalid opcode_size");
+		expect((await captureError(run("set_hint", { addr: "main", hint: "immediate_base", value: "bogus" }))).message).toContain("invalid immediate_base");
 	});
 
 	test("set_data / set_string / set_format mark metadata, independently verified via C.j, and /re undo removes it", async () => {

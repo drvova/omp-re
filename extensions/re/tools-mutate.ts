@@ -10,7 +10,7 @@
  * builder `/re undo` and annotation replay use.
  */
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { annotationCommands, liveAnnotations, type AnnotationData, type AnnotationKind } from "./annotations.ts";
+import { annotationCommands, HINT_KINDS, HINT_SPEC, type HintKind, liveAnnotations, type AnnotationData, type AnnotationKind } from "./annotations.ts";
 import { branchEntries } from "./entries.ts";
 import { plainResult, type ReToolResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
@@ -74,6 +74,17 @@ async function flagAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<
 async function archHintAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<{ arch?: string; bits?: number } | undefined> {
 	const hints = await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`, { signal });
 	return Array.isArray(hints) && hints.length > 0 ? hints[0] : undefined;
+}
+
+/** The current value of analysis hint `kind` at `ea` as a canonical string, or "" when unset. `ahl.j` prints `[{addr,immbase?,type?,size?,jump?,ret?,…}]` for the hints there. */
+async function hintValueAt(rz: RzSession, ea: string, kind: HintKind, signal?: AbortSignal): Promise<string> {
+	const key = HINT_SPEC[kind].key;
+	const hints = await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`, { signal });
+	const raw = Array.isArray(hints) && hints.length > 0 ? hints[0]?.[key] : undefined;
+	if (raw === undefined || raw === null) return "";
+	// `jump` reads back as a number; re-apply it as hex so the undo/replay command round-trips.
+	if (kind === "jump_target" && typeof raw === "number") return `0x${raw.toString(16)}`;
+	return String(raw);
 }
 
 /** The metadata item of a given type (`Cd`/`Cs`/`Cf`) at `ea`, or undefined when none. `C.j` lists all meta at an address as `[{offset,type,size?,...}]`. */
@@ -145,6 +156,19 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		addr: z.string().describe("Address (or name/expression) where the hint applies."),
 		arch: z.string().optional().describe("Architecture to disassemble as from here, e.g. `arm`, `x86` (sets an `aha` hint)."),
 		bits: z.union([z.literal(8), z.literal(16), z.literal(32), z.literal(64)]).optional().describe("Word size from here, e.g. 16 for ARM Thumb (sets an `ahb` hint)."),
+	});
+	const setHintParams = z.object({
+		addr: z.string().describe("Instruction address (or name/expression) the hint applies to."),
+		hint: z.enum(HINT_KINDS).describe(
+			[
+				"immediate_base: how an operand's immediate is shown (value: 2/8/10/10u/16 or b/o/h/i/p/S/s — e.g. `h` hex, `S` string, `s` syscall, `i` IP-relative).",
+				"opcode_type: reclassify the instruction (value: a type such as call, jmp, ret, nop, mov).",
+				"opcode_size: force the instruction's byte length (value: a positive integer) to realign disassembly.",
+				"jump_target: the real destination of an indirect/computed jump or call (value: an address).",
+				"return_value: a function's return-value hint (value: a decimal or 0x-hex integer).",
+			].join("\n"),
+		),
+		value: z.string().describe("The hint value; its grammar depends on `hint` (see the hint descriptions)."),
 	});
 	const setDataParams = z.object({
 		addr: z.string().describe("Address (or name/expression) to mark as data."),
@@ -414,6 +438,34 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			const data = { kind: "set_arch_hint", ea, oldValue: "", newValue: encoded };
 			recordAnnotation(pi, ctx, data);
 			return mutateResult("set_arch_hint", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_hint",
+		label: "Set Hint",
+		description:
+			"Set an analysis hint at an instruction that corrects how rizin reads it: the display base of an immediate (hex/decimal/char/string/syscall/IP-relative), the opcode type, the opcode byte-length (to realign disassembly), the real target of an indirect jump/call, or a function's return value. Verifies the hint landed and records what rizin stored; reversible with /re undo (which deletes it or restores the prior hint).",
+		approval: (args) => ({ tier: "write", reason: `Set the ${describeArg(args, "hint")} hint at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setHintParams,
+		...reRenderers({ title: "Hint", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const kind = params.hint as HintKind;
+			const oldValue = await hintValueAt(rz, ea, kind, signal);
+
+			// Forward value comes from the request (validated in annotationCommands); newValue below is the read-back, never the request.
+			await apply(rz, annotationCommands("set_hint", ea, params.value, "", kind), signal);
+
+			const landed = await hintValueAt(rz, ea, kind, signal);
+			if (landed === "") {
+				throw new Error(`omp-re: set_hint: mutation did not land: no ${kind} hint at ${ea} after setting ${JSON.stringify(params.value)}`);
+			}
+			const data = { kind: "set_hint", ea, oldValue, newValue: landed, target: kind };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_hint", data);
 		},
 	});
 

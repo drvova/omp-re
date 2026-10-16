@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![54 tools](https://img.shields.io/badge/tools-54-informational)
+![55 tools](https://img.shields.io/badge/tools-55-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 54 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 55 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -259,7 +259,7 @@ blocked, and the IOC is defanged even in the error message:
 
 ## Tool reference
 
-All 54 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 55 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
 may legitimately show fewer than 32.
@@ -335,7 +335,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the cordis context graph: process effects and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 54 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 55 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

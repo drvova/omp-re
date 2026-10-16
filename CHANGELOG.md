@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 54.
+40 to 55.
 
 ### Added
 
@@ -38,6 +38,15 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   instead of being autodetected as the build default. The settings are
   validated, persisted in the `re.binary` entry, and reused on every respawn
   and resume; an explicit `bits` also steers 32/64 build selection.
+- **`set_hint`.** Set an analysis hint that corrects how rizin reads one
+  instruction (book: analysis/code_analysis): `immediate_base` (show an operand
+  as hex/decimal/char/string/syscall/IP-relative, `ahi`), `opcode_type`
+  (reclassify, `aho`), `opcode_size` (force byte-length to realign
+  disassembly, `ahs`), `jump_target` (the real target of an indirect jump/call,
+  `ahc`), or `return_value` (`ahr`). Follows the resolve → write → read-back →
+  verify contract, records the value rizin stored (never the request), and is
+  reversible with `/re undo` (which deletes the hint or restores the prior one)
+  and replayed on resume/respawn.
 - **Four analysis-edit mutate tools**, each with the resolve → write →
   read-back → verify contract, `/re undo`, and replay: `define_function`
   (`af` where auto-analysis missed one), `set_calling_convention` (`afc`,

@@ -203,6 +203,27 @@ describe("annotationCommands", () => {
 		expect(() => annotationCommands("set_format", "0x1000", "nofmt", "")).toThrow("needs a size and a pf format");
 	});
 
+	test("set_hint builds the ah command for each hint kind (kind in target), and undo deletes it", () => {
+		expect(annotationCommands("set_hint", "0x1138", "16", "", "immediate_base")).toEqual(["ahi 16 @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "h", "", "immediate_base")).toEqual(["ahi h @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "call", "", "opcode_type")).toEqual(["aho call @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "7", "", "opcode_size")).toEqual(["ahs 7 @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "0x1200", "", "jump_target")).toEqual(["ahc 0x1200 @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "42", "", "return_value")).toEqual(["ahr 42 @ 0x1138"]);
+		// undo with an empty value deletes the right hint (kind carried in target), or re-applies a prior value
+		expect(annotationCommands("set_hint", "0x1138", "", "16", "immediate_base")).toEqual(["ahi- @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "", "push", "opcode_type")).toEqual(["aho- @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "10", "16", "immediate_base")).toEqual(["ahi 10 @ 0x1138"]);
+		// validation per kind, and a missing/unknown hint kind
+		expect(() => annotationCommands("set_hint", "0x1138", "bogus", "", "immediate_base")).toThrow("invalid immediate_base");
+		expect(() => annotationCommands("set_hint", "0x1138", "Call;id", "", "opcode_type")).toThrow("invalid opcode_type");
+		expect(() => annotationCommands("set_hint", "0x1138", "0", "", "opcode_size")).toThrow("invalid opcode_size");
+		expect(() => annotationCommands("set_hint", "0x1138", "main;id", "", "jump_target")).toThrow("invalid address");
+		expect(() => annotationCommands("set_hint", "0x1138", "-5", "", "return_value")).toThrow("invalid return_value");
+		expect(() => annotationCommands("set_hint", "0x1138", "16", "")).toThrow("missing the hint kind");
+		expect(() => annotationCommands("set_hint", "0x1138", "16", "", "bogus_kind")).toThrow("unknown hint kind");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");

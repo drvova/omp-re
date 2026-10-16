@@ -27,9 +27,27 @@ export type AnnotationKind =
 	| "set_calling_convention"
 	| "set_flag"
 	| "set_arch_hint"
+	| "set_hint"
 	| "set_data"
 	| "set_string"
 	| "set_format";
+
+/**
+ * The analysis hints `set_hint` can set, each a one-letter `ah` command and
+ * the key it shows under in `ahl.j`. The arch/bits hints (`aha`/`ahb`) have
+ * their own tool ({@link archHintCommands}); the delete-region/highlight/esil
+ * forms stay out.
+ */
+export const HINT_SPEC: Record<string, { cmd: string; key: string }> = {
+	immediate_base: { cmd: "ahi", key: "immbase" },
+	opcode_type: { cmd: "aho", key: "type" },
+	opcode_size: { cmd: "ahs", key: "size" },
+	jump_target: { cmd: "ahc", key: "jump" },
+	return_value: { cmd: "ahr", key: "ret" },
+};
+
+export type HintKind = keyof typeof HINT_SPEC;
+export const HINT_KINDS = Object.keys(HINT_SPEC) as [HintKind, ...HintKind[]];
 
 export interface AnnotationData {
 	kind: string;
@@ -81,6 +99,13 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 		case "set_arch_hint":
 			// `to` encodes the arch/bits hint at `ea` as `arch=<a>` and/or `bits=<n>` joined by `;`; "" means no hint (undo deletes both).
 			return to === "" ? [`aha- ${at}`, `ahb- ${at}`] : archHintCommands(to, at);
+		case "set_hint": {
+			// `target` names which hint (immediate_base/opcode_type/…); `to` is its value, "" removes it. The hint kind is carried in `target` so undo can delete the right one even with an empty value.
+			if (!target) throw new Error("omp-re: set_hint annotation is missing the hint kind");
+			const spec = HINT_SPEC[target];
+			if (!spec) throw new Error(`omp-re: unknown hint kind: ${target}`);
+			return to === "" ? [`${spec.cmd}- ${at}`] : [`${spec.cmd} ${hintValueArg(target as HintKind, to)} ${at}`];
+		}
 		case "set_data":
 			// `to` is `<size>` or `<size>:<repeat>`; "" removes the data mark.
 			return to === "" ? [`Cd- ${at}`] : [`Cd ${dataMarkArgs(to)} ${at}`];
@@ -92,6 +117,29 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 			return to === "" ? [`Cf- ${at}`] : [`Cf ${formatMarkArgs(to)} ${at}`];
 		default:
 			throw new Error(`omp-re: unknown annotation kind: ${kind}`);
+	}
+}
+
+/** Validate and format a `set_hint` value for the given hint kind, so a malformed hint fails here, not at rizin. */
+function hintValueArg(kind: HintKind, value: string): string {
+	const v = value.trim();
+	switch (kind) {
+		case "immediate_base":
+			// Documented inputs (2/8/10/10u/16/b/o/h/i/p/S/s) plus the numeric codes `ahl.j` reads back (e.g. 11, 32, 80), for round-trip/undo.
+			if (!/^(?:[0-9]+u?|d|du|[bohipSs])$/.test(v)) throw new Error(`omp-re: invalid immediate_base: ${JSON.stringify(value)} — one of 2, 8, 10, 10u, 16, b, o, h, i, p, S, s`);
+			return v;
+		case "opcode_type":
+			if (!/^[a-z][a-z0-9]*$/.test(v)) throw new Error(`omp-re: invalid opcode_type: ${JSON.stringify(value)} — a lowercase opcode type such as call, jmp, ret, nop, mov`);
+			return v;
+		case "opcode_size":
+			return intArg("opcode_size", v);
+		case "jump_target":
+			return validateAddr(v);
+		case "return_value":
+			if (!/^(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(v)) throw new Error(`omp-re: invalid return_value: ${JSON.stringify(value)} — a decimal or 0x-hex integer`);
+			return v;
+		default:
+			throw new Error(`omp-re: unknown hint kind: ${kind}`);
 	}
 }
 
