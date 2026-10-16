@@ -94,6 +94,40 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 	"fdj",
 	"%v",
 	"echo",
+// search tools: /xj search family; /R+/C prime the gadget cache for /Rj+/Cj
+"/xj",
+"/xrj",
+"/aj",
+"/vj",
+"/v1j",
+"/v2j",
+"/v4j",
+"/v8j",
+"/V1j",
+"/V2j",
+"/V4j",
+"/V8j",
+"/R",
+"/Rj",
+"/C",
+"/Cj",
+// type tools
+"tsj",
+"tej",
+"ttj",
+"tfj",
+"td",
+"tp",
+// syscall tools
+"aslj",
+"asn",
+"asr",
+// binary-info tools
+"iIj",
+"iej",
+"irj",
+"flj",
+"icj",
 ];
 
 export function missingRequiredCommands(catalog: RzCatalog): string[] {
