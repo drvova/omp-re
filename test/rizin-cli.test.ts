@@ -45,6 +45,57 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
 	axlq: { summary: "List all xrefs (quiet mode)" },
 	axg: { summary: "Show xrefs graph to reach function at current seek" },
 	axgj: { summary: "Show xrefs graph to reach function at current seek (JSON mode)" },
+	aai: { summary: "Print preformed analysis details" },
+	aaij: { summary: "Print preformed analysis details (JSON mode)" },
+	aau: { summary: "Print memory areas not covered by functions" },
+	afbr: { summary: "Show addresses of instructions which leave the function" },
+	afns: { summary: "Print all strings referenced by the function in current seek" },
+	afnsj: { summary: "Print all strings referenced by the function in current seek (JSON mode)" },
+	afsb: { summary: "Outputs the function signature bytes, mask and search mask at current address" },
+	afsbj: { summary: "Outputs the function signature bytes, mask and search mask at current address (JSON mode)" },
+	afcl: { summary: "List all available calling conventions" },
+	afclj: { summary: "List all available calling conventions (JSON mode)" },
+	afcr: { summary: "Show register usage for the current function" },
+	afcrj: { summary: "Show register usage for the current function (JSON mode)" },
+	afx: { summary: "Info all fcn variables/args" },
+	afd: { summary: "Show function + delta for given offset" },
+	afvf: { summary: "Show BP relative stackframe variables" },
+	afvc: { summary: "List value constraints of all variables / of the given one" },
+	afvcj: { summary: "List value constraints of all variables / of the given one (JSON mode)" },
+	idj: { summary: "Show DWARF source lines information (JSON mode)" },
+	idq: { summary: "Show DWARF source lines information (quiet mode)" },
+	id: { summary: "Show DWARF source lines information" },
+	idp: { summary: "Load PDB file information" },
+	fl: { summary: "List all flags" },
+	"fl.": { summary: "List all flags at the current offset" },
+	"fd.": { summary: "Describe flags for the current offset" },
+	fi: { summary: "Show the flags in the block or custom range" },
+	fg: { summary: "Show the flag graph" },
+	fsl: { summary: "Display flagspaces" },
+	fssl: { summary: "Display flagspace stack" },
+	ftl: { summary: "List all flag tags" },
+	"fz.": { summary: "Show around flag zone context" },
+	"afclk": { summary: "List all available calling conventions (sdb mode)" },
+	"afcll": { summary: "List all available calling conventions (verbose mode)" },
+	"flj": { summary: "List all flags (JSON mode)" },
+	"flq": { summary: "List all flags (quiet mode)" },
+	"flt": { summary: "List all flags (table mode)" },
+	"f.l": { summary: "List the local flags for the function" },
+	"f.lj": { summary: "List the local flags for the function (JSON mode)" },
+	"f.lq": { summary: "List the local flags for the function (quiet mode)" },
+	"fij": { summary: "Show the flags in the block or custom range (JSON mode)" },
+	"fiq": { summary: "Show the flags in the block or custom range (quiet mode)" },
+	"fit": { summary: "Show the flags in the block or custom range (table mode)" },
+	"fslj": { summary: "Display flagspaces (JSON mode)" },
+	"fslq": { summary: "Display flagspaces (quiet mode)" },
+	"fsslj": { summary: "Display flagspace stack (JSON mode)" },
+	"ftlj": { summary: "List all flag tags (JSON mode)" },
+	"ftll": { summary: "List all flag tags (verbose mode)" },
+	"fzlj": { summary: "List all flag zones (JSON mode)" },
+	fzl: { summary: "List all flag zones" },
+	fL: { summary: "Show the flag length / Set the flag length" },
+	fN: { summary: "Show the realname of the flag / Set the realname of the flag" },
+	fs: { summary: "Select flagspace" },
 	"/R": { args_str: " [<re>]", summary: "Search rop gadgets", description: "Find gadgets ending in ret" },
 	izj: { summary: "List strings in data sections (JSON mode)" },
 	agc: { args_str: " [<format>]", summary: "Global callgraph" },
@@ -55,7 +106,6 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
 	e: { summary: "Get/set config" },
 	o: { summary: "Open file" },
 	s: { summary: "Seek" },
-	id: { summary: "Load PDB" },
 	aoe: { summary: "Emulate op" },
 };
 const CATALOG: RzCatalog = new Map(Object.entries(SPECS).map(([cmd, spec]) => [cmd, { ...spec, cmd }]));
@@ -111,7 +161,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
 
 	test("refuses every non-read-only command head, including the task (`&`) and shell (`!`) operators", () => {
 		// Validated against rizin's documented prompt grammar (book: first_steps/commandline_rizin).
-		for (const command of ["!id", "!!id", "& dc", "&t dc", "&= 0", "3 px", "wx 90", "e io.cache=true", "o /etc/passwd", "s main", "afn evil", "CC note", "pfw x", "agw /tmp/g", "id /tmp/x.pdb", "$a=!id", ".!id", "(m;!id)"]) {
+		for (const command of ["!id", "!!id", "& dc", "&t dc", "&= 0", "3 px", "wx 90", "e io.cache=true", "o /etc/passwd", "s main", "afn evil", "CC note", "pfw x", "agw /tmp/g", "idp /tmp/x.pdb", "$a=!id", ".!id", "(m;!id)"]) {
 			const reason = refusal(command);
 			expect(reason).toMatch(/is not available here|is not allowed in a command/);
 		}
@@ -125,6 +175,19 @@ describe("checkRizinCommand (no rizin needed)", () => {
 		for (const command of ["ax 0x40", "axc 0x40", "axC 0x40", "axd 0x40", "axs 0x40", "ax- 0x40", "ax-*", "axm 0x40"]) {
 			expect(refusal(command)).toMatch(/is not available here/);
 		}
+	});
+
+	test("verified read-only listings run; get/set duals and PDB loads stay refused", () => {
+		for (const command of ["aai", "aaij", "aau", "afbr", "afns", "afnsj", "afsb", "afsbj", "afcl", "afclj", "afcr", "afcrj", "afd", "afvf", "afvc", "id", "idj", "idq", "fl", "flj", "flq", "flt", "fl.", "f.l", "f.lj", "fi", "fij", "fit", "fg", "fsl", "fslj", "fssl", "fsslj", "ftl", "ftlj", "ftll", "fz.", "fzl", "fzlj"]) {
+			expect(checkRizinCommand(CATALOG, command)).toMatchObject({ ok: true, name: command });
+		}
+		// get/set duals: bare form reads, but the same name with an argument writes
+		for (const command of ["fL", "fN", "fs x", "fc x", "fC x", "ft x", "afvs", "afvr", "afs", "afsj", "aezv", "ar", "arj", "arr"]) {
+			expect(refusal(command)).toMatch(/is not available here/);
+		}
+		// DWARF line info reads, but PDB loading/downloading stays out
+		expect(refusal("idp /tmp/x.pdb")).toMatch(/is not available here/);
+		expect(refusal("idpd")).toMatch(/is not available here/);
 	});
 
 	test("refuses raw-byte printers, which would break the NUL-framed pipe", () => {

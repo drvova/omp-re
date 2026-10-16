@@ -142,9 +142,16 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * refused; annotations go through the dedicated, undoable mutate tools.
  * Inside `ax`, only the read-only listings pass: `axt`/`axf` (refs to/from),
  * `axl[jq]` (all refs), `axgj?` (refs graph) — `ax`/`axc`/`axC`/`axd`/`axs`
- * add refs, `ax-` deletes, `axm` copies.
+ * add refs, `ax-` deletes, `axm` copies. Other verified read-only singles:
+ * analysis state and coverage (`aai[j]?`, `aau`), function views (`afbr`
+ * exits, `afns[j]?` strings, `afsb[j]?` signature bytes, `afcl[jlk]?`
+ * calling conventions, `afcr[j]?` register usage, `afd` function+delta,
+ * `afvf`/`afvc[j]?` stackframe and constraints), flag listings (`fl[jqt.]?`,
+ * `f.l[jq]?`, `fi[jqt]?`, `fg`, `fsl[jq]?`, `fssl[j]?`, `ftl[jl]?`,
+ * `fz.[j]?`, `fzl[j]?` — the get/set duals `fL/fN/fc/fC/ft/fs` stay out),
+ * and DWARF line info (`id[jq]?` — `idp*` still refuses the PDB loads).
  */
-const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd)/;
+const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd)/;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:
@@ -153,11 +160,12 @@ const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|af(l|i|b|x|vl|v
  * `pr`/`prz`/`prg` and `p6d` print raw bytes (a NUL byte ends a `-q0` frame
  * and desyncs the session; `px`, `p8`, `prx` show the same bytes), `/F`
  * searches for a file's content, `ag[enw]` edit the custom graph or write a
- * file, `afb[cer]` set block attributes, `afii` adds imports, `ica` applies
- * class flags, `id` loads PDB files. A command name carrying `+ - = ! *` adds,
- * removes, or sets.
+ * file, `afb[ce]` set block colors/edges (`afbr` lists exits — read-only),
+ * `afii` adds imports, `ica` applies
+ * class flags, `idp` loads/downloads/extracts PDB files. A command name
+ * carrying `+ - = ! *` adds, removes, or sets.
  */
-const DENIED_COMMAND = /^(pf|po|pw|pkill|pm|pr(?![xc])|p6d|\/F|ag[enw]|afb[cer]|afii|ica|id)|[+\-=!*]/;
+const DENIED_COMMAND = /^(pf|po|pw|pkill|pm|pr(?![xc])|p6d|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
 
 /**
  * Syntax refused anywhere in a raw command, because it would leave the single
