@@ -114,6 +114,36 @@ Both tmux tiers (`test/tui.sh`, `test/tui-qa.sh`) are **local/self-hosted
 only**: both hard-exit 0 when a prerequisite is missing, which would make
 them pure theatre on a hosted runner that has neither tmux nor a model.
 
+## Cross-OS coverage — `.github/workflows/cross-os.yml`
+
+The default `test` job is deliberately rizin-free, so the OS-specific paths —
+above all the debugger (`debug.test.ts` executes the fixture under rizin's
+debugger) and the PE/Mach-O format handling — are never exercised on a hosted
+runner. `cross-os.yml` is the tier that does: a **manually dispatched**
+(`workflow_dispatch`) matrix over `ubuntu-latest`, `macos-latest`, and
+`windows-latest` that installs rizin **v0.9.1** on each (Linux: the portable
+static release tarball — there is no `.deb`; macOS: `brew install rizin`;
+Windows: the `rizin-windows-shared64` release zip) and runs the full suite.
+This is how the plugin gets real Windows/macOS coverage without owning those
+machines — CI borrows the runner per dispatch.
+
+Because `/bin/ls` is absent on Windows and SIP-protected against the debugger
+on macOS, each OS compiles **`test/fixtures/sample.c`** (a trivial program
+with a `main`, locals, a called function, and a string — everything the
+integration setups look up) and points `OMPRE_TEST_BINARY` at it. Ground truth
+is still read from rizin at runtime. The debugger suite self-enables
+`OMPRE_ENABLE_DEBUGGER`, so the workflow does **not** set it globally (that
+would break `extension-sdk.test.ts`'s default-off assertion). Never add a
+malware sample — the fixture is built on the runner.
+
+The workflow is authored on Linux and validated there (Linux leg mirrors the
+local run); its Windows/macOS legs are validated on the **first dispatch**.
+Known first-run tweak points, commented in the file: the per-OS rizin install,
+`clang` producing a runnable PE on Windows, and macOS debugging a self-built
+binary (rizin's debugger may need `sudo` or a codesigned rizin for
+`task_for_pid` — if only the macOS `debug.test.ts` launch tests fail, that is
+the cause).
+
 ## Loading the extension through omp itself
 
 `test/extension-sdk.test.ts` shows the pattern: `createAgentSession({

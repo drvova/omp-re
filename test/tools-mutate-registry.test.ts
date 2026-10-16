@@ -218,13 +218,18 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 		state.binaryPath = binaryPath;
 		state.rz = rz;
 		mainEa = eaFromOffset(addrOf((await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never)!);
-		// First address at or after main with no flag — set_flag's clean add/remove path.
-		const base = Number.parseInt(mainEa, 16);
+		// set_flag replaces the single flag at an address, so its clean target is a
+		// function start that has exactly one flag. `main` qualifies on a stripped-ish
+		// binary like /bin/ls, but on a symbol-bearing build it carries both `main`
+		// and `sym.main`; pick the first function whose start has a single flag so the
+		// replace round-trips without leaving a sibling flag behind.
+		const flagCount = new Map<number, number>();
+		for (const f of (await rz.cmdj<{ offset: number }[]>("flj")) ?? []) flagCount.set(f.offset, (flagCount.get(f.offset) ?? 0) + 1);
 		freeEa = mainEa;
-		for (let off = 1; off <= 512; off++) {
-			const cand = eaFromOffset(base + off);
-			if ((await flagName(cand)) === "") {
-				freeEa = cand;
+		for (const fn of (await rz.cmdj<{ offset: number }[]>("aflj")) ?? []) {
+			const off = addrOf(fn as never);
+			if (off !== undefined && flagCount.get(off) === 1) {
+				freeEa = eaFromOffset(off);
 				break;
 			}
 		}
