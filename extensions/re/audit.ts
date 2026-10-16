@@ -40,6 +40,7 @@ export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	list_strings: true,
 	list_segments: true,
 	hash_binary: true,
+	get_graph: true,
 	// tools-search.ts
 	search_bytes: true,
 	search_string: true,

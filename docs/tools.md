@@ -1,8 +1,8 @@
 # Tool reference
 
-All 59 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 60 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 59 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 60 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -23,7 +23,7 @@ that artifact. List results are JSON arrays with one compact row per line.
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 | `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
 
-## Read tier (30 tools)
+## Read tier (31 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
@@ -42,6 +42,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `list_strings` | `read` | `offset?, limit?, filter?` | Strings in data sections, optionally filtered by substring. |
 | `list_segments` | `read` | `offset?, limit?` | Sections with permissions, sizes, and addresses. |
 | `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the open binary. |
+| `get_graph` | `read` | `kind` (`function_cfg`/`callgraph`/`xrefs`/`imports`), `addr?`, `offset?, limit?` | Rizin's analysis graphs as JSON (`agf`/`agc`/`agx`/`agi`): a function's control-flow graph, the callgraph from a function, the xref graph around an address, or the import graph. Returns nodes (address + label) and their edges resolved to addresses. `addr` required except for `imports`. |
 | `deobfuscate` | `read` | `addr, size, op, key?, algo?, iv?` | Reveal obfuscated bytes in place: xor/add/sub/or/and with a `key`, an endian swap, or `decrypt` with `algo`+`key`(+`iv`) — shown as hex and string. Runs under the write cache and resets it, so the file is never modified. |
 | `search_bytes` | `read` | `pattern` (hex), `in_function?, offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
 | `search_string` | `read` | `pattern` (string), `in_function?, offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |

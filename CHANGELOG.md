@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 59.
+40 to 60.
 
 ### Added
 
@@ -100,6 +100,13 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   inside an isolated VM from the host, the open binary serving as the symbol
   source. The pid and URI are validated; `attach` is refused together with
   `run`.
+- **`get_graph`** (book: analysis/graphs). Rizin's analysis graphs as JSON: a
+  function's control-flow graph (`agf`), the callgraph from a function (`agc`),
+  the cross-reference graph around an address (`agx`), or the program's import
+  graph (`agi`). Returns nodes (each with its address and label) and the edges
+  between them resolved from rizin's internal node ids back to addresses — the
+  structure for reasoning about control flow and call relationships without
+  reading the raw disassembly.
 - **`create_signature`** (book: analysis/signatures). Build a FLIRT signature
   (`Fc`) from the current binary's analyzed functions — the creation
   counterpart to `apply_signatures` — to recognize those functions in other
