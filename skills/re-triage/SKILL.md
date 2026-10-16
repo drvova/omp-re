@@ -79,11 +79,19 @@ the network are refused.
 
 `rizin_debug` is present only when the operator set `OMPRE_ENABLE_DEBUGGER`,
 because it **runs the sample**. If it exists and the task calls for runtime
-behaviour: `start` to launch (stops at entry), `break_add` at the addresses
-you care about, then `continue`/`step`, reading `registers`, `read_memory`,
-and `backtrace` at each stop; `stop` when done. Dynamic observations are
-real but volatile — hedge them and never treat a single run as exhaustive.
-Keep annotating through the static mutate tools, not the debugger.
+behaviour: `start` to launch (stops at entry; pass `run` for argv/env/stdio),
+`break_add` or `watch_add` at the addresses you care about, then
+`continue`/`continue_to_syscall`/`continue_to_ret`/`step`, reading
+`registers`, `read_memory`, `backtrace`, and — when the sample unpacks or
+rewrites itself — `disassemble` of *live* memory at each stop; `write_register`
+and `write_memory` can nudge a branch. `heap_arenas`/`heap_chunks`/`heap_bins`
+(glibc) and `heaps`/`heap_blocks` (Windows) inspect the allocator. `stop` when
+done. Dynamic observations are real but volatile — hedge them and never treat
+a single run as exhaustive. Keep static annotations in the mutate tools.
+
+For code that only computes (a decryptor, an argument builder) without
+syscalls, `rizin_emulate` interprets it in rizin's RzIL VM with no OS process
+— safer than the debugger and enabled by default.
 
 ## Navigating
 
@@ -98,11 +106,14 @@ its context.
 
 ## Annotating
 
-`rename_function`, `rename_variable`, `set_comment`, `set_prototype`, and
-`set_variable_type` write back into the rizin session and record annotations.
-Each verifies its own read-back and reports what rizin actually stored.
-`/re undo` reverts the last one. Annotations are re-applied automatically when
-the session is resumed or rizin restarts.
+`rename_function`, `rename_variable`, `set_comment`, `set_prototype`,
+`set_variable_type`, `define_function` (for a function rizin missed),
+`set_calling_convention` (to fix argument recovery), and `set_flag` (to name
+an address) write back into the rizin session and record annotations. Each
+verifies its own read-back and reports what rizin actually stored. `/re undo`
+reverts the last one. Annotations are re-applied automatically when the
+session is resumed or rizin restarts. `apply_signatures` names library
+functions from a FLIRT file (also replayed on resume).
 
 ## Grounding rules
 

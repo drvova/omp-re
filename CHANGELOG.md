@@ -4,6 +4,62 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+Broadened coverage of rizin's own capabilities, chapter by chapter against
+the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
+40 to 47.
+
+### Added
+
+- **Load options for raw/headerless targets.** `open_binary` accepts
+  `arch`/`bits`/`base`/`map`/`format` (rizin's `-a`/`-b`/`-B`/`-m`/`-F`), so
+  flat shellcode, firmware, and ROM dumps load with the right architecture
+  instead of being autodetected as the build default. The settings are
+  validated, persisted in the `re.binary` entry, and reused on every respawn
+  and resume; an explicit `bits` also steers 32/64 build selection.
+- **Three analysis-edit mutate tools**, each with the resolve → write →
+  read-back → verify contract, `/re undo`, and replay: `define_function`
+  (`af` where auto-analysis missed one), `set_calling_convention` (`afc`,
+  which corrects argument recovery), and `set_flag` (`f`, naming an address).
+- **FLIRT signatures.** `apply_signatures` re-applies rizin's built-in sigdb
+  (`Fa`) or applies a custom `.sig`/`.pat` file (`Fs`); a custom-file
+  application is recorded and re-applied on resume/respawn. `rizin_command`
+  can list the sigdb (`Flt`).
+- **Debugger: writing and live code.** `rizin_debug` gains `write_register`,
+  `write_memory`, `disassemble` (of *live* memory, revealing self-modified or
+  unpacked code), `watch_add` (hardware watchpoints), `continue_to_syscall` /
+  `continue_to_call` / `continue_to_ret`, and glibc heap inspection
+  (`heap_arenas` / `heap_chunks` / `heap_bins`) alongside the existing Windows
+  heap actions. The approval reason now distinguishes execute / modify /
+  inspect.
+- **`rizin_command` read-only unlock.** Whole read-only families the book
+  documents are now reachable: configuration reads (`e <key>`, `el`, `elj`,
+  `et`, `es`), analysis-hint listings (`ahl`), metadata and string listings
+  (`C`, `Csl`, …), class reads (`acl`, `aci`, `acg`, `acvl`, `acvf`), address
+  info (`ai`), type reads (unions, enums, typedefs, calling-convention lists,
+  type cross-references, typeclasses), and plugin listings
+  (`Ll`/`La`/`Lc`/`LC`/`Lh`/`Li`/`Lp`/`LD`). A command the installed rizin
+  catalogs that was blocked only by command shape now runs; coverage measured
+  against rizin 0.9.1 rose from 800 to 926 of ~2020 commands.
+
+### Fixed
+
+- The search / types / syscall / binary-info read tools and the RzIL emulator
+  were never added to the suite's tool roster, so those read tools recorded no
+  `re.evidence` (breaking the report gate's grounding for anything found
+  through them), none of these tools were written to the audit log, and
+  `/re off` left them enabled. The roster now matches what is registered.
+- `rizin_debug`'s `start` computed the program counter but dropped it from the
+  result; it now reports where the process stopped (arch-agnostically).
+
+### Security
+
+- The `rizin_command` get/set duals are gated: `e <key>` reads a value but
+  `e key=value` is refused, and `tn`/`Ld`/`Lo` run only in their list form.
+  The ROP/JOP/COP constraint queries keep their `=` arguments. Every newly
+  allowed command was confirmed read-only against a real rizin.
+
 ## [0.2.0] - 2026-10-15
 
 radare2 is replaced by [rizin](https://rizin.re), and the plugin targets

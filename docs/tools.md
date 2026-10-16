@@ -1,8 +1,8 @@
 # Tool reference
 
-All 40 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 47 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 40 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 47 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -22,7 +22,7 @@ that artifact. List results are JSON arrays with one compact row per line.
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 
-## Read tier (26 tools)
+## Read tier (28 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
@@ -139,8 +139,11 @@ Refused before the tool is spawned: any flag that runs code (`rz-find
 -E`/`-R`, `rz-diff -t command`), writes a file (`rz-bin -O`/`-o`/`-C`,
 `rz-asm -O`), fetches over the network (`rz-bin -dd`/`-PP`), or opens an
 interactive view (`rz-diff -H`/`-S`), and any argument with a line break or
-NUL. rz-gg (shellcode generation) and rz-run (launches a process) are not
-exposed — they generate or execute rather than analyze.
+NUL. rz-gg (shellcode generation) is not exposed — it generates rather than
+analyzes. rz-run is not exposed as a CLI tool either, but its directives
+(argv, env, cwd, stdio, limits) do configure the debugger's launch
+environment through `rizin_debug`'s `run` option — the one place omp-re
+executes a sample.
 
 ## Signatures — `apply_signatures` (1 tool)
 

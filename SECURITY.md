@@ -81,9 +81,17 @@ and it refuses before anything reaches rizin unless the command:
 - belongs to a read-only family — print, info, search, graph, op/ESIL
   analysis, xref and function queries, comment and flag lookups — and is
   none of the write, config, shell, file-reading, or analysis-changing
-  commands inside those families (`pf`, `po`, `pw`, `pkill`, `pm`, `/F`,
-  `ag[enw]`, `afb[cer]`, `afii`, `ica`, `id`, or any name containing
-  `+ - = ! *`);
+  commands inside those families (`po`, `pw`, `pkill`, `/F`, `ag[enw]`,
+  `afb[cer]`, `afii`, `ica`, `idp`, or any name containing `+ - = ! *`), **or**
+  is one of a curated set of read-only commands the family regex can't shape
+  (config reads `e`/`el`/`et`/`es`, analysis-hint and metadata/string
+  listings, class reads, address info, type/union/xref reads, plugin
+  listings, the FLIRT sigdb listing) that was each confirmed read-only
+  against a real rizin;
+- is not a get/set dual used in its set form: `e <key>` reads a value but
+  `e <key>=<value>` (a config write) is refused, and the positional duals
+  `tn`/`Ld`/`Lo` run only with no argument (an argument makes them add or
+  set);
 - takes no file or path argument according to rizin's own catalog
   (`/m <magic-file>` runs only bare);
 - contains none of `;`, `|`, `<`, `>`, backticks, `$(`, `${`, `~`, `#`, `"`,
@@ -128,7 +136,10 @@ is spawned:
 Short-flag clusters are checked letter by letter and case-sensitively (so
 `rz-bin -c`, list classes, is allowed while `-C`, create a binary, is not),
 and a doubled flag like `-dd` is matched whole. `rz-gg` (shellcode/egg
-generation) and `rz-run` (launches a process) are not exposed at all. This is
+generation) is not exposed at all. `rz-run` is not a `rizin_cli` tool either,
+but its directives configure the debugger's launch environment via
+`rizin_debug`'s `run` option (see below) — stdio targets there are files
+only; a `!command` target that would run a shell command is refused. This is
 a convenience boundary over the flags, not a sandbox: the tools read whatever
 files you point them at, with your privileges, exactly as if you ran them.
 The policy lives in `extensions/re/tools-rzcli.ts` and is covered by
@@ -149,12 +160,18 @@ of the suite holds:
   continues to only read the file. The debug process is killed with its
   debuggee on `stop` and on session shutdown.
 - Every action is `exec`-tier, and the approval reason says plainly whether
-  it resumes execution (`start`, `continue`, `step`) or only inspects
-  (`registers`, `read_memory`, `backtrace`). Addresses are validated with the
-  same allowlist as every other tool.
-- It is a **plain debugger** — breakpoints, stepping, registers, memory,
-  backtrace. It has no features for evading anti-debugging, hiding the
-  debuggee, or injecting into other processes.
+  it resumes execution (`start`, `continue`, `continue_to_syscall`, `step`),
+  modifies the live process (`write_register`, `write_memory`, `watch_add`),
+  or only inspects (`registers`, `read_memory`, `disassemble`, `backtrace`,
+  the heap and process-state actions). Addresses, register names, register
+  values, and hex byte strings are all validated before anything reaches the
+  process.
+- It is a **plain debugger** — breakpoints and watchpoints, stepping,
+  reading and writing registers and memory, disassembling live memory,
+  backtraces, heap and process-state inspection. The register/memory writes
+  act only on the debuggee this session launched; the tool has no features
+  for evading anti-debugging, hiding the debuggee, attaching to or injecting
+  into other processes.
 
 The debugger provides **no isolation whatsoever** — it is the opposite of a
 sandbox. Enable it and run a sample only inside a disposable VM or container

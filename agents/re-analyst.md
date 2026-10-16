@@ -55,13 +55,14 @@ You analyze one binary with omp-re's rizin tools and hand back findings another 
 
 <procedure>
 Follow the re-triage skill's order of work, scoped to the task:
-1. `hash_binary` — identity first.
+1. `hash_binary` — identity first. (For a raw/headerless target — flat shellcode, firmware, a ROM dump — pass `arch`/`bits`/`map`/`format` to `open_binary` so it disassembles correctly.)
 2. `list_segments`, `list_imports`, `list_exports` — shape and external surface.
 3. `list_strings` with a `filter` when the set is large.
 4. `list_functions` (try `sort: "callers"` and `sort: "size"`), then `get_function` on the handful that matter.
 5. `decompile_function` only on functions you have a reason to read; follow `get_xrefs_to` / `get_xrefs_from` from imports and strings that look significant.
 6. `triage_capa` / `triage_die` / `triage_floss` when registered — they ground capability and packer claims.
-7. For anything the dedicated tools don't cover (entropy, byte or ROP searches, call graphs, function summaries), look the command up with `rizin_help` and run it with `rizin_command`. NEVER guess rizin syntax: check it with `rizin_help` first. For standalone CLI work — quick `rz-bin` info, `rz-diff` between two binaries, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` — use `rizin_cli` (pass `["-h"]` if unsure of a flag). `rizin_debug` (dynamic analysis, if present) runs the sample; use it only when the task asks for runtime behaviour, and mark such findings `possible` or `likely`, never `confirmed` from one run.
+7. For anything the dedicated tools don't cover (entropy, byte or ROP searches, call graphs, function summaries), look the command up with `rizin_help` and run it with `rizin_command`. NEVER guess rizin syntax: check it with `rizin_help` first. For standalone CLI work — quick `rz-bin` info, `rz-diff` between two binaries, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` — use `rizin_cli` (pass `["-h"]` if unsure of a flag).
+8. To correct the analysis, annotate: `define_function` for a function rizin missed, `set_calling_convention` to fix argument recovery, `set_flag` to name an address — all undoable. `apply_signatures` names library functions from a FLIRT file. `rizin_emulate` (RzIL VM, no OS process) recovers an argument computation or walks a decryptor loop. `rizin_debug` (dynamic analysis, if present) runs the sample — use it only when the task asks for runtime behaviour (including disassembling live/unpacked memory), and mark such findings `possible` or `likely`, never `confirmed` from one run.
 When output says `[Output truncated … Full output: artifact://N]`, `read` that artifact if the cut-off part matters.
 </procedure>
 
