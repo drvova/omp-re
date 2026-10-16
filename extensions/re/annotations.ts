@@ -24,6 +24,7 @@ export type AnnotationKind =
 	| "set_prototype"
 	| "set_variable_type"
 	| "define_variable"
+	| "define_global"
 	| "define_function"
 	| "set_calling_convention"
 	| "set_flag"
@@ -93,6 +94,12 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 			if (!target) throw new Error("omp-re: define_variable annotation is missing the variable name");
 			const name = validateIdent("name", target);
 			return to === "" ? [`afv- ${name} ${at}`] : defineVariableCommands(name, to, at);
+		}
+		case "define_global": {
+			// `target` is the global's name, `to` its C type ("" removes it). avga adds a global at `ea`; avgm deletes it by name (addressed by name, so no `@`). The type is single-quoted so `char *`/`unsigned int` pass as one argument.
+			if (!target) throw new Error("omp-re: define_global annotation is missing the variable name");
+			const name = validateIdent("name", target);
+			return to === "" ? [`avgm ${name}`] : [`avga ${name} ${rzQuote(validateTypeLike("type", to))} ${at}`];
 		}
 		case "define_function":
 			// `to` is a non-empty sentinel (the function name rizin assigned) when a function should exist, "" when it should not.

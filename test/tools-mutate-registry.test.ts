@@ -313,6 +313,30 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 		expect(await varNames()).not.toContain("omp_re_local");
 	});
 
+	test("define_global defines a named, typed global, independently verified via avglj, and /re undo removes it", async () => {
+		const globalNamed = async (name: string): Promise<{ type?: string; addr?: string } | undefined> =>
+			((await rz.cmdj<{ name?: string; type?: string; addr?: string }[]>("avglj")) ?? []).find((g) => g.name === name);
+		// a data address at/after main's end — somewhere ordinary to anchor a global
+		const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x400);
+		expect(await globalNamed("omp_re_glob")).toBeUndefined();
+		const result = await run("define_global", { addr: dataEa, name: "omp_re_glob", type: "char *" });
+		expect(textOf(result)).toBe(`define_global: omp_re_glob: "" -> "char *" @ ${dataEa}`);
+		const landed = await globalNamed("omp_re_glob");
+		expect(landed?.type).toBe("char *");
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "define_global", ea: dataEa, oldValue: "", newValue: "char *", target: "omp_re_glob" });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await globalNamed("omp_re_glob")).toBeUndefined();
+	});
+
+	test("define_global refuses a name that already exists", async () => {
+		const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x408);
+		await run("define_global", { addr: dataEa, name: "omp_re_dupe", type: "int" });
+		const err = await captureError(run("define_global", { addr: eaFromOffset(Number.parseInt(mainEa, 16) + 0x410), name: "omp_re_dupe", type: "int" }));
+		expect(err.message).toContain("already exists");
+		await undoLastAnnotation(pi, ctx); // remove omp_re_dupe
+	});
+
 	test("define_variable refuses a name that already exists", async () => {
 		const grouped = (await rz.cmdj<Record<string, { name: string }[]>>(`afvlj @ ${mainEa}`)) ?? {};
 		const existing = Object.values(grouped).flat()[0]?.name ?? "";

@@ -44,6 +44,12 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   searching) — rizin's `search.in=range` with the function's bounds. The prior
   search scope is always restored afterward, so a scoped search never leaks
   into the next one on the shared session.
+- **`define_global`.** Define a global variable at a data address (`avga`),
+  giving it a name and a C type so disassembly, xrefs, and the decompiler show
+  the name and typed accesses instead of a raw address (book: analysis/types).
+  Refuses a name that already exists, verifies it landed, records the type
+  rizin stored, and is reversible with `/re undo` (`avgm`) and replayed on
+  resume/respawn.
 - **`define_variable`.** Define a local variable or argument rizin's analysis
   didn't recover — a stack slot (`afvs`, by frame delta) or a register variable
   (`afvr`, by register), with an optional C type — so the decompiler and

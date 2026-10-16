@@ -87,6 +87,13 @@ async function hintValueAt(rz: RzSession, ea: string, kind: HintKind, signal?: A
 	return String(raw);
 }
 
+/** The global variable named `name`, or undefined when none. `avglj` lists globals as `[{name,type,size,addr}]` (addr is a hex string). */
+async function globalByName(rz: RzSession, name: string, signal?: AbortSignal): Promise<{ type: string; addr: string } | undefined> {
+	const globals = await rz.cmdj<{ name?: string; type?: string; addr?: string }[]>("avglj", { signal });
+	const g = Array.isArray(globals) ? globals.find((x) => x.name === name) : undefined;
+	return g && typeof g.type === "string" ? { type: g.type, addr: String(g.addr ?? "") } : undefined;
+}
+
 /** The metadata item of a given type (`Cd`/`Cs`/`Cf`) at `ea`, or undefined when none. `C.j` lists all meta at an address as `[{offset,type,size?,...}]`. */
 async function metaAt(rz: RzSession, ea: string, type: string, signal?: AbortSignal): Promise<{ type: string; size?: number } | undefined> {
 	const meta = await rz.cmdj<{ type?: string; size?: number }[]>(`C.j @ ${ea}`, { signal });
@@ -143,6 +150,11 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 	});
 	const defineFunctionParams = z.object({
 		addr: z.string().describe("Address (or name/expression) where a function begins that rizin's auto-analysis missed."),
+	});
+	const defineGlobalParams = z.object({
+		addr: z.string().describe("Data address (or name/expression) where the global variable lives."),
+		name: z.string().describe("Global variable name (identifier characters)."),
+		type: z.string().describe("C type, e.g. `int`, `char *`, or a named struct/typedef."),
 	});
 	const defineVariableParams = z.object({
 		addr: fnAddr(),
@@ -362,6 +374,32 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			const data = { kind: "define_variable", ea: fn.ea, oldValue: "", newValue: encoded, target: name };
 			recordAnnotation(pi, ctx, data);
 			return mutateResult("define_variable", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "define_global",
+		label: "Define Global",
+		description:
+			"Define a global variable at a data address (`avga`), giving it a name and a C type so disassembly, xrefs, and the decompiler show the name and typed accesses instead of a raw address. Refuses when a global of that name already exists, verifies it landed, and is reversible with /re undo (which runs `avgm`).",
+		approval: (args) => ({ tier: "write", reason: `Define global ${describeArg(args, "name")} at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: defineGlobalParams,
+		...reRenderers({ title: "Define global", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const name = validateIdent("name", params.name);
+			const type = validateTypeLike("type", params.type.trim());
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			if (await globalByName(rz, name, signal)) throw new Error(`omp-re: define_global: a global named ${JSON.stringify(name)} already exists`);
+
+			await apply(rz, annotationCommands("define_global", ea, type, "", name), signal);
+
+			const landed = await globalByName(rz, name, signal);
+			if (!landed) throw new Error(`omp-re: define_global: mutation did not land: no global ${JSON.stringify(name)} after defining it at ${ea}`);
+			const data = { kind: "define_global", ea, oldValue: "", newValue: landed.type, target: name };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("define_global", data);
 		},
 	});
 

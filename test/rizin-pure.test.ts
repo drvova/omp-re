@@ -236,6 +236,15 @@ describe("annotationCommands", () => {
 		expect(() => annotationCommands("define_variable", "0x4da0", "stack 0x30", "")).toThrow("missing the variable name");
 	});
 
+	test("define_global builds avga with a quoted type, and undo deletes by name (avgm)", () => {
+		expect(annotationCommands("define_global", "0x4000", "int", "", "g_count")).toEqual(["avga g_count 'int' @ 0x4000"]);
+		expect(annotationCommands("define_global", "0x4000", "char *", "", "g_name")).toEqual(["avga g_name 'char *' @ 0x4000"]);
+		expect(annotationCommands("define_global", "0x4000", "", "int", "g_count")).toEqual(["avgm g_count"]);
+		expect(() => annotationCommands("define_global", "0x4000", "int", "")).toThrow("missing the variable name");
+		expect(() => annotationCommands("define_global", "0x4000", "bad;type", "", "g")).toThrow("omp-re: invalid type");
+		expect(() => annotationCommands("define_global", "0x4000", "int", "", "bad name")).toThrow("omp-re: invalid name");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");

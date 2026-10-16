@@ -64,7 +64,7 @@ export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	deobfuscate: true,
 };
 
-/** The 14 write-tier annotation tools (tools-mutate.ts). */
+/** The 15 write-tier annotation tools (tools-mutate.ts). */
 export const RE_MUTATE_TOOL_NAMES: Record<string, true> = {
 	rename_function: true,
 	rename_variable: true,
@@ -72,6 +72,7 @@ export const RE_MUTATE_TOOL_NAMES: Record<string, true> = {
 	set_prototype: true,
 	set_variable_type: true,
 	define_variable: true,
+	define_global: true,
 	define_function: true,
 	set_calling_convention: true,
 	set_flag: true,

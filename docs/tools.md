@@ -1,8 +1,8 @@
 # Tool reference
 
-All 56 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 57 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 56 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 57 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -68,7 +68,7 @@ is restricted to that function's extent (rizin's `search.in=range` plus
 `search.from`/`search.to`), and the previous scope is always restored
 afterward. Omit it to search the whole binary.
 
-## Mutate tier (14 tools)
+## Mutate tier (15 tools)
 
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
@@ -88,6 +88,7 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
 | `define_variable` | `write` | `addr, storage, location, name, type?` | Define a local variable analysis missed — a stack slot (`storage: stack`, `location` a frame delta, `afvs`) or a register variable (`storage: reg`, `location` a register, `afvr`) — so the decompiler names it. Refuses a name that already exists; `/re undo` runs `afv-`. |
 | `define_function` | `write` | `addr` | Define a function where auto-analysis missed one (`af`); refuses when a function already begins there, verifies one now does. `/re undo` runs `af-`. |
+| `define_global` | `write` | `addr, name, type` | Define a global variable at a data address (`avga`), naming and typing it so disassembly, xrefs, and the decompiler show the name and typed accesses. Refuses a name that already exists; `/re undo` runs `avgm`. |
 | `set_calling_convention` | `write` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
 | `set_flag` | `write` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; `/re undo` restores the previous flag (or removes it). |
 | `set_arch_hint` | `write` | `addr, arch?, bits?` | Hint the architecture and/or word size to disassemble from an address (`aha`/`ahb`) — e.g. `bits: 16` for an ARM Thumb region, or `arch` for mixed-arch firmware. `/re undo` deletes the hint. |

@@ -92,7 +92,7 @@ offer.
 | `state.ts` | Thin facade over `RizinBackend` |
 | `rizin.ts` | `RzSession` transport (`-q0` pipe), spawn flags, validators, `rz-*` tool resolution |
 | `catalog.ts` | rizin's self-described command catalog (`?*j`) and the `rizin_command` policy |
-| `tools-read.ts` / `tools-mutate.ts` | The 13 read-tier and 14 mutate-tier tools |
+| `tools-read.ts` / `tools-mutate.ts` | The 13 read-tier and 15 mutate-tier tools |
 | `tools-rizin.ts` | `rizin_help` / `rizin_command` (the REPL bridge) |
 | `tools-rzcli.ts` | `rizin_cli` (the standalone `rz-*` tools) |
 | `tools-debug.ts` | `rizin_debug` (opt-in dynamic analysis) |
