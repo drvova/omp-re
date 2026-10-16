@@ -23,6 +23,7 @@ export type AnnotationKind =
 	| "set_comment"
 	| "set_prototype"
 	| "set_variable_type"
+	| "define_variable"
 	| "define_function"
 	| "set_calling_convention"
 	| "set_flag"
@@ -87,6 +88,12 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 		case "set_variable_type":
 			if (!target) throw new Error("omp-re: set_variable_type annotation is missing the variable name");
 			return to === "" ? [] : [`afvt ${rzQuote(validateIdent("var", target))} ${rzQuote(validateTypeLike("type", to))} ${at}`];
+		case "define_variable": {
+			// `target` is the variable name; `to` encodes `<storage> <location> [<type>]` ("" removes it on undo). afvs/afvr add; afv- deletes by name.
+			if (!target) throw new Error("omp-re: define_variable annotation is missing the variable name");
+			const name = validateIdent("name", target);
+			return to === "" ? [`afv- ${name} ${at}`] : defineVariableCommands(name, to, at);
+		}
 		case "define_function":
 			// `to` is a non-empty sentinel (the function name rizin assigned) when a function should exist, "" when it should not.
 			return to === "" ? [`af- ${at}`] : [`af ${at}`];
@@ -118,6 +125,30 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 		default:
 			throw new Error(`omp-re: unknown annotation kind: ${kind}`);
 	}
+}
+
+/**
+ * Build the `afvs`/`afvr` command that creates variable `name` from an encoded
+ * `<storage> <location> [<type>]` value (e.g. `stack 0x30 char *`, `reg rdi int`).
+ * Each part is validated so a malformed definition fails here, not at rizin.
+ * The type may contain spaces (`char *`); rizin's parser strips the trailing
+ * `@ <ea>` seek before the command sees its args, so it never reaches the type.
+ */
+export function defineVariableCommands(name: string, encoded: string, at: string): string[] {
+	const sp1 = encoded.indexOf(" ");
+	const storage = sp1 === -1 ? encoded : encoded.slice(0, sp1);
+	const rest = sp1 === -1 ? "" : encoded.slice(sp1 + 1).trim();
+	const sp2 = rest.indexOf(" ");
+	const loc = sp2 === -1 ? rest : rest.slice(0, sp2);
+	const type = sp2 === -1 ? "" : rest.slice(sp2 + 1).trim();
+	if (loc === "") throw new Error("omp-re: define_variable needs a location (a stack delta or a register)");
+	const typeArg = type === "" ? "" : ` ${validateTypeLike("type", type)}`;
+	if (storage === "stack") {
+		if (!/^-?(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(loc)) throw new Error(`omp-re: invalid stack delta: ${JSON.stringify(loc)} — a decimal or 0x-hex offset`);
+		return [`afvs ${loc} ${name}${typeArg} ${at}`];
+	}
+	if (storage === "reg") return [`afvr ${validateIdent("reg", loc)} ${name}${typeArg} ${at}`];
+	throw new Error(`omp-re: invalid variable storage: ${JSON.stringify(storage)} — stack or reg`);
 }
 
 /** Validate and format a `set_hint` value for the given hint kind, so a malformed hint fails here, not at rizin. */

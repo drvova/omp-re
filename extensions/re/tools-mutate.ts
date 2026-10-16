@@ -144,6 +144,13 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 	const defineFunctionParams = z.object({
 		addr: z.string().describe("Address (or name/expression) where a function begins that rizin's auto-analysis missed."),
 	});
+	const defineVariableParams = z.object({
+		addr: fnAddr(),
+		storage: z.enum(["stack", "reg"]).describe("`stack` for a stack-based local/argument (`afvs`), `reg` for a register-based one (`afvr`)."),
+		location: z.string().describe("For `stack`: the frame offset as a decimal or 0x-hex delta (e.g. `0x30`). For `reg`: the register name (e.g. `rdi`)."),
+		name: z.string().describe("New variable name (identifier characters)."),
+		type: z.string().optional().describe("C type, e.g. `int` or `char *`; omit to let rizin default it (int)."),
+	});
 	const setCallingConventionParams = z.object({
 		addr: fnAddr(),
 		cc: z.string().describe("Calling convention name, e.g. `amd64`, `ms`, `cdecl`, `stdcall` — see the list from rizin_command afcl."),
@@ -326,6 +333,35 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			const data = { kind: "set_variable_type", ea: fn.ea, oldValue: old.type, newValue: landed.type, target: varName };
 			recordAnnotation(pi, ctx, data);
 			return mutateResult("set_variable_type", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "define_variable",
+		label: "Define Variable",
+		description:
+			"Define a local variable or argument in a function that rizin's analysis didn't recover — a stack slot (`afvs`, by frame delta) or a register variable (`afvr`, by register) — so the decompiler and disassembly name it instead of showing a raw offset. Refuses when a variable of that name already exists, verifies the new one landed, and is reversible with /re undo (which runs `afv-`).",
+		approval: (args) => ({ tier: "write", reason: `Define ${describeArg(args, "storage")} variable ${describeArg(args, "name")} in ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: defineVariableParams,
+		...reRenderers({ title: "Define variable", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const name = validateIdent("name", params.name);
+			const fn = await functionAt(rz, params.addr, signal);
+			if ((await variablesAt(rz, fn.ea, signal)).some((v) => v.name === name)) {
+				throw new Error(`omp-re: define_variable: ${fn.name} already has a variable ${JSON.stringify(name)}`);
+			}
+			const type = params.type !== undefined && params.type.trim() !== "" ? validateTypeLike("type", params.type.trim()) : "";
+			const encoded = `${params.storage} ${params.location.trim()}${type !== "" ? ` ${type}` : ""}`;
+
+			await apply(rz, annotationCommands("define_variable", fn.ea, encoded, "", name), signal);
+
+			const landed = (await variablesAt(rz, fn.ea, signal)).find((v) => v.name === name);
+			if (!landed) throw new Error(`omp-re: define_variable: mutation did not land: no variable ${JSON.stringify(name)} in ${fn.name} after defining it`);
+			const data = { kind: "define_variable", ea: fn.ea, oldValue: "", newValue: encoded, target: name };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("define_variable", data);
 		},
 	});
 

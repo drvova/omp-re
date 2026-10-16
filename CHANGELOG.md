@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 55.
+40 to 56.
 
 ### Added
 
@@ -38,6 +38,12 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   instead of being autodetected as the build default. The settings are
   validated, persisted in the `re.binary` entry, and reused on every respawn
   and resume; an explicit `bits` also steers 32/64 build selection.
+- **`define_variable`.** Define a local variable or argument rizin's analysis
+  didn't recover — a stack slot (`afvs`, by frame delta) or a register variable
+  (`afvr`, by register), with an optional C type — so the decompiler and
+  disassembly name it instead of showing a raw offset (book: analysis/types).
+  Refuses a name that already exists, verifies the variable landed, and is
+  reversible with `/re undo` (`afv-`) and replayed on resume/respawn.
 - **`set_hint`.** Set an analysis hint that corrects how rizin reads one
   instruction (book: analysis/code_analysis): `immediate_base` (show an operand
   as hex/decimal/char/string/syscall/IP-relative, `ahi`), `opcode_type`

@@ -1,8 +1,8 @@
 # Tool reference
 
-All 55 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 56 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 55 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 56 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -63,7 +63,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 reports its total so the model knows a view is partial. An empty page is
 marked as compactable, so omp can drop it from context once it has been read.
 
-## Mutate tier (13 tools)
+## Mutate tier (14 tools)
 
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
@@ -81,6 +81,7 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_comment` | `write` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
 | `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
 | `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
+| `define_variable` | `write` | `addr, storage, location, name, type?` | Define a local variable analysis missed — a stack slot (`storage: stack`, `location` a frame delta, `afvs`) or a register variable (`storage: reg`, `location` a register, `afvr`) — so the decompiler names it. Refuses a name that already exists; `/re undo` runs `afv-`. |
 | `define_function` | `write` | `addr` | Define a function where auto-analysis missed one (`af`); refuses when a function already begins there, verifies one now does. `/re undo` runs `af-`. |
 | `set_calling_convention` | `write` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
 | `set_flag` | `write` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; `/re undo` restores the previous flag (or removes it). |

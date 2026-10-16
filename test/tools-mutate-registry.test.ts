@@ -298,6 +298,28 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 		expect((await captureError(run("set_hint", { addr: "main", hint: "immediate_base", value: "bogus" }))).message).toContain("invalid immediate_base");
 	});
 
+	test("define_variable adds a stack local, independently verified via afvlj, and /re undo removes it", async () => {
+		const varNames = async (): Promise<string[]> => {
+			const grouped = (await rz.cmdj<Record<string, { name: string }[]>>(`afvlj @ ${mainEa}`)) ?? {};
+			return Object.values(grouped).flat().map((v) => v.name);
+		};
+		expect(await varNames()).not.toContain("omp_re_local");
+		const result = await run("define_variable", { addr: "main", storage: "stack", location: "0x44", name: "omp_re_local", type: "int" });
+		expect(textOf(result)).toBe(`define_variable: omp_re_local: "" -> "stack 0x44 int" @ ${mainEa}`);
+		expect(await varNames()).toContain("omp_re_local");
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "define_variable", ea: mainEa, oldValue: "", newValue: "stack 0x44 int", target: "omp_re_local" });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await varNames()).not.toContain("omp_re_local");
+	});
+
+	test("define_variable refuses a name that already exists", async () => {
+		const grouped = (await rz.cmdj<Record<string, { name: string }[]>>(`afvlj @ ${mainEa}`)) ?? {};
+		const existing = Object.values(grouped).flat()[0]?.name ?? "";
+		const err = await captureError(run("define_variable", { addr: "main", storage: "reg", location: "rbx", name: existing }));
+		expect(err.message).toContain("already has a variable");
+	});
+
 	test("set_data / set_string / set_format mark metadata, independently verified via C.j, and /re undo removes it", async () => {
 		const metaType = async (ea: string): Promise<string[]> => ((await rz.cmdj<{ type?: string }[]>(`C.j @ ${ea}`)) ?? []).map((m) => m.type ?? "");
 		// set_data at a .data address

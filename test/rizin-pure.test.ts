@@ -224,6 +224,18 @@ describe("annotationCommands", () => {
 		expect(() => annotationCommands("set_hint", "0x1138", "16", "", "bogus_kind")).toThrow("unknown hint kind");
 	});
 
+	test("define_variable builds afvs/afvr from the encoded storage/location/type, and undo deletes by name", () => {
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x30 int", "", "counter")).toEqual(["afvs 0x30 counter int @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x40 char *", "", "path")).toEqual(["afvs 0x40 path char * @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "stack -0x8", "", "tmp")).toEqual(["afvs -0x8 tmp @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "reg rdi int", "", "arg0")).toEqual(["afvr rdi arg0 int @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "", "stack 0x30 int", "counter")).toEqual(["afv- counter @ 0x4da0"]);
+		expect(() => annotationCommands("define_variable", "0x4da0", "stack notanoffset", "", "v")).toThrow("invalid stack delta");
+		expect(() => annotationCommands("define_variable", "0x4da0", "heap 0x10", "", "v")).toThrow("invalid variable storage");
+		expect(() => annotationCommands("define_variable", "0x4da0", "stack 0x30 bad;type", "", "v")).toThrow("omp-re: invalid type");
+		expect(() => annotationCommands("define_variable", "0x4da0", "stack 0x30", "")).toThrow("missing the variable name");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");
