@@ -165,15 +165,21 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * write marks), seek-history listing (`sh/shj` — `shu/shr` move), `px`
  * aliases (`x/xj/xc`) and analysis-plugin listing (`aL[jc]?`). The `pf` read
  * forms pass with the print family; DENIED's lookahead keeps the
- * definition/write/load forms (`pfa/pfo/pfw/pfn/pf-`) out.
+ * definition/write/load forms (`pfa/pfo/pfw/pfn/pf-`) out. C++ vtable/RTTI
+ * reads (`av[j]?`, `avx[t]?`, `avrD` demangler, `avg` global listings
+ * `avg[l[jqt]?|p|x[jq]?|c[j]?]` — the parsers `avr/avra/avrr`, `avD`
+ * devirtualizer and `avg*` setters stay out), type prints (`tp[vx]?`,
+ * `ts[jlcd]?`), sdb namespace dump (`kj`) and magic search (`pm[j]?` —
+ * bare-only: the fileArg mechanism refuses its `<file/directory>` form like
+ * `/m`, so DENIED no longer needs `pm`).
  */
-const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
+const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:
  * `po` writes operations
- * into the buffer, `pkill` kills processes, `pm` reads a magic file path,
- * `pr`/`prz`/`prg` and `p6d` print raw bytes (a NUL byte ends a `-q0` frame
+ * into the buffer, `pkill` kills processes, `pr`/`prz`/`prg` and `p6d` print
+ * raw bytes (a NUL byte ends a `-q0` frame
  * and desyncs the session; `px`, `p8`, `prx` show the same bytes), `/F`
  * searches for a file's content, `ag[enw]` edit the custom graph or write a
  * file, `afb[ce]` set block colors/edges (`afbr` lists exits — read-only),
@@ -186,7 +192,7 @@ const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afb
  * format file), `pfw` (writes data), `pfn` (defines formats), `pf-` — is
  * still denied.
  */
-const DENIED_COMMAND = /^(po|pw|pkill|pm|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
+const DENIED_COMMAND = /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
 
 /**
  * Syntax refused anywhere in a raw command, because it would leave the single

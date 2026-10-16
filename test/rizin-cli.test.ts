@@ -200,6 +200,32 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
 	"pfd": { summary: "Show data using given format string as DOT" },
 	"pfs": { summary: "Print the size of format in bytes" },
 	"pfv": { summary: "Print the value for named format" },
+	"av": { summary: "search for vtables in data sections and show results" },
+	"avj": { summary: "search for vtables in data sections and show results (JSON mode)" },
+	"avx": { summary: "Show the addresses of calls to the virtual function." },
+	"avxt": { summary: "Show the addresses of calls to the virtual function. (table mode)" },
+	"avrD": { summary: "demangle a class name from RTTI" },
+	"avgl": { summary: "show/list global variables" },
+	"avglj": { summary: "show/list global variables (JSON mode)" },
+	"avglq": { summary: "show/list global variables (quiet mode)" },
+	"avglt": { summary: "show/list global variables (table mode)" },
+	"avgp": { summary: "print the global variable value" },
+	"avgx": { summary: "print all xrefs to the global variable" },
+	"avgxj": { summary: "print all xrefs to the global variable (JSON mode)" },
+	"avgxq": { summary: "print all xrefs to the global variable (quiet mode)" },
+	"avgc": { summary: "List value constraints of all globals / of the given one" },
+	"avgcj": { summary: "List value constraints of all globals / of the given one (JSON mode)" },
+	"tp": { summary: "Print formatted type casted to the address or variable" },
+	"tpv": { summary: "Print formatted type casted to the value" },
+	"tpx": { summary: "Print formatted type casted to the hexadecimal sequence" },
+	"ts": { summary: "List loaded structures / Show pf format string for given structure" },
+	"tsj": { summary: "List loaded structures / Show pf format string for given structure (JSON mode)" },
+	"tsl": { summary: "List loaded structures / Show pf format string for given structure (verbose mode)" },
+	"tsc": { summary: "Show structure in the C output format with newlines" },
+	"tsd": { summary: "Show structure in the C output format without newlines" },
+	"kj": { summary: "List all namespaces under 'analysis/' and sdb databases in JSON format (SDB)." },
+	"pm": { summary: "Search magics and print the long description of them.", args_str: " [<file/directory>]", args: [{ type: "string", name: "file/directory" }] },
+	"pmj": { summary: "Search magics and print the long description of them. (JSON mode)", args_str: " [<file/directory>]", args: [{ type: "string", name: "file/directory" }] },
 };
 const CATALOG: RzCatalog = new Map(Object.entries(SPECS).map(([cmd, spec]) => [cmd, { ...spec, cmd }]));
 
@@ -271,11 +297,11 @@ describe("checkRizinCommand (no rizin needed)", () => {
 	});
 
 	test("verified read-only listings run; get/set duals and PDB loads stay refused", () => {
-		for (const command of ["aai", "aaij", "aau", "afbr", "afns", "afnsj", "afsb", "afsbj", "afcl", "afclj", "afcr", "afcrj", "afd", "afvf", "afvc", "id", "idj", "idq", "fl", "flj", "flq", "flt", "fl.", "f.l", "f.lj", "fi", "fij", "fit", "fg", "fsl", "fslj", "fssl", "fsslj", "ftl", "ftlj", "ftll", "fz.", "fzl", "fzlj", "cc", "ccc", "ccd", "cX", "cXj", "cu", "cu1", "cu2", "cu4", "cu8", "cud", "%v", "%vi", "%vi4", "%X", "%x", "%b64", "%b", "%o", "%u", "%l", "%lq", "%h", "%f", "%s", "%btw", "%P", "%p", "%w", "%B", "%Bj", "%Bt", "%$", "%j", "y", "yj", "yq", "ys", "yx", "as", "asl", "aslj", "asn", "asr", "ol", "olj", "olq", "olt", "obl", "oblj", "oml", "omlj", "omlQ", "omlt", "md", "mdj", "mdt", "mi", "mij", "miq", "mit", "ml", "mlj", "mlq", "mlt", "C.", "C.j", "C.l", "sh", "shj", "x", "xj", "xc", "aL", "aLj", "aLc", "pf", "pfj", "pfq", "pf.", "pf.j", "pf.q", "pfc", "pfd", "pfs", "pfv"]) {
+		for (const command of ["aai", "aaij", "aau", "afbr", "afns", "afnsj", "afsb", "afsbj", "afcl", "afclj", "afcr", "afcrj", "afd", "afvf", "afvc", "id", "idj", "idq", "fl", "flj", "flq", "flt", "fl.", "f.l", "f.lj", "fi", "fij", "fit", "fg", "fsl", "fslj", "fssl", "fsslj", "ftl", "ftlj", "ftll", "fz.", "fzl", "fzlj", "cc", "ccc", "ccd", "cX", "cXj", "cu", "cu1", "cu2", "cu4", "cu8", "cud", "%v", "%vi", "%vi4", "%X", "%x", "%b64", "%b", "%o", "%u", "%l", "%lq", "%h", "%f", "%s", "%btw", "%P", "%p", "%w", "%B", "%Bj", "%Bt", "%$", "%j", "y", "yj", "yq", "ys", "yx", "as", "asl", "aslj", "asn", "asr", "ol", "olj", "olq", "olt", "obl", "oblj", "oml", "omlj", "omlQ", "omlt", "md", "mdj", "mdt", "mi", "mij", "miq", "mit", "ml", "mlj", "mlq", "mlt", "C.", "C.j", "C.l", "sh", "shj", "x", "xj", "xc", "aL", "aLj", "aLc", "pf", "pfj", "pfq", "pf.", "pf.j", "pf.q", "pfc", "pfd", "pfs", "pfv", "av", "avj", "avx", "avxt", "avrD", "avgl", "avglj", "avglq", "avglt", "avgp", "avgx", "avgxj", "avgxq", "avgc", "avgcj", "tp", "tpv", "tpx", "ts", "tsj", "tsl", "tsc", "tsd", "kj", "pm", "pmj"]) {
 			expect(checkRizinCommand(CATALOG, command)).toMatchObject({ ok: true, name: command });
 		}
 		// get/set duals: bare form reads, but the same name with an argument writes
-		for (const command of ["fL", "fN", "fs x", "fc x", "fC x", "ft x", "afvs", "afvr", "afs", "afsj", "aezv", "ar", "arj", "arr", "shu", "shr", "yy", "yt", "yz", "om /tmp/x", "asca", "m x", "pfa x", "pfo /tmp/f", "pfn fmt body", "cf /etc/passwd", "cfj /etc/passwd", "%= 1", "%0", "L /tmp/p.dll", "yp", "yf", "p6d 16"]) {
+		for (const command of ["fL", "fN", "fs x", "fc x", "fC x", "ft x", "afvs", "afvr", "afs", "afsj", "aezv", "ar", "arj", "arr", "shu", "shr", "yy", "yt", "yz", "om /tmp/x", "asca", "m x", "pfa x", "pfo /tmp/f", "pfn fmt body", "cf /etc/passwd", "cfj /etc/passwd", "%= 1", "%0", "L /tmp/p.dll", "yp", "yf", "p6d 16", "avD", "avr", "avra", "avrr", "avga", "avgn", "avgd", "avgm", "avgcs", "avg /tmp/x", "tc x", "tl x", "te x"]) {
 			expect(refusal(command)).toMatch(/is not available here/);
 		}
 		// DWARF line info reads, but PDB loading/downloading stays out
@@ -293,6 +319,9 @@ describe("checkRizinCommand (no rizin needed)", () => {
 		expect(refusal("/F /etc/passwd")).toContain("is not available here");
 		expect(refusal("/m /tmp/magic")).toBe("omp-re: rizin_command: /m reads <magic-file> from disk; run it without arguments or not at all");
 		expect(checkRizinCommand(CATALOG, "/m")).toMatchObject({ ok: true, line: "/m" });
+		// `pm` joined the same bare-only rule: its catalog arg is <file/directory>.
+		expect(refusal("pm /tmp/magic")).toBe("omp-re: rizin_command: pm reads <file/directory> from disk; run it without arguments or not at all");
+		expect(checkRizinCommand(CATALOG, "pm")).toMatchObject({ ok: true, line: "pm" });
 	});
 
 	test("refuses commands this rizin doesn't have, and interactive modes", () => {
