@@ -77,6 +77,7 @@ let callSite: number;
 let groundImports: GroundImport[];
 let pltImport: GroundImport;
 let groundExports: unknown[];
+let groundSymbols: unknown[];
 let groundStrings: GroundString[];
 let probeString: GroundString;
 let groundSegments: GroundSegment[];
@@ -105,6 +106,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		groundImports = JSON.parse((await session.cmd("iij")).trim()) as GroundImport[];
 		pltImport = mustFind(groundImports, (i) => typeof i.plt === "number" && i.plt > 0, "an import with a PLT stub");
 		groundExports = JSON.parse((await session.cmd("iEj")).trim()) as unknown[];
+		groundSymbols = JSON.parse((await session.cmd("isj")).trim()) as unknown[];
 
 		groundStrings = JSON.parse((await session.cmd("izj")).trim()) as GroundString[];
 		probeString = mustFind(
@@ -129,7 +131,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		shutdownState(ctx.sessionManager.getSessionId());
 	});
 
-	test("registers all 11 analysis tools plus hash_binary, each with read approval and renderers", () => {
+	test("registers all 12 analysis tools plus hash_binary, each with read approval and renderers", () => {
 		for (const name of [
 			"list_functions",
 			"search_functions",
@@ -140,6 +142,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 			"get_xrefs_from",
 			"list_imports",
 			"list_exports",
+			"list_symbols",
 			"list_strings",
 			"list_segments",
 			"hash_binary",
@@ -338,6 +341,24 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		test("valid: the default page matches rizin's export table size", async () => {
 			const { header } = splitHeaderBody(textOf(await run("list_exports", {})));
 			expect(header).toBe(expectedPageHeader("exports", Math.min(200, groundExports.length), groundExports.length));
+		});
+	});
+
+	describe("list_symbols", () => {
+		test("valid: the default page matches rizin's symbol table size (a superset of exports)", async () => {
+			const { header } = splitHeaderBody(textOf(await run("list_symbols", {})));
+			expect(header).toBe(expectedPageHeader("symbols", Math.min(200, groundSymbols.length), groundSymbols.length));
+			expect(groundSymbols.length).toBeGreaterThanOrEqual(groundExports.length);
+		});
+
+		test("valid: a name filter narrows the table", async () => {
+			// Derive the needle from a real symbol so the test is fixture-agnostic.
+			const first = (groundSymbols as { name?: string }[]).find((s) => typeof s.name === "string" && s.name.length >= 4);
+			const needle = first!.name!.slice(0, 4);
+			const { body } = splitHeaderBody(textOf(await run("list_symbols", { filter: needle })));
+			const parsed = JSON.parse(body) as { name: string }[];
+			expect(parsed.length).toBeGreaterThan(0);
+			expect(parsed.every((s) => s.name.includes(needle))).toBe(true);
 		});
 	});
 

@@ -79,6 +79,7 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 	"axfj",
 	"iij",
 	"iEj",
+	"isj",
 	"izj",
 	"iSj",
 	"ij",

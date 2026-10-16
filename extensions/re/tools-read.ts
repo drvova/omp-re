@@ -173,6 +173,15 @@ interface RzExport extends RzVaddrRow {
 	type: string;
 }
 
+interface RzSymbol extends RzVaddrRow {
+	name: string;
+	bind: string;
+	type: string;
+	size: number;
+	is_imported?: boolean;
+	lib?: string;
+}
+
 interface RzString extends RzVaddrRow {
 	ordinal?: number;
 	size: number;
@@ -244,6 +253,10 @@ export function registerReadTools(pi: ExtensionAPI): void {
 	const stringsParams = z.object({
 		...offsetLimit,
 		filter: z.string().optional().describe("Only include strings containing this substring."),
+	});
+	const symbolsParams = z.object({
+		...offsetLimit,
+		filter: z.string().optional().describe("Only include symbols whose name contains this substring."),
 	});
 	const noParams = z.object({});
 
@@ -421,6 +434,26 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			const items = (await rz.cmdj<RzExport[]>("iEj", { signal })) ?? [];
 			const { page, total } = paginate(items, params.offset, params.limit);
 			const result = await jsonResult(pageHeader("exports", page, total, params.offset), withVaddrEa(page), { ctx, tool: "list_exports" });
+			return markEmpty(result, page.length === 0);
+		},
+	});
+
+	pi.registerTool({
+		name: "list_symbols",
+		label: "List Symbols",
+		description:
+			"List the binary's full symbol table (`is`) — local/internal functions and data symbols with name, type, bind, size, and address. A superset of list_imports/list_exports; optionally filter by name substring.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: symbolsParams,
+		...reRenderers({ title: "Symbols", subject: "filter", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const items = (await rz.cmdj<RzSymbol[]>("isj", { signal })) ?? [];
+			const filter = params.filter;
+			const filtered = filter ? items.filter((s) => s.name.includes(filter)) : items;
+			const { page, total } = paginate(filtered, params.offset, params.limit);
+			const result = await jsonResult(pageHeader("symbols", page, total, params.offset), withVaddrEa(page), { ctx, tool: "list_symbols" });
 			return markEmpty(result, page.length === 0);
 		},
 	});

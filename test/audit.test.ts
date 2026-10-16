@@ -22,8 +22,8 @@ import {
 } from "../extensions/re/audit.ts";
 
 describe("RE_ALL_TOOL_NAMES", () => {
-	test("contains exactly 49 names and is the union of read (28), mutate (9), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (1), analyze (1), and session (1)", () => {
-		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(28);
+	test("contains exactly 50 names and is the union of read (29), mutate (9), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (1), analyze (1), and session (1)", () => {
+		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(29);
 		expect(Object.keys(RE_MUTATE_TOOL_NAMES)).toHaveLength(9);
 		expect(Object.keys(RE_RIZIN_TOOL_NAMES)).toHaveLength(2);
 		expect(Object.keys(RE_RZCLI_TOOL_NAMES)).toHaveLength(1);
@@ -35,7 +35,7 @@ describe("RE_ALL_TOOL_NAMES", () => {
 		expect(Object.keys(RE_SESSION_TOOL_NAMES)).toHaveLength(1);
 
 		const allNames = Object.keys(RE_ALL_TOOL_NAMES);
-		expect(allNames).toHaveLength(49);
+		expect(allNames).toHaveLength(50);
 
 		const expectedUnion = new Set([
 			...Object.keys(RE_READ_TOOL_NAMES),

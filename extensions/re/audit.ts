@@ -36,6 +36,7 @@ export const RE_READ_TOOL_NAMES: Record<string, true> = {
 	get_xrefs_from: true,
 	list_imports: true,
 	list_exports: true,
+	list_symbols: true,
 	list_strings: true,
 	list_segments: true,
 	hash_binary: true,

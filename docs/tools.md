@@ -1,8 +1,8 @@
 # Tool reference
 
-All 49 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 50 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 49 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 50 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -22,7 +22,7 @@ that artifact. List results are JSON arrays with one compact row per line.
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 
-## Read tier (28 tools)
+## Read tier (29 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
@@ -37,6 +37,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `get_xrefs_from` | `read` | `addr, offset?, limit?` | Cross-references originating from the instruction at an address (per instruction — use `get_function`'s `calls` for a whole function). |
 | `list_imports` | `read` | `offset?, limit?` | Imported symbols, with the PLT stub as `ea` when there is one. |
 | `list_exports` | `read` | `offset?, limit?` | Exported symbols. |
+| `list_symbols` | `read` | `offset?, limit?, filter?` | The full symbol table (`is`) — local/internal functions and data symbols with name, type, bind, size, and `ea`; a superset of imports/exports. `filter` matches the name. |
 | `list_strings` | `read` | `offset?, limit?, filter?` | Strings in data sections, optionally filtered by substring. |
 | `list_segments` | `read` | `offset?, limit?` | Sections with permissions, sizes, and addresses. |
 | `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the open binary. |
