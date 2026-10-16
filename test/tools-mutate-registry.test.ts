@@ -60,10 +60,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 	});
 
 	test("every mutate tool declares write approval with a per-call reason", () => {
-		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag", "set_arch_hint"]) {
+		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag", "set_arch_hint", "set_data", "set_string", "set_format"]) {
 			const approval = harness.tool(name).approval as (args: unknown) => { tier: string; reason?: string };
 			expect(typeof approval).toBe("function");
-			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl", arch: "arm", bits: 16 });
+			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl", arch: "arm", bits: 16, size: 4, format: "xxdd" });
 			expect(decision.tier).toBe("write");
 			expect(decision.reason).toContain("main");
 		}
@@ -272,6 +272,34 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 
 		await undoLastAnnotation(pi, ctx);
 		expect(await hintAt(mainEa)).toBeUndefined();
+	});
+
+	test("set_data / set_string / set_format mark metadata, independently verified via C.j, and /re undo removes it", async () => {
+		const metaType = async (ea: string): Promise<string[]> => ((await rz.cmdj<{ type?: string }[]>(`C.j @ ${ea}`)) ?? []).map((m) => m.type ?? "");
+		// set_data at a .data address
+		const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x200);
+		await run("set_data", { addr: dataEa, size: 4, count: 4 });
+		expect(await metaType(dataEa)).toContain("Cd");
+		await undoLastAnnotation(pi, ctx);
+		expect(await metaType(dataEa)).not.toContain("Cd");
+		// set_string at a real string's address (Cs on non-string bytes correctly no-ops)
+		const aString = (await rz.cmdj<{ vaddr: number; size: number }[]>("izj"))!.find((s) => s.size >= 4)!;
+		const strEa = eaFromOffset(aString.vaddr);
+		await run("set_string", { addr: strEa });
+		expect(await metaType(strEa)).toContain("Cs");
+		await undoLastAnnotation(pi, ctx);
+		expect(await metaType(strEa)).not.toContain("Cs");
+		// set_format (struct overlay)
+		const fmtEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x220);
+		const res = await run("set_format", { addr: fmtEa, size: 8, format: "xxdd f1 f2 f3 f4" });
+		expect(textOf(res)).toContain("@ " + fmtEa);
+		expect(await metaType(fmtEa)).toContain("Cf");
+		await undoLastAnnotation(pi, ctx);
+		expect(await metaType(fmtEa)).not.toContain("Cf");
+	});
+
+	test("set_data rejects a non-positive size before touching rizin", async () => {
+		expect((await captureError(run("set_data", { addr: "main", size: 0 }))).message).toContain("positive integer");
 	});
 
 	test("define_function creates a function where rizin missed one, and /re undo removes it", async () => {

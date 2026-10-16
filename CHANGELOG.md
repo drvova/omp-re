@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
-40 to 50.
+40 to 53.
 
 ### Added
 
@@ -35,7 +35,10 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   which corrects argument recovery), `set_flag` (`f`, naming an address), and
   `set_arch_hint` (`aha`/`ahb`, to disassemble a region as a different
   architecture or word size — ARM/Thumb switches, mixed-arch firmware; book:
-  analysis/cpu_platform_profiles).
+  analysis/cpu_platform_profiles); and the metadata family `set_data` (`Cd`,
+  mark bytes as a data element/array), `set_string` (`Cs`, force a missed
+  string), and `set_format` (`Cf`, overlay a pf struct format so disassembly
+  shows named fields; book: disassembling/adding_metadata).
 - **FLIRT signatures.** `apply_signatures` re-applies rizin's built-in sigdb
   (`Fa`) or applies a custom `.sig`/`.pat` file (`Fs`); a custom-file
   application is recorded and re-applied on resume/respawn. `rizin_command`

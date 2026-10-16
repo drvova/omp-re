@@ -1,8 +1,8 @@
 # Tool reference
 
-All 50 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 53 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 50 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 53 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -62,7 +62,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 reports its total so the model knows a view is partial. An empty page is
 marked as compactable, so omp can drop it from context once it has been read.
 
-## Mutate tier (9 tools)
+## Mutate tier (12 tools)
 
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
@@ -84,6 +84,9 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_calling_convention` | `write` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
 | `set_flag` | `write` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; `/re undo` restores the previous flag (or removes it). |
 | `set_arch_hint` | `write` | `addr, arch?, bits?` | Hint the architecture and/or word size to disassemble from an address (`aha`/`ahb`) — e.g. `bits: 16` for an ARM Thumb region, or `arch` for mixed-arch firmware. `/re undo` deletes the hint. |
+| `set_data` | `write` | `addr, size, count?` | Mark bytes as a data element/array (`Cd`) so they stop rendering as code. `/re undo` removes the mark. |
+| `set_string` | `write` | `addr, size?` | Mark bytes as a string (`Cs`); omit `size` to autodetect. Correctly no-ops on non-string bytes. `/re undo` removes it. |
+| `set_format` | `write` | `addr, size, format` | Overlay a pf struct format (with field names) on a region (`Cf`) so disassembly shows named fields. Display-only. `/re undo` removes it. |
 
 ## rizin REPL (2 tools)
 

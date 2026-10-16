@@ -189,6 +189,20 @@ describe("annotationCommands", () => {
 		expect(() => annotationCommands("set_arch_hint", "0x1000", "flavor=spicy", "")).toThrow("invalid arch hint");
 	});
 
+	test("set_data / set_string / set_format build their C* commands and delete on undo", () => {
+		expect(annotationCommands("set_data", "0x1000", "4", "")).toEqual(["Cd 4 @ 0x1000"]);
+		expect(annotationCommands("set_data", "0x1000", "4:8", "")).toEqual(["Cd 4 8 @ 0x1000"]);
+		expect(annotationCommands("set_data", "0x1000", "", "4")).toEqual(["Cd- @ 0x1000"]);
+		expect(annotationCommands("set_string", "0x1000", "16", "")).toEqual(["Cs 16 @ 0x1000"]);
+		expect(annotationCommands("set_string", "0x1000", "auto", "")).toEqual(["Cs @ 0x1000"]);
+		expect(annotationCommands("set_string", "0x1000", "", "auto")).toEqual(["Cs- @ 0x1000"]);
+		expect(annotationCommands("set_format", "0x1000", "8 xxdd field1 field2", "")).toEqual(["Cf 8 xxdd field1 field2 @ 0x1000"]);
+		expect(annotationCommands("set_format", "0x1000", "", "8 xxdd")).toEqual(["Cf- @ 0x1000"]);
+		expect(() => annotationCommands("set_data", "0x1000", "0", "")).toThrow("invalid size");
+		expect(() => annotationCommands("set_format", "0x1000", "8 bad;fmt", "")).toThrow("invalid pf format");
+		expect(() => annotationCommands("set_format", "0x1000", "nofmt", "")).toThrow("needs a size and a pf format");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");

@@ -76,6 +76,12 @@ async function archHintAt(rz: RzSession, ea: string, signal?: AbortSignal): Prom
 	return Array.isArray(hints) && hints.length > 0 ? hints[0] : undefined;
 }
 
+/** The metadata item of a given type (`Cd`/`Cs`/`Cf`) at `ea`, or undefined when none. `C.j` lists all meta at an address as `[{offset,type,size?,...}]`. */
+async function metaAt(rz: RzSession, ea: string, type: string, signal?: AbortSignal): Promise<{ type: string; size?: number } | undefined> {
+	const meta = await rz.cmdj<{ type?: string; size?: number }[]>(`C.j @ ${ea}`, { signal });
+	return Array.isArray(meta) ? (meta.find((m) => m.type === type) as { type: string; size?: number } | undefined) : undefined;
+}
+
 /** Tolerate only rizin's own cosmetic re-punctuation (spacing, trailing `;`) when comparing signatures/types — never a semantic difference. */
 function normalizeCType(value: string): string {
 	return value.trim().replace(/;+\s*$/, "").replace(/\s+/g, "");
@@ -139,6 +145,20 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		addr: z.string().describe("Address (or name/expression) where the hint applies."),
 		arch: z.string().optional().describe("Architecture to disassemble as from here, e.g. `arm`, `x86` (sets an `aha` hint)."),
 		bits: z.union([z.literal(8), z.literal(16), z.literal(32), z.literal(64)]).optional().describe("Word size from here, e.g. 16 for ARM Thumb (sets an `ahb` hint)."),
+	});
+	const setDataParams = z.object({
+		addr: z.string().describe("Address (or name/expression) to mark as data."),
+		size: z.number().describe("Size in bytes of one data element."),
+		count: z.number().optional().describe("Number of consecutive elements (an array); default 1."),
+	});
+	const setStringParams = z.object({
+		addr: z.string().describe("Address (or name/expression) where a string begins."),
+		size: z.number().optional().describe("String length in bytes; omit to let rizin autodetect the encoding and length."),
+	});
+	const setFormatParams = z.object({
+		addr: z.string().describe("Address (or name/expression) to overlay a struct format on."),
+		size: z.number().describe("Total size in bytes the format covers."),
+		format: z.string().describe("A pf format string, optionally with field names, e.g. `xxdd field1 field2 field3 field4` (see rizin_help pf)."),
 	});
 
 	pi.registerTool({
@@ -394,6 +414,81 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			const data = { kind: "set_arch_hint", ea, oldValue: "", newValue: encoded };
 			recordAnnotation(pi, ctx, data);
 			return mutateResult("set_arch_hint", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_data",
+		label: "Set Data",
+		description:
+			"Mark bytes as a data element (or an array, with `count`) so disassembly and xrefs stop rendering data as code. Verifies the mark landed; reversible with /re undo.",
+		approval: (args) => ({ tier: "write", reason: `Mark data at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setDataParams,
+		...reRenderers({ title: "Data", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			if (!Number.isInteger(params.size) || params.size <= 0) throw new Error("omp-re: set_data: size must be a positive integer");
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const encoded = params.count !== undefined && params.count > 1 ? `${params.size}:${params.count}` : `${params.size}`;
+
+			await apply(rz, annotationCommands("set_data", ea, encoded, ""), signal);
+
+			const landed = await metaAt(rz, ea, "Cd", signal);
+			if (!landed) throw new Error(`omp-re: set_data: mutation did not land: no data mark at ${ea}`);
+			const data = { kind: "set_data", ea, oldValue: "", newValue: encoded };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_data", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_string",
+		label: "Set String",
+		description:
+			"Mark bytes as a string where rizin's auto-analysis missed one, so it shows in the disassembly and string views. Omit `size` to autodetect encoding and length. Verifies it landed; reversible with /re undo.",
+		approval: (args) => ({ tier: "write", reason: `Mark a string at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setStringParams,
+		...reRenderers({ title: "String", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			if (params.size !== undefined && (!Number.isInteger(params.size) || params.size <= 0)) throw new Error("omp-re: set_string: size must be a positive integer");
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const encoded = params.size === undefined ? "auto" : `${params.size}`;
+
+			await apply(rz, annotationCommands("set_string", ea, encoded, ""), signal);
+
+			const landed = await metaAt(rz, ea, "Cs", signal);
+			if (!landed) throw new Error(`omp-re: set_string: mutation did not land: no string mark at ${ea} (not valid string bytes there?)`);
+			const data = { kind: "set_string", ea, oldValue: "", newValue: encoded };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_string", data);
+		},
+	});
+
+	pi.registerTool({
+		name: "set_format",
+		label: "Set Format",
+		description:
+			"Overlay a struct format (a pf format string, optionally with field names) on a memory region, so the disassembly shows named, typed fields instead of raw bytes — one of the highest-leverage annotations for data structures. Display-only (doesn't perturb analysis). Verifies it landed; reversible with /re undo.",
+		approval: (args) => ({ tier: "write", reason: `Overlay a format at ${describeArg(args, "addr")}. ${undoNote}` }),
+		loadMode: "essential",
+		parameters: setFormatParams,
+		...reRenderers({ title: "Format", subject: "addr", body: "none" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			if (!Number.isInteger(params.size) || params.size <= 0) throw new Error("omp-re: set_format: size must be a positive integer");
+			const ea = eaFromOffset(await resolveNumericAddr(rz, params.addr, signal));
+			const encoded = `${params.size} ${params.format.trim()}`;
+
+			await apply(rz, annotationCommands("set_format", ea, encoded, ""), signal);
+
+			const landed = await metaAt(rz, ea, "Cf", signal);
+			if (!landed) throw new Error(`omp-re: set_format: mutation did not land: no format mark at ${ea} (bad pf format?)`);
+			const data = { kind: "set_format", ea, oldValue: "", newValue: encoded };
+			recordAnnotation(pi, ctx, data);
+			return mutateResult("set_format", data);
 		},
 	});
 }

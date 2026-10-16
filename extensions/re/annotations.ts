@@ -26,7 +26,10 @@ export type AnnotationKind =
 	| "define_function"
 	| "set_calling_convention"
 	| "set_flag"
-	| "set_arch_hint";
+	| "set_arch_hint"
+	| "set_data"
+	| "set_string"
+	| "set_format";
 
 export interface AnnotationData {
 	kind: string;
@@ -78,9 +81,40 @@ export function annotationCommands(kind: string, ea: string, to: string, from: s
 		case "set_arch_hint":
 			// `to` encodes the arch/bits hint at `ea` as `arch=<a>` and/or `bits=<n>` joined by `;`; "" means no hint (undo deletes both).
 			return to === "" ? [`aha- ${at}`, `ahb- ${at}`] : archHintCommands(to, at);
+		case "set_data":
+			// `to` is `<size>` or `<size>:<repeat>`; "" removes the data mark.
+			return to === "" ? [`Cd- ${at}`] : [`Cd ${dataMarkArgs(to)} ${at}`];
+		case "set_string":
+			// `to` is a byte size, or "auto" to let rizin detect the encoding/length; "" removes the string mark.
+			return to === "" ? [`Cs- ${at}`] : [`Cs${to === "auto" ? "" : ` ${intArg("size", to)}`} ${at}`];
+		case "set_format":
+			// `to` is `<size> <pf-format[ fields...]>`; "" removes the format mark.
+			return to === "" ? [`Cf- ${at}`] : [`Cf ${formatMarkArgs(to)} ${at}`];
 		default:
 			throw new Error(`omp-re: unknown annotation kind: ${kind}`);
 	}
+}
+
+/** A positive integer argument (data/string/format sizes). */
+function intArg(key: string, value: string): string {
+	if (!/^[0-9]+$/.test(value) || value === "0") throw new Error(`omp-re: invalid ${key}: ${JSON.stringify(value)} — a positive integer`);
+	return value;
+}
+
+/** `Cd` arguments from `<size>` or `<size>:<repeat>`. */
+function dataMarkArgs(encoded: string): string {
+	const [size, repeat] = encoded.split(":", 2);
+	return repeat === undefined ? intArg("size", size ?? "") : `${intArg("size", size ?? "")} ${intArg("repeat", repeat)}`;
+}
+
+/** `Cf` arguments from `<size> <pf-format[ fields...]>`. The format is a pf format string plus optional field names; validated to a safe charset (it reaches rizin through the pipe, so no separators/framing bytes). */
+function formatMarkArgs(encoded: string): string {
+	const sp = encoded.indexOf(" ");
+	if (sp === -1) throw new Error("omp-re: set_format needs a size and a pf format, e.g. `8 xxdd field1 field2`");
+	const size = intArg("size", encoded.slice(0, sp));
+	const format = encoded.slice(sp + 1).trim();
+	if (!/^[A-Za-z0-9_ .*[\]]+$/.test(format)) throw new Error(`omp-re: invalid pf format: ${JSON.stringify(format)}`);
+	return `${size} ${format}`;
 }
 
 /** Build the `aha <arch>` / `ahb <bits>` commands from an encoded arch-hint value (`arch=arm;bits=16`). Each part is validated so a malformed hint fails here, not at rizin. */
