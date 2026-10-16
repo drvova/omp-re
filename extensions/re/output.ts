@@ -15,18 +15,32 @@
  */
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 /**
- * Assert a path is safe to hand to rizin as a command argument: a resolved
- * path of ordinary characters, no whitespace or command metacharacters that
- * rizin's parser could turn into a second command (`;`, `|`, `` ` ``, `$`,
- * redirects, `@`, quotes). The model-supplied part is already a
- * {@link safeBasename}; this also catches a hostile `OMPRE_OUTPUT_DIR`.
+ * rizin's command parser takes forward-slash paths on every platform, so the
+ * rizin-facing output path is normalized to forward slashes: a Windows
+ * `C:\…\omp-re-out\x` becomes `C:/…/omp-re-out/x`, which rizin accepts
+ * verbatim and which carries no backslash for {@link assertRizinSafePath} to
+ * trip on. Node's own fs calls accept the forward-slash form on Windows too,
+ * so a caller can still stat/read the returned path.
+ */
+export function toRizinPath(path: string): string {
+	return path.replace(/\\/g, "/");
+}
+
+/**
+ * Assert a (forward-slash normalized) path is safe to hand to rizin as a
+ * command argument: ordinary characters only, no whitespace or command
+ * metacharacters that rizin's parser could turn into a second command (`;`,
+ * `|`, `` ` ``, `$`, redirects, `@`, quotes). `/`, `.`, `_`, `-` and the
+ * Windows drive colon are allowed — none is a rizin separator or substitution
+ * character. The model-supplied part is already a {@link safeBasename}; this
+ * also catches a hostile `OMPRE_OUTPUT_DIR`.
  */
 function assertRizinSafePath(path: string): void {
-	if (!/^[A-Za-z0-9_./-]+$/.test(path)) {
-		throw new Error(`omp-re: the output directory path ${JSON.stringify(path)} contains characters that can't be passed to rizin safely — set OMPRE_OUTPUT_DIR to a path of letters, digits, '/', '.', '_' and '-'`);
+	if (!/^[A-Za-z0-9_.:/-]+$/.test(path)) {
+		throw new Error(`omp-re: the output directory path ${JSON.stringify(path)} contains characters that can't be passed to rizin safely — set OMPRE_OUTPUT_DIR to a path of letters, digits, '/', '.', '_', '-' and (on Windows) a drive letter`);
 	}
 }
 
@@ -54,8 +68,10 @@ export function safeBasename(name: string): string {
 export async function prepareOutputPath(basename: string): Promise<string> {
 	const dir = outputDir();
 	const full = resolve(dir, safeBasename(basename));
-	// Defense in depth: safeBasename already forbids separators, but confirm the join stayed inside the directory.
-	if (full !== join(dir, basename) || !full.startsWith(`${dir}/`)) {
+	// Defense in depth: safeBasename already forbids separators, but confirm the
+	// join stayed inside the directory. `sep` (not a literal `/`) so the
+	// containment check holds on Windows, where resolve/join use `\`.
+	if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
 		throw new Error(`omp-re: refusing to write outside the output directory: ${JSON.stringify(basename)}`);
 	}
 	await mkdir(dir, { recursive: true });
@@ -63,12 +79,13 @@ export async function prepareOutputPath(basename: string): Promise<string> {
 }
 
 /**
- * Like {@link prepareOutputPath}, but also asserts the full path is safe to
- * hand to rizin as a command argument. Used when rizin itself writes the file
- * (e.g. a project `.rzdb`), so the path — not just the bytes — reaches rizin.
+ * Like {@link prepareOutputPath}, but returns a forward-slash normalized path
+ * and asserts it is safe to hand to rizin as a command argument. Used when
+ * rizin itself writes the file (e.g. a project `.rzdb`), so the path — not
+ * just the bytes — reaches rizin.
  */
 export async function rizinOutputPath(basename: string): Promise<string> {
-	const full = await prepareOutputPath(basename);
+	const full = toRizinPath(await prepareOutputPath(basename));
 	assertRizinSafePath(full);
 	return full;
 }
@@ -82,10 +99,11 @@ export async function rizinOutputPath(basename: string): Promise<string> {
 export async function outputSubdir(basename: string, create: boolean): Promise<string> {
 	const dir = outputDir();
 	const full = resolve(dir, safeBasename(basename));
-	if (full !== join(dir, basename) || !full.startsWith(`${dir}/`)) {
+	if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
 		throw new Error(`omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`);
 	}
-	assertRizinSafePath(full);
+	const rizinSafe = toRizinPath(full);
+	assertRizinSafePath(rizinSafe);
 	if (create) await mkdir(full, { recursive: true });
-	return full;
+	return rizinSafe;
 }
