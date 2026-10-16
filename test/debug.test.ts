@@ -5,7 +5,7 @@
  * when rizin or the fixture is missing.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { DEBUG_LAUNCH_WARNING, buildRunDirectives, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
+import { DEBUG_LAUNCH_WARNING, buildDebugTarget, buildRunDirectives, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
 import { registerEmulateTools } from "../extensions/re/tools-emulate.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, TEST_BINARY, textOf } from "./helpers.ts";
@@ -80,6 +80,30 @@ describe("buildRunDirectives (no rizin needed)", () => {
 		]) {
 			expect(() => buildRunDirectives(run)).toThrow(/omp-re: debug: run/);
 		}
+	});
+});
+
+
+describe("buildDebugTarget (no rizin needed)", () => {
+	test("no attach ⇒ undefined (the default launch)", () => {
+		expect(buildDebugTarget(undefined)).toBeUndefined();
+	});
+
+	test("a pid becomes the target string, a gdb/windbg URI passes through", () => {
+		expect(buildDebugTarget({ pid: 1234 })).toBe("1234");
+		expect(buildDebugTarget({ remote: "gdb://127.0.0.1:1234" })).toBe("gdb://127.0.0.1:1234");
+		expect(buildDebugTarget({ remote: "windbg://pipe/com_1" })).toBe("windbg://pipe/com_1");
+	});
+
+	test("refuses a bad pid, a non-gdb/windbg or flag-shaped URI, and both-or-neither", () => {
+		expect(() => buildDebugTarget({ pid: 0 })).toThrow(/positive integer/);
+		expect(() => buildDebugTarget({ pid: -1 })).toThrow(/positive integer/);
+		expect(() => buildDebugTarget({ pid: 1.5 })).toThrow(/positive integer/);
+		expect(() => buildDebugTarget({ remote: "http://evil" })).toThrow(/gdb:\/\/ or windbg:\/\//);
+		expect(() => buildDebugTarget({ remote: "gdb://host; rm -rf /" })).toThrow(/gdb:\/\/ or windbg:\/\//);
+		expect(() => buildDebugTarget({})).toThrow(/exactly one/);
+		expect(() => buildDebugTarget({ pid: 1, remote: "gdb://h:1" })).toThrow(/exactly one/);
+		expect(() => buildDebugTarget("nope")).toThrow(/must be an object/);
 	});
 });
 
@@ -248,5 +272,46 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(textOf(await run("stop"))).toContain("stopped");
 		expect(getState(ctx).dbg).toBeNull();
 		expect(textOf(await run("stop"))).toContain("no debug session");
+	});
+});
+
+describe.skipIf(!canRunRizin)("debug attach to a running process", () => {
+	const harness = makeHarness("debug-attach-test-session");
+	const { ctx } = harness;
+	const run = (action: string, extra: Record<string, unknown> = {}) =>
+		harness.tool("rizin_debug").execute("t-attach", { action, ...extra }, undefined, undefined, ctx);
+	let victim: ReturnType<typeof Bun.spawn> | undefined;
+
+	beforeAll(() => {
+		process.env.OMPRE_ENABLE_DEBUGGER = "1";
+		getState(ctx).binaryPath = TEST_BINARY; // the open binary is the symbol source
+		registerDebugTools(harness.pi);
+		// A long-lived process of our own to attach to.
+		victim = Bun.spawn(["sleep", "120"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+	});
+	afterAll(() => {
+		shutdownState(ctx.sessionManager.getSessionId());
+		try {
+			victim?.kill();
+		} catch {
+			// already gone (stop killed it)
+		}
+		restoreEnable();
+	});
+
+	test("start with attach.pid controls the running process and reads its registers", async () => {
+		const out = textOf(await run("start", { attach: { pid: victim!.pid } }));
+		expect(out).toContain(`attached to PID ${victim!.pid}`);
+		expect(out).toContain(DEBUG_LAUNCH_WARNING);
+		expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
+	}, 25_000);
+
+	test("attach cannot be combined with run", async () => {
+		await run("stop");
+		expect((await captureError(run("start", { attach: { pid: victim!.pid }, run: { args: ["x"] } }))).message).toContain("cannot be combined with run");
+	});
+
+	test("a malformed remote target is refused before anything starts", async () => {
+		expect((await captureError(run("start", { attach: { remote: "http://nope" } }))).message).toContain("gdb:// or windbg://");
 	});
 });

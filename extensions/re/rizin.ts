@@ -209,6 +209,14 @@ export interface SpawnOptions {
 	runDirectives?: string[];
 	/** Explicit load settings (`-a/-b/-B/-F`) for a headerless/raw target. Applied to both the static and debug spawns so analysis and execution agree on the arch. */
 	loadOptions?: LoadOptions;
+	/**
+	 * A debug target to attach to instead of launching the open binary: a pid
+	 * (`"1234"`) or a remote stub URI (`"gdb://host:port"`). The open binary is
+	 * still passed as the symbol source (`rizin -d <target> <binary>`). Only
+	 * the debug spawn reads it, and it excludes the rz-run launch directives
+	 * (there is no new process to configure).
+	 */
+	debugTarget?: string;
 }
 
 /** Settle `task` normally, or reject early with RzAbortError when `signal` fires. The task itself keeps running. */
@@ -421,19 +429,24 @@ export class RzSession {
 	}
 
 	/**
-	 * Spawn a rizin DEBUG session: `rizin -q0 -d <binary>`, which LAUNCHES the
-	 * target process (stopped at its entry) so it can be stepped and inspected.
-	 * This is the one place omp-re executes a sample, kept entirely separate
-	 * from the static {@link spawn} session that only ever reads the file.
-	 * Light `aa` analysis (not full `aaa`) runs so symbols resolve in
-	 * backtraces without slowing the launch.
+	 * Spawn a rizin DEBUG session. By default `rizin -q0 -d <binary>`, which
+	 * LAUNCHES the target process (stopped at its entry). With `debugTarget`
+	 * set it instead ATTACHES to a running pid or connects to a remote stub —
+	 * `rizin -q0 -d <target> <binary>`, the open binary serving as the symbol
+	 * source — and the rz-run launch directives and raw-load flags are dropped
+	 * (there is no new local process to configure). Either way this is the one
+	 * place omp-re drives a live process, kept entirely separate from the
+	 * static {@link spawn} session that only ever reads the file. Light `aa`
+	 * analysis (not full `aaa`) runs so symbols resolve without slowing things.
 	 */
 	static async spawnDebug(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
 		if (options.signal?.aborted) throw new RzAbortError("debug launch");
 		// -R directives go before -d: each is one argv element (no shell), so
 		// values with spaces need no quoting.
-		const runFlags = (options.runDirectives ?? []).flatMap((d) => ["-R", d]);
-		const proc = spawn(rizinPath, [...baseRizinFlags(), ...buildLoadFlags(options.loadOptions), ...runFlags, "-d", binaryPath], {
+		const argv = options.debugTarget
+			? [...baseRizinFlags(), "-d", options.debugTarget, binaryPath]
+			: [...baseRizinFlags(), ...buildLoadFlags(options.loadOptions), ...(options.runDirectives ?? []).flatMap((d) => ["-R", d]), "-d", binaryPath];
+		const proc = spawn(rizinPath, argv, {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const session = new RzSession(proc, binaryPath);

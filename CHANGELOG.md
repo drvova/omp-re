@@ -41,6 +41,13 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   (`heap_arenas` / `heap_chunks` / `heap_bins`) alongside the existing Windows
   heap actions. The approval reason now distinguishes execute / modify /
   inspect.
+- **Remote and attach debugging** (book: remote_access). `rizin_debug`'s
+  `start` can now control an existing target instead of launching: `attach:
+  {pid}` attaches to a running process, and `attach: {remote: "gdb://host:port"}`
+  (or `windbg://…`) connects to a remote stub — so a sample can be driven
+  inside an isolated VM from the host, the open binary serving as the symbol
+  source. The pid and URI are validated; `attach` is refused together with
+  `run`.
 - **`rizin_command` read-only unlock.** Whole read-only families the book
   documents are now reachable: configuration reads (`e <key>`, `el`, `elj`,
   `et`, `es`), analysis-hint listings (`ahl`), metadata and string listings

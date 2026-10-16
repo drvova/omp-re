@@ -169,9 +169,19 @@ of the suite holds:
 - It is a **plain debugger** — breakpoints and watchpoints, stepping,
   reading and writing registers and memory, disassembling live memory,
   backtraces, heap and process-state inspection. The register/memory writes
-  act only on the debuggee this session launched; the tool has no features
-  for evading anti-debugging, hiding the debuggee, attaching to or injecting
-  into other processes.
+  act only on the process this session drives; the tool has no features for
+  evading anti-debugging, hiding the debuggee, or injecting into other
+  processes.
+- Besides launching, `start` can **attach** to a running pid or **connect to
+  a remote stub** (`attach: {pid}` / `attach: {remote: "gdb://…"}`), so a
+  sample can be driven inside an isolated VM from the host. Attaching controls
+  an existing process with your privileges; a remote target opens an outbound
+  connection to the stub you name (through the environment's network policy).
+  The pid must be a positive integer and the remote URI must be a
+  charset-validated `gdb://`/`windbg://` string — both reach rizin through
+  argv, never a shell. `attach` is refused together with `run` (there is no
+  new process to configure), and these paths still require
+  `OMPRE_ENABLE_DEBUGGER`.
 
 The debugger provides **no isolation whatsoever** — it is the opposite of a
 sandbox. Enable it and run a sample only inside a disposable VM or container

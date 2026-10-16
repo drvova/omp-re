@@ -105,6 +105,36 @@ function validateWatchPerm(perm: string | undefined): string {
 	return p;
 }
 
+const REMOTE_URI = /^(gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/;
+
+/**
+ * Turn an `attach` object into the rizin `-d <target>` string: a pid
+ * (`"1234"`) or a remote stub URI (`gdb://host:port`, `windbg://...`).
+ * Exactly one of pid/remote; the URI is charset-validated (it reaches rizin
+ * through argv, no shell, but a flag-shaped or spaced value is rejected here
+ * with a clear message). Returns undefined when no attach was requested.
+ */
+export function buildDebugTarget(attach: unknown): string | undefined {
+	if (attach === undefined) return undefined;
+	if (typeof attach !== "object" || attach === null || Array.isArray(attach)) {
+		throw new Error("omp-re: debug: attach must be an object with a pid or remote");
+	}
+	const a = attach as { pid?: unknown; remote?: unknown };
+	const hasPid = a.pid !== undefined;
+	const hasRemote = a.remote !== undefined;
+	if (hasPid === hasRemote) throw new Error("omp-re: debug: attach needs exactly one of pid or remote");
+	if (hasPid) {
+		if (typeof a.pid !== "number" || !Number.isInteger(a.pid) || a.pid <= 0) {
+			throw new Error(`omp-re: debug: attach.pid must be a positive integer (got ${JSON.stringify(a.pid)})`);
+		}
+		return String(a.pid);
+	}
+	if (typeof a.remote !== "string" || !REMOTE_URI.test(a.remote)) {
+		throw new Error(`omp-re: debug: attach.remote must be a gdb:// or windbg:// URI (got ${JSON.stringify(a.remote)})`);
+	}
+	return a.remote;
+}
+
 /** Clamp a positive integer parameter to a sane range. */
 function clampInt(value: number | undefined, fallback: number, max: number): number {
 	if (value === undefined || !Number.isFinite(value)) return fallback;
@@ -210,7 +240,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 	const debugParams = z.object({
 		action: z.enum(DEBUG_ACTIONS).describe(
 			[
-				"start: launch the open binary under the debugger, stopped at entry (EXECUTES it).",
+				"start: launch the open binary under the debugger, stopped at entry (EXECUTES it); or, with `attach`, control a running pid or a remote gdb/windbg stub instead.",
 				"continue: resume until a breakpoint, signal, or exit. continue_until: resume to `addr`.",
 				"continue_to_syscall / continue_to_call / continue_to_ret: resume until the next syscall, call, or return.",
 				"step: one instruction (or `count`). step_over: step over calls.",
@@ -245,16 +275,29 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				timeout: z.number().optional().describe("Seconds before the debuggee is killed."),
 			})
 			.optional()
-			.describe("rz-run environment for start: the target's arguments, env, cwd, stdio redirections, and limits. Only read alongside action 'start'."),
+			.describe("rz-run environment for start: the target's arguments, env, cwd, stdio redirections, and limits. Only read alongside action 'start' when launching (not with attach)."),
+		attach: z
+			.object({
+				pid: z.number().optional().describe("Attach to this already-running process id instead of launching the open binary."),
+				remote: z.string().optional().describe("Connect to a remote debug stub instead of launching: a gdb:// or windbg:// URI (e.g. a sample running in an isolated VM)."),
+			})
+			.optional()
+			.describe("For action 'start': attach to a running pid or a remote stub instead of launching the open binary. Exactly one of pid/remote; not combined with run. The open binary is used as the symbol source."),
 	});
 
 	pi.registerTool({
 		name: "rizin_debug",
 		label: "debugger",
 		description:
-			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
+			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected.",
 		approval: (args) => {
-			const action = (args && typeof args === "object" ? (args as { action?: unknown }).action : undefined) as DebugAction | undefined;
+			const record = args && typeof args === "object" ? (args as { action?: unknown; attach?: { pid?: unknown; remote?: unknown } }) : {};
+			const action = record.action as DebugAction | undefined;
+			if (action === "start" && record.attach && typeof record.attach === "object") {
+				const { pid, remote } = record.attach;
+				if (typeof pid === "number") return { tier: "exec", reason: `Attach the debugger to running PID ${pid} — it will control that process.` };
+				if (typeof remote === "string") return { tier: "exec", reason: `Connect the debugger to the remote target ${JSON.stringify(remote)}.` };
+			}
 			return { tier: "exec", reason: action ? approvalReason(action) : "Drive the debugged process." };
 		},
 		loadMode: "essential",
@@ -270,10 +313,18 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					return plainResult(`debug: already running\n${pc}`);
 				}
 				const binary = requireBinary(getState(ctx));
+				const debugTarget = buildDebugTarget(params.attach); // throws on a bad pid/URI, before anything starts
+				if (debugTarget !== undefined && params.run !== undefined) {
+					throw new Error("omp-re: debug: attach cannot be combined with run (there is no new process to configure)");
+				}
 				if (ctx.hasUI) ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
 				const runDirectives = buildRunDirectives(params.run); // throws on bad settings, before anything launches
-				const dbg = await startDebug(ctx, { signal, runDirectives }); // the debug process is a revertible effect on the session scope
+				const dbg = await startDebug(ctx, { signal, runDirectives, debugTarget }); // the debug process is a revertible effect on the session scope
 				const pc = await programCounter(dbg, signal);
+				if (debugTarget !== undefined) {
+					const how = /^\d+$/.test(debugTarget) ? `attached to PID ${debugTarget}` : `connected to ${debugTarget}`;
+					return textResult(`debug: ${how}`, `${DEBUG_LAUNCH_WARNING}\nControlling the live process (${how}), symbols from ${binary}.${pc ? `\n${pc}` : ""}\nSet breakpoints (break_add), then continue or step.`);
+				}
 				const runNote = runDirectives ? ` Target env: ${runDirectives.join(", ")}.` : "";
 				// Already surfaced as a warning by startDebug; repeat in the result so
 				// the text record carries it.

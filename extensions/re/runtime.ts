@@ -179,15 +179,21 @@ class RizinBackend {
 		const rec = this.record(ctx.sessionManager.getSessionId());
 		if (rec.dbg && !rec.dbg.isClosed) return rec.dbg;
 		const binaryPath = this.requireBinary(rec);
+		// When attaching to a pid or a remote stub, the target brings its own
+		// arch and memory — the raw-load options and the bits-mismatch check
+		// (which are about launching the open file) don't apply.
+		const attaching = options.debugTarget !== undefined;
 		// The debug launch loads the target the same way the static session did
 		// (raw blob arch/bits/base), so stepping agrees with the analysis.
-		const loadOptions = rec.loadOptions ?? undefined;
+		const loadOptions = attaching ? undefined : (rec.loadOptions ?? undefined);
 		const rizinPath = resolveRizinPath(binaryPath, loadOptions?.bits);
-		// The debugger executes the process: a build whose bits don't match the
-		// target produces wrong-arch semantics (file-relative VM bases,
-		// esp-vs-rsp) — say so loudly instead of letting them pass as results.
-		const mismatch = await rizinBitsMismatch(binaryPath);
-		if (mismatch) ctx.ui?.notify?.(`omp-re: ${mismatch}`, "warning");
+		if (!attaching) {
+			// The debugger executes the process: a build whose bits don't match the
+			// target produces wrong-arch semantics (file-relative VM bases,
+			// esp-vs-rsp) — say so loudly instead of letting them pass as results.
+			const mismatch = await rizinBitsMismatch(binaryPath);
+			if (mismatch) ctx.ui?.notify?.(`omp-re: ${mismatch}`, "warning");
+		}
 		const dbg = await RzSession.spawnDebug(rizinPath, binaryPath, { ...options, loadOptions });
 		const scope = await this.scope(rec);
 		rec._disposeDbg = scope.effect(() => () => {

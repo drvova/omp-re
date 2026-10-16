@@ -181,13 +181,19 @@ shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?` | Drives one debug action (below). `addr` is validated like every other address. |
+| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?` | Drives one debug action (below). `addr` is validated like every other address. |
 
 Actions:
 
-- **Execution:** `start` (launch, stopped at entry), `continue` /
-  `continue_until` (`addr`), `continue_to_syscall` / `continue_to_call` /
-  `continue_to_ret`, `step` / `step_over` (`count` instructions).
+- **Start:** `start` launches the open binary, stopped at entry (`run`
+  configures its argv/env/stdio). With `attach` it instead controls an
+  existing target without launching: `attach: {pid: N}` attaches to a running
+  process, `attach: {remote: "gdb://host:port"}` (or `windbg://…`) connects to
+  a remote stub — e.g. a sample running in an isolated VM — with the open
+  binary as the symbol source. `attach` is not combined with `run`.
+- **Execution:** `continue` / `continue_until` (`addr`),
+  `continue_to_syscall` / `continue_to_call` / `continue_to_ret`, `step` /
+  `step_over` (`count` instructions).
 - **Registers & memory:** `registers`, `write_register` (`reg`=`value`),
   `read_memory` (`size` bytes at `addr`), `write_memory` (`bytes` hex at
   `addr`, into the live process), `disassemble` (`count` instructions at

@@ -148,6 +148,12 @@ that only ever reads the file, and every resume or modification is an
 isolated, disposable VM or container — see
 [`SECURITY.md`](SECURITY.md#rizin_debug).
 
+Instead of launching locally, `start` can **attach** to an already-running
+process (`attach: {pid}`) or **connect to a remote stub** (`attach: {remote:
+"gdb://host:port"}`, or `windbg://…`) — so you can drive a sample running
+inside an isolated VM from omp-re on the host, the open binary serving as the
+symbol source. Everything else about the tool is unchanged.
+
 ### Emulation and signatures
 
 Between pure static reading and executing the sample, two more rizin
