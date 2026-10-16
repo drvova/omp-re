@@ -16,7 +16,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { plainResult, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
-import { debugTimeoutMs, rizinBitsMismatch, validateAddr } from "./rizin.ts";
+import { debugTimeoutMs, rizinBitsMismatch, validateAddr, type RzSession } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
@@ -69,6 +69,18 @@ function approvalReason(action: DebugAction): string {
 function clampInt(value: number | undefined, fallback: number, max: number): number {
 	if (value === undefined || !Number.isFinite(value)) return fallback;
 	return Math.max(1, Math.min(Math.floor(value), max));
+}
+
+/**
+ * The debuggee's program counter as a `<reg> = 0x…` line. `dr rip` is the
+ * x86-64 name; `dr PC` is rizin's arch-agnostic alias (eip on x86-32, pc on
+ * ARM/MIPS), tried as a fallback so the result is meaningful on every target.
+ * Empty string when neither resolves (e.g. the process already exited).
+ */
+async function programCounter(dbg: RzSession, signal?: AbortSignal): Promise<string> {
+	const rip = (await dbg.cmd("dr rip", { signal })).trim();
+	if (rip) return rip;
+	return (await dbg.cmd("dr PC", { signal })).trim();
 }
 
 /**
@@ -206,19 +218,19 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 			if (params.action === "start") {
 				const existing = getState(ctx).dbg;
 				if (existing && !existing.isClosed) {
-					const pc = (await existing.cmd("dr rip", { signal })).trim() || (await existing.cmd("dr PC", { signal })).trim();
+					const pc = await programCounter(existing, signal);
 					return plainResult(`debug: already running\n${pc}`);
 				}
 				const binary = requireBinary(getState(ctx));
 				if (ctx.hasUI) ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
 				const runDirectives = buildRunDirectives(params.run); // throws on bad settings, before anything launches
 				const dbg = await startDebug(ctx, { signal, runDirectives }); // the debug process is a revertible effect on the session scope
-				const pc = (await dbg.cmd("dr rip", { signal })).trim();
+				const pc = await programCounter(dbg, signal);
 				const runNote = runDirectives ? ` Target env: ${runDirectives.join(", ")}.` : "";
 				// Already surfaced as a warning by startDebug; repeat in the result so
 				// the text record carries it.
 				const bitsNote = (await rizinBitsMismatch(binary)) ?? "";
-				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}${bitsNote ? `\n${bitsNote}` : ""}\nSet breakpoints (break_add), then continue or step.`);
+				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}${bitsNote ? `\n${bitsNote}` : ""}${pc ? `\n${pc}` : ""}\nSet breakpoints (break_add), then continue or step.`);
 			}
 
 			if (params.action === "stop") {
@@ -241,25 +253,25 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 			switch (params.action) {
 				case "continue": {
 					const out = (await dbg.cmd("dc", { timeoutMs: dbgTimeout, signal })).trim();
-					const pc = (await dbg.cmd("dr rip", { signal })).trim();
+					const pc = await programCounter(dbg, signal);
 					return textResult("debug: continue", `${out || "(resumed)"}\n${pc}`);
 				}
 				case "continue_until": {
 					if (!ea) throw new Error("omp-re: debug continue_until needs addr");
 					const out = (await dbg.cmd(`dcu ${ea}`, { timeoutMs: dbgTimeout, signal })).trim();
-					const pc = (await dbg.cmd("dr rip", { signal })).trim();
+					const pc = await programCounter(dbg, signal);
 					return textResult(`debug: continue_until ${ea}`, `${out || "(resumed)"}\n${pc}`);
 				}
 				case "step": {
 					const n = clampInt(params.count, 1, 100_000);
 					await dbg.cmd(`ds ${n}`, { timeoutMs: dbgTimeout, signal });
-					const pc = (await dbg.cmd("dr rip", { signal })).trim();
+					const pc = await programCounter(dbg, signal);
 					return textResult(`debug: step ${n}`, pc);
 				}
 				case "step_over": {
 					const n = clampInt(params.count, 1, 100_000);
 					await dbg.cmd(`dso ${n}`, { timeoutMs: dbgTimeout, signal });
-					const pc = (await dbg.cmd("dr rip", { signal })).trim();
+					const pc = await programCounter(dbg, signal);
 					return textResult(`debug: step_over ${n}`, pc);
 				}
 				case "registers": {
