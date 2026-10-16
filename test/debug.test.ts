@@ -5,7 +5,7 @@
  * when rizin or the fixture is missing.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { DEBUG_LAUNCH_WARNING, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
+import { DEBUG_LAUNCH_WARNING, buildRunDirectives, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -38,6 +38,47 @@ describe("debuggerEnabled (no rizin needed)", () => {
 		const h = makeHarness("debug-off");
 		registerDebugTools(h.pi);
 		expect(() => h.tool("rizin_debug")).toThrow();
+	});
+});
+
+
+describe("buildRunDirectives (no rizin needed)", () => {
+	test("builds directives for args, env, cwd, stdio, input, aslr, and limits", () => {
+		expect(buildRunDirectives(undefined)).toBeUndefined();
+		expect(buildRunDirectives({})).toBeUndefined();
+		expect(buildRunDirectives({ args: ["--flag", "value with spaces"], env: { PATH_EXTRA: "a=b" }, cwd: "C:/tmp", aslr: false, timeout: 30 })).toEqual([
+			"arg0=--flag",
+			"arg1=value with spaces",
+			"setenv=PATH_EXTRA=a=b",
+			"chdir=C:/tmp",
+			"aslr=no",
+			"timeout=30",
+		]);
+		expect(buildRunDirectives({ stdin: "C:/in.txt", stdout: "C:/out.txt", stderr: "C:/err.txt", input: "payload", maxstack: 0x100000, maxfd: 64, maxproc: 8 })).toEqual([
+			"stdin=C:/in.txt",
+			"stdout=C:/out.txt",
+			"stderr=C:/err.txt",
+			"input=payload",
+			"maxstack=1048576",
+			"maxfd=64",
+			"maxproc=8",
+		]);
+	});
+	test("refuses what the contract leaves out", () => {
+		for (const run of [
+			{ stdin: "!rm -rf /" }, // stdio=!cmd executes a shell command
+			{ stdout: "!cmd" },
+			{ args: ["line\nbreak"] },
+			{ env: { "BAD-NAME": "v" } },
+			{ env: { OK: 1 } },
+			{ aslr: "yes" },
+			{ timeout: -1 },
+			{ bogus: 1 },
+			{ args: "not-a-list" },
+			"not-an-object",
+		]) {
+			expect(() => buildRunDirectives(run)).toThrow(/omp-re: debug: run/);
+		}
 	});
 });
 

@@ -155,6 +155,8 @@ export interface SpawnOptions {
 	signal?: AbortSignal;
 	/** Called about once a second while `aaa` runs, with the elapsed milliseconds. */
 	onProgress?: (elapsedMs: number) => void;
+	/** rz-run directives (`arg0=...`, `setenv=K=V`, `chdir=...`, ...) passed as `-R` flags — the debug launch's target environment. */
+	runDirectives?: string[];
 }
 
 /** Settle `task` normally, or reject early with RzAbortError when `signal` fires. The task itself keeps running. */
@@ -376,7 +378,10 @@ export class RzSession {
 	 */
 	static async spawnDebug(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
 		if (options.signal?.aborted) throw new RzAbortError("debug launch");
-		const proc = spawn(rizinPath, [...baseRizinFlags(), "-d", binaryPath], {
+		// -R directives go before -d: each is one argv element (no shell), so
+		// values with spaces need no quoting.
+		const runFlags = (options.runDirectives ?? []).flatMap((d) => ["-R", d]);
+		const proc = spawn(rizinPath, [...baseRizinFlags(), ...runFlags, "-d", binaryPath], {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const session = new RzSession(proc, binaryPath);

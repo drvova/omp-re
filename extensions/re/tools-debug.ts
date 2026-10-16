@@ -71,6 +71,85 @@ function clampInt(value: number | undefined, fallback: number, max: number): num
 	return Math.max(1, Math.min(Math.floor(value), max));
 }
 
+/**
+ * Build rz-run directives for the debug launch (book: tools/rz-run — rizin
+ * loads them as `-R directive` flags). One directive per argv element, so
+ * values with spaces need no quoting; newlines would break the profile
+ * format and are refused everywhere. `!`-prefixed stdio targets execute
+ * shell commands on this machine and stay out of the contract.
+ */
+export function buildRunDirectives(run: unknown): string[] | undefined {
+	if (run === undefined) return undefined;
+	if (typeof run !== "object" || run === null || Array.isArray(run)) {
+		throw new Error("omp-re: debug: run must be an object of rz-run settings");
+	}
+	const clean = (key: string, value: string): string => {
+		if (/[\r\n]/.test(value)) throw new Error(`omp-re: debug: run.${key} must not contain line breaks`);
+		return value;
+	};
+	const directives: string[] = [];
+	const r = run as Record<string, unknown>;
+	for (const [key, raw] of Object.entries(r)) {
+		switch (key) {
+			case "args": {
+				if (!Array.isArray(raw) || raw.some((a) => typeof a !== "string")) {
+					throw new Error("omp-re: debug: run.args must be a list of strings");
+				}
+				if (raw.length > 64) throw new Error("omp-re: debug: run.args supports at most 64 arguments");
+				raw.forEach((a, i) => directives.push(`arg${i}=${clean(key, a)}`));
+				break;
+			}
+			case "env": {
+				if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+					throw new Error("omp-re: debug: run.env must be an object");
+				}
+				for (const [k, v] of Object.entries(raw)) {
+					if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`omp-re: debug: run.env: bad variable name ${JSON.stringify(k)}`);
+					if (typeof v !== "string") throw new Error(`omp-re: debug: run.env.${k} must be a string`);
+					directives.push(`setenv=${k}=${clean(key, v)}`);
+				}
+				break;
+			}
+			case "cwd":
+				if (typeof raw !== "string") throw new Error("omp-re: debug: run.cwd must be a string");
+				directives.push(`chdir=${clean(key, raw)}`);
+				break;
+			case "stdin":
+			case "stdout":
+			case "stderr": {
+				if (typeof raw !== "string") throw new Error(`omp-re: debug: run.${key} must be a file path`);
+				if (raw.startsWith("!")) throw new Error(`omp-re: debug: run.${key} does not accept command targets`);
+				directives.push(`${key}=${clean(key, raw)}`);
+				break;
+			}
+			case "input": {
+				if (typeof raw !== "string") throw new Error("omp-re: debug: run.input must be a string");
+				if (raw.length > 65_536) throw new Error("omp-re: debug: run.input is limited to 64 KiB");
+				directives.push(`input=${clean(key, raw)}`);
+				break;
+			}
+			case "aslr": {
+				if (typeof raw !== "boolean") throw new Error("omp-re: debug: run.aslr must be true or false");
+				directives.push(`aslr=${raw ? "yes" : "no"}`);
+				break;
+			}
+			case "maxstack":
+			case "maxfd":
+			case "maxproc":
+			case "timeout": {
+				if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+					throw new Error(`omp-re: debug: run.${key} must be a positive number`);
+				}
+				directives.push(`${key}=${Math.floor(raw)}`);
+				break;
+			}
+			default:
+				throw new Error(`omp-re: debug: run.${key} is not a supported rz-run setting (args, env, cwd, stdin, stdout, stderr, input, aslr, maxstack, maxfd, maxproc, timeout)`);
+		}
+	}
+	return directives.length > 0 ? directives : undefined;
+}
+
 export function registerDebugTools(pi: ExtensionAPI): void {
 	if (!debuggerEnabled()) return; // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
 
@@ -90,6 +169,23 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		addr: z.string().optional().describe("Address or symbol for continue_until, read_memory, break_add, break_remove."),
 		count: z.number().optional().describe("Instruction count for step / step_over (default 1)."),
 		size: z.number().optional().describe("Bytes to read for read_memory (default 64)."),
+		run: z
+			.object({
+				args: z.array(z.string()).optional().describe("Program arguments (arg0..argN)."),
+				env: z.record(z.string(), z.string()).optional().describe("Environment variables for the debuggee."),
+				cwd: z.string().optional().describe("Working directory for the debuggee."),
+				stdin: z.string().optional().describe("File to read the debuggee's stdin from."),
+				stdout: z.string().optional().describe("File to write the debuggee's stdout to."),
+				stderr: z.string().optional().describe("File to write the debuggee's stderr to."),
+				input: z.string().optional().describe("String passed to the debuggee via stdin."),
+				aslr: z.boolean().optional().describe("Enable or disable ASLR for the debuggee."),
+				maxstack: z.number().optional().describe("Maximum stack size (bytes)."),
+				maxfd: z.number().optional().describe("Maximum number of file descriptors."),
+				maxproc: z.number().optional().describe("Maximum number of processes."),
+				timeout: z.number().optional().describe("Seconds before the debuggee is killed."),
+			})
+			.optional()
+			.describe("rz-run environment for start: the target's arguments, env, cwd, stdio redirections, and limits. Only read alongside action 'start'."),
 	});
 
 	pi.registerTool({
@@ -115,9 +211,11 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				}
 				const binary = requireBinary(getState(ctx));
 				if (ctx.hasUI) ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
-				const dbg = await startDebug(ctx, { signal }); // the debug process is a revertible effect on the session scope
+				const runDirectives = buildRunDirectives(params.run); // throws on bad settings, before anything launches
+				const dbg = await startDebug(ctx, { signal, runDirectives }); // the debug process is a revertible effect on the session scope
 				const pc = (await dbg.cmd("dr rip", { signal })).trim();
-				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry. ${pc}\nSet breakpoints (break_add), then continue or step.`);
+				const runNote = runDirectives ? ` Target env: ${runDirectives.join(", ")}.` : "";
+				return textResult(`debug: started ${binary}`, `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}\nSet breakpoints (break_add), then continue or step.`);
 			}
 
 			if (params.action === "stop") {
