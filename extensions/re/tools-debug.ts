@@ -49,6 +49,8 @@ const DEBUG_ACTIONS = [
 	"fds",
 	"signals",
 	"windows",
+	"heaps",
+	"heap_blocks",
 	"stop",
 ] as const;
 type DebugAction = (typeof DEBUG_ACTIONS)[number];
@@ -94,7 +96,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		name: "rizin_debug",
 		label: "debugger",
 		description:
-			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints, continue, single-step, read registers and memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, and windows. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
+			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints, continue, single-step, read registers and memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, windows, and heaps. This EXECUTES the target process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' kills it. The static analysis tools are unaffected.",
 		approval: (args) => {
 			const action = (args && typeof args === "object" ? (args as { action?: unknown }).action : undefined) as DebugAction | undefined;
 			return { tier: "exec", reason: action ? approvalReason(action) : "Drive the debugged process." };
@@ -226,6 +228,17 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				case "windows": {
 					const out = (await dbg.cmd("dW", { signal })).trim();
 					return textResult("debug: windows", out || "(no windows)", { ctx, tool: "rizin_debug" });
+				}
+				// Windows heap inspection (book: debugger/memory_maps — dmh* display
+				// commands, no mutation subcommand). heaps lists the process heaps;
+				// heap_blocks lists allocated blocks in a heap (optional addr).
+				case "heaps": {
+					const out = (await dbg.cmd("dmhwj", { signal })).trim();
+					return textResult("debug: heaps", out || "(no heap info)", { ctx, tool: "rizin_debug" });
+				}
+				case "heap_blocks": {
+					const out = (await dbg.cmd(`dmhwbj${ea ? ` @ ${ea}` : ""}`, { signal })).trim();
+					return textResult(`debug: heap_blocks${ea ? ` @ ${ea}` : ""}`, out || "(no blocks)", { ctx, tool: "rizin_debug" });
 				}
 				default:
 					throw new Error(`omp-re: debug: unknown action ${JSON.stringify(params.action)}`);
