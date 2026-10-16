@@ -40,23 +40,52 @@ describe("checkRzCli (no binaries needed)", () => {
 		expect(refusal("rz-find", ["-E", "id", "f"])).toContain("rz-find -E");
 		expect(refusal("rz-find", ["-R", "w0", "f"])).toContain("rz-find -R");
 		expect(refusal("rz-find", ["-jR", "w0", "f"])).toContain("rz-find -R"); // hidden in a short cluster
-		expect(refusal("rz-diff", ["-t", "command", "a", "b"])).toContain("executes commands");
-		expect(refusal("rz-diff", ["-t", "commands", "a", "b"])).toContain("executes commands");
+		expect(refusal("rz-diff", ["-t", "command", "a", "b"])).toContain("runs a command");
+		expect(refusal("rz-diff", ["-t", "commands", "a", "b"])).toContain("runs a command");
 	});
 
-	test("refuses flags that write files", () => {
+	test("refuses the rz-diff -t command RCE in every getopt spelling (not just the split form)", () => {
+		// `-t command` makes rz-diff run a rizin command per file, and rizin `!` reaches the shell.
+		for (const args of [
+			["-t", "command", "-0", "!touch X", "a", "b"], // split
+			["-tcommand", "-0", "!touch X", "a", "b"], // attached — the old pair check missed this
+			["-t", "commands", "a", "b"], // plural, split
+			["-tcommands", "a", "b"], // plural, attached
+			["-Xtcommand", "a", "b"], // clustered behind another flag
+		]) {
+			expect(refusal("rz-diff", args)).toContain("runs a command");
+		}
+		// legitimate diff types are unaffected
+		expect(checkRzCli(def("rz-diff"), ["-t", "functions", "a", "b"])).toEqual({ ok: true });
+		expect(checkRzCli(def("rz-diff"), ["-tbytes", "a", "b"])).toEqual({ ok: true });
+	});
+
+	test("refuses flags that write or extract to disk", () => {
 		expect(refusal("rz-bin", ["-O", "d/s/1"])).toContain("rz-bin -O");
 		expect(refusal("rz-bin", ["-o", "/tmp/x"])).toContain("rz-bin -o");
 		expect(refusal("rz-bin", ["-C", "elf:90:"])).toContain("rz-bin -C");
+		expect(refusal("rz-bin", ["-x"])).toContain("rz-bin -x"); // extract sub-binaries to disk
+		expect(refusal("rz-bin", ["-xj"])).toContain("rz-bin -x"); // even clustered
 		expect(refusal("rz-asm", ["-O", "/tmp/out", "nop"])).toContain("rz-asm -O");
 	});
 
-	test("refuses network fetch and interactive views", () => {
-		expect(refusal("rz-bin", ["-dd"])).toContain("rz-bin -dd");
-		expect(refusal("rz-bin", ["-PP"])).toContain("rz-bin -PP");
-		expect(checkRzCli(def("rz-bin"), ["-d"])).toEqual({ ok: true }); // -d (local dwarf) is allowed; only the doubled -dd fetches over the network
+	test("refuses network fetch however the repeat is spelled, but keeps the single-read form", () => {
+		for (const args of [["-dd"], ["-d", "-d"], ["-ddj"], ["-jdd"], ["-PP"], ["-PPj"]]) {
+			expect(refusal("rz-bin", args)).toContain("fetches over the network");
+		}
+		// a single -d / -P reads locally and stays allowed; unrelated repeats (-SS, -zzz) are fine
+		expect(checkRzCli(def("rz-bin"), ["-d"])).toEqual({ ok: true });
+		expect(checkRzCli(def("rz-bin"), ["-dj"])).toEqual({ ok: true });
+		expect(checkRzCli(def("rz-bin"), ["-P"])).toEqual({ ok: true });
+		expect(checkRzCli(def("rz-bin"), ["-SS"])).toEqual({ ok: true });
+		expect(checkRzCli(def("rz-bin"), ["-zzz"])).toEqual({ ok: true });
+	});
+
+	test("refuses interactive views on rz-diff but keeps read-only diff flags", () => {
 		expect(refusal("rz-diff", ["-H", "a", "b"])).toContain("rz-diff -H");
 		expect(refusal("rz-diff", ["-S", "80x25", "a", "b"])).toContain("rz-diff -S");
+		expect(checkRzCli(def("rz-diff"), ["-A", "a", "b"])).toEqual({ ok: true }); // -A (compare addresses) is read-only
+		expect(checkRzCli(def("rz-diff"), ["-tbytes", "a", "b"])).toEqual({ ok: true }); // the 'e' in "bytes" is a value char, not a flag
 	});
 
 	test("refuses newlines and NUL in an argument", () => {

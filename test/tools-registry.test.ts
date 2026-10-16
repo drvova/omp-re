@@ -1,5 +1,5 @@
 /**
- * Deterministic coverage for the 12 read-tier tool wrappers registered by
+ * Deterministic coverage for the read-tier tool wrappers registered by
  * registerReadTools() (tools-read.ts), executed through a stub ExtensionAPI
  * the same way omp calls them: execute(toolCallId, params, signal, onUpdate, ctx).
  *
@@ -77,6 +77,7 @@ let callSite: number;
 let groundImports: GroundImport[];
 let pltImport: GroundImport;
 let groundExports: unknown[];
+let groundSymbols: unknown[];
 let groundStrings: GroundString[];
 let probeString: GroundString;
 let groundSegments: GroundSegment[];
@@ -105,6 +106,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		groundImports = JSON.parse((await session.cmd("iij")).trim()) as GroundImport[];
 		pltImport = mustFind(groundImports, (i) => typeof i.plt === "number" && i.plt > 0, "an import with a PLT stub");
 		groundExports = JSON.parse((await session.cmd("iEj")).trim()) as unknown[];
+		groundSymbols = JSON.parse((await session.cmd("isj")).trim()) as unknown[];
 
 		groundStrings = JSON.parse((await session.cmd("izj")).trim()) as GroundString[];
 		probeString = mustFind(
@@ -129,7 +131,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		shutdownState(ctx.sessionManager.getSessionId());
 	});
 
-	test("registers all 11 analysis tools plus hash_binary, each with read approval and renderers", () => {
+	test("registers all read-tier analysis tools, each with read approval and renderers", () => {
 		for (const name of [
 			"list_functions",
 			"search_functions",
@@ -140,9 +142,11 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 			"get_xrefs_from",
 			"list_imports",
 			"list_exports",
+			"list_symbols",
 			"list_strings",
 			"list_segments",
 			"hash_binary",
+			"get_graph",
 		]) {
 			const def = tool(name);
 			expect(def.approval).toBe("read");
@@ -341,6 +345,24 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		});
 	});
 
+	describe("list_symbols", () => {
+		test("valid: the default page matches rizin's symbol table size (a superset of exports)", async () => {
+			const { header } = splitHeaderBody(textOf(await run("list_symbols", {})));
+			expect(header).toBe(expectedPageHeader("symbols", Math.min(200, groundSymbols.length), groundSymbols.length));
+			expect(groundSymbols.length).toBeGreaterThanOrEqual(groundExports.length);
+		});
+
+		test("valid: a name filter narrows the table", async () => {
+			// Derive the needle from a real symbol so the test is fixture-agnostic.
+			const first = (groundSymbols as { name?: string }[]).find((s) => typeof s.name === "string" && s.name.length >= 4);
+			const needle = first!.name!.slice(0, 4);
+			const { body } = splitHeaderBody(textOf(await run("list_symbols", { filter: needle })));
+			const parsed = JSON.parse(body) as { name: string }[];
+			expect(parsed.length).toBeGreaterThan(0);
+			expect(parsed.every((s) => s.name.includes(needle))).toBe(true);
+		});
+	});
+
 	describe("list_strings", () => {
 		test("valid: the default page is capped at 200 of the real total", async () => {
 			const { header } = splitHeaderBody(textOf(await run("list_strings", {})));
@@ -378,6 +400,27 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 			const text = textOf(await run("hash_binary", {}));
 			expect(text).toContain(`sha256=${sha256}`);
 			expect(text).toContain(`size=${bytes.byteLength}`);
+		});
+	});
+
+	describe("get_graph", () => {
+		test("function_cfg returns basic-block nodes with addresses and resolved edges matching rizin's own graph", async () => {
+			const ground = JSON.parse((await session.cmd(`agf json @ ${mainEa}`)).trim()) as { nodes: { id: number; offset: number; out_nodes?: number[] }[] };
+			const { body } = splitHeaderBody(textOf(await run("get_graph", { kind: "function_cfg", addr: "main", limit: 1000 })));
+			const rows = JSON.parse(body) as { ea: string; to: string[] }[];
+			expect(rows.length).toBe(ground.nodes.length);
+			// every node's address is hex and corresponds to a ground-truth block offset
+			const groundEas = new Set(ground.nodes.map((n) => eaFromOffset(n.offset)));
+			expect(rows.every((r) => groundEas.has(r.ea))).toBe(true);
+			// edges resolve to addresses (not raw ids): the entry block's successors match ground truth
+			const entry = ground.nodes[0]!;
+			const expectedTo = (entry.out_nodes ?? []).map((id) => eaFromOffset(ground.nodes.find((n) => n.id === id)!.offset));
+			expect(rows.find((r) => r.ea === eaFromOffset(entry.offset))?.to.sort()).toEqual(expectedTo.sort());
+		});
+
+		test("callgraph works and function_cfg without addr is rejected before rizin", async () => {
+			expect(textOf(await run("get_graph", { kind: "callgraph", addr: "main" }))).toContain("graph: callgraph @ main");
+			expect((await captureError(run("get_graph", { kind: "function_cfg" }))).message).toContain("needs addr");
 		});
 	});
 

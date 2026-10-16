@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES } from "../extensions/re/audit.ts";
+import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
+import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
 import { canRunRizin, logSkip, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
@@ -26,6 +27,9 @@ const ALWAYS_REGISTERED = [
 	...Object.keys(RE_READ_TOOL_NAMES),
 	...Object.keys(RE_MUTATE_TOOL_NAMES),
 	...Object.keys(RE_RIZIN_TOOL_NAMES),
+	...Object.keys(RE_EMULATE_TOOL_NAMES),
+	...Object.keys(RE_SIGNATURE_TOOL_NAMES),
+	...Object.keys(RE_ANALYZE_TOOL_NAMES),
 	...Object.keys(RE_SESSION_TOOL_NAMES),
 ];
 
@@ -159,6 +163,9 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 });
 
 describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
+	// Opens the binary (full `aaa`) once, then replays into a freshly reopened
+	// session (another `aaa`); on a cold CI/container host each analysis is a
+	// few seconds, so the default 5s budget is too tight.
 	test("open, annotate, and resume: the reopened session replays the annotation into a fresh rizin", async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 		const sessionDir = join(agentDir, "sessions");
@@ -179,7 +186,7 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		} finally {
 			await second.shutdown();
 		}
-	});
+	}, 30_000);
 
 	test("/re status reports the rizin compatibility check, and rizin_command runs through the host", async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
@@ -187,7 +194,9 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		try {
 			await h.session.getToolByName("open_binary")!.execute("t-open", { path: TEST_BINARY });
 			await h.session.prompt("/re status");
-			expect(h.notes.at(-1)).toContain("rizin commands: all 24 omp-re sends are present");
+			// The count is REQUIRED_COMMANDS.length, which grows as tool families
+			// are added; assert the shape, not a frozen number.
+			expect(h.notes.at(-1)).toContain(`rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present`);
 			const result = await h.session.getToolByName("rizin_command")!.execute("t-rz", { command: "pdsf", addr: "main" });
 			expect(result.content[0]?.type === "text" && result.content[0].text.startsWith("rizin> pdsf @ main\n")).toBe(true);
 			// rizin_cli registers through the real runner when the rz-* tools are present (they ship with rizin).

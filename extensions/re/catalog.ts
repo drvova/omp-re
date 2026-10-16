@@ -79,6 +79,7 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 	"axfj",
 	"iij",
 	"iEj",
+	"isj",
 	"izj",
 	"iSj",
 	"ij",
@@ -128,11 +129,70 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 "irj",
 "flj",
 "icj",
+// deobfuscate tool: block transforms + decrypt under the write cache
+"wox",
+"woD",
+"wc-",
 ];
 
 export function missingRequiredCommands(catalog: RzCatalog): string[] {
 	return REQUIRED_COMMANDS.filter((cmd) => !catalog.has(cmd));
 }
+
+/**
+ * Read-only commands that the family-shaped {@link ALLOWED_COMMAND} regex does
+ * not cover, allowed by exact name. Every entry was confirmed read-only
+ * against rizin 0.9.1 by running it on a sample: it either lists/shows or
+ * returns a benign "needs an argument" usage, and never mutates. Grouped by
+ * the book chapter that documents the family.
+ *
+ * The get/set duals are handled separately: `e <key>` (Configuration) reads a
+ * value, and a `key=value` argument — the only way `e` writes — is refused in
+ * {@link checkRizinCommand}; the positional duals (`tn`, `Ld`, `Lo`) live in
+ * {@link NOARG_DUALS} and run only with no argument.
+ */
+export const READ_ONLY_EXTRAS: ReadonlySet<string> = new Set([
+	// Configuration (book: configuration/*) — read a value / list / type / spaces.
+	"e", "el", "elj", "elq", "ell", "elJ", "et", "es",
+	// Analysis hints (book: analysis/code_analysis) — list only; the aha/ahb/… setters and ah- stay out.
+	"ahl", "ahlj", "ahl.", "ahl.j",
+	// Address information (book: analysis/code_analysis) — `aii` (add global import) stays out.
+	"ai", "aij",
+	// Classes (book: analysis/vtables) — the list/show/graph reads; bare `ac`/`acn`/`acm`/`acb`/`acv` add or rename.
+	"acl", "aclj", "acll", "aci", "acij", "acil", "acg", "acbl", "acvl", "acvf",
+	// Metadata & strings (book: disassembling/adding_metadata) — list/show forms; the setters (Cs/Cd/Ch/Cm/Ct/Cf, CS create, C-) stay out, and comments go through set_comment.
+	"C", "Cj", "Cl",
+	"Csl", "Cslj", "Cslq", "Cs.", "Cs.j", "Cs.q", "Cs.l",
+	"Cdl", "Cdlj", "Cd.", "Cfl", "Cflj", "Chl", "Chlj", "Cml", "Cmlj", "Ctl", "Ctlj", "CSl", "CSlj", "CSlq",
+	// Types (book: analysis/types) — lists, unions, enums, typedefs, calling-convention lists, type xrefs, typeclass reads.
+	// The writers stay out: td/tdf (define → define_types tool), tfc (set cc), tn (NOARG_DUALS), tks (set typeclass), to/toe/tos (load file), tr (rename), t- (delete).
+	"t", "tj", "tl",
+	"tu", "tuj", "tul", "tuc", "tud",
+	"te", "tej", "teb", "tec", "ted", "tef",
+	"tt", "ttj", "ttc",
+	"tf", "tfj", "tc", "tcd", "tcc", "tccj", "tcck", "tccl",
+	"tx", "txf", "txg", "txl",
+	"tk", "tkl", "tklj", "tkll", "tklt",
+	// Plugin listings (book: plugins/*) — list only. The bare `L`/`L-` load/unload a plugin file; `Lo`/`Ld` are in NOARG_DUALS.
+	"Ll", "Llj", "Llq", "Llt", "La", "Laj", "Laq", "Lat", "Lac", "Lacj",
+	"Lc", "Lcj", "Lcq", "Lct", "LC", "LCj", "LCq", "LCt", "Lh", "Lhj", "Lhq", "Lht",
+	"Li", "Lij", "Liq", "Lit", "Lp", "Lpj", "Lpq", "Lpt", "LD", "LDj", "LDq", "LDt",
+	// Signatures (book: analysis/signatures) — list the FLIRT sigdb. Applying is the apply_signatures tool; Fc/Fd/Fs/Ff read or write a file.
+	"Flt",
+]);
+
+/**
+ * Commands that list when given no argument and mutate when given one:
+ * `tn[j]` lists noreturn functions / adds one, `Ld[jqt]`/`Lo[jqt]` list
+ * debug/IO plugins / set the backend or register a plugin. They run through
+ * `rizin_command` only with no argument; {@link checkRizinCommand} refuses
+ * them with an argument.
+ */
+export const NOARG_DUALS: ReadonlySet<string> = new Set([
+	"tn", "tnj",
+	"Ld", "Ldj", "Ldq", "Ldt",
+	"Lo", "Loj", "Loq", "Lot",
+]);
 
 /**
  * Commands `rizin_command` may run: read-only families — print (`p`), info
@@ -172,6 +232,11 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * `ts[jlcd]?`), sdb namespace dump (`kj`) and magic search (`pm[j]?` —
  * bare-only: the fileArg mechanism refuses its `<file/directory>` form like
  * `/m`, so DENIED no longer needs `pm`).
+ *
+ * Commands whose shape this family regex can't capture are listed by exact
+ * name in {@link READ_ONLY_EXTRAS} (config/hints/meta/classes/types/plugin
+ * listings) and {@link NOARG_DUALS} (list-vs-set positional duals), both
+ * checked by {@link isRunnable} and gated in {@link checkRizinCommand}.
  */
 const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
 
@@ -193,6 +258,18 @@ const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afb
  * still denied.
  */
 const DENIED_COMMAND = /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
+
+/**
+ * The `p=`/`p==` statistical-histogram family (book: print_modes) — entropy
+ * (`p=e`, `p=rj` rising/falling), chi-square, printable, strings, 0x00/0xFF
+ * density, and the byte histogram — all read-only prints over the current
+ * block/range. They carry `=` in the command name, which {@link
+ * DENIED_COMMAND}'s get/set guard would otherwise veto, so {@link isRunnable}
+ * allows them by this pattern instead. The interactive visual variants (the
+ * `…v` forms, which drive an ncurses UI and would block the pipe) are excluded
+ * by the trailing-`v` negative lookahead.
+ */
+const ENTROPY_MAP = /^p={1,2}(?![0-9A-Za-z]*v$)[0-9A-Za-z]*$/;
 
 /**
  * Syntax refused anywhere in a raw command, because it would leave the single
@@ -220,13 +297,26 @@ const FORBIDDEN_SYNTAX: readonly [RegExp, string][] = [
 
 export type CommandCheck = { ok: true; name: string; line: string } | { ok: false; reason: string };
 
+/**
+ * The label of the first forbidden-syntax character in `value`, or undefined
+ * when none is present. {@link checkRizinCommand} uses this to reject a command
+ * line; tools that interpolate a free-form model string into a rizin command
+ * (e.g. the search patterns) use it to reject the same command-injection
+ * characters — `;` and a newline chain a second command through the `-q0`
+ * pipe, `>`/`<` redirect to a file, and the rest substitute or grep — before
+ * the string reaches the pipe.
+ */
+export function forbiddenSyntaxReason(value: string): string | undefined {
+	for (const [pattern, label] of FORBIDDEN_SYNTAX) if (pattern.test(value)) return label;
+	return undefined;
+}
+
 /** Decide whether `command` (plus an optional `addr` to run it at) may run through `rizin_command`, and build the exact line sent to rizin. */
 export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: string): CommandCheck {
 	const trimmed = command.trim();
 	if (trimmed === "") return { ok: false, reason: "omp-re: rizin_command: empty command" };
-	for (const [pattern, label] of FORBIDDEN_SYNTAX) {
-		if (pattern.test(trimmed)) return { ok: false, reason: `omp-re: rizin_command: ${label} is not allowed in a command` };
-	}
+	const forbidden = forbiddenSyntaxReason(trimmed);
+	if (forbidden) return { ok: false, reason: `omp-re: rizin_command: ${forbidden} is not allowed in a command` };
 	const name = trimmed.split(/\s+/, 1)[0]!;
 	// Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
 	// sorts/filters/paginates/reformats the command's table. Only the head must
@@ -257,6 +347,16 @@ export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: st
 	if (/(^|\s)interactive(\s|$)/.test(trimmed)) {
 		return { ok: false, reason: "omp-re: rizin_command: interactive output modes would wait for keyboard input" };
 	}
+	// The argument text after the command name (table spec already stripped from `checked`).
+	const argPortion = trimmed.slice(name.length).trim();
+	// Configuration: `e <key>` reads a value; `e <key>=<value>` sets it. Reading is fine; setting is a write.
+	if (checked === "e" && argPortion.includes("=")) {
+		return { ok: false, reason: "omp-re: rizin_command: setting config variables (`e key=value`) is a write and is not allowed; `e <key>` reads a value, `el`/`elj` list them" };
+	}
+	// Get/set positional duals: they list with no argument and mutate with one.
+	if (NOARG_DUALS.has(checked) && argPortion !== "") {
+		return { ok: false, reason: `omp-re: rizin_command: ${checked} runs read-only only with no argument (an argument makes it set/add); it lists when run bare` };
+	}
 	// A command whose catalog entry takes a file or path argument (`/m <magic-file>`) reads from disk; it runs only with none given.
 	const fileArg = catalog.get(checked)?.args?.find((arg) => /file|path|dir/i.test(arg.name));
 	if (fileArg && trimmed !== name) {
@@ -265,9 +365,86 @@ export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: st
 	return { ok: true, name: specNote ? `${checked}${specNote}` : checked, line: addr ? `${trimmed} @ ${validateAddr(addr)}` : trimmed };
 }
 
-/** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). */
+/** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). The NOARG_DUALS run read-only with no argument, so they count as runnable here; `checkRizinCommand` enforces the no-argument constraint. */
 export function isRunnable(name: string): boolean {
+	if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) return true;
+	if (ENTROPY_MAP.test(name)) return true;
 	return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
+}
+
+/**
+ * Read-only debugger-state commands a breakpoint on-hit command (`dbc`, the
+ * `break_command` debug action) may run. The static {@link checkRizinCommand}
+ * policy refuses the whole `d*` family because `rizin_command` drives a static
+ * session; but an on-hit command runs inside the live debugger, where logging
+ * registers, maps, the backtrace, or heap state on each hit is the point.
+ *
+ * Every entry here was read off rizin 0.9.1's own `?*j` summaries as a pure
+ * read: register/arena views (`dr*` show forms — the assign dual `dr reg=val`
+ * carries `=`, refused below), memory-map/module/library listings (`dm*`
+ * list/show — the `dm+`/`dm-`/`dmp`/`dml`/`dmd*` allocate/map/dump forms are
+ * distinct tokens left out), heap reads (`dmhg*`/`dmhj*`), backtrace (`dbt*`
+ * display — not the `dbtd`/`dbte`/`dbts` trace toggles), process/thread and
+ * debug-info listings (`dp`/`dpt`/`dpl`/`dpT`/`dpe`, `di*` — not `dpa`/`dpf`
+ * attach, `dpk` signal, `dp-` detach), the signal-handler listings and name/
+ * number resolvers (`dkl*`/`dkN`/`dkn` — not `dk` send, `dko` set), and the
+ * file-descriptor listing (`ddl*` only — `ddr`/`ddw`/`dds`/`ddd`/`dd` read/
+ * write/seek/open fds, left out). Matched by exact first token, so a setter
+ * sibling (`dra+`, `draw`, `drx`, `drpo`) never slips through, and any `=`
+ * (register assignment, `dm=`/`dr=`/`dp=` select/display) is refused outright.
+ */
+const DEBUG_READ_COMMANDS: ReadonlySet<string> = new Set([
+	// Registers & arenas (show forms; `dr reg=val` assign carries `=`, refused below).
+	"dr", "drj", "drq", "drt", "drr", "drrj", "dro", "droj", "droq", "drot",
+	"drd", "dri", "drc", "drcc", "drA", "drAj", "drF", "drR", "drT",
+	"drp", "drpj", "drpc", "dra", "draS", "drab",
+	// Memory maps, modules, libraries, sections.
+	"dm", "dmj", "dmq", "dmt", "dm.", "dmm", "dmmj", "dmm.", "dmm.j",
+	"dmi", "dmij", "dmiq", "dmi.", "dmi.j", "dmia", "dmiaj", "dmiaq", "dmS", "dmSj",
+	// Heap reads.
+	"dmh", "dmhg", "dmhgj", "dmhgb", "dmhgc", "dmhgm", "dmhgl", "dmhgt", "dmhja", "dmhjb", "dmhjc",
+	// Backtrace display.
+	"dbt", "dbtj", "dbtq", "dbtt", "dbtv", "dbta",
+	// Process / threads / debug info.
+	"dp", "dpj", "dpt", "dpe", "dpl", "dplj", "dplt", "dpT", "dpTj", "dpTt", "di", "dij", "diq",
+	// Signal-handler listings and name/number resolvers.
+	"dkl", "dklj", "dklq", "dklt", "dkN", "dkn",
+	// File-descriptor listing (list only).
+	"ddl", "ddlj", "ddlt",
+]);
+
+/**
+ * Decide whether `command` may run as a breakpoint on-hit command (`dbc`). It
+ * accepts either a vetted read-only debugger-state read ({@link
+ * DEBUG_READ_COMMANDS}) or anything the static read-only policy already allows
+ * (print/info/search), so an on-hit command can log the debugger's live state
+ * or a static view. The forbidden-syntax guards apply either way, and any `=`
+ * is refused so the register-assign dual (`dr rax=0`) can never write.
+ */
+export function checkDebugOnHitCommand(catalog: RzCatalog, command: string): CommandCheck {
+	const trimmed = command.trim();
+	if (trimmed === "") return { ok: false, reason: "omp-re: break_command: empty command" };
+	for (const [pattern, label] of FORBIDDEN_SYNTAX) {
+		if (pattern.test(trimmed)) return { ok: false, reason: `omp-re: break_command: ${label} is not allowed in an on-hit command` };
+	}
+	const name = trimmed.split(/\s+/, 1)[0]!;
+	if (DEBUG_READ_COMMANDS.has(name)) {
+		// `=` is the only way these turn into a write (register assignment) or a stateful select (`dm=`/`dp=`); refuse it.
+		if (trimmed.includes("=")) {
+			return { ok: false, reason: `omp-re: break_command: ${JSON.stringify(name)} with \`=\` would assign/select (a write); use the bare read form to log state` };
+		}
+		if (!isKnownCommand(catalog, name)) {
+			return { ok: false, reason: `omp-re: break_command: this rizin has no command ${JSON.stringify(name)} — look it up with rizin_help` };
+		}
+		return { ok: true, name, line: trimmed };
+	}
+	// Not a debugger read — fall back to the static read-only policy (print/info/search), which does its own validation.
+	const check = checkRizinCommand(catalog, command);
+	if (check.ok) return check;
+	return {
+		ok: false,
+		reason: `omp-re: break_command: ${JSON.stringify(name)} is not a read-only on-hit command. Allowed: read-only debugger state (registers \`drj\`/\`drr\`, maps \`dmj\`, modules \`dmmj\`, backtrace \`dbtj\`, heap \`dmhg\`), or a static read (print/info/search).`,
+	};
 }
 
 function describeArgs(spec: RzCommandSpec): string[] {

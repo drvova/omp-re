@@ -48,6 +48,14 @@ interface RzRef {
 	type: string;
 }
 
+/** A node of rizin's analysis-graph JSON (`ag* json` → `{nodes:[...]}`); `out_nodes` are node ids (edges), resolved back to addresses for the tool's output. */
+interface RzGraphNode {
+	id: number;
+	offset?: number;
+	title?: string;
+	out_nodes?: number[];
+}
+
 interface RzVar {
 	name: string;
 	type: string;
@@ -173,6 +181,15 @@ interface RzExport extends RzVaddrRow {
 	type: string;
 }
 
+interface RzSymbol extends RzVaddrRow {
+	name: string;
+	bind: string;
+	type: string;
+	size: number;
+	is_imported?: boolean;
+	lib?: string;
+}
+
 interface RzString extends RzVaddrRow {
 	ordinal?: number;
 	size: number;
@@ -244,6 +261,24 @@ export function registerReadTools(pi: ExtensionAPI): void {
 	const stringsParams = z.object({
 		...offsetLimit,
 		filter: z.string().optional().describe("Only include strings containing this substring."),
+	});
+	const symbolsParams = z.object({
+		...offsetLimit,
+		filter: z.string().optional().describe("Only include symbols whose name contains this substring."),
+	});
+	const graphParams = z.object({
+		kind: z
+			.enum(["function_cfg", "callgraph", "imports", "xrefs"])
+			.describe(
+				[
+					"function_cfg: the control-flow graph (basic blocks + branches) of the function at `addr` (`agf`).",
+					"callgraph: the functions called from the function at `addr`, transitively (`agc`).",
+					"xrefs: the cross-reference graph around `addr` (`agx`).",
+					"imports: the program's import graph (`agi`) — no `addr`.",
+				].join("\n"),
+			),
+		addr: z.string().optional().describe("Function/address for function_cfg, callgraph, and xrefs (required); omit for imports."),
+		...offsetLimit,
 	});
 	const noParams = z.object({});
 
@@ -426,6 +461,26 @@ export function registerReadTools(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "list_symbols",
+		label: "List Symbols",
+		description:
+			"List the binary's full symbol table (`is`) — local/internal functions and data symbols with name, type, bind, size, and address. A superset of list_imports/list_exports; optionally filter by name substring.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: symbolsParams,
+		...reRenderers({ title: "Symbols", subject: "filter", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const rz = await ensureRizin(ctx, { signal });
+			const items = (await rz.cmdj<RzSymbol[]>("isj", { signal })) ?? [];
+			const filter = params.filter;
+			const filtered = filter ? items.filter((s) => s.name.includes(filter)) : items;
+			const { page, total } = paginate(filtered, params.offset, params.limit);
+			const result = await jsonResult(pageHeader("symbols", page, total, params.offset), withVaddrEa(page), { ctx, tool: "list_symbols" });
+			return markEmpty(result, page.length === 0);
+		},
+	});
+
+	pi.registerTool({
 		name: "list_strings",
 		label: "List Strings",
 		description: "List strings found in the open binary's data sections, optionally filtered by substring.",
@@ -485,6 +540,44 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			const md5 = byName.get("md5");
 			if (!sha256 || !sha1 || !md5) throw new Error(`omp-re: rz-hash returned no sha256/sha1/md5 rows: ${result.stdout.trim()}`);
 			return plainResult(`sha256=${sha256.value}\nsha1=${sha1.value}\nmd5=${md5.value}\nsize=${sha256.to}`, "0x0");
+		},
+	});
+
+	const GRAPH_COMMAND: Record<string, { cmd: string; needsAddr: boolean }> = {
+		function_cfg: { cmd: "agf", needsAddr: true },
+		callgraph: { cmd: "agc", needsAddr: true },
+		xrefs: { cmd: "agx", needsAddr: true },
+		imports: { cmd: "agi", needsAddr: false },
+	};
+
+	pi.registerTool({
+		name: "get_graph",
+		label: "Get Graph",
+		description:
+			"Rizin's analysis graphs as JSON (book: analysis/graphs): a function's control-flow graph (basic blocks and the branches between them), the callgraph from a function, the cross-reference graph around an address, or the program's import graph. Returns nodes (each with its address and label) and the edges between them (resolved to addresses) — the structure for reasoning about control flow and call relationships without reading the raw disassembly.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: graphParams,
+		...reRenderers({ title: "Graph", subject: "kind", body: "json" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const spec = GRAPH_COMMAND[params.kind]!;
+			if (spec.needsAddr && params.addr === undefined) throw new Error(`omp-re: get_graph: ${params.kind} needs addr`);
+			const rz = await ensureRizin(ctx, { signal });
+			const at = spec.needsAddr ? ` @ ${validateAddr(params.addr!)}` : "";
+			const graph = await rz.cmdj<{ nodes?: RzGraphNode[] }>(`${spec.cmd} json${at}`, { signal });
+			const nodes = graph?.nodes ?? [];
+			// out_nodes are node ids; map each id to its block/function address so edges read as addresses.
+			const eaById = new Map<number, string>();
+			for (const n of nodes) if (typeof n.offset === "number") eaById.set(n.id, eaFromOffset(knownAddr(n.offset) ?? n.offset));
+			const rows = nodes.map((n) => ({
+				ea: typeof n.offset === "number" ? eaFromOffset(knownAddr(n.offset) ?? n.offset) : null,
+				...(n.title && n.title.trim() !== "" ? { label: n.title.trim() } : {}),
+				to: (n.out_nodes ?? []).map((id) => eaById.get(id)).filter((ea): ea is string => ea !== undefined),
+			}));
+			const { page, total } = paginate(rows, params.offset, params.limit);
+			const label = spec.needsAddr ? `${params.kind} @ ${params.addr}` : params.kind;
+			const result = await jsonResult(pageHeader(`graph: ${label}`, page, total, params.offset), page, { ctx, tool: "get_graph" });
+			return markEmpty(result, rows.length === 0);
 		},
 	});
 }

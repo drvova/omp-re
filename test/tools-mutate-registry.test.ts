@@ -1,5 +1,5 @@
 /**
- * Coverage for the 5 mutate-tier tools and `/re undo`, against real rizin.
+ * Coverage for the 13 mutate-tier tools and `/re undo`, against real rizin.
  *
  * Every case asserts real success plus an independent read-back via raw
  * rz.cmd/cmdj (bypassing the tool's own verification), so a regression in a
@@ -60,10 +60,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 	});
 
 	test("every mutate tool declares write approval with a per-call reason", () => {
-		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type"]) {
+		for (const name of ["rename_function", "rename_variable", "set_comment", "set_prototype", "set_variable_type", "define_function", "set_calling_convention", "set_flag", "set_arch_hint", "set_hint", "set_data", "set_string", "set_format"]) {
 			const approval = harness.tool(name).approval as (args: unknown) => { tier: string; reason?: string };
 			expect(typeof approval).toBe("function");
-			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int" });
+			const decision = approval({ addr: "main", new: "x", old: "y", text: "t", sig: "int f(void)", var: "v", type: "int", cc: "ms", name: "lbl", arch: "arm", bits: 16, size: 4, format: "xxdd" });
 			expect(decision.tier).toBe("write");
 			expect(decision.reason).toContain("main");
 		}
@@ -189,5 +189,225 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 		test("nothing is left to undo once every annotation is reverted", async () => {
 			expect((await captureError(undoLastAnnotation(pi, ctx))).message).toBe("omp-re: no annotation left to undo");
 		});
+	});
+});
+
+describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_function, set_calling_convention, set_flag", () => {
+	const harness = makeHarness("omp-re-tools-analysis-edit-test");
+	const { pi, ctx, entries } = harness;
+	const run = (name: string, params: Record<string, unknown>) => harness.tool(name).execute(`call-${name}`, params, undefined, undefined, ctx);
+	let rz: RzSession;
+	let binaryPath: string;
+	let mainEa: string;
+	let freeEa: string; // an address with no flag, for set_flag
+
+	const fnStart = async (ea: string): Promise<string | undefined> => {
+		const fn = (await rz.cmdj<{ offset: number }[]>(`afij @ ${ea}`))?.[0];
+		return fn ? eaFromOffset(addrOf(fn as never)!) : undefined;
+	};
+	const flagName = async (ea: string): Promise<string> => (await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`))?.name ?? "";
+	const ccOf = async (ea: string): Promise<string> => (await rz.cmd(`afc @ ${ea}`)).trim();
+
+	registerMutateTools(pi);
+
+	beforeAll(async () => {
+		binaryPath = await resolveBinaryPath(TEST_BINARY);
+		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
+		rz = await RzSession.spawn(rizinPath, binaryPath);
+		const state = getState(ctx);
+		state.binaryPath = binaryPath;
+		state.rz = rz;
+		mainEa = eaFromOffset(addrOf((await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never)!);
+		// set_flag replaces the single flag at an address, so its clean target is a
+		// function start that has exactly one flag. `main` qualifies on a stripped-ish
+		// binary like /bin/ls, but on a symbol-bearing build it carries both `main`
+		// and `sym.main`; pick the first function whose start has a single flag so the
+		// replace round-trips without leaving a sibling flag behind.
+		const flagCount = new Map<number, number>();
+		for (const f of (await rz.cmdj<{ offset: number }[]>("flj")) ?? []) flagCount.set(f.offset, (flagCount.get(f.offset) ?? 0) + 1);
+		freeEa = mainEa;
+		for (const fn of (await rz.cmdj<{ offset: number }[]>("aflj")) ?? []) {
+			const off = addrOf(fn as never);
+			if (off !== undefined && flagCount.get(off) === 1) {
+				freeEa = eaFromOffset(off);
+				break;
+			}
+		}
+	});
+
+	afterAll(() => {
+		shutdownState(ctx.sessionManager.getSessionId());
+	});
+
+	test("set_calling_convention lands, independently verified, and /re undo restores the old one", async () => {
+		const before = await ccOf(mainEa);
+		const target = before === "ms" ? "amd64" : "ms"; // any other listed cc
+		const result = await run("set_calling_convention", { addr: "main", cc: target });
+		expect(textOf(result)).toBe(`set_calling_convention: ${JSON.stringify(before)} -> ${JSON.stringify(target)} @ ${mainEa}`);
+		expect(await ccOf(mainEa)).toBe(target);
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "set_calling_convention", ea: mainEa, oldValue: before, newValue: target });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await ccOf(mainEa)).toBe(before);
+	});
+
+	test("set_calling_convention rejects an unknown convention with rizin's own error", async () => {
+		const err = await captureError(run("set_calling_convention", { addr: "main", cc: "nonexistent_cc" }));
+		expect(err.message).toContain("set_calling_convention");
+		// the function's convention is unchanged
+		expect(await ccOf(mainEa)).not.toBe("nonexistent_cc");
+	});
+
+	test("set_flag adds a named label, independently verified, and /re undo removes it", async () => {
+		const old = await flagName(freeEa);
+		const result = await run("set_flag", { addr: freeEa, name: "omp_re_label" });
+		expect(textOf(result)).toBe(`set_flag: ${JSON.stringify(old)} -> "omp_re_label" @ ${freeEa}`);
+		expect(await flagName(freeEa)).toBe("omp_re_label");
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await flagName(freeEa)).toBe(old);
+	});
+
+	test("set_arch_hint sets an arch/bits hint (Thumb), independently verified, and /re undo removes it", async () => {
+		const hintAt = async (ea: string): Promise<{ arch?: string; bits?: number } | undefined> => (await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`))?.[0];
+		expect(await hintAt(mainEa)).toBeUndefined();
+		const result = await run("set_arch_hint", { addr: "main", arch: "arm", bits: 16 });
+		expect(textOf(result)).toBe(`set_arch_hint: "" -> "arch=arm;bits=16" @ ${mainEa}`);
+		expect(await hintAt(mainEa)).toMatchObject({ arch: "arm", bits: 16 });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await hintAt(mainEa)).toBeUndefined();
+	});
+
+	test("set_hint sets analysis hints (immediate base, opcode type), records the read-back value, and /re undo removes each", async () => {
+		const hintKey = async (ea: string, key: string): Promise<unknown> => (await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`))?.[0]?.[key];
+		// immediate_base: input `h` is stored as the numeric code 16; the tool records the read-back, not the request
+		expect(await hintKey(mainEa, "immbase")).toBeUndefined();
+		const r1 = await run("set_hint", { addr: "main", hint: "immediate_base", value: "h" });
+		expect(textOf(r1)).toBe(`set_hint: immediate_base: "" -> "16" @ ${mainEa}`);
+		expect(await hintKey(mainEa, "immbase")).toBe(16);
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "set_hint", ea: mainEa, oldValue: "", newValue: "16", target: "immediate_base" });
+		await undoLastAnnotation(pi, ctx);
+		expect(await hintKey(mainEa, "immbase")).toBeUndefined();
+
+		// opcode_type round-trips the string verbatim
+		const r2 = await run("set_hint", { addr: "main", hint: "opcode_type", value: "nop" });
+		expect(textOf(r2)).toBe(`set_hint: opcode_type: "" -> "nop" @ ${mainEa}`);
+		expect(await hintKey(mainEa, "type")).toBe("nop");
+		await undoLastAnnotation(pi, ctx);
+		expect(await hintKey(mainEa, "type")).toBeUndefined();
+	});
+
+	test("set_hint rejects a malformed value for the chosen hint before touching rizin", async () => {
+		expect((await captureError(run("set_hint", { addr: "main", hint: "opcode_size", value: "0" }))).message).toContain("invalid opcode_size");
+		expect((await captureError(run("set_hint", { addr: "main", hint: "immediate_base", value: "bogus" }))).message).toContain("invalid immediate_base");
+	});
+
+	test("define_variable adds a stack local, independently verified via afvlj, and /re undo removes it", async () => {
+		const varNames = async (): Promise<string[]> => {
+			const grouped = (await rz.cmdj<Record<string, { name: string }[]>>(`afvlj @ ${mainEa}`)) ?? {};
+			return Object.values(grouped).flat().map((v) => v.name);
+		};
+		expect(await varNames()).not.toContain("omp_re_local");
+		const result = await run("define_variable", { addr: "main", storage: "stack", location: "0x44", name: "omp_re_local", type: "int" });
+		expect(textOf(result)).toBe(`define_variable: omp_re_local: "" -> "stack 0x44 int" @ ${mainEa}`);
+		expect(await varNames()).toContain("omp_re_local");
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "define_variable", ea: mainEa, oldValue: "", newValue: "stack 0x44 int", target: "omp_re_local" });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await varNames()).not.toContain("omp_re_local");
+	});
+
+	test("define_global defines a named, typed global, independently verified via avglj, and /re undo removes it", async () => {
+		const globalNamed = async (name: string): Promise<{ type?: string; addr?: string } | undefined> =>
+			((await rz.cmdj<{ name?: string; type?: string; addr?: string }[]>("avglj")) ?? []).find((g) => g.name === name);
+		// a data address at/after main's end — somewhere ordinary to anchor a global
+		const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x400);
+		expect(await globalNamed("omp_re_glob")).toBeUndefined();
+		const result = await run("define_global", { addr: dataEa, name: "omp_re_glob", type: "char *" });
+		expect(textOf(result)).toBe(`define_global: omp_re_glob: "" -> "char *" @ ${dataEa}`);
+		const landed = await globalNamed("omp_re_glob");
+		expect(landed?.type).toBe("char *");
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "define_global", ea: dataEa, oldValue: "", newValue: "char *", target: "omp_re_glob" });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await globalNamed("omp_re_glob")).toBeUndefined();
+	});
+
+	test("define_global refuses a name that already exists", async () => {
+		const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x408);
+		await run("define_global", { addr: dataEa, name: "omp_re_dupe", type: "int" });
+		const err = await captureError(run("define_global", { addr: eaFromOffset(Number.parseInt(mainEa, 16) + 0x410), name: "omp_re_dupe", type: "int" }));
+		expect(err.message).toContain("already exists");
+		await undoLastAnnotation(pi, ctx); // remove omp_re_dupe
+	});
+
+	test("define_variable refuses a name that already exists", async () => {
+		const grouped = (await rz.cmdj<Record<string, { name: string }[]>>(`afvlj @ ${mainEa}`)) ?? {};
+		const existing = Object.values(grouped).flat()[0]?.name ?? "";
+		const err = await captureError(run("define_variable", { addr: "main", storage: "reg", location: "rbx", name: existing }));
+		expect(err.message).toContain("already has a variable");
+	});
+
+	test("set_data / set_string / set_format mark metadata, independently verified via C.j, and /re undo removes it", async () => {
+		const metaType = async (ea: string): Promise<string[]> => ((await rz.cmdj<{ type?: string }[]>(`C.j @ ${ea}`)) ?? []).map((m) => m.type ?? "");
+		// set_data at a .data address
+		const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x200);
+		await run("set_data", { addr: dataEa, size: 4, count: 4 });
+		expect(await metaType(dataEa)).toContain("Cd");
+		await undoLastAnnotation(pi, ctx);
+		expect(await metaType(dataEa)).not.toContain("Cd");
+		// set_string at a real string's address (Cs on non-string bytes correctly no-ops)
+		const aString = (await rz.cmdj<{ vaddr: number; size: number }[]>("izj"))!.find((s) => s.size >= 4)!;
+		const strEa = eaFromOffset(aString.vaddr);
+		await run("set_string", { addr: strEa });
+		expect(await metaType(strEa)).toContain("Cs");
+		await undoLastAnnotation(pi, ctx);
+		expect(await metaType(strEa)).not.toContain("Cs");
+		// set_format (struct overlay)
+		const fmtEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x220);
+		const res = await run("set_format", { addr: fmtEa, size: 8, format: "xxdd f1 f2 f3 f4" });
+		expect(textOf(res)).toContain("@ " + fmtEa);
+		expect(await metaType(fmtEa)).toContain("Cf");
+		await undoLastAnnotation(pi, ctx);
+		expect(await metaType(fmtEa)).not.toContain("Cf");
+	});
+
+	test("set_data rejects a non-positive size before touching rizin", async () => {
+		expect((await captureError(run("set_data", { addr: "main", size: 0 }))).message).toContain("positive integer");
+	});
+
+	test("define_function creates a function where rizin missed one, and /re undo removes it", async () => {
+		// Undefine main to create the gap, define it back through the tool, verify, undo, then restore main for anyone else.
+		await rz.cmd(`af- @ ${mainEa}`);
+		expect(await fnStart(mainEa)).not.toBe(mainEa);
+
+		const result = await run("define_function", { addr: mainEa });
+		expect(textOf(result)).toContain(`@ ${mainEa}`);
+		expect(await fnStart(mainEa)).toBe(mainEa);
+		expect(liveAnnotations(entries as never, binaryPath).at(-1)?.data).toMatchObject({ kind: "define_function", ea: mainEa, oldValue: "" });
+
+		await undoLastAnnotation(pi, ctx);
+		expect(await fnStart(mainEa)).not.toBe(mainEa);
+	});
+
+	test("define_function refuses when a function already begins at the address", async () => {
+		await rz.cmd(`af @ ${mainEa}`); // ensure one exists
+		const err = await captureError(run("define_function", { addr: mainEa }));
+		expect(err.message).toContain("already begins at");
+	});
+
+	test("a defined function survives the rizin process dying: the respawn replays it", async () => {
+		// Pick a second function, undefine it, define through the tool, then crash+respawn.
+		const fns = (await rz.cmdj<{ offset: number }[]>("aflj"))!;
+		const victim = eaFromOffset(fns.map((f) => f.offset).find((o) => eaFromOffset(o) !== mainEa)!);
+		await rz.cmd(`af- @ ${victim}`);
+		await run("define_function", { addr: victim });
+		expect(await fnStart(victim)).toBe(victim);
+
+		rz.close();
+		rz = await ensureRizin(ctx);
+		expect(await fnStart(victim)).toBe(victim);
+		await undoLastAnnotation(pi, ctx);
 	});
 });

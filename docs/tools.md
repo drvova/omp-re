@@ -1,8 +1,8 @@
 # Tool reference
 
-All 40 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 61 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 40 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 61 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -16,13 +16,15 @@ model and saved in full to the session's artifact store; the result ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
 that artifact. List results are JSON arrays with one compact row per line.
 
-## Session-setup (1 tool)
+## Session (3 tools)
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
+| `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
+| `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable — reopen to drop the map. |
 
-## Read tier (26 tools)
+## Read tier (31 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
@@ -37,15 +39,18 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `get_xrefs_from` | `read` | `addr, offset?, limit?` | Cross-references originating from the instruction at an address (per instruction — use `get_function`'s `calls` for a whole function). |
 | `list_imports` | `read` | `offset?, limit?` | Imported symbols, with the PLT stub as `ea` when there is one. |
 | `list_exports` | `read` | `offset?, limit?` | Exported symbols. |
+| `list_symbols` | `read` | `offset?, limit?, filter?` | The full symbol table (`is`) — local/internal functions and data symbols with name, type, bind, size, and `ea`; a superset of imports/exports. `filter` matches the name. |
 | `list_strings` | `read` | `offset?, limit?, filter?` | Strings in data sections, optionally filtered by substring. |
 | `list_segments` | `read` | `offset?, limit?` | Sections with permissions, sizes, and addresses. |
 | `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the open binary. |
-| `search_bytes` | `read` | `pattern` (hex), `offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
-| `search_string` | `read` | `pattern` (string), `offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |
-| `search_regex_bytes` | `read` | `pattern` (regex), `offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
-| `search_asm` | `read` | `instructions`, `offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
-| `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
-| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, offset?, limit?` | ROP/COP gadget chains natively: a text-mode run primes rizin's gadget cache, then `/Rj`/`/Cj` returns `{ea, size, gadgets}` rows (each opcode carries its own address and type). `filter` is rizin's own gadget filter string. |
+| `get_graph` | `read` | `kind` (`function_cfg`/`callgraph`/`xrefs`/`imports`), `addr?`, `offset?, limit?` | Rizin's analysis graphs as JSON (`agf`/`agc`/`agx`/`agi`): a function's control-flow graph, the callgraph from a function, the xref graph around an address, or the import graph. Returns nodes (address + label) and their edges resolved to addresses. `addr` required except for `imports`. |
+| `deobfuscate` | `read` | `addr, size, op, key?, algo?, iv?` | Reveal obfuscated bytes in place: xor/add/sub/or/and with a `key`, an endian swap, or `decrypt` with `algo`+`key`(+`iv`) — shown as hex and string. Runs under the write cache and resets it, so the file is never modified. |
+| `search_bytes` | `read` | `pattern` (hex), `in_function?, offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
+| `search_string` | `read` | `pattern` (string), `in_function?, offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |
+| `search_regex_bytes` | `read` | `pattern` (regex), `in_function?, offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
+| `search_asm` | `read` | `instructions`, `in_function?, offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
+| `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `in_function?, offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
+| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, in_function?, offset?, limit?` | ROP/COP gadget chains natively: a text-mode run primes rizin's gadget cache, then `/Rj`/`/Cj` returns `{ea, size, gadgets}` rows (each opcode carries its own address and type). `filter` is rizin's own gadget filter string. |
 | `list_types` | `read` | `kind` (`struct`/`enum`/`typedef`/`function`), `filter?, offset?, limit?` | Types loaded in rizin's database (`tsj`/`tej`/`ttj`/`tfj`) — the built-in Windows type base plus debug-info and user-defined types. |
 | `define_types` | `read` | `definitions: string[]` | Define types from C statements (`td`, one declaration per entry; names used must be defined first). Rizin's errors surface verbatim. |
 | `cast_memory` | `read` | `addr`, `type` | Print memory at an address interpreted as a named type (`tp`). |
@@ -61,7 +66,12 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 reports its total so the model knows a view is partial. An empty page is
 marked as compactable, so omp can drop it from context once it has been read.
 
-## Mutate tier (5 tools)
+Every `search_*` tool accepts `in_function` (an address or name): the search
+is restricted to that function's extent (rizin's `search.in=range` plus
+`search.from`/`search.to`), and the previous scope is always restored
+afterward. Omit it to search the whole binary.
+
+## Mutate tier (15 tools)
 
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
@@ -79,6 +89,16 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_comment` | `write` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
 | `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
 | `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
+| `define_variable` | `write` | `addr, storage, location, name, type?` | Define a local variable analysis missed — a stack slot (`storage: stack`, `location` a frame delta, `afvs`) or a register variable (`storage: reg`, `location` a register, `afvr`) — so the decompiler names it. Refuses a name that already exists; `/re undo` runs `afv-`. |
+| `define_function` | `write` | `addr` | Define a function where auto-analysis missed one (`af`); refuses when a function already begins there, verifies one now does. `/re undo` runs `af-`. |
+| `define_global` | `write` | `addr, name, type` | Define a global variable at a data address (`avga`), naming and typing it so disassembly, xrefs, and the decompiler show the name and typed accesses. Refuses a name that already exists; `/re undo` runs `avgm`. |
+| `set_calling_convention` | `write` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
+| `set_flag` | `write` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; `/re undo` restores the previous flag (or removes it). |
+| `set_arch_hint` | `write` | `addr, arch?, bits?` | Hint the architecture and/or word size to disassemble from an address (`aha`/`ahb`) — e.g. `bits: 16` for an ARM Thumb region, or `arch` for mixed-arch firmware. `/re undo` deletes the hint. |
+| `set_hint` | `write` | `addr, hint, value` | Set an analysis hint that corrects how rizin reads one instruction: `immediate_base` (how an operand is shown — hex/decimal/char/string/syscall/IP-relative, `ahi`), `opcode_type` (reclassify, `aho`), `opcode_size` (force byte-length to realign disassembly, `ahs`), `jump_target` (the real target of an indirect jump/call, `ahc`), or `return_value` (`ahr`). Records what rizin stored; `/re undo` deletes it or restores the prior hint. |
+| `set_data` | `write` | `addr, size, count?` | Mark bytes as a data element/array (`Cd`) so they stop rendering as code. `/re undo` removes the mark. |
+| `set_string` | `write` | `addr, size?` | Mark bytes as a string (`Cs`); omit `size` to autodetect. Correctly no-ops on non-string bytes. `/re undo` removes it. |
+| `set_format` | `write` | `addr, size, format` | Overlay a pf struct format (with field names) on a region (`Cf`) so disassembly shows named fields. Display-only. `/re undo` removes it. |
 
 ## rizin REPL (2 tools)
 
@@ -133,11 +153,45 @@ gating is on the flags.
 | `rz-ax` | base and format conversion | `rz-ax 0xdead` |
 
 Refused before the tool is spawned: any flag that runs code (`rz-find
--E`/`-R`, `rz-diff -t command`), writes a file (`rz-bin -O`/`-o`/`-C`,
-`rz-asm -O`), fetches over the network (`rz-bin -dd`/`-PP`), or opens an
-interactive view (`rz-diff -H`/`-S`), and any argument with a line break or
-NUL. rz-gg (shellcode generation) and rz-run (launches a process) are not
-exposed — they generate or execute rather than analyze.
+-E`/`-R`, `rz-diff -t command`), writes or extracts to disk (`rz-bin
+-O`/`-o`/`-C`/`-x`, `rz-asm -O`), fetches over the network (`rz-bin
+-dd`/`-PP`), or opens an interactive view (`rz-diff -H`/`-S`), and any
+argument with a line break or NUL. The check is getopt-aware: the flag is
+caught whether written split (`-t command`), attached (`-tcommand`), or
+clustered (`-ddj`), and a single `-d`/`-P` (local read) stays allowed while
+`-dd`/`-d -d`/`-ddj` (network fetch) are refused. rz-gg (shellcode
+generation) is not exposed — it generates rather than
+analyzes. rz-run is not exposed as a CLI tool either, but its directives
+(argv, env, cwd, stdio, limits) do configure the debugger's launch
+environment through `rizin_debug`'s `run` option — the one place omp-re
+executes a sample.
+
+## Signatures (2 tools)
+
+FLIRT signatures name library functions from a signature database (book:
+analysis/signatures). `open_binary`'s analysis (`aaa`) already applies rizin's
+built-in database, so this covers what that doesn't: re-applying it on demand,
+applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't, because
+it refuses file arguments — and creating a new signature from the analyzed
+functions. List the built-in database with `rizin_command Flt`.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `apply_signatures` | `exec` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions, so it is exec-tier. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
+| `create_signature` | `exec` | `file?` | Builds a FLIRT signature (`Fc`) from the current binary's analyzed functions — to recognize them in other samples (tracking a routine across a malware family) — written to omp-re's output directory as `.pat` (text patterns, default) or `.sig` (compiled). Reads the analysis, modifies nothing. Apply it elsewhere with `apply_signatures` (`source: file`). |
+
+## Analysis passes — `analyze` (1 tool)
+
+`open_binary`'s `aaa` is the analysis baseline. `analyze` re-runs the deeper
+or format-specific passes it skips (book: analysis/code_analysis), each
+additive — it finds functions, xrefs, names, or types; none deletes. The pass
+is recorded and re-run on resume/respawn (before signatures and annotations,
+so each layer sees the one before it), not as an undoable annotation —
+reopen the binary to return to the baseline.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `all_functions` (`aaf`), `data_refs` (`aad`), `autoname` (`aan`), `types` (`aaft`), `struct_offsets` (`aat`), `golang` (`aalg`), `objc` (`aalor`), `rtti_classes` (`avrr` — C++ classes from RTTI), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
 
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 
@@ -149,17 +203,67 @@ shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `rizin_debug` | `exec` (the reason says plainly when a step executes vs. inspects) | `action: enum`, `addr?`, `count?`, `size?` | Drives one debug action (below). `addr` is validated like every other address. |
+| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?`, `file?` | Drives one debug action (below). `addr` is validated like every other address. |
 
-Actions: `start` (launch, stopped at entry), `continue` / `continue_until`
-(resume), `step` / `step_over` (`count` instructions), `registers`,
-`read_memory` (`size` bytes at `addr`), `break_add` / `break_remove` /
-`break_list`, `backtrace`, `stop` (kill and end the session). Every action
-needs a session started first except `start`; nothing is ever launched
-implicitly. A `continue`/`step` that never returns (a debuggee blocked on
-input) is killed at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
+Actions:
+
+- **Start:** `start` launches the open binary, stopped at entry (`run`
+  configures its argv/env/stdio). With `attach` it instead controls an
+  existing target without launching: `attach: {pid: N}` attaches to a running
+  process, `attach: {remote: "gdb://host:port"}` (or `windbg://…`) connects to
+  a remote stub — e.g. a sample running in an isolated VM — with the open
+  binary as the symbol source. `attach` is not combined with `run`.
+- **Execution:** `continue` / `continue_until` (`addr`),
+  `continue_to_syscall` / `continue_to_call` / `continue_to_ret`, `step` /
+  `step_over` (`count` instructions).
+- **Reverse debugging:** `trace_start` / `trace_stop` record a trace;
+  `step_back` (`count`) / `continue_back` then move backward through it (they
+  error until a trace is recorded). `trace_save` / `trace_load` (`file`)
+  persist the recorded session to, and restore it from, a directory in
+  omp-re's output directory — so an expensive recording survives across debug
+  sessions.
+- **Registers & memory:** `registers`, `registers_telescope` (each register
+  resolved to what it points at), `write_register` (`reg`=`value`),
+  `read_memory` (`size` bytes at `addr`, returned inline as hex),
+  `dump_memory` (`size` bytes of live memory at `addr` written to a file in
+  omp-re's output directory — for an unpacked/decrypted region too large to
+  return inline; returns the path, size, and SHA-256), `write_memory` (`bytes`
+  hex at `addr`, into the live process), `disassemble` (`count` instructions at
+  `addr`, default the PC — reads *live* memory, so it shows self-modified or
+  unpacked code the static view can't), `resolve_symbol` (`name`, optional
+  `lib`) — the live, post-ASLR address of a loaded symbol such as libc
+  `system`.
+- **Breakpoints & watchpoints:** `break_add` / `break_remove` / `break_list`,
+  `break_add_hw` (hardware breakpoint via debug registers — breaks on
+  read-only / self-modifying / packed pages without patching int3 bytes),
+  `break_enable` / `break_disable` (toggle the breakpoint at `addr`),
+  `break_condition` (`condition`, e.g. `rax>0` — stop only when it holds; the
+  expression is passed literally so `>`/`<`/`==` are not shell redirects),
+  `break_command` (`command` — run a **read-only** rizin command on each hit,
+  e.g. `drj` to log registers or `dbtj` the backtrace; restricted to vetted
+  debugger-state reads plus static print/info/search, never shell, writes,
+  config, or debugger control), `watch_add` (hardware watchpoint at `addr`,
+  `perm` r/w/rw, `size` 1/2/4/8 — removed with `break_remove`), `backtrace`.
+- **Process state:** `maps`, `modules`, `libraries`, `sections`, `processes`,
+  `threads`, `fds`, `signals`, `windows`.
+- **Heaps:** `heaps` / `heap_blocks` (Windows), `heap_arenas` / `heap_chunks`
+  (optional arena in `addr`) / `heap_bins` (optional
+  `tcache`/`fast`/`unsorted`/`small`/`large` in `addr`) — glibc.
+- **Lifecycle:** `stop` (kill and end the session).
+
+Every action needs a session started first except `start`; nothing is ever
+launched implicitly. The `write_*` and `watch_add` actions change the live
+process and are called out as such in the approval reason. A
+`continue`/`step` that never returns (a debuggee blocked on input) is killed
+at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
 no facilities for evading detection or hiding the debuggee; see
 [`SECURITY.md`](../SECURITY.md#rizin_debug).
+
+`dump_memory` is the one tool that emits a file (the sample itself is still
+never written). Dumps go to `OMPRE_OUTPUT_DIR` — or `<tmpdir>/omp-re-out` when
+unset — under a bare filename it validates; it never writes to a path the
+model chose, so it can't traverse out of that directory or clobber an
+arbitrary file.
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 

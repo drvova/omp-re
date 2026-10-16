@@ -146,6 +146,56 @@ export function baseRizinFlags(): string[] {
 	return flags;
 }
 
+/**
+ * Explicit load settings for a binary with no (or a misread) header: raw
+ * firmware dumps, flat shellcode, a ROM image at a non-zero base. They map to
+ * rizin's own load flags (book: First Steps / commandline_options, Basic
+ * Commands / mapping_files):
+ *   arch   → `-a <arch>`   force the disassembly architecture (asm.arch)
+ *   bits   → `-b <bits>`   force the word size (asm.bits)
+ *   base   → `-B <addr>`   rebase a formatted image (PE/ELF) at this address
+ *   map    → `-m <addr>`   map a raw/flat file at this address (rizin warns
+ *                          against `-B` on headerless files; `-m` is for them)
+ *   format → `-F <plugin>` force the bin plugin (e.g. `elf`, or `any` for raw)
+ * All omitted ⇒ rizin autodetects from the header exactly as before.
+ */
+export interface LoadOptions {
+	arch?: string;
+	bits?: 8 | 16 | 32 | 64;
+	base?: string;
+	map?: string;
+	format?: string;
+}
+
+const ARCH_NAME = /^[A-Za-z][A-Za-z0-9_.]*$/;
+const LOAD_BITS: readonly number[] = [8, 16, 32, 64];
+
+/**
+ * Build the `-a/-b/-B/-F` flags from load options, validating each value so a
+ * nonsense (or flag-shaped) argument fails here with a clear message rather
+ * than at the rizin layer. argv only — no shell is involved — so this is for
+ * clarity and early rejection, not injection defense.
+ */
+export function buildLoadFlags(opts?: LoadOptions): string[] {
+	if (!opts) return [];
+	const flags: string[] = [];
+	if (opts.arch !== undefined) {
+		if (!ARCH_NAME.test(opts.arch)) throw new Error(`omp-re: load: invalid arch ${JSON.stringify(opts.arch)} — a plugin name like x86, arm, mips (see rizin -L)`);
+		flags.push("-a", opts.arch);
+	}
+	if (opts.bits !== undefined) {
+		if (!LOAD_BITS.includes(opts.bits)) throw new Error(`omp-re: load: invalid bits ${JSON.stringify(opts.bits)} — one of 8, 16, 32, 64`);
+		flags.push("-b", String(opts.bits));
+	}
+	if (opts.base !== undefined) flags.push("-B", validateAddr(opts.base));
+	if (opts.map !== undefined) flags.push("-m", validateAddr(opts.map));
+	if (opts.format !== undefined) {
+		if (!ARCH_NAME.test(opts.format)) throw new Error(`omp-re: load: invalid format ${JSON.stringify(opts.format)} — a bin plugin name like elf, pe, mach0, or any for raw (see rizin -L)`);
+		flags.push("-F", opts.format);
+	}
+	return flags;
+}
+
 export interface CmdOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
@@ -157,6 +207,16 @@ export interface SpawnOptions {
 	onProgress?: (elapsedMs: number) => void;
 	/** rz-run directives (`arg0=...`, `setenv=K=V`, `chdir=...`, ...) passed as `-R` flags — the debug launch's target environment. */
 	runDirectives?: string[];
+	/** Explicit load settings (`-a/-b/-B/-F`) for a headerless/raw target. Applied to both the static and debug spawns so analysis and execution agree on the arch. */
+	loadOptions?: LoadOptions;
+	/**
+	 * A debug target to attach to instead of launching the open binary: a pid
+	 * (`"1234"`) or a remote stub URI (`"gdb://host:port"`). The open binary is
+	 * still passed as the symbol source (`rizin -d <target> <binary>`). Only
+	 * the debug spawn reads it, and it excludes the rz-run launch directives
+	 * (there is no new process to configure).
+	 */
+	debugTarget?: string;
 }
 
 /** Settle `task` normally, or reject early with RzAbortError when `signal` fires. The task itself keeps running. */
@@ -346,7 +406,7 @@ export class RzSession {
 	 */
 	static async spawn(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
 		if (options.signal?.aborted) throw new RzAbortError("rizin analysis");
-		const proc = spawn(rizinPath, [...baseRizinFlags(), binaryPath], {
+		const proc = spawn(rizinPath, [...baseRizinFlags(), ...buildLoadFlags(options.loadOptions), binaryPath], {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const session = new RzSession(proc, binaryPath);
@@ -369,19 +429,24 @@ export class RzSession {
 	}
 
 	/**
-	 * Spawn a rizin DEBUG session: `rizin -q0 -d <binary>`, which LAUNCHES the
-	 * target process (stopped at its entry) so it can be stepped and inspected.
-	 * This is the one place omp-re executes a sample, kept entirely separate
-	 * from the static {@link spawn} session that only ever reads the file.
-	 * Light `aa` analysis (not full `aaa`) runs so symbols resolve in
-	 * backtraces without slowing the launch.
+	 * Spawn a rizin DEBUG session. By default `rizin -q0 -d <binary>`, which
+	 * LAUNCHES the target process (stopped at its entry). With `debugTarget`
+	 * set it instead ATTACHES to a running pid or connects to a remote stub —
+	 * `rizin -q0 -d <target> <binary>`, the open binary serving as the symbol
+	 * source — and the rz-run launch directives and raw-load flags are dropped
+	 * (there is no new local process to configure). Either way this is the one
+	 * place omp-re drives a live process, kept entirely separate from the
+	 * static {@link spawn} session that only ever reads the file. Light `aa`
+	 * analysis (not full `aaa`) runs so symbols resolve without slowing things.
 	 */
 	static async spawnDebug(rizinPath: string, binaryPath: string, options: SpawnOptions = {}): Promise<RzSession> {
 		if (options.signal?.aborted) throw new RzAbortError("debug launch");
 		// -R directives go before -d: each is one argv element (no shell), so
 		// values with spaces need no quoting.
-		const runFlags = (options.runDirectives ?? []).flatMap((d) => ["-R", d]);
-		const proc = spawn(rizinPath, [...baseRizinFlags(), ...runFlags, "-d", binaryPath], {
+		const argv = options.debugTarget
+			? [...baseRizinFlags(), "-d", options.debugTarget, binaryPath]
+			: [...baseRizinFlags(), ...buildLoadFlags(options.loadOptions), ...(options.runDirectives ?? []).flatMap((d) => ["-R", d]), "-d", binaryPath];
+		const proc = spawn(rizinPath, argv, {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		const session = new RzSession(proc, binaryPath);
@@ -401,14 +466,16 @@ export class RzSession {
 	}
 }
 
-export function resolveRizinPath(binaryPath?: string): string {
+export function resolveRizinPath(binaryPath?: string, bitsOverride?: 8 | 16 | 32 | 64): string {
 	// The open binary's bits decide which build runs it: the bits-sensitive
 	// surfaces (the debugger executes the process; the RzIL VM inherits the
 	// build's addressing) misbehave when the build's bits don't match the
 	// target — a 32-bit rizin emulates a 64-bit PE at a file-relative base
 	// with `esp`. Per-bits overrides win, then the general one, then PATH.
-	if (binaryPath) {
-		const bits = readBinaryBits(binaryPath);
+	// An explicit load `bits` (raw/headerless target) wins over the header
+	// read, which returns nothing for a flat blob.
+	if (binaryPath || bitsOverride) {
+		const bits = bitsOverride ?? (binaryPath ? readBinaryBits(binaryPath) : undefined);
 		if (bits === 64 && process.env.OMPRE_RIZIN_PATH_64?.trim()) return process.env.OMPRE_RIZIN_PATH_64.trim();
 		if (bits === 32 && process.env.OMPRE_RIZIN_PATH_32?.trim()) return process.env.OMPRE_RIZIN_PATH_32.trim();
 	}

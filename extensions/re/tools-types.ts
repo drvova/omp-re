@@ -54,11 +54,28 @@ export async function listTypeRows(rz: RzSession, params: RzListTypesParams): Pr
 	return markEmpty(result, page.length === 0);
 }
 
-/** Define types from C statements, one td per entry (the transport is line-based). Surfaces rizin's stderr verbatim. */
+/**
+ * Validate and double-quote a `td` C definition. rizin's command parser splits
+ * a line on `;`, so an unquoted multi-member struct (`struct S { int a; int b;
+ * }`) is cut into fragments and rejected — wrapping the whole definition in
+ * `"..."` makes rizin treat the `;`-bearing C as one argument. The quoting is
+ * safe only if the definition can't close the quote or substitute, so a `"`,
+ * backtick, `$`, `\`, or control character (none of which appears in a C type)
+ * is refused rather than passed through.
+ */
+export function quoteTypeDefinition(definition: string): string {
+	const trimmed = definition.trim();
+	if (trimmed === "") throw new Error("omp-re: define_types: empty definition");
+	const bad = trimmed.match(/["`$\\\x00-\x1f]/);
+	if (bad) throw new Error(`omp-re: define_types: a C type definition may not contain ${JSON.stringify(bad[0])}`);
+	return `td "${trimmed}"`;
+}
+
+/** Define types from C statements, one td per entry. Each definition is double-quoted so its member `;`s survive rizin's line splitter. Surfaces rizin's stderr verbatim. */
 export async function defineTypeLines(rz: RzSession, definitions: string[]): Promise<ReToolResult> {
 	const lines: string[] = [];
 	for (const definition of definitions) {
-		const { output, stderr } = await rz.cmdWithStderr(`td ${definition}`);
+		const { output, stderr } = await rz.cmdWithStderr(quoteTypeDefinition(definition));
 		if (output.trim().length > 0) lines.push(output.trim());
 		if (stderr.trim().length > 0) lines.push(stderr.trim());
 	}

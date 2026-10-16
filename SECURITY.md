@@ -42,6 +42,24 @@ read-only and none of these tools ever writes back to the sample on disk.
 The annotations themselves are recorded in the omp session and replayed into
 rizin when the session is resumed.
 
+`map_file` opens a *second* file into the session (`o <file> <addr>`, book:
+basic_commands/mapping_files) — a dump, a library, a blob to analyze alongside
+the primary binary. Reading a file the model names is the same trust boundary
+as `open_binary` (which opens the sample itself); the path is realpath-checked
+for readability and single-quoted so it cannot inject a command. It is opened
+with `o`, never `o+`, so the mapped file stays read-only on disk — mapping
+never writes it.
+
+The sample is never written. The only file omp-re itself emits is a memory
+dump from the debugger (`rizin_debug`'s `dump_memory`, for extracting an
+unpacked or decrypted region too large to return inline). It goes to a single
+confined directory — `OMPRE_OUTPUT_DIR`, or `<tmpdir>/omp-re-out` when unset —
+under a basename validated to letters, digits, `.`, `_` and `-` (no
+separators, no `..`, not absolute). The model never supplies the output path,
+so the dump cannot traverse out of that directory or overwrite an arbitrary
+file, and the bytes are read in TypeScript and written directly (rizin is
+never handed a file path to write).
+
 `-N` additionally skips the user's `rizinrc` and startup scripts, so a global
 eval var or alias in the operator's config can't silently change the command
 output omp-re parses; plugins still load (that needs `-NN`, which omp-re never
@@ -61,7 +79,17 @@ none of them can start a second command:
 - Function and variable names must be identifiers.
 - Free text (comments) and C types/prototypes are passed as single-quoted
   rizin arguments with `\'` and `\\` escaped, which rizin treats as a
-  literal; line breaks and NUL are rejected outright.
+  literal; line breaks and NUL are rejected outright. This includes the type
+  given to `define_variable` (`afvs`/`afvr`), which — like `set_prototype`,
+  `set_variable_type`, and `define_global` — is single-quoted, not merely
+  character-checked.
+- Free-form search arguments — the `search_regex_bytes` regex, the
+  `search_asm` assembly text, and the `search_gadgets` filter — are checked
+  against the same forbidden-syntax guard `rizin_command` applies
+  (`forbiddenSyntaxReason`) before being interpolated into the search command,
+  since they reach the pipe verbatim. `search_bytes` (hex charset) and
+  `search_string` (hex-encoded client-side) carry no metacharacters by
+  construction.
 
 **0.1.x is affected by a command-injection bug fixed in 0.2.0.** It
 interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and the
@@ -81,9 +109,20 @@ and it refuses before anything reaches rizin unless the command:
 - belongs to a read-only family — print, info, search, graph, op/ESIL
   analysis, xref and function queries, comment and flag lookups — and is
   none of the write, config, shell, file-reading, or analysis-changing
-  commands inside those families (`pf`, `po`, `pw`, `pkill`, `pm`, `/F`,
-  `ag[enw]`, `afb[cer]`, `afii`, `ica`, `id`, or any name containing
-  `+ - = ! *`);
+  commands inside those families (`po`, `pw`, `pkill`, `/F`, `ag[enw]`,
+  `afb[cer]`, `afii`, `ica`, `idp`, or any name containing `+ - = ! *`), **or**
+  is one of a curated set of read-only commands the family regex can't shape
+  (config reads `e`/`el`/`et`/`es`, analysis-hint and metadata/string
+  listings, class reads, address info, type/union/xref reads, plugin
+  listings, the FLIRT sigdb listing) that was each confirmed read-only
+  against a real rizin, or is one of the `p=`/`p==` statistical-histogram
+  prints (entropy, chi-square, printable/string density, byte histograms)
+  allowed by name despite the `=` guard — with the interactive visual (`…v`)
+  variants excluded so none can block the command pipe;
+- is not a get/set dual used in its set form: `e <key>` reads a value but
+  `e <key>=<value>` (a config write) is refused, and the positional duals
+  `tn`/`Ld`/`Lo` run only with no argument (an argument makes them add or
+  set);
 - takes no file or path argument according to rizin's own catalog
   (`/m <magic-file>` runs only bare);
 - contains none of `;`, `|`, `<`, `>`, backticks, `$(`, `${`, `~`, `#`, `"`,
@@ -120,15 +159,28 @@ is spawned:
 
 - flags that run code: `rz-find -E` (shell command per hit), `rz-find -R`
   (rizin command per hit, which can reach `!` shell), `rz-diff -t command`
-  (runs commands in both files);
-- flags that write to disk: `rz-bin -O`/`-o`/`-C`, `rz-asm -O`;
+  (runs a rizin command per file, which reaches `!` shell);
+- flags that write or extract to disk: `rz-bin -O`/`-o`/`-C`/`-x`, `rz-asm -O`;
 - flags that reach the network: `rz-bin -dd`/`-PP` (debuginfod / pdb);
 - flags that open an interactive view that would hang: `rz-diff -H`/`-S`.
 
-Short-flag clusters are checked letter by letter and case-sensitively (so
-`rz-bin -c`, list classes, is allowed while `-C`, create a binary, is not),
-and a doubled flag like `-dd` is matched whole. `rz-gg` (shellcode/egg
-generation) and `rz-run` (launches a process) are not exposed at all. This is
+The gating is **getopt-aware**, so a denied capability cannot be smuggled
+past by respelling the flag. Short-flag clusters are checked letter by letter
+and case-sensitively (so `rz-bin -c`, list classes, is allowed while `-C`,
+create a binary, is not). A capability that escalates on repetition —
+`rz-bin -d` reads local DWARF but `-dd` downloads it — is refused by counting
+the letter across *all* clusters, so `-dd`, `-d -d`, `-ddj`, and `-jdd` are
+all caught while a single `-d` stays allowed. A value-taking flag whose value
+is dangerous — `rz-diff -t command` — is refused in every spelling (`-t
+command`, `-tcommand`, `-Xtcommand`), since the value is the rest of the
+cluster after the flag or the next token. (Earlier versions matched only the
+exact doubled token and the split `-t command` pair; the attached and
+split-letter forms were a sandbox-escape bypass, now closed and regression-
+tested.) `rz-gg` (shellcode/egg
+generation) is not exposed at all. `rz-run` is not a `rizin_cli` tool either,
+but its directives configure the debugger's launch environment via
+`rizin_debug`'s `run` option (see below) — stdio targets there are files
+only; a `!command` target that would run a shell command is refused. This is
 a convenience boundary over the flags, not a sandbox: the tools read whatever
 files you point them at, with your privileges, exactly as if you ran them.
 The policy lives in `extensions/re/tools-rzcli.ts` and is covered by
@@ -149,12 +201,42 @@ of the suite holds:
   continues to only read the file. The debug process is killed with its
   debuggee on `stop` and on session shutdown.
 - Every action is `exec`-tier, and the approval reason says plainly whether
-  it resumes execution (`start`, `continue`, `step`) or only inspects
-  (`registers`, `read_memory`, `backtrace`). Addresses are validated with the
-  same allowlist as every other tool.
-- It is a **plain debugger** — breakpoints, stepping, registers, memory,
-  backtrace. It has no features for evading anti-debugging, hiding the
-  debuggee, or injecting into other processes.
+  it resumes execution (`start`, `continue`, `continue_to_syscall`, `step`),
+  modifies the live process (`write_register`, `write_memory`, `watch_add`,
+  `break_add_hw`), reads live memory out to a file (`dump_memory` — see the
+  confined output directory above), or only inspects (`registers`,
+  `read_memory`, `disassemble`, `backtrace`, the heap and process-state
+  actions). Addresses, register names, register values, and hex byte strings
+  are all validated before anything reaches the process.
+- `break_command` stores a rizin command that reruns on **every** breakpoint
+  hit (`dbc`), so its command string is gated the way `rizin_command` is —
+  but, running inside the live debugger, it additionally allows a vetted set
+  of read-only debugger-state reads (register/arena views, memory-map/module/
+  library/heap listings, backtraces, process/thread/fd/signal listings; see
+  `checkDebugOnHitCommand` in `catalog.ts`). Matched by exact command token,
+  with any `=` refused, so a register-assign dual (`dr rax=0`), a control
+  command (`dc`/`ds`), a write, config, shell, or script form can never be
+  stored — the on-hit command can only log state, never drive or mutate the
+  process. `break_condition` passes its expression to rizin single-quoted, so
+  comparison operators in the condition stay literal and never become
+  redirects.
+- It is a **plain debugger** — breakpoints and watchpoints, stepping,
+  reading and writing registers and memory, disassembling live memory,
+  recording a trace and stepping backward through it (reverse debugging),
+  backtraces, heap and process-state inspection. The register/memory writes
+  act only on the process this session drives; the tool has no features for
+  evading anti-debugging, hiding the debuggee, or injecting into other
+  processes.
+- Besides launching, `start` can **attach** to a running pid or **connect to
+  a remote stub** (`attach: {pid}` / `attach: {remote: "gdb://…"}`), so a
+  sample can be driven inside an isolated VM from the host. Attaching controls
+  an existing process with your privileges; a remote target opens an outbound
+  connection to the stub you name (through the environment's network policy).
+  The pid must be a positive integer and the remote URI must be a
+  charset-validated `gdb://`/`windbg://` string — both reach rizin through
+  argv, never a shell. `attach` is refused together with `run` (there is no
+  new process to configure), and these paths still require
+  `OMPRE_ENABLE_DEBUGGER`.
 
 The debugger provides **no isolation whatsoever** — it is the opposite of a
 sandbox. Enable it and run a sample only inside a disposable VM or container

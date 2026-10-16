@@ -72,7 +72,7 @@ export function registerRizinTools(pi: ExtensionAPI): void {
 		name: "rizin_command",
 		label: "rizin command",
 		description:
-			"Run one read-only rizin command against the open binary, for anything the dedicated tools don't cover: function summaries (pdsf), call and block graphs (agc, agf), hexdumps (px), entropy (ph entropy), byte/string/ROP searches (/x, /, /R), ESIL (aoe), headers (iH), and the rest of rizin's print, info, search, graph, and listing commands. Commands that write, change config, open files, run shell commands, or change analysis are refused; annotate with the dedicated tools instead. If rizin rejects the arguments, its own error and usage text are returned. Check syntax with rizin_help first.",
+			"Run one read-only rizin command against the open binary, for anything the dedicated tools don't cover: function summaries (pdsf), call and block graphs (agc, agf), hexdumps (px), entropy (ph entropy), byte/string/ROP searches (/x, /, /R), ESIL (aoe), headers (iH), and the rest of rizin's print, info, search, graph, and listing commands. Also reads config (e asm.arch, el, elj), analysis hints (ahl), metadata and strings (C, Csl), classes (acl, aci), address info (ai), unions and type cross-references (tu, tx), calling-convention lists (tcc), and plugin lists (Ll, La, LD). Commands that write, set config (e key=value), open files, run shell commands, or change analysis are refused; annotate with the dedicated tools instead. If rizin rejects the arguments, its own error and usage text are returned. Check syntax with rizin_help first.",
 		approval: (args) => ({ tier: "exec", reason: `Run the rizin command ${describeCommand(args)} on the open binary.` }),
 		loadMode: "essential",
 		parameters: commandParams,

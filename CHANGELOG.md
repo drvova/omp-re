@@ -4,6 +4,209 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+Broadened coverage of rizin's own capabilities, chapter by chapter against
+the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
+40 to 61.
+
+### Added
+
+- **`deobfuscate`.** Reveal obfuscated bytes in place — xor/add/sub/or/and
+  with a key, an endian swap, or a cipher `decrypt` (RC4/AES via rizin's
+  `woD`) over a window, shown as hex and string. The transform runs under
+  rizin's write cache and is reset immediately, so the file on disk is never
+  modified (consistent with "mutations never touch the file"). Read-tier and
+  recorded as evidence — the single highest-payoff capability for unmasking
+  xor-hidden strings and embedded configs (book: basic_commands/write).
+- **`list_symbols`.** The full symbol table (`is`) — local/internal functions
+  and data symbols with name/type/bind/size/address, filterable by name — the
+  read-tier companion to `list_imports`/`list_exports` it was missing.
+- **Analysis passes.** `analyze` re-runs a rizin analysis pass beyond
+  `open_binary`'s baseline `aaa`: `calls`/`xrefs`/`pointers`, `preludes`
+  (recovers functions in stripped binaries), `autoname`, `types`, `golang`,
+  `objc`, and `emulate_functions`. It reports the function count before and
+  after, surfaces rizin's own message for a pass that doesn't apply, and is
+  re-run on resume/respawn (before signatures and annotations) so the
+  recovered analysis is faithful across a restart. Passes: calls, xrefs,
+  pointers, preludes, all_functions, data_refs, autoname, types,
+  struct_offsets, golang, objc, rtti_classes (C++ from RTTI), emulate_functions.
+
+- **Load options for raw/headerless targets.** `open_binary` accepts
+  `arch`/`bits`/`base`/`map`/`format` (rizin's `-a`/`-b`/`-B`/`-m`/`-F`), so
+  flat shellcode, firmware, and ROM dumps load with the right architecture
+  instead of being autodetected as the build default. The settings are
+  validated, persisted in the `re.binary` entry, and reused on every respawn
+  and resume; an explicit `bits` also steers 32/64 build selection.
+- **Function-scoped search.** Every `search_*` tool (bytes, string, regex,
+  asm, value, gadgets) accepts `in_function` (an address or name) to restrict
+  the search to one function's extent instead of the whole binary (book:
+  searching) — rizin's `search.in=range` with the function's bounds. The prior
+  search scope is always restored afterward, so a scoped search never leaks
+  into the next one on the shared session.
+- **`define_global`.** Define a global variable at a data address (`avga`),
+  giving it a name and a C type so disassembly, xrefs, and the decompiler show
+  the name and typed accesses instead of a raw address (book: analysis/types).
+  Refuses a name that already exists, verifies it landed, records the type
+  rizin stored, and is reversible with `/re undo` (`avgm`) and replayed on
+  resume/respawn.
+- **`define_variable`.** Define a local variable or argument rizin's analysis
+  didn't recover — a stack slot (`afvs`, by frame delta) or a register variable
+  (`afvr`, by register), with an optional C type — so the decompiler and
+  disassembly name it instead of showing a raw offset (book: analysis/types).
+  Refuses a name that already exists, verifies the variable landed, and is
+  reversible with `/re undo` (`afv-`) and replayed on resume/respawn.
+- **`set_hint`.** Set an analysis hint that corrects how rizin reads one
+  instruction (book: analysis/code_analysis): `immediate_base` (show an operand
+  as hex/decimal/char/string/syscall/IP-relative, `ahi`), `opcode_type`
+  (reclassify, `aho`), `opcode_size` (force byte-length to realign
+  disassembly, `ahs`), `jump_target` (the real target of an indirect jump/call,
+  `ahc`), or `return_value` (`ahr`). Follows the resolve → write → read-back →
+  verify contract, records the value rizin stored (never the request), and is
+  reversible with `/re undo` (which deletes the hint or restores the prior one)
+  and replayed on resume/respawn.
+- **Four analysis-edit mutate tools**, each with the resolve → write →
+  read-back → verify contract, `/re undo`, and replay: `define_function`
+  (`af` where auto-analysis missed one), `set_calling_convention` (`afc`,
+  which corrects argument recovery), `set_flag` (`f`, naming an address), and
+  `set_arch_hint` (`aha`/`ahb`, to disassemble a region as a different
+  architecture or word size — ARM/Thumb switches, mixed-arch firmware; book:
+  analysis/cpu_platform_profiles); and the metadata family `set_data` (`Cd`,
+  mark bytes as a data element/array), `set_string` (`Cs`, force a missed
+  string), and `set_format` (`Cf`, overlay a pf struct format so disassembly
+  shows named fields; book: disassembling/adding_metadata).
+- **FLIRT signatures.** `apply_signatures` re-applies rizin's built-in sigdb
+  (`Fa`) or applies a custom `.sig`/`.pat` file (`Fs`); a custom-file
+  application is recorded and re-applied on resume/respawn. `rizin_command`
+  can list the sigdb (`Flt`).
+- **Debugger: writing and live code.** `rizin_debug` gains `write_register`,
+  `write_memory`, `disassemble` (of *live* memory, revealing self-modified or
+  unpacked code), `watch_add` (hardware watchpoints), `continue_to_syscall` /
+  `continue_to_call` / `continue_to_ret`, and glibc heap inspection
+  (`heap_arenas` / `heap_chunks` / `heap_bins`) alongside the existing Windows
+  heap actions. The approval reason now distinguishes execute / modify /
+  inspect.
+- **Reverse debugging** (book: debugger/revdebug). `trace_start` / `trace_stop`
+  record a trace session; `step_back` and `continue_back` then move the process
+  backward through it — stepping back from a crash or a watchpoint hit.
+  `trace_save` / `trace_load` persist a recorded session to (and restore it
+  from) a directory in omp-re's confined output directory, so an expensive
+  recording survives across debug sessions; the directory path is validated
+  and never model-chosen.
+- **Remote and attach debugging** (book: remote_access). `rizin_debug`'s
+  `start` can now control an existing target instead of launching: `attach:
+  {pid}` attaches to a running process, and `attach: {remote: "gdb://host:port"}`
+  (or `windbg://…`) connects to a remote stub — so a sample can be driven
+  inside an isolated VM from the host, the open binary serving as the symbol
+  source. The pid and URI are validated; `attach` is refused together with
+  `run`.
+- **`map_file`** (book: basic_commands/mapping_files). Open an additional file
+  into the current session at a virtual address (`o <file> <addr>`) alongside
+  the primary binary — overlay a dumped/unpacked region over the packed image,
+  or map a library for cross-module analysis. The file is mapped read-only
+  (`o`, never `o+`, so it is never written on disk), and the map is recorded as
+  a `re.mapfile` entry re-applied on every resume/respawn before the analysis
+  passes (so they see the mapped region), like analysis passes and signatures.
+  Not an undoable annotation: reopen the binary to drop it. The dominant
+  "analyze a dump" workflow stays with `open_binary` + load options.
+- **`get_graph`** (book: analysis/graphs). Rizin's analysis graphs as JSON: a
+  function's control-flow graph (`agf`), the callgraph from a function (`agc`),
+  the cross-reference graph around an address (`agx`), or the program's import
+  graph (`agi`). Returns nodes (each with its address and label) and the edges
+  between them resolved from rizin's internal node ids back to addresses — the
+  structure for reasoning about control flow and call relationships without
+  reading the raw disassembly.
+- **`create_signature`** (book: analysis/signatures). Build a FLIRT signature
+  (`Fc`) from the current binary's analyzed functions — the creation
+  counterpart to `apply_signatures` — to recognize those functions in other
+  samples (e.g. tracking a routine across a malware family). Written to
+  omp-re's confined output directory as a `.pat` (text patterns) or `.sig`
+  (compiled), then applied elsewhere with `apply_signatures` (`source: file`).
+  Reads the analysis and emits a file; it modifies neither the analysis nor the
+  sample.
+- **`export_project`** (book: projects). Save the current analysis — functions,
+  names, comments, flags, types, and every annotation omp-re has applied — as a
+  rizin project (`.rzdb`, via `Ps`), so it can be opened in interactive rizin or
+  Cutter (`rizin -p <file>`). Written to omp-re's confined output directory
+  (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`), never the sample and never a
+  model-chosen path. Export only: omp-re manages analysis state through its own
+  session log, so loading a project (which would be a second, divergent source
+  of truth on respawn) is deliberately not offered.
+- **`dump_memory`** (book: debugger). `rizin_debug` can write a region of the
+  debugged process's live memory to a file — for an unpacked or decrypted
+  payload too large to return inline — reporting its path, size, and SHA-256.
+  The sample on disk is still never written; dumps go to a single confined
+  directory (`OMPRE_OUTPUT_DIR`, or `<tmpdir>/omp-re-out`) under a validated
+  bare filename, never a model-chosen path, so a dump can't traverse out or
+  clobber another file. The bytes are read over the pipe and written in
+  TypeScript, so rizin is never handed a path to write.
+- **Breakpoint management and live symbol resolution** (book:
+  debugger/getting_started). `rizin_debug` gains `break_add_hw` (hardware
+  breakpoint via debug registers — breaks on read-only / self-modifying /
+  packed pages without patching int3 bytes), `break_enable` / `break_disable`,
+  `break_condition` (stop only when an expression such as `rax>0` holds, passed
+  literally so comparison operators are not shell redirects), `break_command`
+  (run a read-only rizin command on each hit — e.g. `drj` to log registers),
+  `registers_telescope` (each register resolved to what it points at), and
+  `resolve_symbol` (the live, post-ASLR address of a loaded symbol such as
+  libc `system`).
+- **`rizin_command` read-only unlock.** Whole read-only families the book
+  documents are now reachable: configuration reads (`e <key>`, `el`, `elj`,
+  `et`, `es`), analysis-hint listings (`ahl`), metadata and string listings
+  (`C`, `Csl`, …), class reads (`acl`, `aci`, `acg`, `acvl`, `acvf`), address
+  info (`ai`), type reads (unions, enums, typedefs, calling-convention lists,
+  type cross-references, typeclasses), plugin listings
+  (`Ll`/`La`/`Lc`/`LC`/`Lh`/`Li`/`Lp`/`LD`), and the `p=`/`p==` statistical
+  histograms (book: print_modes) — entropy (`p=e`, `p=rj` rising/falling edges),
+  chi-square, printable, string-density, and byte histograms, for spotting
+  packed or encrypted regions — allowed past the get/set `=` guard while their
+  interactive visual (`…v`) variants stay refused. A command the installed
+  rizin catalogs that was blocked only by command shape now runs; coverage
+  measured against rizin 0.9.1 rose from 800 to 968 of ~2020 commands.
+
+### Fixed
+
+- `define_types` sent `td <definition>` unquoted, so rizin's command parser
+  split a multi-member struct on its member `;`s and rejected the whole
+  definition ("Error while parsing command") — the tool only ever worked for
+  single-member/semicolon-free types, and its stub-only tests never ran a real
+  `td`. The definition is now double-quoted (`td "<definition>"`) so the `;`s
+  survive, with a `"`/backtick/`$`/`\`/control-char guard so the quoting can't
+  be broken out of, and a live test defines a real multi-member struct.
+- The search / types / syscall / binary-info read tools and the RzIL emulator
+  were never added to the suite's tool roster, so those read tools recorded no
+  `re.evidence` (breaking the report gate's grounding for anything found
+  through them), none of these tools were written to the audit log, and
+  `/re off` left them enabled. The roster now matches what is registered.
+- `rizin_debug`'s `start` computed the program counter but dropped it from the
+  result; it now reports where the process stopped (arch-agnostically).
+
+### Security
+
+- The `rizin_command` get/set duals are gated: `e <key>` reads a value but
+  `e key=value` is refused, and `tn`/`Ld`/`Lo` run only in their list form.
+  The ROP/JOP/COP constraint queries keep their `=` arguments. Every newly
+  allowed command was confirmed read-only against a real rizin.
+- `break_command`'s on-hit command (`dbc`, which reruns on every breakpoint
+  hit) is restricted to vetted read-only debugger-state reads plus the static
+  print/info/search policy. Matched by exact command token with any `=`
+  refused, so a register-assign dual, a control command (`dc`/`ds`), a write,
+  config, shell, or script form can never be stored — the stored command can
+  only log state, never drive or mutate the process.
+- The free-form search arguments — `search_regex_bytes` (regex),
+  `search_asm` (assembly), and `search_gadgets` (filter) — now pass through
+  the same forbidden-syntax guard as `rizin_command` before reaching the pipe.
+  They were interpolated into the search command raw, so a `;`/newline (chains
+  a command through the `-q0` pipe) with `!` (shell) or a `>` (file redirect)
+  could execute a command or write a file through read-tier tools that take no
+  exec approval. (`search_bytes`/`search_string`/`search_value` were never
+  affected — hex charset, client-side hex-encoding, and numeric args.)
+- `define_variable` interpolated its C type into `afvs`/`afvr` unquoted,
+  guarded only by a character check that still allowed `>`/`<`/`@`; it is now
+  single-quoted like every other type/prototype path (`set_prototype`,
+  `set_variable_type`, `define_global`), so a redirect or seek character in the
+  type is literal and can neither write a file nor seek.
+
 ## [0.2.0] - 2026-10-15
 
 radare2 is replaced by [rizin](https://rizin.re), and the plugin targets

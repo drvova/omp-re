@@ -97,6 +97,7 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
 	fN: { summary: "Show the realname of the flag / Set the realname of the flag" },
 	fs: { summary: "Select flagspace" },
 	"/R": { args_str: " [<re>]", summary: "Search rop gadgets", description: "Find gadgets ending in ret" },
+	"/Rk": { args_str: " <key>[=<val>] ...", summary: "Query ROP Gadgets by providing constraints", args: [{ type: "string", name: "key=value" }] },
 	izj: { summary: "List strings in data sections (JSON mode)" },
 	agc: { args_str: " [<format>]", summary: "Global callgraph" },
 	agw: { summary: "Write graph to file" },
@@ -226,6 +227,63 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
 	"kj": { summary: "List all namespaces under 'analysis/' and sdb databases in JSON format (SDB)." },
 	"pm": { summary: "Search magics and print the long description of them.", args_str: " [<file/directory>]", args: [{ type: "string", name: "file/directory" }] },
 	"pmj": { summary: "Search magics and print the long description of them. (JSON mode)", args_str: " [<file/directory>]", args: [{ type: "string", name: "file/directory" }] },
+	// --- read-only extras (chapter B) --- (`e` is defined above)
+	// Configuration
+	"el": { summary: "List config variables with their descriptions", args: [{ type: "string", name: "key" }] },
+	"elj": { summary: "List config variables with their descriptions (JSON mode)", args: [{ type: "string", name: "key" }] },
+	"et": { summary: "Show type of given config variable <key>", args: [{ type: "string", name: "key" }] },
+	"es": { summary: "List all config variable spaces" },
+	"ec": { summary: "List eval colors and keys" },
+	"ecr": { summary: "Set random palette" },
+	"e-": { summary: "Reset config variables" },
+	// Analysis hints (list only)
+	"ahl": { summary: "List all analysis hints" },
+	"ahlj": { summary: "List all analysis hints (JSON mode)" },
+	"aha": { summary: "Set arch hint" },
+	// Address info
+	"ai": { summary: "show address information" },
+	"aij": { summary: "show address information (JSON mode)" },
+	"aii": { summary: "list/add global import (like afii, but global)" },
+	// Classes
+	"acl": { summary: "List all classes" },
+	"aclj": { summary: "List all classes (JSON mode)" },
+	"aci": { summary: "Show information of class", args: [{ type: "string", name: "class_name" }] },
+	"acvf": { summary: "Lookup function address on vtable offset", args: [{ type: "string", name: "offset" }] },
+	"acn": { summary: "Rename class" },
+	// Metadata & strings
+	"C": { summary: "List all meta information" },
+	"Cj": { summary: "List all meta information (JSON mode)" },
+	"Cl": { summary: "List all meta information (verbose mode)" },
+	"Csl": { summary: "List all strings" },
+	"Cslj": { summary: "List all strings (JSON mode)" },
+	"Cs.": { summary: "Show string at the current address" },
+	"Cs": { summary: "Add string (autodetects the encoding)" },
+	"Csp": { summary: "Add Pascal-style string with the size" },
+	"Cd": { summary: "Set the \"data\" mark to the current address" },
+	// Types
+	"t": { summary: "List all types / Show type information" },
+	"tl": { summary: "List all types / Show type information (verbose mode)", args: [{ type: "string", name: "type" }] },
+	"tc": { summary: "List loaded types in C format with newlines", args: [{ type: "string", name: "type" }] },
+	"te": { summary: "List loaded enums / Show enum member", args: [{ type: "string", name: "enum" }] },
+	"tu": { summary: "List loaded unions / Show pf format string for given union" },
+	"tcc": { summary: "List all calling conventions" },
+	"tx": { summary: "List functions using the type", args: [{ type: "string", name: "type" }] },
+	"tk": { summary: "Show the typeclass of the given type", args: [{ type: "string", name: "type" }] },
+	"tfc": { summary: "Show or set function calling convention", args: [{ type: "string", name: "name" }, { type: "string", name: "cc" }] },
+	"tks": { summary: "Set the typeclass of a type", args: [{ type: "string", name: "type" }, { type: "string", name: "typeclass" }] },
+	"t-": { summary: "Remove the type" },
+	"to": { summary: "Open C header file and load types from it", args: [{ type: "string", name: "file" }] },
+	// Plugin listings
+	"Ll": { summary: "List the lang plugins" },
+	"La": { summary: "List the arch plugins" },
+	"LD": { summary: "List the demanglers plugins (alias for iDl)" },
+	"L": { summary: "Load a plugin from file", args: [{ type: "string", name: "file" }] },
+	// Positional duals
+	"tn": { summary: "List all noreturn references / Add a noreturn function", args: [{ type: "string", name: "name" }] },
+	"tnj": { summary: "List all noreturn references / Add a noreturn function (JSON mode)", args: [{ type: "string", name: "name" }] },
+	"Ld": { summary: "List debug plugins / Set debug backend (e dbg.backend)", args: [{ type: "string", name: "handler" }] },
+	"Ldj": { summary: "List debug plugins / Set debug backend (e dbg.backend) (JSON mode)", args: [{ type: "string", name: "handler" }] },
+	"Lo": { summary: "List IO plugins / Register IO plugin from <path>", args: [{ type: "string", name: "path" }] },
 };
 const CATALOG: RzCatalog = new Map(Object.entries(SPECS).map(([cmd, spec]) => [cmd, { ...spec, cmd }]));
 
@@ -290,7 +348,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
 
 	test("refuses every non-read-only command head, including the task (`&`) and shell (`!`) operators", () => {
 		// Validated against rizin's documented prompt grammar (book: first_steps/commandline_rizin).
-		for (const command of ["!id", "!!id", "& dc", "&t dc", "&= 0", "3 px", "wx 90", "e io.cache=true", "o /etc/passwd", "s main", "afn evil", "CC note", "pfw x", "agw /tmp/g", "idp /tmp/x.pdb", "$a=!id", ".!id", "(m;!id)"]) {
+		for (const command of ["!id", "!!id", "& dc", "&t dc", "&= 0", "3 px", "wx 90", "o /etc/passwd", "s main", "afn evil", "CC note", "pfw x", "agw /tmp/g", "idp /tmp/x.pdb", "$a=!id", ".!id", "(m;!id)"]) {
 			const reason = refusal(command);
 			expect(reason).toMatch(/is not available here|is not allowed in a command/);
 		}
@@ -311,12 +369,63 @@ describe("checkRizinCommand (no rizin needed)", () => {
 			expect(checkRizinCommand(CATALOG, command)).toMatchObject({ ok: true, name: command });
 		}
 		// get/set duals: bare form reads, but the same name with an argument writes
-		for (const command of ["fL", "fN", "fs x", "fc x", "fC x", "ft x", "afvs", "afvr", "afs", "afsj", "aezv", "ar", "arj", "arr", "shu", "shr", "yy", "yt", "yz", "om /tmp/x", "asca", "m x", "pfa x", "pfo /tmp/f", "pfn fmt body", "cf /etc/passwd", "cfj /etc/passwd", "%= 1", "%0", "L /tmp/p.dll", "yp", "yf", "p6d 16", "avD", "avr", "avra", "avrr", "avga", "avgn", "avgd", "avgm", "avgcs", "avg /tmp/x", "tc x", "tl x", "te x"]) {
+		for (const command of ["fL", "fN", "fs x", "fc x", "fC x", "ft x", "afvs", "afvr", "afs", "afsj", "aezv", "ar", "arj", "arr", "shu", "shr", "yy", "yt", "yz", "om /tmp/x", "asca", "m x", "pfa x", "pfo /tmp/f", "pfn fmt body", "cf /etc/passwd", "cfj /etc/passwd", "%= 1", "%0", "L /tmp/p.dll", "yp", "yf", "p6d 16", "avD", "avr", "avra", "avrr", "avga", "avgn", "avgd", "avgm", "avgcs", "avg /tmp/x"]) {
 			expect(refusal(command)).toMatch(/is not available here/);
 		}
 		// DWARF line info reads, but PDB loading/downloading stays out
 		expect(refusal("idp /tmp/x.pdb")).toMatch(/is not available here/);
 		expect(refusal("idpd")).toMatch(/is not available here/);
+	});
+
+	test("chapter B: read-only extras (config, hints, meta, classes, types, plugin lists) run", () => {
+		for (const command of [
+			// Configuration: read a value / list / type / spaces
+			"el", "elj", "et asm.arch", "es",
+			// Analysis hints (list)
+			"ahl", "ahlj",
+			// Address info
+			"ai", "aij",
+			// Classes (list/show/graph/lookup with the query arg they require)
+			"acl", "aclj", "aci SomeClass", "acvf 8",
+			// Metadata & strings (list/show)
+			"C", "Cj", "Cl", "Csl", "Cslj", "Cs.",
+			// Types (list, union, enum, calling conventions, type xrefs, typeclass)
+			"t", "tl int", "tc int", "te MyEnum", "tu", "tcc", "tx int", "tk int",
+			// Plugin listings
+			"Ll", "La", "LD",
+		]) {
+			expect(checkRizinCommand(CATALOG, command)).toMatchObject({ ok: true });
+		}
+	});
+
+	test("chapter B: `e <key>` reads a value, but `e key=value` (set) is refused", () => {
+		expect(checkRizinCommand(CATALOG, "e asm.arch")).toMatchObject({ ok: true, line: "e asm.arch" });
+		expect(refusal("e asm.bits=32")).toContain("setting config variables");
+		expect(refusal("e io.cache=true")).toContain("setting config variables");
+		// a seek addr is still fine and does not count as `=`
+		expect(checkRizinCommand(CATALOG, "e asm.arch", "main")).toMatchObject({ ok: true, line: "e asm.arch @ main" });
+	});
+
+	test("chapter B: positional duals list with no argument and are refused with one", () => {
+		for (const bare of ["tn", "tnj", "Ld", "Ldj"]) {
+			expect(checkRizinCommand(CATALOG, bare)).toMatchObject({ ok: true, line: bare });
+		}
+		expect(refusal("tn sym.main")).toContain("read-only only with no argument");
+		expect(refusal("Ld gdb")).toContain("read-only only with no argument");
+		// Lo also has a <path> arg, so either guard may fire — but it must be refused with one.
+		expect(checkRizinCommand(CATALOG, "Lo")).toMatchObject({ ok: true });
+		expect(refusal("Lo /tmp/plugin.so")).toMatch(/read-only only with no argument|reads <path> from disk/);
+	});
+
+	test("chapter B: the type/class/hint writers next to the new reads stay refused", () => {
+		for (const command of ["e-", "ec", "ecr", "aha 0", "aii", "acn Old New", "Cs hello", "Csp 4", "Cd", "t- int", "tfc main cdecl", "tks int basic", "to /tmp/h.h", "L /tmp/p.so"]) {
+			expect(refusal(command)).toMatch(/is not available here|read-only only with no argument|setting config/);
+		}
+	});
+
+	test("chapter B: the gadget-constraint queries keep their `=` arguments (not caught by the config guard)", () => {
+		// `/Rk reg=rax` is a read-only ROP query; only `e` treats `=` as a write.
+		expect(checkRizinCommand(CATALOG, "/Rk reg=rax")).toMatchObject({ ok: true, line: "/Rk reg=rax" });
 	});
 
 	test("refuses raw-byte printers, which would break the NUL-framed pipe", () => {
@@ -345,10 +454,17 @@ describe("checkRizinCommand (no rizin needed)", () => {
 	});
 
 	test("isRunnable and isKnownCommand", () => {
-		expect(["pdf", "pdsf", "px", "ph", "/x", "/R", "agc", "aoe", "izj", "prx"].every(isRunnable)).toBe(true);
-		expect(["pr", "prz", "p6d", "pfw", "wx", "e", "afn", "CC", "/F", "ps+", "iz-"].some(isRunnable)).toBe(false);
+		expect(["pdf", "pdsf", "px", "ph", "/x", "/R", "agc", "aoe", "izj", "prx", "e", "acl", "ahl", "tu", "Ll", "tn"].every(isRunnable)).toBe(true);
+		// `e` is runnable now (the get form); `e-` (reset) and the other writers are not.
+		expect(["pr", "prz", "p6d", "pfw", "wx", "e-", "afn", "CC", "/F", "ps+", "iz-", "tfc", "tks", "aha", "acn"].some(isRunnable)).toBe(false);
 		expect(isKnownCommand(CATALOG, "iz")).toBe(true);
 		expect(isKnownCommand(CATALOG, "pdzz")).toBe(false);
+	});
+
+	test("the p= histogram family is runnable despite its `=`, but the interactive `…v` and `=`-write forms are not", () => {
+		expect(["p=", "p==", "p=e", "p==e", "p=rj", "p=d", "p=A", "p=C"].every(isRunnable)).toBe(true);
+		// `…v` is the interactive ncurses variant (would block the pipe); `p=e=5` smuggles a second `=`.
+		expect(["p==v", "p==ev", "p==Av", "p=e=5", "p=e;x"].some(isRunnable)).toBe(false);
 	});
 });
 
@@ -375,8 +491,10 @@ describe("searchCatalog (no rizin needed)", () => {
 
 	test("keywords search summaries first, then descriptions", () => {
 		const { header, lines } = searchCatalog(CATALOG, "gadgets");
-		expect(header).toBe('rizin help search: "gadgets" (1 match)');
-		expect(lines).toEqual(["/R [<re>] — Search rop gadgets"]);
+		// Both /R and /Rk carry "gadgets" in their summary; the shorter command ranks first.
+		expect(header).toBe('rizin help search: "gadgets" (2 matches)');
+		expect(lines[0]).toBe("/R [<re>] — Search rop gadgets");
+		expect(lines).toContain("/Rk <key>[=<val>] ... — Query ROP Gadgets by providing constraints");
 		expect(searchCatalog(CATALOG, "zzz nothing").lines[0]).toStartWith("no command matches");
 	});
 });

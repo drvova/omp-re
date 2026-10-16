@@ -1,7 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, annotationFingerprint, liveAnnotations } from "../extensions/re/annotations.ts";
-import { baseRizinFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { recordedAnalysisPasses, recordedMapFiles, recordedSignatures } from "../extensions/re/entries.ts";
+import { mapFileCommand, validateMapPerm } from "../extensions/re/mapfiles.ts";
+import { ANALYSIS_PASSES, isAnalysisPass } from "../extensions/re/passes.ts";
+import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
+import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
+import { baseRizinFlags, buildLoadFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -30,6 +35,30 @@ describe("validateAddr", () => {
 		expect(() => validateAddr("main~{}")).toThrow();
 		expect(() => validateAddr("main|cat")).toThrow();
 		expect(() => validateAddr("'main'")).toThrow();
+	});
+});
+
+describe("buildLoadFlags", () => {
+	test("no options ⇒ no flags (header autodetection)", () => {
+		expect(buildLoadFlags()).toEqual([]);
+		expect(buildLoadFlags({})).toEqual([]);
+	});
+
+	test("maps arch/bits/base/map/format to rizin's own flags", () => {
+		expect(buildLoadFlags({ arch: "x86", bits: 32 })).toEqual(["-a", "x86", "-b", "32"]);
+		expect(buildLoadFlags({ base: "0x400000" })).toEqual(["-B", "0x400000"]);
+		expect(buildLoadFlags({ map: "0x400000" })).toEqual(["-m", "0x400000"]);
+		expect(buildLoadFlags({ format: "any" })).toEqual(["-F", "any"]);
+	});
+
+	test("rejects a bits value that isn't 8/16/32/64", () => {
+		expect(() => buildLoadFlags({ bits: 7 as unknown as 8 })).toThrow("omp-re: load: invalid bits");
+	});
+
+	test("rejects a flag-shaped or injection-shaped arch/format", () => {
+		expect(() => buildLoadFlags({ arch: "-rm" })).toThrow("omp-re: load: invalid arch");
+		expect(() => buildLoadFlags({ format: "a b" })).toThrow("omp-re: load: invalid format");
+		expect(() => buildLoadFlags({ base: "0x1; id" })).toThrow("omp-re: invalid address");
 	});
 });
 
@@ -133,6 +162,92 @@ describe("annotationCommands", () => {
 		expect(annotationCommands("set_comment", "0x10", "x; !id", "")).toEqual(["CC- @ 0x10", "CC 'x; !id' @ 0x10"]);
 	});
 
+	test("define_function toggles af/af- on whether a function should exist", () => {
+		// forward (to = non-empty sentinel) defines; undo (to = "") deletes.
+		expect(annotationCommands("define_function", "0x4da0", "fcn.00004da0", "")).toEqual(["af @ 0x4da0"]);
+		expect(annotationCommands("define_function", "0x4da0", "", "fcn.00004da0")).toEqual(["af- @ 0x4da0"]);
+	});
+
+	test("set_calling_convention just sets afc, both directions", () => {
+		expect(annotationCommands("set_calling_convention", "0x4da0", "ms", "amd64")).toEqual(["afc ms @ 0x4da0"]);
+		expect(annotationCommands("set_calling_convention", "0x4da0", "amd64", "ms")).toEqual(["afc amd64 @ 0x4da0"]);
+		expect(() => annotationCommands("set_calling_convention", "0x4da0", "bad;id", "amd64")).toThrow("omp-re: invalid cc");
+	});
+
+	test("set_flag drops the old flag name and adds the new, either side maybe empty", () => {
+		expect(annotationCommands("set_flag", "0x61000", "decrypt_key", "")).toEqual(["f decrypt_key @ 0x61000"]);
+		expect(annotationCommands("set_flag", "0x61000", "", "decrypt_key")).toEqual(["f- decrypt_key"]);
+		expect(annotationCommands("set_flag", "0x61000", "new.name", "old.name")).toEqual(["f- old.name", "f new.name @ 0x61000"]);
+		expect(() => annotationCommands("set_flag", "0x61000", "bad name", "")).toThrow("omp-re: invalid flag");
+	});
+
+	test("set_arch_hint builds aha/ahb from the encoded value, and undo deletes both", () => {
+		expect(annotationCommands("set_arch_hint", "0x1000", "arch=arm;bits=16", "")).toEqual(["aha arm @ 0x1000", "ahb 16 @ 0x1000"]);
+		expect(annotationCommands("set_arch_hint", "0x1000", "bits=32", "")).toEqual(["ahb 32 @ 0x1000"]);
+		expect(annotationCommands("set_arch_hint", "0x1000", "arch=mips", "")).toEqual(["aha mips @ 0x1000"]);
+		expect(annotationCommands("set_arch_hint", "0x1000", "", "arch=arm;bits=16")).toEqual(["aha- @ 0x1000", "ahb- @ 0x1000"]);
+		expect(() => annotationCommands("set_arch_hint", "0x1000", "bits=7", "")).toThrow("invalid arch hint bits");
+		expect(() => annotationCommands("set_arch_hint", "0x1000", "flavor=spicy", "")).toThrow("invalid arch hint");
+	});
+
+	test("set_data / set_string / set_format build their C* commands and delete on undo", () => {
+		expect(annotationCommands("set_data", "0x1000", "4", "")).toEqual(["Cd 4 @ 0x1000"]);
+		expect(annotationCommands("set_data", "0x1000", "4:8", "")).toEqual(["Cd 4 8 @ 0x1000"]);
+		expect(annotationCommands("set_data", "0x1000", "", "4")).toEqual(["Cd- @ 0x1000"]);
+		expect(annotationCommands("set_string", "0x1000", "16", "")).toEqual(["Cs 16 @ 0x1000"]);
+		expect(annotationCommands("set_string", "0x1000", "auto", "")).toEqual(["Cs @ 0x1000"]);
+		expect(annotationCommands("set_string", "0x1000", "", "auto")).toEqual(["Cs- @ 0x1000"]);
+		expect(annotationCommands("set_format", "0x1000", "8 xxdd field1 field2", "")).toEqual(["Cf 8 xxdd field1 field2 @ 0x1000"]);
+		expect(annotationCommands("set_format", "0x1000", "", "8 xxdd")).toEqual(["Cf- @ 0x1000"]);
+		expect(() => annotationCommands("set_data", "0x1000", "0", "")).toThrow("invalid size");
+		expect(() => annotationCommands("set_format", "0x1000", "8 bad;fmt", "")).toThrow("invalid pf format");
+		expect(() => annotationCommands("set_format", "0x1000", "nofmt", "")).toThrow("needs a size and a pf format");
+	});
+
+	test("set_hint builds the ah command for each hint kind (kind in target), and undo deletes it", () => {
+		expect(annotationCommands("set_hint", "0x1138", "16", "", "immediate_base")).toEqual(["ahi 16 @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "h", "", "immediate_base")).toEqual(["ahi h @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "call", "", "opcode_type")).toEqual(["aho call @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "7", "", "opcode_size")).toEqual(["ahs 7 @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "0x1200", "", "jump_target")).toEqual(["ahc 0x1200 @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "42", "", "return_value")).toEqual(["ahr 42 @ 0x1138"]);
+		// undo with an empty value deletes the right hint (kind carried in target), or re-applies a prior value
+		expect(annotationCommands("set_hint", "0x1138", "", "16", "immediate_base")).toEqual(["ahi- @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "", "push", "opcode_type")).toEqual(["aho- @ 0x1138"]);
+		expect(annotationCommands("set_hint", "0x1138", "10", "16", "immediate_base")).toEqual(["ahi 10 @ 0x1138"]);
+		// validation per kind, and a missing/unknown hint kind
+		expect(() => annotationCommands("set_hint", "0x1138", "bogus", "", "immediate_base")).toThrow("invalid immediate_base");
+		expect(() => annotationCommands("set_hint", "0x1138", "Call;id", "", "opcode_type")).toThrow("invalid opcode_type");
+		expect(() => annotationCommands("set_hint", "0x1138", "0", "", "opcode_size")).toThrow("invalid opcode_size");
+		expect(() => annotationCommands("set_hint", "0x1138", "main;id", "", "jump_target")).toThrow("invalid address");
+		expect(() => annotationCommands("set_hint", "0x1138", "-5", "", "return_value")).toThrow("invalid return_value");
+		expect(() => annotationCommands("set_hint", "0x1138", "16", "")).toThrow("missing the hint kind");
+		expect(() => annotationCommands("set_hint", "0x1138", "16", "", "bogus_kind")).toThrow("unknown hint kind");
+	});
+
+	test("define_variable builds afvs/afvr from the encoded storage/location/type, and undo deletes by name", () => {
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x30 int", "", "counter")).toEqual(["afvs 0x30 counter 'int' @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x40 char *", "", "path")).toEqual(["afvs 0x40 path 'char *' @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "stack -0x8", "", "tmp")).toEqual(["afvs -0x8 tmp @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "reg rdi int", "", "arg0")).toEqual(["afvr rdi arg0 'int' @ 0x4da0"]);
+		// a redirect/seek char in the type is neutralized by the quoting (can't escape to a file write)
+		expect(annotationCommands("define_variable", "0x4da0", "stack 0x30 int > /tmp/x", "", "v")).toEqual(["afvs 0x30 v 'int > /tmp/x' @ 0x4da0"]);
+		expect(annotationCommands("define_variable", "0x4da0", "", "stack 0x30 int", "counter")).toEqual(["afv- counter @ 0x4da0"]);
+		expect(() => annotationCommands("define_variable", "0x4da0", "stack notanoffset", "", "v")).toThrow("invalid stack delta");
+		expect(() => annotationCommands("define_variable", "0x4da0", "heap 0x10", "", "v")).toThrow("invalid variable storage");
+		expect(() => annotationCommands("define_variable", "0x4da0", "stack 0x30 bad;type", "", "v")).toThrow("omp-re: invalid type");
+		expect(() => annotationCommands("define_variable", "0x4da0", "stack 0x30", "")).toThrow("missing the variable name");
+	});
+
+	test("define_global builds avga with a quoted type, and undo deletes by name (avgm)", () => {
+		expect(annotationCommands("define_global", "0x4000", "int", "", "g_count")).toEqual(["avga g_count 'int' @ 0x4000"]);
+		expect(annotationCommands("define_global", "0x4000", "char *", "", "g_name")).toEqual(["avga g_name 'char *' @ 0x4000"]);
+		expect(annotationCommands("define_global", "0x4000", "", "int", "g_count")).toEqual(["avgm g_count"]);
+		expect(() => annotationCommands("define_global", "0x4000", "int", "")).toThrow("missing the variable name");
+		expect(() => annotationCommands("define_global", "0x4000", "bad;type", "", "g")).toThrow("omp-re: invalid type");
+		expect(() => annotationCommands("define_global", "0x4000", "int", "", "bad name")).toThrow("omp-re: invalid name");
+	});
+
 	test("rejects invalid identifiers, addresses, and unknown kinds", () => {
 		expect(() => annotationCommands("rename_function", "0x10", "1bad", "x")).toThrow("omp-re: invalid name");
 		expect(() => annotationCommands("rename_function", "main;id", "ok", "x")).toThrow("omp-re: invalid address");
@@ -142,6 +257,95 @@ describe("annotationCommands", () => {
 	test("restoring an empty prototype or type is a no-op rather than an invalid command", () => {
 		expect(annotationCommands("set_prototype", "0x10", "", "int f(void)")).toEqual([]);
 		expect(annotationCommands("set_variable_type", "0x10", "", "int", "v")).toEqual([]);
+	});
+});
+
+describe("analysis passes", () => {
+	test("every pass maps to an analysis command and isAnalysisPass recognizes exactly those names", () => {
+		for (const [name, command] of Object.entries(ANALYSIS_PASSES)) {
+			expect(command).toMatch(/^(aa[a-z]+|avrr)$/); // aa* passes, plus avrr (RTTI class recovery)
+			expect(isAnalysisPass(name)).toBe(true);
+		}
+		expect(isAnalysisPass("not_a_pass")).toBe(false);
+		expect(isAnalysisPass("aaa")).toBe(false);
+	});
+});
+
+describe("signatures", () => {
+	test("signatureApplyCommand quotes the path as a single Fs argument", () => {
+		expect(signatureApplyCommand("/sigs/libc.sig")).toBe("Fs '/sigs/libc.sig'");
+		expect(signatureApplyCommand("/my sigs/x.pat")).toBe("Fs '/my sigs/x.pat'");
+	});
+
+	test("validateSignaturePath rejects empty paths and pipe-breaking characters", () => {
+		expect(() => validateSignaturePath("")).toThrow("empty path");
+		expect(() => validateSignaturePath("a\nb")).toThrow("line break or NUL");
+		expect(() => validateSignaturePath("a\0b")).toThrow("line break or NUL");
+		expect(validateSignaturePath("/ok/path.sig")).toBe("/ok/path.sig");
+	});
+
+	test("parseAppliedCount reads rizin's `Found N FLIRT signatures` line", () => {
+		expect(parseAppliedCount("Found 12 FLIRT signatures via /x.sig")).toBe(12);
+		expect(parseAppliedCount("Found 1 FLIRT signature via /x.pat")).toBe(1);
+		expect(parseAppliedCount("Found 0 FLIRT signatures via /x.sig")).toBe(0);
+		expect(parseAppliedCount("nothing here")).toBeUndefined();
+	});
+
+	test("recordedAnalysisPasses scopes passes to the binary and de-duplicates them in order", () => {
+		const entries = [
+			{ type: "custom", id: "b1", customType: "re.binary", data: { path: "/bin/a" } },
+			{ type: "custom", id: "a1", customType: "re.analysis", data: { pass: "preludes" } },
+			{ type: "custom", id: "a2", customType: "re.analysis", data: { pass: "golang" } },
+			{ type: "custom", id: "a3", customType: "re.analysis", data: { pass: "preludes" } }, // dup
+			{ type: "custom", id: "b2", customType: "re.binary", data: { path: "/bin/b" } },
+			{ type: "custom", id: "a4", customType: "re.analysis", data: { pass: "objc" } },
+		] as unknown as Entry[];
+		expect(recordedAnalysisPasses(entries, "/bin/a")).toEqual(["preludes", "golang"]);
+		expect(recordedAnalysisPasses(entries, "/bin/b")).toEqual(["objc"]);
+		expect(recordedAnalysisPasses(entries, "/bin/none")).toEqual([]);
+	});
+
+	test("recordedSignatures scopes applied files to the binary open when each was recorded", () => {
+		const entries = [
+			{ type: "custom", id: "b1", customType: "re.binary", data: { path: "/bin/a" } },
+			{ type: "custom", id: "s1", customType: "re.signature", data: { path: "/sigs/one.sig" } },
+			{ type: "custom", id: "b2", customType: "re.binary", data: { path: "/bin/b" } },
+			{ type: "custom", id: "s2", customType: "re.signature", data: { path: "/sigs/two.sig" } },
+			{ type: "custom", id: "s3", customType: "re.signature", data: { path: "/sigs/three.sig" } },
+		] as unknown as Entry[];
+		expect(recordedSignatures(entries, "/bin/a")).toEqual(["/sigs/one.sig"]);
+		expect(recordedSignatures(entries, "/bin/b")).toEqual(["/sigs/two.sig", "/sigs/three.sig"]);
+		expect(recordedSignatures(entries, "/bin/none")).toEqual([]);
+	});
+
+	test("recordedMapFiles scopes maps to the binary, de-duplicates by path+addr, and keeps order", () => {
+		const entries = [
+			{ type: "custom", id: "b1", customType: "re.binary", data: { path: "/bin/a" } },
+			{ type: "custom", id: "m1", customType: "re.mapfile", data: { path: "/dumps/x.bin", addr: "0x50000" } },
+			{ type: "custom", id: "m2", customType: "re.mapfile", data: { path: "/dumps/x.bin", addr: "0x50000" } }, // dup
+			{ type: "custom", id: "m3", customType: "re.mapfile", data: { path: "/dumps/y.bin", addr: "0x60000", perm: "rx" } },
+			{ type: "custom", id: "b2", customType: "re.binary", data: { path: "/bin/b" } },
+			{ type: "custom", id: "m4", customType: "re.mapfile", data: { path: "/dumps/z.bin", addr: "0x70000" } },
+		] as unknown as Entry[];
+		expect(recordedMapFiles(entries, "/bin/a")).toEqual([
+			{ path: "/dumps/x.bin", addr: "0x50000" },
+			{ path: "/dumps/y.bin", addr: "0x60000", perm: "rx" },
+		]);
+		expect(recordedMapFiles(entries, "/bin/b")).toEqual([{ path: "/dumps/z.bin", addr: "0x70000" }]);
+		expect(recordedMapFiles(entries, "/bin/none")).toEqual([]);
+	});
+});
+
+describe("mapFileCommand", () => {
+	test("builds `o <file> <addr> [perm]` with the path single-quoted and the address/perm validated", () => {
+		expect(mapFileCommand({ path: "/tmp/blob.bin", addr: "0x50000" })).toBe("o '/tmp/blob.bin' 0x50000");
+		expect(mapFileCommand({ path: "/tmp/blob.bin", addr: "0x50000", perm: "rx" })).toBe("o '/tmp/blob.bin' 0x50000 rx");
+		// a path with a space or quote stays inside the single-quoted argument (can't inject a second command)
+		expect(mapFileCommand({ path: "/tmp/a b.bin", addr: "0x1000" })).toBe("o '/tmp/a b.bin' 0x1000");
+		expect(mapFileCommand({ path: "/t/x'; !id", addr: "0x1000" })).toBe("o '/t/x\\'; !id' 0x1000");
+		expect(() => mapFileCommand({ path: "/tmp/x", addr: "0x1000", perm: "bad" })).toThrow("invalid permission");
+		expect(() => mapFileCommand({ path: "/tmp/x", addr: "main;!id" })).toThrow("invalid address");
+		expect(() => validateMapPerm("rwz")).toThrow("invalid permission");
 	});
 });
 

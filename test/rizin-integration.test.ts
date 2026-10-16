@@ -1,8 +1,24 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { checkRizinCommand, isKnownCommand, loadCatalog, NOARG_DUALS, READ_ONLY_EXTRAS, type RzCatalog } from "../extensions/re/catalog.ts";
 import { resolveDecompiler } from "../extensions/re/decompile.ts";
 import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
+import { scopedSearch, searchCommand } from "../extensions/re/tools-search.ts";
+import { defineTypeLines } from "../extensions/re/tools-types.ts";
 import { canRunRizin, logSkip, makeHarness, rizinPath, TEST_BINARY } from "./helpers.ts";
+
+/** The hit total from a search result's header ("N hits" / "N of M hits" — M is the total). */
+function hitTotal(result: { content: { type: string; text?: string }[] }): number {
+	const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
+	const m = [...text.matchAll(/(\d+) hits/g)].at(-1);
+	return m ? Number(m[1]) : -1;
+}
+
+/** A flat x86-32 blob with no header: `mov eax,1; add eax,2; ret`. */
+const FLAT_X86_32 = Buffer.from([0xb8, 0x01, 0x00, 0x00, 0x00, 0x83, 0xc0, 0x02, 0xc3]);
 
 logSkip("rizin-integration tests");
 
@@ -85,6 +101,136 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
 		expect([null, "pdg", "pdd"]).toContain(first);
 		expect(await resolveDecompiler(session)).toBe(first);
 	});
+
+	test("scopedSearch narrows a byte search to one function and leaves the global scope untouched", async () => {
+		await session.cmd("aaa");
+		const before = (await session.cmd("e search.in")).trim();
+		const whole = hitTotal(await searchCommand(session, "/xj ff", "hits", { limit: 1 }));
+		const scoped = hitTotal(await scopedSearch(session, "/xj ff", "hits", { in_function: "main", limit: 1 }));
+		expect(whole).toBeGreaterThan(0);
+		// scoping to one function returns no more hits than the whole binary (usually far fewer)
+		expect(scoped).toBeGreaterThanOrEqual(0);
+		expect(scoped).toBeLessThanOrEqual(whole);
+		// the search scope is restored, so a later unscoped search is unaffected
+		expect((await session.cmd("e search.in")).trim()).toBe(before);
+		expect(hitTotal(await searchCommand(session, "/xj ff", "hits", { limit: 1 }))).toBe(whole);
+	});
+});
+
+describe.skipIf(!canRunRizin)("rizin_command read-only extras (chapter B) against the real catalog", () => {
+	let catalog: RzCatalog;
+	let session: RzSession;
+
+	beforeAll(async () => {
+		catalog = await loadCatalog(rizinPath);
+		session = await RzSession.spawn(rizinPath, TEST_BINARY);
+	});
+
+	afterAll(() => {
+		session.close();
+	});
+
+	test("every extra and no-arg dual exists in the installed rizin (no drift in the hardcoded set)", () => {
+		const absent = [...READ_ONLY_EXTRAS, ...NOARG_DUALS].filter((cmd) => !isKnownCommand(catalog, cmd));
+		expect(absent).toEqual([]);
+	});
+
+	test("the policy accepts the new reads and the real rizin runs them without error", async () => {
+		for (const command of ["elj", "ahlj", "aij", "aclj", "Cj", "Cslj", "tj", "tuj", "tcc", "Llj", "LDj"]) {
+			const check = checkRizinCommand(catalog, command);
+			expect(check.ok).toBe(true);
+			// A read-only command returns output or an empty frame — never a stream-desyncing error.
+			const out = await session.cmd(command);
+			expect((await session.cmd("echo aligned")).trim()).toBe("aligned");
+			expect(out).not.toMatch(/Wrong number of arguments/);
+		}
+	});
+
+	test("`e asm.arch` reads the value through the host, `e asm.bits=32` is refused before rizin", async () => {
+		const check = checkRizinCommand(catalog, "e asm.arch");
+		expect(check.ok).toBe(true);
+		expect((await session.cmd((check as { line: string }).line)).trim()).toBe("x86");
+		expect(checkRizinCommand(catalog, "e asm.bits=32")).toMatchObject({ ok: false });
+	});
+
+	test("`tn` lists noreturn functions bare but is refused with an argument (which would add one)", () => {
+		expect(checkRizinCommand(catalog, "tn")).toMatchObject({ ok: true });
+		expect(checkRizinCommand(catalog, "tn sym.main")).toMatchObject({ ok: false });
+	});
+
+	test("define_types defines a multi-member struct through the real transport (the `;`s survive the line splitter)", async () => {
+		// Unquoted, rizin's command parser would cut this on its member `;`s and reject it; defineTypeLines double-quotes it.
+		await defineTypeLines(session, ["struct omp_re_cfg { int flags; char *name; unsigned long id; };"]);
+		const structs = (await session.cmdj<{ name?: string; members?: Record<string, string> }[]>("tsj")) ?? [];
+		const defined = structs.find((s) => s.name === "omp_re_cfg");
+		expect(defined).toBeDefined();
+		expect(Object.keys(defined?.members ?? {})).toEqual(["flags", "name", "id"]);
+	});
+
+	test("the p= statistical/entropy histograms are allowed (despite the `=`) and run read-only", async () => {
+		for (const command of ["p= 16", "p=e 16", "p==e 16", "p=rj", "p=d"]) {
+			const check = checkRizinCommand(catalog, command);
+			expect(check).toMatchObject({ ok: true });
+			await session.cmd((check as { line: string }).line);
+			expect((await session.cmd("echo aligned")).trim()).toBe("aligned"); // no stream desync
+		}
+		// interactive visual variants (`…v`) and a `=`-write form stay refused
+		expect(checkRizinCommand(catalog, "p==ev")).toMatchObject({ ok: false });
+		expect(checkRizinCommand(catalog, "p==v")).toMatchObject({ ok: false });
+		expect(checkRizinCommand(catalog, "p=e=5")).toMatchObject({ ok: false });
+	});
+});
+
+describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
+	let dir: string;
+	let blob: string;
+
+	beforeAll(() => {
+		dir = mkdtempSync(join(tmpdir(), "omp-re-raw-"));
+		blob = join(dir, "blob.bin");
+		writeFileSync(blob, FLAT_X86_32);
+	});
+
+	afterAll(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("arch+bits load options disassemble a flat blob that autodetects as the wrong arch", async () => {
+		// Autodetection reads the file as 64-bit (no header), so the x86-32 ret
+		// would decode differently; the load options pin the real arch.
+		const s = await RzSession.spawn(rizinPath, blob, { loadOptions: { arch: "x86", bits: 32 } });
+		try {
+			const ops = (await s.cmdj<{ opcode: string }[]>("pdj 3 @ 0"))!;
+			expect(ops.map((o) => o.opcode.split(" ")[0])).toEqual(["mov", "add", "ret"]);
+		} finally {
+			s.close();
+		}
+	});
+
+	test("map loads a raw file at a base address (the -m form rizin wants for headerless files)", async () => {
+		const s = await RzSession.spawn(rizinPath, blob, { loadOptions: { arch: "x86", bits: 32, map: "0x400000" } });
+		try {
+			const op = (await s.cmdj<{ opcode: string }[]>("pdj 1 @ 0x400000"))![0]!;
+			expect(op.opcode).toContain("mov");
+		} finally {
+			s.close();
+		}
+	});
+
+	test("spawnRizin stores the load options so a respawn reloads the blob the same way", async () => {
+		const harness = makeHarness("rizin-integration-load");
+		const { ctx, entries } = harness;
+		entries.push({ type: "custom", id: "bin-raw", customType: "re.binary", data: { path: blob, load: { arch: "x86", bits: 32 } } });
+		try {
+			await spawnRizin(ctx, blob, { loadOptions: { arch: "x86", bits: 32 } });
+			getState(ctx).rz!.close(); // force a respawn with no options passed — it must reuse the stored ones
+			const rz = await ensureRizin(ctx);
+			const op = (await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"))![0]!;
+			expect(op.opcode.split(" ")[0]).toBe("mov");
+		} finally {
+			shutdownState(ctx.sessionManager.getSessionId());
+		}
+	});
 });
 
 describe.skipIf(!canRunRizin)("session state: respawn, replay, and branch sync", () => {
@@ -136,6 +282,22 @@ describe.skipIf(!canRunRizin)("session state: respawn, replay, and branch sync",
 
 		const rz = await ensureRizin(ctx);
 		expect((await rz.cmdj<{ name: string }[]>(`afij @ ${fnEa}`))![0]!.name).toBe(fnName);
+	});
+
+	test("a file mapped into the session is recorded and re-mapped on respawn", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "omp-re-map-"));
+		const blob = join(dir, "overlay.bin");
+		writeFileSync(blob, "OVERLAYMAPDATA42"); // 16 bytes
+		const expected = Buffer.from("OVERLAYMAPDATA42").toString("hex");
+		try {
+			entries.push({ type: "custom", id: "map-0", customType: "re.mapfile", data: { path: blob, addr: "0x50000" } });
+			getState(ctx).rz!.close(); // force a respawn; replayMapFiles must re-apply the map
+			const rz = await ensureRizin(ctx);
+			expect((await rz.cmd("p8 16 @ 0x50000")).trim().toLowerCase()).toBe(expected);
+		} finally {
+			entries.splice(entries.findIndex((e) => e.id === "map-0"), 1);
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

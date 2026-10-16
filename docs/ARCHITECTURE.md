@@ -92,11 +92,14 @@ offer.
 | `state.ts` | Thin facade over `RizinBackend` |
 | `rizin.ts` | `RzSession` transport (`-q0` pipe), spawn flags, validators, `rz-*` tool resolution |
 | `catalog.ts` | rizin's self-described command catalog (`?*j`) and the `rizin_command` policy |
-| `tools-read.ts` / `tools-mutate.ts` | The 12 read-tier and 5 mutate-tier tools |
+| `tools-read.ts` / `tools-mutate.ts` | The 14 read-tier and 15 mutate-tier tools |
 | `tools-rizin.ts` | `rizin_help` / `rizin_command` (the REPL bridge) |
 | `tools-rzcli.ts` | `rizin_cli` (the standalone `rz-*` tools) |
 | `tools-debug.ts` | `rizin_debug` (opt-in dynamic analysis) |
+| `tools-project.ts` | `export_project` (save the analysis as a rizin project) |
+| `tools-mapfile.ts` / `mapfiles.ts` | `map_file` (open a file into the session) and its respawn-replay |
 | `tools-triage.ts` | capa / floss / die / yara |
+| `output.ts` | The one confined directory omp-re writes artifacts to (dumps, traces, projects) |
 | `decompile.ts` | Extensible decompiler probe (`OMPRE_DECOMPILER`) |
 | `evidence.ts` | Content-addressed evidence store + `tool_result` hook |
 | `audit.ts` | The RE tool-name sets (the audit gate) + signed audit log |

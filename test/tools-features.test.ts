@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchCommand, searchGadgets } from "../extensions/re/tools-search.ts";
+import { scopedSearch, searchCommand, searchGadgets, validateSearchArg } from "../extensions/re/tools-search.ts";
 import { castMemory, defineTypeLines, listTypeRows } from "../extensions/re/tools-types.ts";
 import { listSyscallRows, syscallLookupText } from "../extensions/re/tools-syscalls.ts";
 import type { RzSession } from "../extensions/re/rizin.ts";
@@ -50,6 +50,73 @@ describe("searchCommand", () => {
 	});
 });
 
+describe("validateSearchArg (search-argument injection guard)", () => {
+	test("rejects rizin command-injection characters so a free-form search arg can't chain a command or write a file", () => {
+		// `;`/newline chain + `!` shell, `>`/`<` redirect, `|` pipe, backtick/`$()` substitute, `@` seek/iterate, `~` grep — all verified live to reach the -q0 pipe or be refused by policy.
+		for (const bad of ["x;!touch /tmp/x", "x\n!id", "nop > /tmp/x", "x < /etc/passwd", "a | sh", "`id`", "$(id)", "x @@ sym.*", "a~b", 'say"hi', "a#b", "a\\b"]) {
+			expect(() => validateSearchArg("search_regex_bytes", bad)).toThrow(/not allowed in a search argument/);
+		}
+	});
+
+	test("allows ordinary regex / assembly / gadget-filter text", () => {
+		for (const ok of ["push rbp", "mov eax, 1", "8b4f..", "pop rdi", "4889e5", "add esp 0x10"]) {
+			expect(validateSearchArg("search_asm", ok)).toBe(ok);
+		}
+	});
+});
+
+describe("scopedSearch", () => {
+	test("scopes a search to a function's bounds and restores the prior scope", async () => {
+		const { rz, ran } = stubRz({
+			"afij @ main": JSON.stringify([{ name: "main", minbound: 0x1000, maxbound: 0x1200 }]),
+			"e search.in": "io.maps",
+			"e search.from": "0",
+			"e search.to": "0",
+			"/xj 90": JSON.stringify([{ address: 0x1100, size: 1, flag: "hit" }]),
+		});
+		const result = await scopedSearch(rz, "/xj 90", "hits", { in_function: "main" });
+		// scope set to the resolved [minbound, maxbound) range, then put back
+		expect(ran).toContain("e search.in=range");
+		expect(ran).toContain("e search.from=4096");
+		expect(ran).toContain("e search.to=4608");
+		expect(ran).toContain("e search.in=io.maps");
+		expect(ran).toContain("e search.from=0");
+		expect(ran).toContain("e search.to=0");
+		// the search ran within the scope window and the label names the function
+		expect(ran).toContain("/xj 90");
+		const text = result.content[0].type === "text" ? result.content[0].text : "";
+		expect(text).toContain("in main");
+	});
+
+	test("restores the scope even when the search throws", async () => {
+		const ran: string[] = [];
+		const cmd = (command: string) => {
+			ran.push(command);
+			if (command === "e search.in") return Promise.resolve("io.maps");
+			return Promise.resolve("0");
+		};
+		const cmdj = (command: string) => {
+			ran.push(command);
+			if (command === "afij @ main") return Promise.resolve([{ name: "main", minbound: 0x1000, maxbound: 0x1200 }] as never);
+			throw new Error("boom");
+		};
+		const rz = { cmd, cmdj } as unknown as RzSession;
+		await expect(scopedSearch(rz, "/xj 90", "hits", { in_function: "main" })).rejects.toThrow("boom");
+		expect(ran).toContain("e search.in=io.maps"); // restored in the finally
+	});
+
+	test("without in_function, runs the bare search and touches no scope config", async () => {
+		const { rz, ran } = stubRz({ "/xj 90": "[]" });
+		await scopedSearch(rz, "/xj 90", "hits", {});
+		expect(ran).toEqual(["/xj 90"]);
+	});
+
+	test("a function that can't be resolved is reported, not silently unscoped", async () => {
+		const { rz } = stubRz({ "afij @ nope": "[]" });
+		await expect(scopedSearch(rz, "/xj 90", "hits", { in_function: "nope" })).rejects.toThrow("no function at");
+	});
+});
+
 describe("listTypeRows", () => {
 	test("filters struct names case-insensitively", async () => {
 		const { rz } = stubRz({ tsj: JSON.stringify([{ name: "tagBITMAPINFO", members: {} }, { name: "config_entry", members: {} }]) });
@@ -61,12 +128,21 @@ describe("listTypeRows", () => {
 });
 
 describe("defineTypeLines", () => {
-	test("sends one td per definition and reports silence", async () => {
+	test("sends one double-quoted td per definition and reports silence", async () => {
 		const { rz, ran } = stubRz({});
 		const result = await defineTypeLines(rz, ["struct cfg { int v; };", "typedef struct cfg cfg_t;"]);
-		expect(ran.filter((c) => c.startsWith("td "))).toEqual(["td struct cfg { int v; };", "td typedef struct cfg cfg_t;"]);
+		// Double-quoted so rizin's line splitter doesn't cut the member `;`s.
+		expect(ran.filter((c) => c.startsWith("td "))).toEqual(['td "struct cfg { int v; };"', 'td "typedef struct cfg cfg_t;"']);
 		const text = result.content[0].type === "text" ? result.content[0].text : "";
 		expect(text).toContain("2 definition(s) accepted silently");
+	});
+
+	test("refuses a definition that could break out of the quoting", async () => {
+		const { rz } = stubRz({});
+		// A raw `"` would close the quote early; backtick/`$`/`\` could substitute or escape. None appears in a real C type.
+		for (const bad of ['struct X { int a; }" ; !id', "struct Y { char *p; } `id`", "struct Z { int $x; }", "struct W { int a; }\\"]) {
+			await expect(defineTypeLines(rz, [bad])).rejects.toThrow("may not contain");
+		}
 	});
 
 	test("surfaces rizin stderr for rejected definitions", async () => {

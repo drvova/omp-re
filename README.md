@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![40 tools](https://img.shields.io/badge/tools-40-informational)
+![61 tools](https://img.shields.io/badge/tools-61-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 40 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 61 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -101,10 +101,14 @@ included, with typed arguments and a summary) and uses it three ways:
   finds `/R`.
 - **`rizin_command`** runs one read-only command from that catalog — function
   summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy
-  (`ph entropy @!4096`), byte and ROP searches (`/x`, `/R`), ESIL (`aoe`),
-  headers (`iH`) — and returns rizin's own error and usage text when the
-  arguments are wrong. Writes, config, shell escapes, file reads, and
-  analysis changes are refused before anything reaches rizin; see
+  (`ph entropy @!4096`), byte and ROP searches (`/x`, `/R`), op analysis
+  (`ao`), headers (`iH`), config reads (`e asm.arch`, `elj`), metadata and
+  string listings (`C`, `Csl`), classes (`acl`), unions and type
+  cross-references (`tu`, `tx`), and the FLIRT sigdb listing (`Flt`) — and
+  returns rizin's own error and usage text when the arguments are wrong.
+  Writes, setting config (`e key=value`), shell escapes, file reads, and
+  analysis changes are refused before anything reaches rizin; the get/set
+  commands (`e`, `tn`, `Ld`) run only in their read form. See
   [`SECURITY.md`](SECURITY.md#rizin_command).
 - **A compatibility check**: when a binary opens, every command omp-re's own
   tools send is looked up in the catalog, and any your rizin lacks is named in
@@ -131,13 +135,55 @@ decompiled code.
 
 ### Dynamic analysis: the debugger (opt-in)
 
-rizin is also a debugger, and `rizin_debug` drives it — launch the target,
-set breakpoints, continue, single-step, read registers and memory, walk the
-backtrace. This **executes the sample**, so it is off until you set
-`OMPRE_ENABLE_DEBUGGER`, runs in a session separate from the static one that
-only ever reads the file, and every resume is an `exec`-tier approval that
-says so. Run untrusted samples only in an isolated, disposable VM or
-container — see [`SECURITY.md`](SECURITY.md#rizin_debug).
+rizin is also a debugger, and `rizin_debug` drives it — launch the target
+(with a controlled argv/env/stdio via `run`), set breakpoints and hardware
+watchpoints, continue (including to the next syscall, call, or return),
+single-step, read and write registers and memory, disassemble **live**
+memory (so self-modified or unpacked code is visible where the static view
+can't reach), walk the backtrace, and inspect maps, modules, threads, and
+Windows or glibc heaps. This **executes the sample**, so it is off until you
+set `OMPRE_ENABLE_DEBUGGER`, runs in a session separate from the static one
+that only ever reads the file, and every resume or modification is an
+`exec`-tier approval that says which it is. Run untrusted samples only in an
+isolated, disposable VM or container — see
+[`SECURITY.md`](SECURITY.md#rizin_debug).
+
+Instead of launching locally, `start` can **attach** to an already-running
+process (`attach: {pid}`) or **connect to a remote stub** (`attach: {remote:
+"gdb://host:port"}`, or `windbg://…`) — so you can drive a sample running
+inside an isolated VM from omp-re on the host, the open binary serving as the
+symbol source. Everything else about the tool is unchanged.
+
+### Emulation and signatures
+
+Between pure static reading and executing the sample, two more rizin
+capabilities are one tool away. `rizin_emulate` runs the target's own code
+inside rizin's RzIL VM — no OS process — to recover an argument computation or
+walk a decryptor loop. `apply_signatures` names library functions from FLIRT
+signatures: `aaa` applies rizin's built-in database on open, and this
+re-applies it or applies a custom `.sig`/`.pat` file you provide (re-applied
+automatically on resume). `rizin_command Flt` lists the built-in database.
+
+`deobfuscate` reveals hidden bytes in place: xor/add/sub a window with a key,
+swap endianness, or decrypt it with a named cipher (RC4, AES) — shown as hex
+and as a string, so an xor-masked URL or an embedded config becomes readable.
+The transform runs under rizin's write cache and is reset immediately, so the
+file on disk is never modified.
+
+`open_binary` runs rizin's baseline analysis (`aaa`); `analyze` re-runs the
+deeper passes it skips — prelude scans that recover functions in stripped
+binaries, Go and Objective-C recovery, pointer analysis, recursive type
+matching — and reports the function count before and after. A pass is re-run
+on resume, before signatures and annotations, so each layer sees the one
+below it.
+
+### Loading raw and headerless targets
+
+`open_binary` normally autodetects architecture and base from the file
+header. For flat shellcode, a firmware image, or a ROM dump — which have no
+header — pass `arch`/`bits`/`map`/`format` (rizin's own `-a`/`-b`/`-m`/`-F`)
+so it's disassembled correctly. The choice is remembered and reused if the
+session resumes or rizin respawns.
 
 ## What it looks like
 
@@ -213,7 +259,7 @@ blocked, and the IOC is defanged even in the error message:
 
 ## Tool reference
 
-All 40 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 61 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
 may legitimately show fewer than 32.
@@ -289,7 +335,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the cordis context graph: process effects and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 40 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 61 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.
