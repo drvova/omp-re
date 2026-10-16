@@ -184,6 +184,9 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(approval({ action: "registers" }).reason).toContain("Inspect");
 		expect(approval({ action: "disassemble" }).reason).toContain("Inspect");
 		expect(approval({ action: "heap_chunks" }).reason).toContain("Inspect");
+		expect(approval({ action: "trace_start" }).reason).toContain("trace session");
+		expect(approval({ action: "step_back" }).reason).toContain("backward");
+		expect(approval({ action: "continue_back" }).reason).toContain("backward");
 		expect(approval({ action: "stop" }).reason).toContain("Terminate");
 	});
 
@@ -254,6 +257,17 @@ describe.skipIf(!canRunRizin)("debug tool against a real debug session", () => {
 		expect(out.length).toBeGreaterThan(0);
 		expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
 	}, 20_000);
+
+	test("reverse debugging: record a trace, step forward, then step_back returns to an earlier PC", async () => {
+		expect(textOf(await run("trace_start"))).toMatch(/trace session|step backward/i);
+		await run("step", { count: 3 });
+		const forward = textOf(await run("registers"));
+		const back = textOf(await run("step_back", { count: 2 }));
+		expect(back).toMatch(/0x[0-9a-f]+/);
+		// The PC after stepping back differs from where we were after stepping forward.
+		expect(textOf(await run("registers"))).not.toBe(forward);
+		await run("trace_stop");
+	}, 25_000);
 
 	test("the glibc heap actions return a result without desyncing (even with no heap mapped yet)", async () => {
 		// Early in a tiny process there may be no glibc arena; the tool returns

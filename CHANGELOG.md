@@ -41,6 +41,9 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
   (`heap_arenas` / `heap_chunks` / `heap_bins`) alongside the existing Windows
   heap actions. The approval reason now distinguishes execute / modify /
   inspect.
+- **Reverse debugging** (book: debugger/revdebug). `trace_start` / `trace_stop`
+  record a trace session; `step_back` and `continue_back` then move the process
+  backward through it — stepping back from a crash or a watchpoint hit.
 - **Remote and attach debugging** (book: remote_access). `rizin_debug`'s
   `start` can now control an existing target instead of launching: `attach:
   {pid}` attaches to a running process, and `attach: {remote: "gdb://host:port"}`

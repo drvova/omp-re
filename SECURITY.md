@@ -168,6 +168,7 @@ of the suite holds:
   process.
 - It is a **plain debugger** — breakpoints and watchpoints, stepping,
   reading and writing registers and memory, disassembling live memory,
+  recording a trace and stepping backward through it (reverse debugging),
   backtraces, heap and process-state inspection. The register/memory writes
   act only on the process this session drives; the tool has no features for
   evading anti-debugging, hiding the debuggee, or injecting into other

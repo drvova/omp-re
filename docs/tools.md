@@ -194,6 +194,9 @@ Actions:
 - **Execution:** `continue` / `continue_until` (`addr`),
   `continue_to_syscall` / `continue_to_call` / `continue_to_ret`, `step` /
   `step_over` (`count` instructions).
+- **Reverse debugging:** `trace_start` / `trace_stop` record a trace;
+  `step_back` (`count`) / `continue_back` then move backward through it (they
+  error until a trace is recorded).
 - **Registers & memory:** `registers`, `write_register` (`reg`=`value`),
   `read_memory` (`size` bytes at `addr`), `write_memory` (`bytes` hex at
   `addr`, into the live process), `disassemble` (`count` instructions at

@@ -37,6 +37,10 @@ const DEBUG_ACTIONS = [
 	"continue_to_ret",
 	"step",
 	"step_over",
+	"trace_start",
+	"trace_stop",
+	"step_back",
+	"continue_back",
 	"registers",
 	"write_register",
 	"read_memory",
@@ -66,7 +70,10 @@ const DEBUG_ACTIONS = [
 type DebugAction = (typeof DEBUG_ACTIONS)[number];
 
 /** Actions that resume the debuggee (versus inspect it, manage breakpoints, or modify its state while stopped). */
-const EXECUTING_ACTIONS = new Set<DebugAction>(["start", "continue", "continue_until", "continue_to_syscall", "continue_to_call", "continue_to_ret", "step", "step_over"]);
+const EXECUTING_ACTIONS = new Set<DebugAction>(["start", "continue", "continue_until", "continue_to_syscall", "continue_to_call", "continue_to_ret", "step", "step_over", "step_back", "continue_back"]);
+
+/** Actions that move the process BACKWARD through a recorded trace (reverse debugging). */
+const REVERSE_ACTIONS = new Set<DebugAction>(["step_back", "continue_back"]);
 
 /** Actions that modify the live process (registers or memory) or arm a watchpoint, as opposed to resuming or inspecting it. */
 const MODIFYING_ACTIONS = new Set<DebugAction>(["write_register", "write_memory", "watch_add"]);
@@ -74,6 +81,9 @@ const MODIFYING_ACTIONS = new Set<DebugAction>(["write_register", "write_memory"
 function approvalReason(action: DebugAction): string {
 	if (action === "start") return "Launch the target under a debugger — this EXECUTES it on this machine.";
 	if (action === "stop") return "Terminate the debugged process.";
+	if (action === "trace_start") return "Start recording a debug trace session (enables stepping backward).";
+	if (action === "trace_stop") return "Stop the debug trace session.";
+	if (REVERSE_ACTIONS.has(action)) return `Move the debugged process backward through the recorded trace (${action}).`;
 	if (EXECUTING_ACTIONS.has(action)) return `Resume execution of the debugged process (${action}).`;
 	if (MODIFYING_ACTIONS.has(action)) return `Modify the debugged process (${action}).`;
 	return `Inspect the debugged process (${action}).`;
@@ -244,6 +254,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 				"continue: resume until a breakpoint, signal, or exit. continue_until: resume to `addr`.",
 				"continue_to_syscall / continue_to_call / continue_to_ret: resume until the next syscall, call, or return.",
 				"step: one instruction (or `count`). step_over: step over calls.",
+				"trace_start / trace_stop: record a trace so you can go backward. step_back / continue_back: step or continue BACKWARD through the recorded trace (reverse debugging).",
 				"registers: all register values. write_register: set `reg` to `value`.",
 				"read_memory: `size` bytes at `addr`. write_memory: write `bytes` (hex) at `addr`. disassemble: `count` instructions at `addr` (default PC) from live memory.",
 				"break_add / break_remove: breakpoint at `addr`. break_list: list breakpoints and watchpoints. watch_add: watchpoint at `addr` (perm r/w/rw, size). backtrace: call stack.",
@@ -289,7 +300,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 		name: "rizin_debug",
 		label: "debugger",
 		description:
-			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected.",
+			"Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, reverse-step (record a trace with trace_start, then step_back / continue_back), read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected.",
 		approval: (args) => {
 			const record = args && typeof args === "object" ? (args as { action?: unknown; attach?: { pid?: unknown; remote?: unknown } }) : {};
 			const action = record.action as DebugAction | undefined;
@@ -387,6 +398,28 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 					await dbg.cmd(`dso ${n}`, { timeoutMs: dbgTimeout, signal });
 					const pc = await programCounter(dbg, signal);
 					return textResult(`debug: step_over ${n}`, pc);
+				}
+				// Reverse debugging (book: debugger/revdebug): record a trace with
+				// trace_start, then step/continue backward through it. The reverse
+				// actions error until a trace session exists — rizin's own message surfaces.
+				case "trace_start": {
+					const out = (await dbg.cmd("dts+", { timeoutMs: dbgTimeout, signal })).trim();
+					return textResult("debug: trace_start", `${out || "trace session started"}\nStep backward with step_back / continue_back; stop recording with trace_stop.`);
+				}
+				case "trace_stop": {
+					await dbg.cmd("dts-", { signal });
+					return plainResult("debug: trace_stop — trace session ended");
+				}
+				case "step_back": {
+					const n = clampInt(params.count, 1, 100_000);
+					const out = (await dbg.cmd(`dsb ${n}`, { timeoutMs: dbgTimeout, signal })).trim();
+					const pc = await programCounter(dbg, signal);
+					return textResult(`debug: step_back ${n}`, `${out ? `${out}\n` : ""}${pc || "(no trace session — run trace_start first)"}`);
+				}
+				case "continue_back": {
+					const out = (await dbg.cmd("dcb", { timeoutMs: dbgTimeout, signal })).trim();
+					const pc = await programCounter(dbg, signal);
+					return textResult("debug: continue_back", `${out ? `${out}\n` : ""}${pc || "(no trace session — run trace_start first)"}`);
 				}
 				case "registers": {
 					const out = (await dbg.cmd("drj", { signal })).trim();
