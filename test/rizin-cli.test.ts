@@ -250,6 +250,16 @@ describe("checkRizinCommand (no rizin needed)", () => {
 		expect(checkRizinCommand(CATALOG, "ph md5 @!0x100", "main")).toMatchObject({ ok: true, line: "ph md5 @!0x100 @ main" });
 	});
 
+	test("allows table-query specs on allowed commands, with a word-shaped grammar", () => {
+		expect(checkRizinCommand(CATALOG, "pd:*/head/10")).toMatchObject({ ok: true, line: "pd:*/head/10" });
+		expect(checkRizinCommand(CATALOG, "px:csv")).toMatchObject({ ok: true });
+		expect(checkRizinCommand(CATALOG, "pd:xrefsTo/sort:csv", "main")).toMatchObject({ ok: true });
+		expect(refusal("pd:bad=spec")).toMatch(/table spec parts/);
+		expect(refusal("pdzz:size/sort")).toBe('omp-re: rizin_command: this rizin has no command "pdzz" — look it up with rizin_help');
+		// file commands keep their bare-only rule even through a spec
+		expect(refusal("pm:csv /tmp/magic")).toBe("omp-re: rizin_command: pm reads <file/directory> from disk; run it without arguments or not at all");
+	});
+
 	test("refuses every way out of a single read-only command", () => {
 		for (const [command, label] of [
 			["px 16; !id", "`;`"],

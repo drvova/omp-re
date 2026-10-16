@@ -228,24 +228,41 @@ export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: st
 		if (pattern.test(trimmed)) return { ok: false, reason: `omp-re: rizin_command: ${label} is not allowed in a command` };
 	}
 	const name = trimmed.split(/\s+/, 1)[0]!;
-	if (!isRunnable(name)) {
+	// Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
+	// sorts/filters/paginates/reformats the command's table. Only the head must
+	// be runnable and known; every spec part must be table-grammar-shaped
+	// (column names, /sort//page//head//csv word grammar) — no paths, no
+	// quoting. FORBIDDEN_SYNTAX above already removed the worst characters.
+	// The spec tail rides along in the line verbatim.
+	let specNote = "";
+	let checked = name;
+	if (checked.includes(":")) {
+		const head = checked.slice(0, checked.indexOf(":"));
+		const specs = checked.slice(checked.indexOf(":") + 1).split(":");
+		if (!specs.every((s) => /^[A-Za-z0-9_*/.-]+$/.test(s))) {
+			return { ok: false, reason: "omp-re: rizin_command: table spec parts must match [A-Za-z0-9_*/.-] (see the table query grammar)" };
+		}
+		checked = head;
+		specNote = " (table spec)";
+	}
+	if (!isRunnable(checked)) {
 		return {
 			ok: false,
 			reason: `omp-re: rizin_command: ${JSON.stringify(name)} is not available here: only read-only print, info, search, graph, and listing commands run through this tool. Use rename_function, set_comment, set_prototype, rename_variable, or set_variable_type to annotate.`,
 		};
 	}
-	if (!isKnownCommand(catalog, name)) {
-		return { ok: false, reason: `omp-re: rizin_command: this rizin has no command ${JSON.stringify(name)} — look it up with rizin_help` };
+	if (!isKnownCommand(catalog, checked)) {
+		return { ok: false, reason: `omp-re: rizin_command: this rizin has no command ${JSON.stringify(checked)} — look it up with rizin_help` };
 	}
 	if (/(^|\s)interactive(\s|$)/.test(trimmed)) {
 		return { ok: false, reason: "omp-re: rizin_command: interactive output modes would wait for keyboard input" };
 	}
 	// A command whose catalog entry takes a file or path argument (`/m <magic-file>`) reads from disk; it runs only with none given.
-	const fileArg = catalog.get(name)?.args?.find((arg) => /file|path|dir/i.test(arg.name));
+	const fileArg = catalog.get(checked)?.args?.find((arg) => /file|path|dir/i.test(arg.name));
 	if (fileArg && trimmed !== name) {
-		return { ok: false, reason: `omp-re: rizin_command: ${name} reads <${fileArg.name}> from disk; run it without arguments or not at all` };
+		return { ok: false, reason: `omp-re: rizin_command: ${checked} reads <${fileArg.name}> from disk; run it without arguments or not at all` };
 	}
-	return { ok: true, name, line: addr ? `${trimmed} @ ${validateAddr(addr)}` : trimmed };
+	return { ok: true, name: specNote ? `${checked}${specNote}` : checked, line: addr ? `${trimmed} @ ${validateAddr(addr)}` : trimmed };
 }
 
 /** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). */
