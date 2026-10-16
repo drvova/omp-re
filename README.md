@@ -6,7 +6,7 @@
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
 ![26 tools](https://img.shields.io/badge/tools-26-informational)
 
-![omp-re triaging /usr/bin/ls: hash, imports, and a plain-English verdict](docs/img/hero.png)
+![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
 it drives [rizin](https://rizin.re) behind 26 agent tools, a `/re` slash
@@ -141,10 +141,11 @@ container — see [`SECURITY.md`](SECURITY.md#rizin_debug).
 
 ## What it looks like
 
-The screenshots below are real, unmodified captures of an earlier `omp-re`
-release against `/usr/bin/ls` on Ubuntu 24.04 — not mockups. The text-UI
-layout is current; [`tools/shotgen`](tools/shotgen) regenerates them against
-your own rizin install on any Linux machine.
+The screenshots below are real, unmodified captures of an `omp-re` session
+triaging a small demo binary (`fixture.exe`, built from the C source in
+[`tools/shotgen/fixture`](tools/shotgen/fixture)) on Windows — not mockups. The
+text-UI layout is current; [`tools/shotgen`](tools/shotgen) regenerates them
+against your own rizin install.
 
 ### Function navigator
 
@@ -162,7 +163,7 @@ to have a real decompile — see [Prerequisites](#prerequisites).
 
 ![Decompiled view of main()](docs/img/decompile.png)
 
-![Cross-references to entry0](docs/img/xrefs.png)
+![Cross-references to main()](docs/img/xrefs.png)
 
 ### Evidence, cited
 
