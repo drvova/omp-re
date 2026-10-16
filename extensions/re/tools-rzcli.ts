@@ -39,10 +39,25 @@ export interface RzCliToolDef {
 	 * network, or open an interactive view.
 	 */
 	deniedLetters: string;
-	/** Whole tokens refused (doubled flags like `-dd`, long options). */
+	/** Whole tokens refused (long options like `--foo`). Short-flag clusters are handled letter-wise, not here. */
 	deniedTokens?: readonly string[];
-	/** `[flag, value]` pairs refused together (`rz-diff -t command` runs rizin commands). */
-	deniedPairs?: readonly (readonly [string, string])[];
+	/**
+	 * Letters that are safe once but escalate when repeated: rz-bin's `-d`
+	 * reads local DWARF but `-dd` downloads from debuginfod, `-P` reads a local
+	 * PDB but `-PP` downloads it. Refused when the letter occurs two or more
+	 * times across ALL short clusters — so `-dd`, `-d -d`, `-ddj`, and `-jdd`
+	 * are all caught, not just the exact doubled token.
+	 */
+	deniedRepeatedLetters?: string;
+	/**
+	 * A value-taking flag whose value is refused when it is one of `values`,
+	 * in EVERY getopt spelling: `-t command`, `-tcommand`, and `-Xtcommand`
+	 * (the value is the rest of the cluster after the flag letter, or the next
+	 * token when the flag ends the cluster). `rz-diff -t command` makes rz-diff
+	 * run a rizin command per file, and rizin `!` runs the shell — an RCE the
+	 * old `[flag, value]` pair check missed in the attached form.
+	 */
+	deniedFlagValues?: readonly { flag: string; values: readonly string[] }[];
 }
 
 /**
@@ -56,18 +71,19 @@ export const RZ_CLI_TOOLS: readonly RzCliToolDef[] = [
 		tool: "rz-bin",
 		summary: "Binary info without loading the whole core: headers (-H), imports (-i), exports (-E), symbols (-s), sections (-S), libraries (-l), strings (-z), classes (-c), entrypoint (-e), main (-M), checksums (-K), demangling (-D). JSON with -j.",
 		target: "open",
-		deniedLetters: "OoC", // -O/-o write/extract, -C creates a new binary
-		deniedTokens: ["-dd", "-PP"], // network fetch (debuginfod / pdb download)
+		deniedLetters: "OoCx", // -O/-o write/extract, -C creates a new binary, -x extracts sub-binaries to disk
+		deniedRepeatedLetters: "dP", // -dd downloads DWARF (debuginfod), -PP downloads the PDB; single -d/-P read locally and stay allowed
 	},
 	{
 		tool: "rz-diff",
-		summary: "Compare two files: edit distance (-d myers|leven|ssdeep) or structural diff (-t bytes|functions|imports|symbols|sections|strings|entries|fields|graphs). Pass both paths; -A/-B analyze first. JSON with -j.",
+		summary: "Compare two files: edit distance (-d myers|leven|ssdeep) or structural diff (-t bytes|functions|imports|symbols|sections|strings|entries|fields|graphs). Pass both paths; -A compares addresses, -B runs full analysis first. JSON with -j.",
 		target: "args",
 		deniedLetters: "HS", // -H/-S open an interactive visual view that would hang
-		deniedPairs: [
-			["-t", "command"],
-			["-t", "commands"],
-		],
+		// Not blocking -e (sets config): its value is arbitrary and would need
+		// value-aware parsing, and a letter-ban on `e` false-positives on any
+		// clustered flag whose value contains an 'e' (e.g. `-tbytes`). rz-diff
+		// runs on a throwaway process with no persistence or demonstrated exec.
+		deniedFlagValues: [{ flag: "t", values: ["command", "commands"] }], // -t command runs a rizin command per file (→ shell via `!`); refused in every spelling
 	},
 	{
 		tool: "rz-hash",
@@ -102,12 +118,38 @@ function isShortCluster(token: string): boolean {
 	return /^-[A-Za-z]+$/.test(token);
 }
 
-/** Validate the flags of one `rz-*` invocation. Pure: no binary substitution, no execution. */
+/**
+ * The value a short-flag `letter` receives, in each getopt spelling, scanned
+ * across all tokens: the rest of the cluster after the letter (`-tcommand`,
+ * `-Xtcommand`), or the next token when the letter ends its cluster (`-t
+ * command`, `-Xt command`). Returns every value the flag is given.
+ */
+function flagValues(args: readonly string[], letter: string): string[] {
+	const values: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const token = args[i]!;
+		if (!isShortCluster(token)) continue;
+		const idx = token.indexOf(letter, 1);
+		if (idx === -1) continue;
+		const attached = token.slice(idx + 1);
+		if (attached !== "") values.push(attached);
+		else if (i + 1 < args.length) values.push(args[i + 1]!);
+	}
+	return values;
+}
+
+/**
+ * Validate the flags of one `rz-*` invocation. Pure: no binary substitution,
+ * no execution. The denials are getopt-aware — a short flag is caught whether
+ * it is written split (`-t x`), attached (`-tx`), or clustered (`-Xtx`), and a
+ * repeat-escalation flag is caught however the repetition is spelled — so a
+ * denied capability cannot be smuggled past by respelling the flag.
+ */
 export function checkRzCli(def: RzCliToolDef, args: readonly string[]): RzCliCheck {
 	const denied = new Set(def.deniedTokens ?? []);
 	const letters = new Set(def.deniedLetters.split(""));
-	for (let i = 0; i < args.length; i++) {
-		const token = args[i]!;
+	const repeatCounts = new Map<string, number>();
+	for (const token of args) {
 		if (/[\n\r\0]/.test(token)) return { ok: false, reason: "omp-re: rizin_cli: an argument contains a line break or NUL" };
 		if (denied.has(token)) {
 			return { ok: false, reason: `omp-re: rizin_cli: ${def.tool} ${token} is not allowed here (it writes, runs code, or fetches over the network)` };
@@ -117,11 +159,20 @@ export function checkRzCli(def: RzCliToolDef, args: readonly string[]): RzCliChe
 				if (letters.has(ch)) {
 					return { ok: false, reason: `omp-re: rizin_cli: ${def.tool} -${ch} is not allowed here (it writes a file, runs code, fetches over the network, or opens an interactive view)` };
 				}
+				if ((def.deniedRepeatedLetters ?? "").includes(ch)) repeatCounts.set(ch, (repeatCounts.get(ch) ?? 0) + 1);
 			}
 		}
-		for (const [flag, value] of def.deniedPairs ?? []) {
-			if (token === flag && args[i + 1] === value) {
-				return { ok: false, reason: `omp-re: rizin_cli: ${def.tool} ${flag} ${value} is not allowed here (it executes commands in both files)` };
+	}
+	for (const [ch, count] of repeatCounts) {
+		if (count >= 2) {
+			return { ok: false, reason: `omp-re: rizin_cli: ${def.tool} -${ch} given ${count} times fetches over the network (a single -${ch} reads locally and is allowed)` };
+		}
+	}
+	for (const { flag, values } of def.deniedFlagValues ?? []) {
+		const denylist = new Set(values);
+		for (const value of flagValues(args, flag)) {
+			if (denylist.has(value)) {
+				return { ok: false, reason: `omp-re: rizin_cli: ${def.tool} -${flag} ${value} is not allowed here (it runs a command, which can reach the shell)` };
 			}
 		}
 	}

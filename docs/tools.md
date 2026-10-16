@@ -137,10 +137,14 @@ gating is on the flags.
 | `rz-ax` | base and format conversion | `rz-ax 0xdead` |
 
 Refused before the tool is spawned: any flag that runs code (`rz-find
--E`/`-R`, `rz-diff -t command`), writes a file (`rz-bin -O`/`-o`/`-C`,
-`rz-asm -O`), fetches over the network (`rz-bin -dd`/`-PP`), or opens an
-interactive view (`rz-diff -H`/`-S`), and any argument with a line break or
-NUL. rz-gg (shellcode generation) is not exposed — it generates rather than
+-E`/`-R`, `rz-diff -t command`), writes or extracts to disk (`rz-bin
+-O`/`-o`/`-C`/`-x`, `rz-asm -O`), fetches over the network (`rz-bin
+-dd`/`-PP`), or opens an interactive view (`rz-diff -H`/`-S`), and any
+argument with a line break or NUL. The check is getopt-aware: the flag is
+caught whether written split (`-t command`), attached (`-tcommand`), or
+clustered (`-ddj`), and a single `-d`/`-P` (local read) stays allowed while
+`-dd`/`-d -d`/`-ddj` (network fetch) are refused. rz-gg (shellcode
+generation) is not exposed — it generates rather than
 analyzes. rz-run is not exposed as a CLI tool either, but its directives
 (argv, env, cwd, stdio, limits) do configure the debugger's launch
 environment through `rizin_debug`'s `run` option — the one place omp-re

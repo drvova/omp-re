@@ -128,14 +128,24 @@ is spawned:
 
 - flags that run code: `rz-find -E` (shell command per hit), `rz-find -R`
   (rizin command per hit, which can reach `!` shell), `rz-diff -t command`
-  (runs commands in both files);
-- flags that write to disk: `rz-bin -O`/`-o`/`-C`, `rz-asm -O`;
+  (runs a rizin command per file, which reaches `!` shell);
+- flags that write or extract to disk: `rz-bin -O`/`-o`/`-C`/`-x`, `rz-asm -O`;
 - flags that reach the network: `rz-bin -dd`/`-PP` (debuginfod / pdb);
 - flags that open an interactive view that would hang: `rz-diff -H`/`-S`.
 
-Short-flag clusters are checked letter by letter and case-sensitively (so
-`rz-bin -c`, list classes, is allowed while `-C`, create a binary, is not),
-and a doubled flag like `-dd` is matched whole. `rz-gg` (shellcode/egg
+The gating is **getopt-aware**, so a denied capability cannot be smuggled
+past by respelling the flag. Short-flag clusters are checked letter by letter
+and case-sensitively (so `rz-bin -c`, list classes, is allowed while `-C`,
+create a binary, is not). A capability that escalates on repetition —
+`rz-bin -d` reads local DWARF but `-dd` downloads it — is refused by counting
+the letter across *all* clusters, so `-dd`, `-d -d`, `-ddj`, and `-jdd` are
+all caught while a single `-d` stays allowed. A value-taking flag whose value
+is dangerous — `rz-diff -t command` — is refused in every spelling (`-t
+command`, `-tcommand`, `-Xtcommand`), since the value is the rest of the
+cluster after the flag or the next token. (Earlier versions matched only the
+exact doubled token and the split `-t command` pair; the attached and
+split-letter forms were a sandbox-escape bypass, now closed and regression-
+tested.) `rz-gg` (shellcode/egg
 generation) is not exposed at all. `rz-run` is not a `rizin_cli` tool either,
 but its directives configure the debugger's launch environment via
 `rizin_debug`'s `run` option (see below) — stdio targets there are files
