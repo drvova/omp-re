@@ -26,6 +26,7 @@ import { plainResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { writeReport } from "./report.ts";
 import { sha256File, verifyEvidence } from "./verify.ts";
+import type { AuditMode } from "./audit-claims.ts";
 import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
@@ -142,7 +143,7 @@ const SUBCOMMANDS: readonly { name: string; usage?: string; description: string 
 	{ name: "evidence", usage: "[id]", description: "evidence recorded on this branch" },
 	{ name: "cite", usage: "<id>", description: "cite an evidence entry in your next message" },
 	{ name: "undo", description: "revert the last annotation" },
-	{ name: "report", usage: "[path]", description: "write the evidence-gated report" },
+	{ name: "report", usage: "[path] [--audit=strict]", description: "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)" },
 	{ name: "verify", usage: "[--strict]", description: "re-run cited rizin commands and check recorded output hashes" },
 	{ name: "status", description: "rizin, decompiler, binary, and evidence status" },
 	{ name: "on", description: "enable the RE tools for this session" },
@@ -158,7 +159,7 @@ const HELP_TEXT = [
 	"/re evidence [id]    evidence log            x  follow xrefs",
 	"/re cite <id>        cite evidence in chat   a  ask the model",
 	"/re undo             revert annotation",
-	"/re report [path]    write report",
+	"/re report [path]    write report (--audit=strict gates claim support)",
 	"/re verify [--strict] re-verify evidence is reproducible",
 	"/re status           rizin, decompiler, and session status",
 	"/re on               enable RE tools",
@@ -391,9 +392,20 @@ function registerShell(pi: ExtensionAPI): void {
 					case "undo":
 						ctx.ui.notify(await undoLastAnnotation(pi, ctx), "info");
 						return;
-					case "report":
-						await writeReport(ctx, rest.join(" ") || undefined);
+					case "report": {
+						// --audit[=advisory|strict] / --no-audit (--audit=off) toggle the claim-support audit;
+						// strip the flag token so the rest joins back into the output path (mirrors verify's flag parse).
+						let audit: AuditMode = "advisory";
+						const pathTokens: string[] = [];
+						for (const tok of rest) {
+							if (tok === "--no-audit" || tok === "--audit=off") audit = "off";
+							else if (tok === "--audit" || tok === "--audit=advisory") audit = "advisory";
+							else if (tok === "--audit=strict") audit = "strict";
+							else pathTokens.push(tok);
+						}
+						await writeReport(ctx, pathTokens.join(" ") || undefined, { audit });
 						return;
+					}
 					case "verify":
 						await verifyEvidence(ctx, { strict: rest.includes("--strict") });
 						return;

@@ -69,6 +69,15 @@ and compares, and `/re report` ships the same data as a Verification Manifest
 and a `<report>.manifest.json` sidecar, so a report is re-derivable from the
 binary, not merely trusted.
 
+The third gate is relevance. Before `/re report` emits, each grounded claim and
+its cited evidence go to an LLM self-audit through omp's `ctx.runEphemeralTurn`
+side turn (no tools, no history writes) that judges whether the evidence actually
+supports the claim — supported, overreach, or unsupported. It is advisory by
+default (flags claims inline, still writes the report); `/re report --audit=strict`
+withholds the report on an unsupported/overreach verdict, and it fails open to an
+"unaudited" note when no model or side turn is available, so the two deterministic
+gates stay authoritative.
+
 Evidence and annotation entries persist in the session JSONL and survive a
 `--continue`/reload, but they are **not** injected into LLM context and are
 **not** rendered inline in the transcript — omp's `pi.appendEntry()`

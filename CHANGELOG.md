@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Claim↔evidence support audit (the third grounding gate).** The existence
+  gate proves a claim is cited and `/re verify` proves its evidence reproducible;
+  this adds the remaining check — does the cited evidence actually *support* the
+  claim? Before `/re report` emits, each grounded claim and its evidence (summary
+  + canonical excerpt) are put to an LLM self-audit through omp's
+  `ctx.runEphemeralTurn` (a side turn that runs no tools and does not touch
+  history), judged supported / overreach / unsupported. **Advisory by default**
+  (flags claims inline + a summary note, report still written); `/re report
+  --audit=strict` withholds the report on any unsupported/overreach, and
+  `--no-audit` skips it. It fails **open**: no model, no side-turn host, a thrown
+  turn, or an unparseable reply degrades to a visible "unaudited" note and never
+  blocks — the two deterministic gates stay authoritative.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added

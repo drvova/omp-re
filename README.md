@@ -242,6 +242,18 @@ uses. `/re report` ships this as a **Verification Manifest** (claim → command 
 output hash → binary hash) plus a machine-readable `<report>.manifest.json`
 sidecar, so anyone with the binary can re-derive the report rather than trust it.
 
+### Supported, not just cited
+
+Two gates prove a claim is *cited* and *reproducible*; a third proves its evidence
+actually *supports* it. Before `/re report` emits, each grounded claim and its
+cited evidence are put to a self-audit through omp's `ctx.runEphemeralTurn` side
+turn (no tools, no history writes), judged **supported / overreach / unsupported**.
+It is **advisory** by default — unsupported claims are flagged inline and the
+report is still written — while `/re report --audit=strict` withholds the report
+on any unsupported/overreach (and `--no-audit` skips it). It fails open: with no
+model or side-turn host it degrades to an "unaudited" note and never blocks, so
+the two deterministic gates stay authoritative.
+
 ## Prerequisites
 
 | Requirement | Notes |
@@ -262,7 +274,7 @@ sidecar, so anyone with the binary can re-derive the report rather than trust it
 /re evidence [id]    evidence log            x  follow xrefs
 /re cite <id>        cite evidence in chat   a  ask the model
 /re undo             revert annotation
-/re report [path]    write report
+/re report [path]    write report (--audit=strict gates claim support)
 /re verify [--strict] re-verify report evidence is reproducible
 /re status           rizin, decompiler, and session status
 /re on               enable RE tools

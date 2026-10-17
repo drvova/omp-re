@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { branchEntries, collectEvidence, type EvidenceRecord, lastRecordedBinarySha256 } from "./entries.ts";
 import { recordedCommand, recordedStatus } from "./verify.ts";
+import { type AuditClaimInput, type AuditMode, type AuditOutcome, auditClaims, type ClaimJudge, ephemeralJudge, flaggedVerdicts } from "./audit-claims.ts";
 
 /**
  * The full text a piece of evidence recorded: the session artifact when the
@@ -347,8 +348,9 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 	};
 }
 
-function formatMarkdown(report: BuiltReport): string {
+function formatMarkdown(report: BuiltReport, outcome?: AuditOutcome): string {
 	const lines: string[] = [`# ${report.title}`, ""];
+	let claimIndex = 0;
 	for (const section of report.sections) {
 		lines.push(`## ${section.title}`, "");
 		if (section.intro) lines.push(section.intro, "");
@@ -357,12 +359,38 @@ function formatMarkdown(report: BuiltReport): string {
 				lines.push(`- ${claim.text}`);
 				const anchors = claim.evidenceIds.map((id) => `[${report.toolById.get(id) ?? "unknown"}:${id}]`).join(" ");
 				if (anchors) lines.push(`  **Evidence:** ${anchors}`);
+				const audit = outcome?.byIndex.get(claimIndex);
+				if (audit && (audit.verdict === "unsupported" || audit.verdict === "overreach")) {
+					lines.push(`  _⚠ Support audit: ${audit.verdict} — ${audit.reason}_`);
+				}
+				claimIndex++;
 			}
 			lines.push("");
 		}
 	}
+	if (outcome) appendClaimAudit(lines, outcome);
 	appendVerificationManifest(lines, report);
 	return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * Append the claim↔evidence support-audit summary note (prose, never a gated
+ * claim, so {@link findUngroundedClaims} is unaffected). Silent when nothing was
+ * audited (no evidence-backed claims); otherwise a one-line summary, or the
+ * degrade note when the side turn was unavailable. Per-claim flags render inline
+ * above, next to each claim.
+ */
+function appendClaimAudit(lines: string[], outcome: AuditOutcome): void {
+	if (outcome.itemCount === 0) return;
+	if (!outcome.audited) {
+		lines.push(`> _Claim–evidence support unaudited — ${outcome.unauditedReason ?? "side turn unavailable"}._`, "");
+		return;
+	}
+	const vals = [...outcome.byIndex.values()];
+	const supported = vals.filter((v) => v.verdict === "supported").length;
+	const flagged = vals.filter((v) => v.verdict === "unsupported" || v.verdict === "overreach").length;
+	const unaudited = vals.filter((v) => v.verdict === "unaudited").length;
+	lines.push(`> _Claim–evidence support audit: ${supported} supported, ${flagged} flagged, ${unaudited} unaudited._`, "");
 }
 
 /**
@@ -419,6 +447,41 @@ function findUngroundedClaims(report: BuiltReport): Claim[] {
 }
 
 /**
+ * Assemble the audit input for the grounded claims: one entry per claim with at
+ * least one resolvable evidence RECORD (annotation-only grounding carries no tool
+ * output to audit), each carrying its cited records' summary + canonicalExcerpt
+ * and — only when a judge will actually run — a short slice of the full output.
+ * `index` is the claim's flat position across the report, which the verdicts map
+ * back on and `formatMarkdown` renders flags by.
+ */
+async function buildAuditInputs(ctx: ExtensionContext, report: BuiltReport, withFullText: boolean): Promise<AuditClaimInput[]> {
+	const items: AuditClaimInput[] = [];
+	const textCache = new Map<string, string | undefined>();
+	let index = 0;
+	for (const section of report.sections) {
+		for (const claim of section.claims) {
+			const evidence: AuditClaimInput["evidence"] = [];
+			for (const id of claim.evidenceIds) {
+				const ev = report.evidenceById.get(id);
+				if (!ev) continue;
+				let fullText: string | undefined;
+				if (withFullText) {
+					if (!textCache.has(id)) {
+						const raw = await readEvidenceOutput(ctx, ev);
+						textCache.set(id, raw && raw.length <= 1200 ? raw : undefined);
+					}
+					fullText = textCache.get(id);
+				}
+				evidence.push({ id: ev.id, tool: ev.tool, summary: ev.summary, canonicalExcerpt: ev.canonicalExcerpt, fullText });
+			}
+			if (evidence.length > 0) items.push({ index, claimText: claim.text, evidence });
+			index++;
+		}
+	}
+	return items;
+}
+
+/**
  * Build the analysis report for the current session and either write it to
  * `outputPath` or hand the rendered Markdown back through the UI/console —
  * this is the sole entry point a `/re report [path]` command handler needs,
@@ -430,7 +493,7 @@ function findUngroundedClaims(report: BuiltReport): Claim[] {
  * visible — console.error plus a non-zero exit code — never a silently
  * dropped report.
  */
-export async function writeReport(ctx: ExtensionContext, outputPath?: string): Promise<void> {
+export async function writeReport(ctx: ExtensionContext, outputPath?: string, opts?: { audit?: AuditMode; judge?: ClaimJudge }): Promise<void> {
 	const report = await buildReport(ctx);
 	const ungrounded = findUngroundedClaims(report);
 	if (ungrounded.length > 0) {
@@ -451,7 +514,33 @@ export async function writeReport(ctx: ExtensionContext, outputPath?: string): P
 		return;
 	}
 
-	const markdown = formatMarkdown(report);
+	// Third gate (semantic): does each grounded claim's cited evidence actually SUPPORT it? Runs only
+	// after the two deterministic gates pass. Advisory by default (flags claims, never blocks); strict
+	// withholds the whole report on an explicit unsupported/overreach — but fails OPEN on any infra or
+	// parse failure (the audit degrades to "unaudited"), so a strict report stays emittable when the
+	// side turn or model is unavailable. The two deterministic gates stay blocking in every mode.
+	const mode = opts?.audit ?? "advisory";
+	const judge = mode === "off" ? null : (opts?.judge ?? ephemeralJudge(ctx));
+	const items = mode === "off" ? [] : await buildAuditInputs(ctx, report, judge !== null);
+	const outcome = await auditClaims(items, judge, mode);
+	if (mode === "strict") {
+		const flagged = flaggedVerdicts(outcome);
+		if (flagged.length > 0) {
+			const flat = report.sections.flatMap((s) => s.claims);
+			const message = [
+				`omp-re: report withheld — ${flagged.length} claim(s) not supported by their cited evidence:`,
+				...flagged.map((v) => `  - [${v.verdict}] ${flat[v.index]?.text ?? ""} — ${v.reason}`),
+			].join("\n");
+			if (ctx.hasUI) ctx.ui.notify(message, "error");
+			else {
+				console.error(message);
+				process.exitCode = 1;
+			}
+			return;
+		}
+	}
+
+	const markdown = formatMarkdown(report, outcome);
 	let successMessage: string;
 	if (outputPath) {
 		try {
