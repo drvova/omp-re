@@ -12,7 +12,8 @@ without reviewing them first.
 ## Before opening a PR
 
 ```bash
-bun run check      # tsc --noEmit — must exit 0
+bun run check      # tsc-ts (native TypeScript 7 build) --noEmit — must exit 0
+                    # (bun run check:tsc runs the stock tsc as a fallback)
 bun test           # unit + integration tests; the rizin suites run against
                     # /bin/ls when rizin is on PATH and skip otherwise —
                     # see docs/testing.md
