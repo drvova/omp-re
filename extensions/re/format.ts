@@ -11,6 +11,7 @@
  * (two independent limits, whichever is hit first wins; never returns a
  * partial line) so this module stays importable without loading the host.
  */
+import { createHash } from "node:crypto";
 import type { AgentToolResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 const MAX_LINES = 2000;
@@ -26,6 +27,12 @@ export interface ReToolDetails {
 	artifactId?: string;
 	/** decompile_function only: which decompiler produced the code. */
 	decompiler?: string;
+	/** rizin_command only: the exact rizin line(s) that produced this output, for the verification manifest and re-run. */
+	commands?: string[];
+	/** SHA-256 of the CANONICALIZED raw output — the verification key. Distinct from the evidence record's `outputHash`, which hashes the model-facing text (header + session-specific truncation footer) and is therefore not reproducible. */
+	reproHash?: string;
+	/** First lines of the canonical output, for human diffing in the manifest. */
+	canonicalExcerpt?: string;
 }
 
 export type ReToolResult = AgentToolResult<ReToolDetails>;
@@ -101,6 +108,12 @@ export interface ResultOptions {
 	/** Truncation hint for the model when no artifact could be saved. */
 	narrowHint?: string;
 	decompiler?: string;
+	/** rizin_command only: the exact rizin line(s) recorded for the verification manifest. */
+	commands?: string[];
+	/** rizin_command only: SHA-256 of the canonicalized raw output (the reproducibility key). */
+	reproHash?: string;
+	/** rizin_command only: a short canonical excerpt for human diffing. */
+	canonicalExcerpt?: string;
 }
 
 async function spill(full: string, options: ResultOptions): Promise<string | undefined> {
@@ -134,6 +147,9 @@ async function buildResult(lead: string, header: string, body: string, options: 
 			...(truncation.truncated ? { truncated: true } : {}),
 			...(artifactId ? { artifactId } : {}),
 			...(options.decompiler ? { decompiler: options.decompiler } : {}),
+			...(options.commands ? { commands: options.commands } : {}),
+			...(options.reproHash ? { reproHash: options.reproHash } : {}),
+			...(options.canonicalExcerpt ? { canonicalExcerpt: options.canonicalExcerpt } : {}),
 		},
 	};
 }
@@ -147,6 +163,36 @@ export function formatJson(data: unknown): string {
 	if (!Array.isArray(data)) return JSON.stringify(data, null, 2);
 	if (data.length === 0) return "[]";
 	return `[\n${data.map((row) => `  ${JSON.stringify(row)}`).join(",\n")}\n]`;
+}
+
+const ANSI_ESCAPE = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+/**
+ * Normalize raw rizin output so an independent re-run on the same binary and the
+ * same pinned rizin build hashes identically: strip ANSI escapes, fold CR/CRLF to
+ * LF, right-trim every line, drop trailing blank lines, and redact the open
+ * binary's absolute path to a stable `<BINARY>` token (rizin prints it in headers).
+ * This canonical projection — never the raw ANSI bytes — is what `reproHash` is a
+ * SHA-256 of. Prefer a command's JSON (`*j`) form where possible: rizin JSON is
+ * ANSI-free and field-order-stable within a version, so it canonicalizes cleanly.
+ */
+export function canonicalizeRizinOutput(raw: string, binaryPath?: string): string {
+	let text = raw.replace(ANSI_ESCAPE, "").replace(/\r\n?/g, "\n");
+	if (binaryPath && binaryPath.length > 0) text = text.split(binaryPath).join("<BINARY>");
+	const lines = text.split("\n").map((line) => line.replace(/[ \t]+$/, ""));
+	while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+	return lines.join("\n");
+}
+
+/** SHA-256 hex of the canonical form of `raw` (see {@link canonicalizeRizinOutput}) — the reproducibility key recorded as `reproHash` and recomputed at verify time. */
+export function canonicalHash(raw: string, binaryPath?: string): string {
+	return createHash("sha256").update(canonicalizeRizinOutput(raw, binaryPath), "utf8").digest("hex");
+}
+
+/** The first `maxLines` lines (≤ `maxBytes`) of the canonical output, stored for human diffing in the verification manifest. Display-only — never hashed. */
+export function canonicalExcerpt(raw: string, binaryPath?: string, maxLines = 20, maxBytes = 1024): string {
+	const head = canonicalizeRizinOutput(raw, binaryPath).split("\n").slice(0, maxLines).join("\n");
+	return head.length <= maxBytes ? head : head.slice(0, maxBytes);
 }
 
 /** A tool result whose content is the real JSON payload (not just a count), truncated defensively for huge outputs. */

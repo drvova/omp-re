@@ -20,11 +20,12 @@ import { registerAnalyzeTools } from "./tools-analyze.ts";
 import { registerDeobfuscateTools } from "./tools-deobfuscate.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
 import { registerSignatureTools } from "./tools-signatures.ts";
-import { branchEntries, lastRecordedBinaryPath, lastRecordedLoadOptions } from "./entries.ts";
+import { branchEntries, lastRecordedBinaryPath, lastRecordedBinarySha256, lastRecordedLoadOptions } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { writeReport } from "./report.ts";
+import { sha256File, verifyEvidence } from "./verify.ts";
 import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
@@ -78,10 +79,19 @@ function toLoadOptions(params: { arch?: string; bits?: 8 | 16 | 32 | 64; base?: 
  */
 async function openBinary(pi: ExtensionAPI, ctx: ExtensionContext, inputPath: string, options: OpenOptions = {}): Promise<OpenResult> {
 	const resolved = await resolveBinaryPath(inputPath);
+	// SHA-256 of the exact bytes, streamed with Node crypto (no rizin spawn). Bound into every
+	// evidence record taken this session so `/re verify` confirms it is re-running against the same
+	// binary. A hash failure must never block opening — degrade to an unbound (unverifiable) session.
+	const sha256 = await sha256File(resolved).catch(() => undefined);
 	const { replayFailures } = await spawnRizin(ctx, resolved, options);
+	if (sha256) getState(ctx).binarySha256 = sha256;
 	const replayed = liveAnnotations(branchEntries(ctx), resolved).length;
-	// Persist the load settings in the entry too, so a resume reopens a raw blob the same way (header autodetection carries nothing).
-	const details = options.loadOptions ? { path: resolved, load: options.loadOptions } : { path: resolved };
+	// Persist the load settings and binary hash in the entry too, so a resume reopens a raw blob the same way (header autodetection carries nothing) and restores the evidence binding.
+	const details = {
+		path: resolved,
+		...(options.loadOptions ? { load: options.loadOptions } : {}),
+		...(sha256 ? { sha256 } : {}),
+	};
 	pi.appendEntry("re.binary", details);
 	pi.sendMessage({ customType: "re.binary", content: `[re: opened ${resolved}]`, display: true, details });
 	await refreshStatusBand(ctx);
@@ -133,6 +143,7 @@ const SUBCOMMANDS: readonly { name: string; usage?: string; description: string 
 	{ name: "cite", usage: "<id>", description: "cite an evidence entry in your next message" },
 	{ name: "undo", description: "revert the last annotation" },
 	{ name: "report", usage: "[path]", description: "write the evidence-gated report" },
+	{ name: "verify", usage: "[--strict]", description: "re-run cited rizin commands and check recorded output hashes" },
 	{ name: "status", description: "rizin, decompiler, binary, and evidence status" },
 	{ name: "on", description: "enable the RE tools for this session" },
 	{ name: "off", description: "disable the RE tools for this session" },
@@ -148,6 +159,7 @@ const HELP_TEXT = [
 	"/re cite <id>        cite evidence in chat   a  ask the model",
 	"/re undo             revert annotation",
 	"/re report [path]    write report",
+	"/re verify [--strict] re-verify evidence is reproducible",
 	"/re status           rizin, decompiler, and session status",
 	"/re on               enable RE tools",
 	"/re off              disable RE tools (quick toggle, no restart)",
@@ -250,6 +262,8 @@ function registerShell(pi: ExtensionAPI): void {
 		rebuildEvidenceIndex(ctx);
 		const state = getState(ctx);
 		const recorded = lastRecordedBinaryPath(branchEntries(ctx));
+		// Restore the open binary's hash from the branch so evidence recorded after a resume/branch/tree stays bound (openBinary recomputes it when it actually reopens a file below).
+		state.binarySha256 = lastRecordedBinarySha256(branchEntries(ctx)) ?? null;
 
 		if (opts.flag && opts.flag !== recorded) {
 			const onProgress = analysisStatus(ctx, basename(opts.flag));
@@ -342,7 +356,7 @@ function registerShell(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("re", {
-		description: "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | undo | report [path] | status | on | off | help",
+		description: "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | undo | report [path] | verify [--strict] | status | on | off | help",
 		getArgumentCompletions: completeArguments,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
@@ -379,6 +393,9 @@ function registerShell(pi: ExtensionAPI): void {
 						return;
 					case "report":
 						await writeReport(ctx, rest.join(" ") || undefined);
+						return;
+					case "verify":
+						await verifyEvidence(ctx, { strict: rest.includes("--strict") });
 						return;
 					case "status":
 						ctx.ui.notify(await statusText(ctx), "info");

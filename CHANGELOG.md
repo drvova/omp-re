@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Verifiable reports.** Evidence is now reproducible, not merely cited. Every
+  `rizin_command` evidence record carries the exact command, a `reproHash` (the
+  SHA-256 of its *canonicalized* raw output — ANSI, line endings and trailing
+  whitespace normalized and the binary's path redacted, so it is stable across a
+  session, distinct from the model-facing `outputHash`), and the open binary's
+  SHA-256, stamped at open time. A new `/re verify [--strict]` re-runs each cited
+  command read-only against the same binary and confirms the hash still matches:
+  reproducible, tampered (a hard failure with a non-zero headless exit, like the
+  report gate), or unverifiable (legacy / provenance-only / a different binary; a
+  failure only under `--strict`). `/re report` now appends a **Verification
+  Manifest** (claim → command → output hash → binary hash) and writes a
+  machine-readable `<report>.manifest.json` sidecar, so anyone with the binary
+  can re-derive the report. Dedicated multi-command read tools carry their
+  command(s) for the manifest as "provenance-only"; `rizin_command` is fully
+  machine-verifiable.
+
 ## [0.3.0] - 2026-10-17
 
 Broadened coverage of rizin's own capabilities, chapter by chapter against

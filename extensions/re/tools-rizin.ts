@@ -8,10 +8,10 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { checkRizinCommand, loadCatalog, searchCatalog } from "./catalog.ts";
-import { plainResult, textResult } from "./format.ts";
+import { canonicalExcerpt, canonicalHash, plainResult, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { eaFromOffset, resolveNumericAddr } from "./rizin.ts";
-import { ensureRizin } from "./state.ts";
+import { ensureRizin, getState } from "./state.ts";
 
 const RIZIN_COMMAND_TIMEOUT_MS = 120_000;
 
@@ -91,7 +91,18 @@ export function registerRizinTools(pi: ExtensionAPI): void {
 					? { ...plainResult(`${header}\n(no output; rizin said:)\n${errors}`, ea), isError: true }
 					: plainResult(`${header}\n(no output)`, ea);
 			}
-			return textResult(header, output.replace(/\n+$/, ""), { ea, ctx, tool: "rizin_command" });
+			// reproHash is over the RAW output (pre-trim/pre-truncation), canonicalized and bound to the
+			// open binary's path, so `/re verify` can re-run this exact line and hash-compare. The body
+			// sent to the model is still the trimmed/truncated text; only the verification key sees raw.
+			const binaryPath = getState(ctx).binaryPath ?? undefined;
+			return textResult(header, output.replace(/\n+$/, ""), {
+				ea,
+				ctx,
+				tool: "rizin_command",
+				commands: [check.line],
+				reproHash: canonicalHash(output, binaryPath),
+				canonicalExcerpt: canonicalExcerpt(output, binaryPath),
+			});
 		},
 	});
 }

@@ -27,6 +27,9 @@ system binary like `/bin/ls` is enough to learn the flow.
    follow-up about it without retyping context.
 8. `/re report [path]` writes a Markdown report. With no path, it prints the
    report directly instead of writing a file.
+9. `/re verify [--strict]` re-runs each cited `rizin_command` read-only against
+   the open binary and checks its recorded output hash — proving the report's
+   evidence is not just cited but reproducible.
 
 ## How the evidence chain actually works
 
@@ -55,6 +58,16 @@ tool call, not a shell command or a paraphrase. `/re evidence` and `/re cite
 <id>` exist specifically so the model (and you) can look back at exactly
 what was actually observed, in its own words, before writing a claim that
 depends on it.
+
+Grounding is the first gate; reproducibility is the second. Alongside the
+model-facing `outputHash` (which bakes in the header and any truncation footer,
+so it is not reproducible), every `rizin_command` evidence record now stores a
+`reproHash` — the SHA-256 of its *canonicalized* raw output (ANSI, line endings,
+and trailing whitespace normalized; the binary's path redacted) — plus the open
+binary's SHA-256. `/re verify [--strict]` re-runs each cited command read-only
+and compares, and `/re report` ships the same data as a Verification Manifest
+and a `<report>.manifest.json` sidecar, so a report is re-derivable from the
+binary, not merely trusted.
 
 Evidence and annotation entries persist in the session JSONL and survive a
 `--continue`/reload, but they are **not** injected into LLM context and are

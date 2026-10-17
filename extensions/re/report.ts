@@ -14,7 +14,8 @@ import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { branchEntries } from "./entries.ts";
+import { branchEntries, collectEvidence, type EvidenceRecord, lastRecordedBinarySha256 } from "./entries.ts";
+import { recordedCommand, recordedStatus } from "./verify.ts";
 
 /**
  * The full text a piece of evidence recorded: the session artifact when the
@@ -54,32 +55,12 @@ interface ReportSection {
 	claims: Claim[];
 }
 
-interface EvidenceRecord {
-	id: string;
-	tool: string;
-	ea?: string;
-	outputHash?: string;
-	artifactId?: string;
-	summary: string;
-}
-
 interface AnnotationRecord {
 	kind: string;
 	ea: string;
 	oldValue: string;
 	newValue: string;
 	evidenceId: string;
-}
-
-function collectEvidence(entries: readonly { type: string; customType?: string; data?: unknown }[]): EvidenceRecord[] {
-	const out: EvidenceRecord[] = [];
-	for (const entry of entries) {
-		if (entry.type !== "custom" || entry.customType !== "re.evidence") continue;
-		const data = entry.data as Partial<EvidenceRecord> | undefined;
-		if (!data || typeof data.id !== "string" || typeof data.tool !== "string" || typeof data.summary !== "string") continue;
-		out.push({ id: data.id, tool: data.tool, ea: data.ea, outputHash: data.outputHash, artifactId: data.artifactId, summary: data.summary });
-	}
-	return out;
 }
 
 /** Annotations on this branch that `/re undo` has not reversed. */
@@ -309,6 +290,10 @@ interface BuiltReport {
 	sections: ReportSection[];
 	/** tool name per evidence/annotation id, for anchor rendering. */
 	toolById: Map<string, string>;
+	/** full evidence record per id, for the verification manifest. */
+	evidenceById: Map<string, EvidenceRecord>;
+	/** SHA-256 of the binary this branch last opened, bound into the manifest. */
+	binarySha256?: string;
 }
 
 async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
@@ -357,6 +342,8 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 		title: `Analysis Report — Session ${sessionId.length > 8 ? sessionId.slice(-8) : sessionId}`,
 		sections,
 		toolById,
+		evidenceById: new Map(evidence.map((ev) => [ev.id, ev])),
+		binarySha256: lastRecordedBinarySha256(entries),
 	};
 }
 
@@ -374,7 +361,50 @@ function formatMarkdown(report: BuiltReport): string {
 			lines.push("");
 		}
 	}
+	appendVerificationManifest(lines, report);
 	return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * Append the Verification Manifest: one row per distinct cited evidence id — the
+ * table its `[tool:id]` anchors resolve into (command, reproducible-output hash,
+ * binary hash, status) — so anyone with the binary can re-derive each claim
+ * (`/re verify`, or re-running the command read-only). Prose/table only, never a
+ * gated `claims` entry, so {@link findUngroundedClaims} is unaffected.
+ */
+function appendVerificationManifest(lines: string[], report: BuiltReport): void {
+	const citedIds: string[] = [];
+	const seen = new Set<string>();
+	for (const section of report.sections) {
+		for (const claim of section.claims) {
+			for (const id of claim.evidenceIds) {
+				if (seen.has(id)) continue;
+				seen.add(id);
+				citedIds.push(id);
+			}
+		}
+	}
+	if (citedIds.length === 0) return;
+
+	lines.push("## Verification Manifest", "");
+	lines.push(`Binary SHA-256: \`${report.binarySha256 ?? "unbound (legacy)"}\``, "");
+	lines.push("Each `reproducible` row can be re-derived from the binary: re-run its command read-only and compare the output hash (`/re verify`).", "");
+	lines.push("| Evidence | Tool | Command | Output hash (repro) | Status |", "| --- | --- | --- | --- | --- |");
+	for (const id of citedIds) {
+		const ev = report.evidenceById.get(id);
+		const tool = report.toolById.get(id) ?? ev?.tool ?? "unknown";
+		const command = ev ? manifestCommandCell(ev) : "—";
+		const repro = ev?.reproHash ? `\`${ev.reproHash.slice(0, 12)}…\`` : "—";
+		const status = ev ? recordedStatus(ev) : "unverifiable (legacy)";
+		lines.push(`| \`${id.slice(0, 8)}\` | ${tool} | ${command} | ${repro} | ${status} |`);
+	}
+	lines.push("");
+}
+
+/** The manifest table's Command cell: the recorded rizin line(s) in inline code, or an em dash. */
+function manifestCommandCell(ev: EvidenceRecord): string {
+	const command = recordedCommand(ev);
+	return command ? `\`${command}\`` : "—";
 }
 
 /** Every claim across the whole report must resolve to at least one evidence/annotation id. A partial or annotated report is not an acceptable substitute — the point of the gate is that an ungrounded report never reaches a ticket. */
@@ -430,10 +460,69 @@ export async function writeReport(ctx: ExtensionContext, outputPath?: string): P
 			const reason = err instanceof Error ? err.message : String(err);
 			throw new Error(`omp-re: could not write report to ${outputPath}: ${reason}`);
 		}
-		successMessage = `omp-re: report written to ${outputPath}`;
+		const manifestPath = `${outputPath}.manifest.json`;
+		let manifestNote = ` (+ ${manifestPath})`;
+		try {
+			await writeFile(manifestPath, `${JSON.stringify(buildManifestJson(report), null, 2)}\n`, "utf8");
+		} catch (err) {
+			// The report itself is already on disk; a sidecar failure (disk full, EACCES) must not undo that — note it and carry on.
+			manifestNote = ` (manifest sidecar not written: ${err instanceof Error ? err.message : String(err)})`;
+		}
+		successMessage = `omp-re: report written to ${outputPath}${manifestNote}`;
 	} else {
 		successMessage = markdown;
 	}
 	if (ctx.hasUI) ctx.ui.notify(successMessage, "info");
 	else console.log(successMessage);
+}
+
+/**
+ * The machine-readable verification manifest written beside the report
+ * (`<report>.manifest.json`): the binary hash plus one entry per distinct cited
+ * evidence id — its command(s), reproducible-output hash, canonical excerpt, bound
+ * binary hash, recorded status, and the claims it backs. The artifact "anyone with
+ * the binary can re-derive it" from: re-run each command read-only, canonicalize,
+ * hash, compare.
+ */
+function buildManifestJson(report: BuiltReport): {
+	binarySha256: string | null;
+	entries: Array<{
+		evidenceId: string;
+		tool: string;
+		command: string | null;
+		commands: string[] | null;
+		reproHash: string | null;
+		canonicalExcerpt: string | null;
+		binarySha256: string | null;
+		status: string;
+		claims: string[];
+	}>;
+} {
+	const claimsById = new Map<string, string[]>();
+	for (const section of report.sections) {
+		for (const claim of section.claims) {
+			for (const id of claim.evidenceIds) {
+				const list = claimsById.get(id) ?? [];
+				list.push(claim.text);
+				claimsById.set(id, list);
+			}
+		}
+	}
+	return {
+		binarySha256: report.binarySha256 ?? null,
+		entries: [...claimsById.keys()].map((id) => {
+			const ev = report.evidenceById.get(id);
+			return {
+				evidenceId: id,
+				tool: report.toolById.get(id) ?? ev?.tool ?? "unknown",
+				command: ev ? (recordedCommand(ev) ?? null) : null,
+				commands: ev?.commands ?? null,
+				reproHash: ev?.reproHash ?? null,
+				canonicalExcerpt: ev?.canonicalExcerpt ?? null,
+				binarySha256: ev?.binarySha256 ?? null,
+				status: ev ? recordedStatus(ev) : "unverifiable (legacy)",
+				claims: claimsById.get(id) ?? [],
+			};
+		}),
+	};
 }
