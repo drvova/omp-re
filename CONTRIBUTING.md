@@ -52,6 +52,32 @@ which the forward tools, `/re undo`, and replay all share. Keep it that way.
    assertion count differs between branches, and the drift guard fails a
    run that is actually healthy.
 
+## Versioning and releases
+
+The version is **not** hand-edited. Commit messages follow
+[Conventional Commits](https://www.conventionalcommits.org/), and on every
+merge to `main` the `Release` workflow (`.github/workflows/release.yml`, via
+`scripts/release.mjs`) picks the bump from the commits that landed, updates
+`package.json` and `.omp-plugin/marketplace.json` together, stamps a dated
+section in `CHANGELOG.md`, commits `chore(release): vX.Y.Z`, and tags it.
+
+| Commit | Bump |
+| --- | --- |
+| `feat: …` | minor |
+| `fix: …`, `perf: …` | patch |
+| `feat!: …` / any `BREAKING CHANGE:` footer | major (capped to **minor** while the version is still `0.x`) |
+| `docs:`, `chore:`, `ci:`, `test:`, `refactor:`, `style:`, `build:` | none — no release on their own |
+
+The highest level across the merged commits wins; a push with no
+release-worthy commits leaves the version untouched. Keep the
+`## [Unreleased]` section of `CHANGELOG.md` current as you work — the workflow
+only renames it to the new version and date, it does not write your entries.
+Preview a range locally without changing anything:
+
+```bash
+node scripts/release.mjs <baseRef> <headRef> --dry-run
+```
+
 ## Style
 
 - No emojis in commits, code, or PR descriptions.

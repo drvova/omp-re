@@ -1,0 +1,66 @@
+name: Release
+
+# Auto-bump the version on every merge to main, driven by Conventional Commits.
+#
+# scripts/release.mjs inspects the commits that just landed and, if any warrant
+# a release (feat / fix / perf / a breaking change), bumps package.json and
+# .omp-plugin/marketplace.json in lock-step and stamps a dated section in
+# CHANGELOG.md. This job then commits that as `chore(release): vX.Y.Z`, tags it,
+# and pushes both back to main. See CONTRIBUTING.md -> Versioning.
+#
+# No recursion: a push authenticated with the default GITHUB_TOKEN does not
+# trigger further workflow runs, so the release commit/tag this job pushes does
+# NOT re-run CI or this workflow.
+#
+# Assumes main accepts a direct push from Actions. If you protect main against
+# that, this job's push will fail — grant it bypass, or move to a release-PR
+# flow (and swap the GITHUB_TOKEN loop-guard for a `[skip ci]`-style one).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    # Belt-and-suspenders: never act on our own release commit. (Only reachable
+    # if someone swaps GITHUB_TOKEN for a PAT, which would re-trigger pushes.)
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for the commit range and tag lookup
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide and apply the version bump
+        id: bump
+        run: node scripts/release.mjs "${{ github.event.before }}" "${{ github.sha }}"
+
+      - name: Commit, tag and push the release
+        if: ${{ steps.bump.outputs.released == 'true' }}
+        env:
+          V: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json .omp-plugin/marketplace.json CHANGELOG.md
+          git commit -m "chore(release): v${V}"
+          git tag -a "v${V}" -m "v${V}"
+          git push origin HEAD:main
+          git push origin "v${V}"
+
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          if [ "${{ steps.bump.outputs.released }}" = "true" ]; then
+            echo "Released **v${{ steps.bump.outputs.version }}** (${{ steps.bump.outputs.level }} bump from ${{ steps.bump.outputs.previous }})." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No release-worthy commits in this push; version stays ${{ steps.bump.outputs.previous }}." >> "$GITHUB_STEP_SUMMARY"
+          fi
