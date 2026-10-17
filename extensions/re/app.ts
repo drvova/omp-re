@@ -1,57 +1,38 @@
 /**
- * The cordis composition root for omp-re.
+ * The composition root for omp-re.
  *
  * Every subsystem — the read/mutate/rizin/CLI/debug/triage tool groups, the
- * evidence store, the audit log, the UI, and the command shell — is a cordis
- * plugin loaded on one `Context` created per extension load. The omp host
- * (`pi`) is provided as a service, and each subsystem declares it as a
- * dependency (`inject: ["pi"]`), so a subsystem activates only once the host
- * is present — the paper's *reactive coeffect* (spatial composability) in
- * practice. One Context per load (not a process singleton) keeps concurrent
- * omp sessions in the same process from sharing a host service.
+ * evidence store, the audit log, the UI, and the command shell — is applied
+ * here, in order, with the omp host (`pi`) handed to each. The subsystems'
+ * registration functions stay plain `(pi) => …` so they remain unit-testable
+ * in isolation; this module only sequences them.
  *
- * The subsystems' own registration functions stay plain `(pi) => …` so they
- * remain unit-testable in isolation; this module only wires them onto the
- * context graph.
- *
- * On teardown: omp's `ExtensionAPI` returns no handle from `on()`,
- * `registerTool()`, `registerCommand()`, … and exposes no extension-unload
- * hook, so a listener or tool, once registered, cannot be removed — those
- * subsystems are register-once by the host's design, and their plugin nodes
- * carry no inverse because there is nothing to undo. The teardown that is real
- * lives one level down, in `runtime.ts`: the per-session rizin and debug
- * processes are effects on a per-session scope that `session_shutdown`
- * disposes. omp's only supported toggle, `setActiveTools`, is what `/re off`
- * uses. So this graph buys declarative, dependency-ordered composition and a
- * single place to see every subsystem — not host-level hot-unload, which the
- * host does not offer.
+ * This used to be a cordis context graph, but a cordis `Context` meant a
+ * third-party runtime dependency, and an installed omp plugin can only resolve
+ * the host's own `@oh-my-pi/*` packages — not arbitrary deps — so the plugin
+ * failed to load with "Cannot find package 'cordis'". The composition it
+ * bought was a plain dependency-ordered loop: every subsystem needs only the
+ * host, which is always present, so a sequential `await` over the list gives
+ * the same ordering and the same "host injected" guarantee with no dependency
+ * to resolve. Teardown that is real lives in `runtime.ts` (the per-session
+ * rizin/debug processes); omp exposes no extension-unload hook, so there is
+ * nothing to revert at this level (see the note there).
  */
-import { Context } from "cordis";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
-/** A subsystem: a name and the registration it runs once the host service is available. */
+/** A subsystem: a name and the registration it runs with the host. */
 export interface ReSubsystem {
 	name: string;
 	apply: (pi: ExtensionAPI) => void | Promise<void>;
 }
 
 /**
- * Build the extension's context graph: provide `pi`, then load each subsystem
- * as a cordis plugin that injects it. Awaits every plugin's activation (the
- * async ones probe PATH) so all tools and listeners are registered before the
- * extension finishes initializing. Returns the root `Context` for inspection;
- * it is not disposed in normal operation (see the note above — omp has no
- * extension-unload hook, and the real per-session teardown lives in runtime.ts).
+ * Apply each subsystem in order, awaiting every one (the PATH-probing tool
+ * groups are async) so all tools and listeners are registered before the
+ * extension finishes initializing.
  */
-export async function composeApp(pi: ExtensionAPI, subsystems: readonly ReSubsystem[]): Promise<Context> {
-	const app = new Context();
-	app.provide("pi", pi);
+export async function composeApp(pi: ExtensionAPI, subsystems: readonly ReSubsystem[]): Promise<void> {
 	for (const sub of subsystems) {
-		await app.plugin({
-			name: sub.name,
-			inject: ["pi"],
-			apply: (ctx: Context) => sub.apply(ctx.get("pi") as ExtensionAPI),
-		});
+		await sub.apply(pi);
 	}
-	return app;
 }

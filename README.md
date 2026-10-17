@@ -82,7 +82,7 @@ address behind them.
 | Session branches (`getBranch`) | Evidence, annotations, and the open binary follow the active branch: after `/tree` navigation or a branch, an abandoned branch's renames are rolled back and its evidence no longer grounds claims. |
 | Session lifecycle events | `--continue`/`/resume` reopen the branch's binary in the background and **replay its annotations** into the fresh rizin process; a crashed or timed-out rizin respawns the same way. |
 | Compaction preservation (`session.compacting`) | When omp compacts the conversation, omp-re folds a snapshot of the RE session — open binary, evidence and annotation counts, the most recent evidence ids — into the summary, so the post-compaction model stays grounded and knows it can recall detail with `/re evidence` / `/re cite`. |
-| cordis composition | The extension is composed on one [cordis](https://github.com/cordiverse/cordis) `Context`: the rizin/debug process lifecycle is modelled as revertible effects, and every subsystem is a plugin that injects the host as a service. See [`CHANGELOG`](CHANGELOG.md) and `extensions/re/{runtime,app}.ts`. |
+| process lifecycle | The rizin/debug processes a session owns are tracked on a small per-session teardown scope: a respawn closes just the previous process, session shutdown closes them all. Subsystems are applied in order with the host handed to each. No third-party runtime dependencies — the plugin resolves only the host's own packages. See `extensions/re/{runtime,app}.ts`. |
 | Approval tiers with reasons | Read tools (and `rizin_help`) are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); `rizin_command` is `exec` with the exact command in its reason; triage tools are `exec`. omp's `tools.approvalMode` decides. |
 | Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
 | Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the evidence ids on this branch. |
@@ -353,7 +353,7 @@ Three environment variables, all optional:
 
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the cordis context graph: process effects and subsystem composition.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
 - [`docs/tools.md`](docs/tools.md) — full parameter tables for all 61 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.

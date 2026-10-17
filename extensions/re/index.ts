@@ -190,9 +190,8 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 /**
  * The command shell subsystem: the `re.binary` renderer, the `open_binary`
  * tool and `--binary` flag, the session-lifecycle handlers, argument
- * completion, and the `/re` command. Registered like every other subsystem as
- * a cordis plugin (see the default export), so it activates once the host
- * service is available.
+ * completion, and the `/re` command. Applied like every other subsystem (see
+ * the default export), with the host handed to it.
  */
 function registerShell(pi: ExtensionAPI): void {
 	/** Session id this instance last saw, to tell a branch into a new session file apart from navigation within one. */
@@ -415,11 +414,10 @@ function registerShell(pi: ExtensionAPI): void {
 }
 
 /**
- * Extension entry: compose every omp-re subsystem onto one cordis context.
- * The tool groups, evidence, audit, UI, and the command shell are each a
- * plugin node; `composeApp` provides the host (`pi`) as a service they inject
- * and awaits their activation (the triage/CLI probes are async) before init
- * completes. See app.ts for the paradigm.
+ * Extension entry: apply every omp-re subsystem in order. The tool groups,
+ * evidence, audit, UI, and the command shell each take the host (`pi`);
+ * `composeApp` awaits their registration (the triage/CLI probes are async)
+ * before init completes. See app.ts.
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
 	await composeApp(pi, [

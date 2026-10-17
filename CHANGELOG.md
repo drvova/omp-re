@@ -166,6 +166,17 @@ the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
 
 ### Fixed
 
+- **The installed plugin failed to load (`Cannot find package 'cordis'`).** An
+  omp plugin resolves only the host's own `@oh-my-pi/*` packages, not arbitrary
+  third-party `dependencies`, so the `cordis` runtime dependency that
+  `app.ts`/`runtime.ts` imported could not be found from the installed location
+  (dev-loading from the checkout masked it — that `node_modules` had cordis).
+  The cordis context graph is replaced with a plain ordered `composeApp` loop
+  and a small hand-rolled per-session teardown scope that owns the rizin/debug
+  process lifecycle — same semantics (a respawn closes the previous process,
+  session shutdown closes them all, `debug stop` closes just the debug
+  process). omp-re now has **no third-party runtime dependencies**, only the
+  host-provided `@oh-my-pi/*` peers.
 - **Cross-OS portability (surfaced by the Windows/macOS CI matrix).** The
   confined output directory (`output.ts`) used a hardcoded `/` separator and
   rejected the drive-letter colon, so every file-emitting capability
