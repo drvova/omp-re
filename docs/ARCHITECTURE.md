@@ -47,7 +47,7 @@ probes that stat PATH) finish before init completes. Each subsystem needs only
 the host, which is always present, so a plain sequential `await` gives the
 ordering with nothing to resolve. (This was a cordis `Context` graph until the
 cordis dependency stopped the installed plugin from loading; see the
-`[Unreleased]` CHANGELOG entry.)
+`[0.3.0]` CHANGELOG entry.)
 
 The subsystems, in load order (`index.ts`):
 
@@ -68,8 +68,8 @@ omp's `ExtensionAPI` returns no handle from `on()`, `registerTool()`,
 `registerCommand()`, `registerMessageRenderer()`, or `registerFlag()`, and
 exposes no extension-unload hook. So a listener or tool, once registered,
 cannot be removed — those subsystems are **register-once by the host's
-design**, and their plugin nodes carry no inverse because there is nothing to
-undo. The teardown that is real is the per-session process lifecycle above;
+design** — with no unregister call, there is nothing to undo. The teardown
+that is real is the per-session process lifecycle above;
 omp's one supported toggle, `setActiveTools`, is what `/re off` uses. There is
 no host-level hot-unload — the host does not offer one.
 

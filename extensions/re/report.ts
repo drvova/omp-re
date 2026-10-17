@@ -411,6 +411,11 @@ export async function writeReport(ctx: ExtensionContext, outputPath?: string): P
 		if (ctx.hasUI) ctx.ui.notify(message, "error");
 		else {
 			console.error(message);
+			// Headless (e.g. `omp --print "/re report …"`): the withheld-report gate must fail the
+			// run, not pass silently into a pipeline. omp exposes no exit-code API, so this is the
+			// one deliberate place the extension signals the host — `process.exitCode`, never
+			// `process.exit`, so omp's own shutdown still completes. Interactive callers get the
+			// `ctx.ui.notify` above instead, where a non-zero exit would be meaningless.
 			process.exitCode = 1;
 		}
 		return;
