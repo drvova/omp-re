@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-17
+
 Broadened coverage of rizin's own capabilities, chapter by chapter against
 the Rizin Book, verified end to end on rizin 0.9.1. The tool count grows from
 40 to 61.
