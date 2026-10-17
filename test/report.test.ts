@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { writeReport } from "../extensions/re/report.ts";
+import type { ClaimAudit, ClaimJudge } from "../extensions/re/audit-claims.ts";
 
 interface StubEntry {
 	id?: string;
@@ -189,5 +190,126 @@ describe("writeReport", () => {
 		expect(entry?.reproHash).toBe("b".repeat(64));
 		expect(entry?.status).toBe("reproducible");
 		expect(entry?.claims.length).toBeGreaterThan(0);
+	});
+});
+
+describe("writeReport — claim↔evidence support audit", () => {
+	// One grounded claim: the IOC in the summary produces a single grounded IOC claim (flat index 0).
+	const groundedEntries = (): StubEntry[] => [
+		{ type: "custom", customType: "re.binary", data: { path: "/bin/sample", sha256: "a".repeat(64) } },
+		{
+			type: "custom",
+			customType: "re.evidence",
+			data: {
+				id: "ev-a",
+				tool: "rizin_command",
+				args: { command: "iz" },
+				commands: ["iz"],
+				reproHash: "b".repeat(64),
+				binarySha256: "a".repeat(64),
+				canonicalExcerpt: "0x1 str http://185.220.101.99/beacon",
+				summary: "found string: http://185.220.101.99/beacon",
+			},
+		},
+	];
+	const supportedAll: ClaimJudge = async (items) => items.map((it): ClaimAudit => ({ index: it.index, verdict: "supported", reason: "ok" }));
+	const unsupportedAll = (reason: string): ClaimJudge => async (items) => items.map((it): ClaimAudit => ({ index: it.index, verdict: "unsupported", reason }));
+
+	test("no model / no judge: audit degrades to 'unaudited', report still written, exit 0", async () => {
+		const outputPath = join(tempDir, "audit-degrade.md");
+		await writeReport(makeCtx(groundedEntries(), []), outputPath); // default advisory; makeCtx has no runEphemeralTurn/model
+		expect(process.exitCode).not.toBe(1);
+		const md = await readFile(outputPath, "utf8");
+		expect(md).toContain("support unaudited");
+		expect(md).toContain("hxxp://185[.]220[.]101[.]99/beacon");
+	});
+
+	test("advisory: all supported -> no inline flag, a summary note, exit 0", async () => {
+		const outputPath = join(tempDir, "audit-ok.md");
+		await writeReport(makeCtx(groundedEntries(), []), outputPath, { audit: "advisory", judge: supportedAll });
+		expect(process.exitCode).not.toBe(1);
+		const md = await readFile(outputPath, "utf8");
+		expect(md).not.toContain("⚠ Support audit");
+		expect(md).toContain("support audit:");
+		expect(md).toContain("0 flagged");
+	});
+
+	test("advisory: an unsupported claim is flagged inline, report still written, exit 0", async () => {
+		const outputPath = join(tempDir, "audit-flag.md");
+		await writeReport(makeCtx(groundedEntries(), []), outputPath, { audit: "advisory", judge: unsupportedAll("evidence shows only an import") });
+		expect(process.exitCode).not.toBe(1);
+		const md = await readFile(outputPath, "utf8");
+		expect(md).toContain("⚠ Support audit: unsupported");
+		expect(md).toContain("evidence shows only an import");
+	});
+
+	test("strict: an unsupported claim withholds the whole report, exit 1", async () => {
+		const outputPath = join(tempDir, "audit-strict.md");
+		await writeReport(makeCtx(groundedEntries(), []), outputPath, { audit: "strict", judge: unsupportedAll("misattributed") });
+		expect(process.exitCode).toBe(1);
+		expect(await fileExists(outputPath)).toBe(false);
+		const err = consoleErrorCalls.map((a) => a.join(" ")).join("\n");
+		expect(err).toContain("not supported by their cited evidence");
+		expect(err).toContain("misattributed");
+	});
+
+	test("a throwing judge degrades to 'unaudited' and never blocks — even in strict (fails open)", async () => {
+		const judge: ClaimJudge = async () => {
+			throw new Error("no active model");
+		};
+		const advisoryPath = join(tempDir, "audit-throw-adv.md");
+		await writeReport(makeCtx(groundedEntries(), []), advisoryPath, { audit: "advisory", judge });
+		expect(process.exitCode).not.toBe(1);
+		expect(await readFile(advisoryPath, "utf8")).toContain("support unaudited");
+
+		const strictPath = join(tempDir, "audit-throw-strict.md");
+		await writeReport(makeCtx(groundedEntries(), []), strictPath, { audit: "strict", judge });
+		expect(process.exitCode).not.toBe(1); // infra failure must not fail closed
+		expect(await fileExists(strictPath)).toBe(true);
+	});
+
+	test("default judge: calls ctx.runEphemeralTurn with the right options and parses its JSON reply", async () => {
+		const ctx = makeCtx(groundedEntries(), []);
+		let captured: { tools?: unknown; dedupeReply?: unknown; replyMaxBytes?: unknown; promptText?: string } | undefined;
+		(ctx as unknown as { model: unknown }).model = { id: "test-model" };
+		(ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = async (opts: typeof captured) => {
+			captured = opts;
+			return { replyText: '```json\n[{"index":0,"verdict":"overreach","reason":"too strong"}]\n```', assistantMessage: {} };
+		};
+		const outputPath = join(tempDir, "audit-eph.md");
+		await writeReport(ctx, outputPath, { audit: "advisory" });
+		expect(captured?.tools).toBe(false);
+		expect(captured?.dedupeReply).toBe(false);
+		expect(captured?.replyMaxBytes).toBe(Number.POSITIVE_INFINITY);
+		expect(captured?.promptText).toContain("found string: http://185.220.101.99/beacon");
+		expect(process.exitCode).not.toBe(1);
+		expect(await readFile(outputPath, "utf8")).toContain("⚠ Support audit: overreach");
+	});
+
+	test("default judge: an unparseable reply degrades to 'unaudited' and fails open even in strict", async () => {
+		const ctx = makeCtx(groundedEntries(), []);
+		(ctx as unknown as { model: unknown }).model = { id: "test-model" };
+		(ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = async () => ({ replyText: "I cannot produce JSON, sorry.", assistantMessage: {} });
+		const outputPath = join(tempDir, "audit-badjson.md");
+		await writeReport(ctx, outputPath, { audit: "strict" });
+		expect(process.exitCode).not.toBe(1);
+		expect(await fileExists(outputPath)).toBe(true);
+		expect(await readFile(outputPath, "utf8")).toContain("support unaudited");
+	});
+
+	test("the existence gate runs before the audit: an ungrounded claim withholds and the judge is never called", async () => {
+		let calls = 0;
+		const judge: ClaimJudge = async (items) => {
+			calls++;
+			return items.map((it): ClaimAudit => ({ index: it.index, verdict: "supported", reason: "" }));
+		};
+		const entries: StubEntry[] = [
+			{ type: "custom", customType: "re.annotation", data: { kind: "comment", ea: "0x401000", oldValue: "", newValue: "http://evil-test.example/x", evidenceId: "" } },
+		];
+		const outputPath = join(tempDir, "audit-order.md");
+		await writeReport(makeCtx(entries, []), outputPath, { audit: "strict", judge });
+		expect(process.exitCode).toBe(1);
+		expect(await fileExists(outputPath)).toBe(false);
+		expect(calls).toBe(0);
 	});
 });
