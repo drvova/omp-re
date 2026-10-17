@@ -19,12 +19,76 @@ export function customEntries(entries: readonly SessionEntry[], customType: stri
 	return entries.filter((entry): entry is CustomEntry => entry.type === "custom" && entry.customType === customType);
 }
 
+/**
+ * One recorded `re.evidence` entry, read back from the branch. The reproducibility
+ * fields (`commands`/`reproHash`/`canonicalExcerpt`/`binarySha256`) are present only
+ * on records written since verifiable reports shipped; older records omit them and
+ * are treated as "unverifiable (legacy)" by `/re verify` and the report manifest.
+ */
+export interface EvidenceRecord {
+	id: string;
+	tool: string;
+	/** The tool's JSON params (for `rizin_command`: `{ command, addr }`), used to reconstruct the exact line at verify time. */
+	args?: unknown;
+	ea?: string;
+	/** SHA-256 of the model-facing text (header + any truncation footer): resolves the blob, but NOT reproducible. */
+	outputHash?: string;
+	artifactId?: string;
+	summary: string;
+	/** `rizin_command` only: the exact rizin line(s) that produced this output. */
+	commands?: string[];
+	/** `rizin_command` only: SHA-256 of the canonicalized raw output — the verification key. */
+	reproHash?: string;
+	/** `rizin_command` only: a short canonical excerpt for human diffing. */
+	canonicalExcerpt?: string;
+	/** SHA-256 of the binary this evidence was taken against, stamped at record time. */
+	binarySha256?: string;
+}
+
+/**
+ * Every `re.evidence` record on the branch. Skips malformed rows (missing
+ * id/tool/summary); the provenance fields are copied through when present and
+ * left undefined on legacy records, so old sessions load without crashing.
+ */
+export function collectEvidence(entries: readonly { type: string; customType?: string; data?: unknown }[]): EvidenceRecord[] {
+	const out: EvidenceRecord[] = [];
+	for (const entry of entries) {
+		if (entry.type !== "custom" || entry.customType !== "re.evidence") continue;
+		const data = entry.data as Partial<EvidenceRecord> | undefined;
+		if (!data || typeof data.id !== "string" || typeof data.tool !== "string" || typeof data.summary !== "string") continue;
+		out.push({
+			id: data.id,
+			tool: data.tool,
+			args: data.args,
+			ea: typeof data.ea === "string" ? data.ea : undefined,
+			outputHash: typeof data.outputHash === "string" ? data.outputHash : undefined,
+			artifactId: typeof data.artifactId === "string" ? data.artifactId : undefined,
+			summary: data.summary,
+			commands: Array.isArray(data.commands) && data.commands.every((c) => typeof c === "string") ? data.commands : undefined,
+			reproHash: typeof data.reproHash === "string" ? data.reproHash : undefined,
+			canonicalExcerpt: typeof data.canonicalExcerpt === "string" ? data.canonicalExcerpt : undefined,
+			binarySha256: typeof data.binarySha256 === "string" ? data.binarySha256 : undefined,
+		});
+	}
+	return out;
+}
+
 /** The binary path the latest `re.binary` entry on this branch opened, if any. */
 export function lastRecordedBinaryPath(entries: readonly SessionEntry[]): string | undefined {
 	let last: string | undefined;
 	for (const entry of customEntries(entries, "re.binary")) {
 		const path = (entry.data as { path?: unknown } | undefined)?.path;
 		if (typeof path === "string") last = path;
+	}
+	return last;
+}
+
+/** The SHA-256 of the binary the latest `re.binary` entry on this branch opened, if one was recorded (absent on entries written before verifiable reports). */
+export function lastRecordedBinarySha256(entries: readonly SessionEntry[]): string | undefined {
+	let last: string | undefined;
+	for (const entry of customEntries(entries, "re.binary")) {
+		const sha = (entry.data as { sha256?: unknown } | undefined)?.sha256;
+		if (typeof sha === "string") last = sha;
 	}
 	return last;
 }

@@ -62,6 +62,7 @@ d                # toggle decompiled C
 x                # follow the selected xref
 a                # hand the function off to the model with a grounding prompt
 /re report       # write a Markdown report from what was gathered
+/re verify       # re-run the cited commands and prove the report reproducible
 ```
 
 Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a
@@ -229,6 +230,18 @@ blocked, and the IOC is defanged even in the error message:
 
 ![/re report withholding the whole report over one ungrounded IOC claim](docs/img/report-gate.png)
 
+### Verified, reproducible
+
+Grounding proves a claim was *cited*; `/re verify` proves its evidence is
+*reproducible*. Every `rizin_command` evidence record stores the exact command,
+the SHA-256 of its canonicalized output, and the open binary's SHA-256 (stamped
+at open time). `/re verify [--strict]` re-runs each cited command read-only
+against the same binary and confirms the hash still matches — a mismatch is a
+hard failure with a non-zero headless exit, the same loud signal the report gate
+uses. `/re report` ships this as a **Verification Manifest** (claim → command →
+output hash → binary hash) plus a machine-readable `<report>.manifest.json`
+sidecar, so anyone with the binary can re-derive the report rather than trust it.
+
 ## Prerequisites
 
 | Requirement | Notes |
@@ -250,6 +263,7 @@ blocked, and the IOC is defanged even in the error message:
 /re cite <id>        cite evidence in chat   a  ask the model
 /re undo             revert annotation
 /re report [path]    write report
+/re verify [--strict] re-verify report evidence is reproducible
 /re status           rizin, decompiler, and session status
 /re on               enable RE tools
 /re off              disable RE tools (quick toggle, no restart)

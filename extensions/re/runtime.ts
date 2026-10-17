@@ -33,6 +33,8 @@ export interface ReSessionState {
 	/** The DEBUG session (rizin -d), which has launched the target process. Separate from `rz`, created only by the `debug` tool, never auto-respawned (that would silently re-run the program). */
 	dbg: RzSession | null;
 	binaryPath: string | null;
+	/** SHA-256 of the open binary, computed once at open time (Node crypto over the file). Binds recorded evidence to the exact bytes it was taken against, for `/re verify`. Null until a binary is opened, or on a resume whose `re.binary` entry predates this field. */
+	binarySha256: string | null;
 	/** Explicit load settings (`-a/-b/-B/-F`) for a headerless/raw target, reused on every respawn so a resume or crash recovery loads the blob the same way. Null means header autodetection. */
 	loadOptions: LoadOptions | null;
 	/** annotationFingerprint() of the annotations applied to `rz`; compared after branch/tree changes. */
@@ -94,6 +96,7 @@ function newState(sessionId: string): ReSessionState {
 		spawning: null,
 		dbg: null,
 		binaryPath: null,
+		binarySha256: null,
 		loadOptions: null,
 		appliedAnnotations: "",
 		auditHmacWarned: false,
