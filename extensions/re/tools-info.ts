@@ -60,8 +60,6 @@ export interface RzClassRow {
 	[key: string]: unknown;
 }
 
-type ToolCtx = Parameters<Parameters<ExtensionAPI["registerTool"]>[0]["execute"]>[4];
-
 /** Binary info object, keyed by canonical field names where rizin reports them. */
 export async function getBinaryInfo(rz: RzSession): Promise<ReToolResult> {
 	const info = (await rz.cmdj<RzBinaryInfo>("iIj")) ?? ({} as RzBinaryInfo);

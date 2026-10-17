@@ -193,7 +193,7 @@ interface PickerOptions {
 	done: (result: undefined) => void;
 }
 
-/** A scrollable, fuzzy-filterable list: SelectList plus an externally-driven filter that matches on `label` with omp's own fuzzy matcher (SelectList's built-in filter matches `value` by prefix, which is useless when value is an address). Rebuilds the SelectList on each filter change since it exposes no setItems. */
+/** A scrollable, fuzzy-filterable list: a SelectList wrapped in custom panel chrome (title + count, a styled filter line, a custom hint, and esc clears the filter then closes). The filter is driven here and fuzzy-matches on `label` only (omp's fuzzyFilter), so addresses in `value` don't pollute matches; the SelectList is rebuilt on each filter change. */
 function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
 	const allItems = opts.items;
 	let filter = "";
