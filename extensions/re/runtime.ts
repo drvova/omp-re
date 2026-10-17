@@ -1,23 +1,21 @@
 /**
- * The cordis backbone for omp-re.
+ * The process-lifecycle backbone for omp-re.
  *
- * Process lifecycle — the part that used to be hand-rolled in `state.ts` as a
- * `Map` of nullable fields with scattered `.close()` calls — is modelled with
- * cordis's *revertible effects* (https://github.com/cordiverse/cordis, the
- * "context paradigm"). One root `Context` is created per extension load; each
- * omp session gets a child scope (a cordis fiber), and each rizin process it
- * owns — the static analysis session and the opt-in debug session — is a
- * `ctx.effect` whose setup returns its own teardown. The runtime holds that
- * inverse, so closing a process is never wired by hand: disposing the one
- * effect closes one process (a respawn), and disposing the whole session
- * scope closes every process it owns (session shutdown). RzSession itself
- * stays the low-level transport; cordis owns *when it lives and dies*.
+ * Process lifecycle — the static analysis session and the opt-in debug session
+ * a given omp session owns — is modelled as a small per-session teardown
+ * scope. Each rizin process registers its `close()` as an effect on the scope
+ * and gets back an idempotent disposer, so closing a process is never wired by
+ * hand: disposing the one effect closes one process (a respawn), and disposing
+ * the whole session scope closes every process it owns (session shutdown).
+ * RzSession itself stays the low-level transport; the scope owns *when it lives
+ * and dies*. (This was a cordis context graph; it is now hand-rolled so the
+ * installed plugin needs no third-party runtime dependency to resolve — an omp
+ * plugin can only resolve the host's own `@oh-my-pi/*` packages. See app.ts.)
  *
  * `getState()` stays synchronous and returns a plain record, so the many
- * call sites that read/write counters and paths are unchanged; the cordis
- * scope attaches lazily the first time a process is spawned.
+ * call sites that read/write counters and paths are unchanged; the scope
+ * attaches lazily the first time a process is spawned.
  */
-import { Context } from "cordis";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
 import { branchEntries, recordedAnalysisPasses, recordedMapFiles, recordedSignatures } from "./entries.ts";
@@ -44,17 +42,49 @@ export interface ReSessionState {
 	findingCount: number;
 	/** normalized addr -> most recent evidence id observed at that address (used by mutate tools to ground annotations, and by report anchors) */
 	evidenceByAddr: Map<string, string>;
-	/** cordis internals: the session's child scope and the live effect disposers that own each process's teardown. Not read outside the backend. */
-	_scope: ScopeHandle | null;
+	/** Internals: the session's teardown scope and the live disposers that own each process's teardown. Not read outside the backend. */
+	_scope: Scope | null;
 	_disposeRz: Disposer | null;
 	_disposeDbg: Disposer | null;
 }
 
 type Disposer = () => Promise<void> | void;
+type Teardown = () => Promise<void> | void;
 
-interface ScopeHandle {
-	ctx: Context;
-	dispose: () => Promise<void>;
+/**
+ * A per-session teardown registry (replaces the cordis fiber). Each spawned
+ * process registers its `close()` via {@link Scope.effect} and gets an
+ * idempotent disposer; {@link Scope.dispose} runs every still-registered
+ * teardown (most-recent first), which is how a session shutdown closes all of
+ * its processes at once.
+ */
+interface Scope {
+	/** Run `setup` now and keep the teardown it returns; the returned disposer runs that teardown once and unregisters it. */
+	effect(setup: () => Teardown): Disposer;
+	/** Run every teardown still registered, most-recent first. */
+	dispose(): Promise<void>;
+}
+
+function newScope(): Scope {
+	const teardowns = new Set<Teardown>();
+	return {
+		effect(setup) {
+			const teardown = setup();
+			teardowns.add(teardown);
+			let disposed = false;
+			return async () => {
+				if (disposed) return;
+				disposed = true;
+				teardowns.delete(teardown);
+				await teardown();
+			};
+		},
+		async dispose() {
+			const pending = [...teardowns].reverse();
+			teardowns.clear();
+			for (const teardown of pending) await teardown();
+		},
+	};
 }
 
 function newState(sessionId: string): ReSessionState {
@@ -77,15 +107,14 @@ function newState(sessionId: string): ReSessionState {
 }
 
 /**
- * Owns the root cordis `Context` and the per-session scopes. One instance per
- * process (lazily built), reachable through the `state.ts` facade so tools and
- * tests keep their existing imports.
+ * Owns the per-session teardown scopes. One instance per process (lazily
+ * built), reachable through the `state.ts` facade so tools and tests keep
+ * their existing imports.
  */
 class RizinBackend {
-	private readonly root = new Context();
 	private readonly records = new Map<string, ReSessionState>();
 
-	/** The plain record for a session, created on first use. Synchronous: the cordis scope is attached later, on first spawn. */
+	/** The plain record for a session, created on first use. Synchronous: the teardown scope is attached later, on first spawn. */
 	record(sessionId: string): ReSessionState {
 		let rec = this.records.get(sessionId);
 		if (!rec) {
@@ -95,13 +124,10 @@ class RizinBackend {
 		return rec;
 	}
 
-	/** The session's child scope (a cordis fiber), created and activated on demand. Processes register their teardown as effects on `scope.ctx`. */
-	private async scope(rec: ReSessionState): Promise<Context> {
-		if (rec._scope) return rec._scope.ctx;
-		const fiber = this.root.plugin(() => {});
-		await fiber;
-		rec._scope = { ctx: fiber.ctx, dispose: () => fiber.dispose() };
-		return rec._scope.ctx;
+	/** The session's teardown scope, created on demand. Processes register their `close()` as effects on it. */
+	private scope(rec: ReSessionState): Scope {
+		if (!rec._scope) rec._scope = newScope();
+		return rec._scope;
 	}
 
 	requireBinary(rec: ReSessionState): string {
@@ -140,12 +166,12 @@ class RizinBackend {
 		const live = liveAnnotations(entries, binaryPath);
 		const replayFailures = [...mapFailures, ...passFailures, ...signatureFailures, ...(await replayAnnotations(rz, live))];
 
-		const scope = await this.scope(rec);
+		const scope = this.scope(rec);
 		const previous = rec._disposeRz;
-		// Revertible effect: the inverse closes exactly this process. Idempotent, so an explicit close elsewhere is harmless.
+		// The disposer closes exactly this process. Idempotent, so an explicit close elsewhere is harmless.
 		rec._disposeRz = scope.effect(() => () => {
 			if (!rz.isClosed) rz.close();
-		}, "rizin process");
+		});
 		rec.rz = rz;
 		rec.binaryPath = binaryPath;
 		rec.appliedAnnotations = annotationFingerprint(live);
@@ -198,10 +224,10 @@ class RizinBackend {
 			if (mismatch) ctx.ui?.notify?.(`omp-re: ${mismatch}`, "warning");
 		}
 		const dbg = await RzSession.spawnDebug(rizinPath, binaryPath, { ...options, loadOptions });
-		const scope = await this.scope(rec);
+		const scope = this.scope(rec);
 		rec._disposeDbg = scope.effect(() => () => {
 			if (!dbg.isClosed) dbg.close(); // closing the debug rizin also kills the launched debuggee
-		}, "debug process");
+		});
 		rec.dbg = dbg;
 		return dbg;
 	}

@@ -1,14 +1,14 @@
 /**
- * The cordis backbone (runtime.ts, via the state.ts facade): the per-session
- * record is stable and synchronous, and each rizin/debug process's teardown is
- * owned by a revertible effect on the session scope — so a respawn closes the
- * old process and disposing the session closes every process it owns.
+ * The process-lifecycle backbone (runtime.ts, via the state.ts facade): the
+ * per-session record is stable and synchronous, and each rizin/debug process's
+ * teardown is owned by an effect on the session scope — so a respawn closes
+ * the old process and disposing the session closes every process it owns.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, startDebug } from "../extensions/re/state.ts";
 import { canRunRizin, logSkip, makeHarness, TEST_BINARY } from "./helpers.ts";
 
-logSkip("runtime (cordis backbone) tests");
+logSkip("runtime (process-lifecycle) tests");
 
 describe("session record (no rizin needed)", () => {
 	test("getState returns one stable, mutable record per session id", () => {
@@ -43,7 +43,7 @@ describe("session record (no rizin needed)", () => {
 	});
 });
 
-describe.skipIf(!canRunRizin)("process lifecycle is owned by cordis effects", () => {
+describe.skipIf(!canRunRizin)("process lifecycle is owned by the session scope", () => {
 	const h = makeHarness("runtime-lifecycle");
 	beforeAll(() => {
 		getState(h.ctx).binaryPath = TEST_BINARY;

@@ -1,8 +1,7 @@
 /**
- * The cordis composition root (app.ts): subsystems load as plugins that
- * inject the host `pi` service, their order is preserved, async subsystems
- * (the PATH-probing tool groups) finish before composition resolves, and the
- * returned context disposes cleanly. No rizin needed.
+ * The composition root (app.ts): subsystems are applied in order with the host
+ * `pi` handed to each, async subsystems (the PATH-probing tool groups) finish
+ * before composition resolves, and each call is independent. No rizin needed.
  */
 import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -11,16 +10,14 @@ import { composeApp, type ReSubsystem } from "../extensions/re/app.ts";
 const fakePi = { tag: "the-host" } as unknown as ExtensionAPI;
 
 describe("composeApp", () => {
-	test("loads every subsystem once, in order, with the host injected", async () => {
+	test("applies every subsystem once, in order, with the host passed to each", async () => {
 		const seen: string[] = [];
 		const subs: ReSubsystem[] = [
 			{ name: "a", apply: (pi) => void seen.push(`a:${(pi as unknown as { tag: string }).tag}`) },
 			{ name: "b", apply: (pi) => void seen.push(`b:${(pi as unknown as { tag: string }).tag}`) },
 		];
-		const app = await composeApp(fakePi, subs);
+		await composeApp(fakePi, subs);
 		expect(seen).toEqual(["a:the-host", "b:the-host"]);
-		expect(app.get("pi")).toBe(fakePi);
-		await app.fiber.dispose();
 	});
 
 	test("an async subsystem finishes applying before composeApp resolves", async () => {
@@ -38,14 +35,14 @@ describe("composeApp", () => {
 		expect(done).toBe(true); // composeApp awaited the async apply
 	});
 
-	test("each load gets its own context — two apps don't share the host service", async () => {
+	test("each call passes its own host — two compositions don't bleed into each other", async () => {
 		const piOne = { tag: "one" } as unknown as ExtensionAPI;
 		const piTwo = { tag: "two" } as unknown as ExtensionAPI;
-		const one = await composeApp(piOne, []);
-		const two = await composeApp(piTwo, []);
-		expect(one.get("pi")).toBe(piOne);
-		expect(two.get("pi")).toBe(piTwo);
-		await one.fiber.dispose();
-		await two.fiber.dispose();
+		const seenOne: string[] = [];
+		const seenTwo: string[] = [];
+		await composeApp(piOne, [{ name: "x", apply: (pi) => void seenOne.push((pi as unknown as { tag: string }).tag) }]);
+		await composeApp(piTwo, [{ name: "x", apply: (pi) => void seenTwo.push((pi as unknown as { tag: string }).tag) }]);
+		expect(seenOne).toEqual(["one"]);
+		expect(seenTwo).toEqual(["two"]);
 	});
 });

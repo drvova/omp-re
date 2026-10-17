@@ -1,60 +1,53 @@
 # Architecture
 
 omp-re is an [omp](https://omp.sh) extension that drives [rizin](https://rizin.re)
-for reverse engineering. Internally it is composed on one
-[cordis](https://github.com/cordiverse/cordis) `Context` — the "context
-paradigm" from *A Programming Paradigm for Spatiotemporal Composability* — so
-process lifecycle and subsystem wiring are declarative rather than hand-rolled.
+for reverse engineering. It has **no third-party runtime dependencies** — an
+installed omp plugin can only resolve the host's own `@oh-my-pi/*` packages, so
+everything below is hand-rolled on top of them.
 
-## The two cordis roles
-
-cordis shows up in exactly two places, each matching one half of the paradigm.
-
-### 1. Revertible effects — process lifecycle (`runtime.ts`)
+## Process lifecycle (`runtime.ts`)
 
 A rizin process is a resource with a lifetime: spawn, respawn on death or
 branch change, close on shutdown. That used to be a `Map` of nullable fields
-with `.close()` calls sprinkled across the code. It is now a single `RizinBackend`
-(a process-wide singleton) that owns one root `Context`:
+with `.close()` calls sprinkled across the code. It is now a single
+`RizinBackend` (a process-wide singleton) that gives each omp session (keyed by
+`ctx.sessionManager.getSessionId()`) a small **teardown scope**:
 
-- Each omp session (keyed by `ctx.sessionManager.getSessionId()`) gets a
-  **child scope** — a cordis fiber created from the root context.
-- Each process it owns — the static analysis session (`rizin -q0 -N`) and the
-  opt-in debug session (`rizin -d`) — is a **`ctx.effect`** whose setup returns
-  its own teardown (`() => rz.close()`). The runtime holds that inverse.
+- Each process the session owns — the static analysis session (`rizin -q0 -N`)
+  and the opt-in debug session (`rizin -d`) — registers its `close()` on the
+  scope as an **effect** and gets back an idempotent **disposer**.
+- Calling one disposer closes exactly that process; disposing the whole scope
+  closes every process the session still owns (most-recent first).
 
 The consequences fall out for free:
 
 | Event | Mechanism |
 | --- | --- |
-| Respawn (process died / stale after a branch) | dispose the one rizin effect, create a new one |
-| `/tree` navigation to a branch with different annotations | dispose the effect; the next tool call respawns and replays that branch's annotations |
-| `debug stop` | dispose just the debug effect; the static session is untouched |
-| `session_shutdown` / `session_before_switch` | dispose the whole session scope — every process effect's inverse runs |
+| Respawn (process died / stale after a branch) | run the one rizin disposer, register a new effect |
+| `/tree` navigation to a branch with different annotations | run the disposer; the next tool call respawns and replays that branch's annotations |
+| `debug stop` | run just the debug disposer; the static session is untouched |
+| `session_shutdown` / `session_before_switch` | dispose the whole session scope — every registered teardown runs |
 
 `RzSession` (`rizin.ts`) stays the low-level transport: the `-q0` NUL-framed
-pipe, with abort, timeouts, and stderr capture. cordis owns *when a process
+pipe, with abort, timeouts, and stderr capture. The scope owns *when a process
 lives and dies*, not how bytes move.
 
 `state.ts` is a thin facade over the backend (`getState`, `ensureRizin`,
 `spawnRizin`, `shutdownState`, `rekeyState`, `syncAnnotationsToBranch`,
 `startDebug`, `stopDebug`, `requireDebug`). `getState()` stays synchronous and
 returns a plain per-session record, so the many call sites that read and write
-counters and paths are unchanged; the cordis scope attaches lazily on the
-first spawn.
+counters and paths are unchanged; the scope attaches lazily on the first spawn.
 
-### 2. Reactive coeffects — subsystem composition (`app.ts`)
+## Subsystem composition (`app.ts`)
 
-`composeApp(pi, subsystems)` is the extension's composition root, built once
-per extension load:
-
-- A fresh `Context` is created (per load, not a process singleton, so
-  concurrent omp sessions in one process never share a host service).
-- The omp host, `pi`, is provided as a service: `app.provide("pi", pi)`.
-- Every subsystem is a cordis **plugin** that declares `inject: ["pi"]`, so it
-  activates only once the host is present — the paper's *reactive coeffect*
-  (spatial composability). `composeApp` awaits each plugin, so the async ones
-  (the triage / CLI probes that stat PATH) finish before init completes.
+`composeApp(pi, subsystems)` is the extension's composition root, run once per
+extension load: it applies each subsystem in order, handing the omp host (`pi`)
+to each, and awaits every one — so the async subsystems (the triage / CLI
+probes that stat PATH) finish before init completes. Each subsystem needs only
+the host, which is always present, so a plain sequential `await` gives the
+ordering with nothing to resolve. (This was a cordis `Context` graph until the
+cordis dependency stopped the installed plugin from loading; see the
+`[Unreleased]` CHANGELOG entry.)
 
 The subsystems, in load order (`index.ts`):
 
@@ -67,7 +60,7 @@ re:preserve     re:ui            re:shell
 Each subsystem's registration stays a plain `(pi) => …` function (see
 `tools-*.ts`, `evidence.ts`, `audit.ts`, `ui.ts`, `preserve.ts`, and
 `registerShell` in `index.ts`), so it is unit-testable in isolation; `app.ts`
-only wires them onto the graph.
+only sequences them.
 
 ## Teardown, honestly
 
@@ -77,18 +70,16 @@ exposes no extension-unload hook. So a listener or tool, once registered,
 cannot be removed — those subsystems are **register-once by the host's
 design**, and their plugin nodes carry no inverse because there is nothing to
 undo. The teardown that is real is the per-session process lifecycle above;
-omp's one supported toggle, `setActiveTools`, is what `/re off` uses. The
-context graph buys declarative, dependency-ordered composition and one place
-to see every subsystem — not host-level hot-unload, which the host does not
-offer.
+omp's one supported toggle, `setActiveTools`, is what `/re off` uses. There is
+no host-level hot-unload — the host does not offer one.
 
 ## Module map
 
 | File | Responsibility |
 | --- | --- |
 | `index.ts` | Extension entry; `registerShell` (renderers, `open_binary`, `--binary`, session-lifecycle handlers, completions, the `/re` command); the `composeApp` call |
-| `app.ts` | cordis composition root (`composeApp`) |
-| `runtime.ts` | cordis backbone: root `Context`, `RizinBackend`, per-session scopes, process effects |
+| `app.ts` | Composition root (`composeApp`): applies each subsystem in order with the host |
+| `runtime.ts` | `RizinBackend`: per-session teardown scopes that own the rizin/debug process lifecycle |
 | `state.ts` | Thin facade over `RizinBackend` |
 | `rizin.ts` | `RzSession` transport (`-q0` pipe), spawn flags, validators, `rz-*` tool resolution |
 | `catalog.ts` | rizin's self-described command catalog (`?*j`) and the `rizin_command` policy |
@@ -120,7 +111,5 @@ risk.
 
 ## References
 
-- cordis — the meta-framework: <https://github.com/cordiverse/cordis>
-- *A Programming Paradigm for Spatiotemporal Composability* — the paradigm
-  (revertible effects, reactive coeffects, the context paradigm):
-  <https://github.com/cordiverse/paper>
+- [omp](https://omp.sh) — the host agent
+- [rizin](https://rizin.re) — the reverse-engineering toolkit omp-re drives

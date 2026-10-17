@@ -1,10 +1,10 @@
 /**
- * Per-omp-session state, now a thin facade over the cordis backend in
- * `runtime.ts`. The exported surface is unchanged so the tools, UI, evidence,
- * and audit modules keep their imports; the process lifecycle underneath is
- * managed by cordis revertible effects rather than hand-rolled `.close()`
- * calls. Keyed by `ctx.sessionManager.getSessionId()`, so the main session
- * and every task subagent get their own rizin process.
+ * Per-omp-session state, a thin facade over the backend in `runtime.ts`. The
+ * exported surface is unchanged so the tools, UI, evidence, and audit modules
+ * keep their imports; the process lifecycle underneath is owned by the
+ * backend's per-session teardown scope. Keyed by
+ * `ctx.sessionManager.getSessionId()`, so the main session and every task
+ * subagent get their own rizin process.
  */
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { type RzSession, type SpawnOptions } from "./rizin.ts";
