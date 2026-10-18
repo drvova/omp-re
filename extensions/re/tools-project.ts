@@ -23,7 +23,7 @@ import { rizinOutputPath, rizinPathArg } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
-export function registerProjectTools(pi: ExtensionAPI): void {
+export const registerProjectTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const exportProjectParams = z.object({
     file: z
@@ -82,4 +82,4 @@ export function registerProjectTools(pi: ExtensionAPI): void {
       );
     },
   });
-}
+};

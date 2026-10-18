@@ -85,7 +85,7 @@ interface Scope {
   dispose: () => Promise<void>;
 }
 
-function newScope(): Scope {
+const newScope = (): Scope => {
   const teardowns = new Set<Teardown>();
   return {
     async dispose() {
@@ -109,26 +109,24 @@ function newScope(): Scope {
       };
     },
   };
-}
+};
 
-function newState(sessionId: string): ReSessionState {
-  return {
-    _disposeDbg: null,
-    _disposeRz: null,
-    _scope: null,
-    appliedAnnotations: "",
-    auditHmacWarned: false,
-    binaryPath: null,
-    binarySha256: null,
-    dbg: null,
-    evidenceByAddr: new Map(),
-    evidenceCount: 0,
-    loadOptions: null,
-    rz: null,
-    sessionId,
-    spawning: null,
-  };
-}
+const newState = (sessionId: string): ReSessionState => ({
+  _disposeDbg: null,
+  _disposeRz: null,
+  _scope: null,
+  appliedAnnotations: "",
+  auditHmacWarned: false,
+  binaryPath: null,
+  binarySha256: null,
+  dbg: null,
+  evidenceByAddr: new Map(),
+  evidenceCount: 0,
+  loadOptions: null,
+  rz: null,
+  sessionId,
+  spawning: null,
+});
 
 /**
  * Owns the per-session teardown scopes. One instance per process (lazily
@@ -398,9 +396,9 @@ class RizinBackend {
 let backendSingleton: RizinBackend | null = null;
 
 /** The process-wide backend, built on first use. */
-export function backend(): RizinBackend {
+export const backend = (): RizinBackend => {
   if (!backendSingleton) {
     backendSingleton = new RizinBackend();
   }
   return backendSingleton;
-}
+};

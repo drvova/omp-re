@@ -38,7 +38,7 @@ import type { RzSession } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
 
 /** The live rizin session for UI use, or null (with the reason already shown) when there is none. Respawns transparently like the tools do, so a panel opened after a branch change still works. */
-async function uiSession(ctx: ExtensionContext): Promise<RzSession | null> {
+const uiSession = async (ctx: ExtensionContext): Promise<RzSession | null> => {
   if (!getState(ctx).binaryPath) {
     ctx.ui.notify(
       "omp-re: no binary open — use /re open <path> first",
@@ -55,7 +55,7 @@ async function uiSession(ctx: ExtensionContext): Promise<RzSession | null> {
     );
     return null;
   }
-}
+};
 
 /** Static facts an `ij`/`iej` pair answers for a given rizin process — invariant for its lifetime, unlike the function count (which annotations can change). */
 interface BinInfo {
@@ -78,9 +78,9 @@ const binInfoCache = new WeakMap<
   { info: BinInfo | null; entry: number | null }
 >();
 
-async function loadBinInfo(
+const loadBinInfo = async (
   rz: RzSession
-): Promise<{ info: BinInfo | null; entry: number | null }> {
+): Promise<{ info: BinInfo | null; entry: number | null }> => {
   const cached = binInfoCache.get(rz);
   if (cached) {
     return cached;
@@ -93,7 +93,7 @@ async function loadBinInfo(
   const result = { entry: program?.vaddr ?? null, info };
   binInfoCache.set(rz, result);
   return result;
-}
+};
 
 /** Reverser-relevant facts about the currently open binary, plus live counts. Single source of truth for the status-band presenter — never derive display strings anywhere else. */
 export interface BinaryFacts {
@@ -110,7 +110,9 @@ export interface BinaryFacts {
   evidence: number;
 }
 
-export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
+export const binaryFacts = async (
+  ctx: ExtensionContext
+): Promise<BinaryFacts> => {
   const state = getState(ctx);
   const facts: BinaryFacts = {
     arch: null,
@@ -162,9 +164,9 @@ export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
   facts.entry =
     entry === null || entry === undefined ? null : eaFromOffset(entry);
   return facts;
-}
+};
 
-function formatSize(bytes: number): string {
+const formatSize = (bytes: number): string => {
   if (bytes < 1024) {
     return `${bytes}B`;
   }
@@ -176,9 +178,9 @@ function formatSize(bytes: number): string {
     unitIndex += 1;
   }
   return `${value.toFixed(1).replace(/\.0$/u, "")}${units[unitIndex]}`;
-}
+};
 
-function renderBand(f: BinaryFacts, theme: Theme, width: number): string[] {
+const renderBand = (f: BinaryFacts, theme: Theme, width: number): string[] => {
   const info = [f.format, f.arch, f.os].filter(Boolean).join(" ");
   const groups = [
     f.name,
@@ -195,24 +197,26 @@ function renderBand(f: BinaryFacts, theme: Theme, width: number): string[] {
   ].join(" · ");
   const line2 = theme.fg("muted", metrics);
   return [truncateToWidth(line1, width), truncateToWidth(line2, width)];
-}
+};
 
 /** The widget factory closes over one already-computed BinaryFacts snapshot; render() never re-fetches, so it stays a pure, synchronous presenter as the Component contract requires. */
-function makeHud(facts: BinaryFacts): (tui: TUI, theme: Theme) => Component {
-  return (_tui: TUI, theme: Theme) => ({
+const makeHud =
+  (facts: BinaryFacts): ((tui: TUI, theme: Theme) => Component) =>
+  (_tui: TUI, theme: Theme) => ({
     invalidate() {},
     render(width: number): string[] {
       return renderBand(facts, theme, width);
     },
   });
-}
 
 /**
  * Exported so index.ts can force an immediate refresh right after opening a
  * binary — session_start handlers across extensions are not guaranteed to run
  * in a particular order. With no binary open the band reads "no binary".
  */
-export async function refreshStatusBand(ctx: ExtensionContext): Promise<void> {
+export const refreshStatusBand = async (
+  ctx: ExtensionContext
+): Promise<void> => {
   if (!ctx.hasUI) {
     return;
   }
@@ -222,21 +226,19 @@ export async function refreshStatusBand(ctx: ExtensionContext): Promise<void> {
   } catch {
     // best-effort: a stale ctx or dead rizin process must never crash the primary flow
   }
-}
+};
 
 const MAX_VISIBLE_ROWS = 12;
 const DEFAULT_HINT = "enter select · esc close";
 
-function selectListTheme(theme: Theme): SelectListTheme {
-  return {
-    description: (t) => theme.fg("dim", t),
-    noMatch: (t) => theme.fg("muted", t),
-    scrollInfo: (t) => theme.fg("dim", t),
-    selectedPrefix: (t) => theme.fg("accent", t),
-    selectedText: (t) => theme.fg("accent", t),
-    symbols: getSymbolTheme(),
-  };
-}
+const selectListTheme = (theme: Theme): SelectListTheme => ({
+  description: (t) => theme.fg("dim", t),
+  noMatch: (t) => theme.fg("muted", t),
+  scrollInfo: (t) => theme.fg("dim", t),
+  selectedPrefix: (t) => theme.fg("accent", t),
+  selectedText: (t) => theme.fg("accent", t),
+  symbols: getSymbolTheme(),
+});
 
 interface PickerOptions {
   title: string;
@@ -249,12 +251,11 @@ interface PickerOptions {
 }
 
 /** A scrollable, fuzzy-filterable list: a SelectList wrapped in custom panel chrome (title + count, a styled filter line, a custom hint, and esc clears the filter then closes). The filter is driven here and fuzzy-matches on `label` only (omp's fuzzyFilter), so addresses in `value` don't pollute matches; the SelectList is rebuilt on each filter change. */
-function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
+const makePickerPanel = (theme: Theme, opts: PickerOptions): Component => {
   const allItems = opts.items;
   let filter = "";
-  let selectList = buildSelectList();
 
-  function buildSelectList(): SelectList {
+  const buildSelectList = (): SelectList => {
     const filtered =
       filter === ""
         ? allItems
@@ -271,7 +272,8 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
     };
     sl.onCancel = () => opts.done(null);
     return sl;
-  }
+  };
+  let selectList = buildSelectList();
 
   return {
     handleInput(data: string) {
@@ -314,17 +316,17 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
       return lines.map((l) => truncateToWidth(l, width));
     },
   };
-}
+};
 
 /**
  * Overlay when the interactive TUI is available; falls back to a plain
  * notification otherwise (headless/print/RPC modes, where `ctx.ui.custom` is
  * a no-op that would otherwise hang the command indefinitely).
  */
-async function showPanel(
+const showPanel = async (
   ctx: ExtensionContext,
   opts: Omit<PickerOptions, "done">
-): Promise<void> {
+): Promise<void> => {
   if (!ctx.hasUI) {
     const body =
       opts.items.length > 0
@@ -338,44 +340,7 @@ async function showPanel(
       makePickerPanel(theme, { ...opts, done }),
     { overlay: true }
   );
-}
-
-export async function showFunctionsPanel(ctx: ExtensionContext): Promise<void> {
-  const rz = await uiSession(ctx);
-  if (!rz) {
-    return;
-  }
-  interface Fn {
-    addr?: number;
-    offset?: number;
-    name: string;
-    size?: number;
-  }
-  const fns = (await rz.cmdj<Fn[]>("aflj").catch(() => null)) ?? [];
-  const items: SelectItem[] = fns.flatMap((fn) => {
-    const addr = addrOf(fn);
-    if (addr === undefined) {
-      return [];
-    }
-    const value = eaFromOffset(addr);
-    return [
-      {
-        description: fn.size === undefined ? value : `${value} · ${fn.size}b`,
-        label: fn.name,
-        value,
-      },
-    ];
-  });
-  await showPanel(ctx, {
-    hint: "enter open · type to filter · esc close",
-    items,
-    onChoose: async (item) => {
-      await showCodeView(ctx, item.value, item.label);
-      return "keep" as const;
-    },
-    title: "omp-re: functions",
-  });
-}
+};
 
 type CodeViewMode = "disasm" | "decompile";
 
@@ -385,7 +350,7 @@ type CodeViewMode = "disasm" | "decompile";
  * pseudo-C alike. Decompiled code is syntax-highlighted with omp's own
  * highlighter (once, at open).
  */
-function makeCodeView(opts: {
+const makeCodeView = (opts: {
   title: string;
   disasmLines: string[];
   decompileLines: string[] | null;
@@ -396,20 +361,19 @@ function makeCodeView(opts: {
   onXrefs: () => void;
   onAsk: () => void;
   done: (result: null) => void;
-}): Component {
+}): Component => {
   let mode: CodeViewMode = "disasm";
   let offset = 0;
   const { theme } = opts;
   const disasm = opts.disasmLines.map((l) => theme.fg("text", l));
   const decompiled = opts.decompileLines;
 
-  function current(): string[] {
-    return mode === "decompile" && decompiled ? decompiled : disasm;
-  }
+  const current = (): string[] =>
+    mode === "decompile" && decompiled ? decompiled : disasm;
 
-  function clamp(): void {
+  const clamp = (): void => {
     offset = Math.min(Math.max(0, offset), Math.max(0, current().length - 1));
-  }
+  };
 
   return {
     handleInput(data: string) {
@@ -465,7 +429,7 @@ function makeCodeView(opts: {
       return rendered.map((l) => truncateToWidth(l, width));
     },
   };
-}
+};
 
 interface RzXrefRow {
   from?: number;
@@ -473,10 +437,10 @@ interface RzXrefRow {
 }
 
 /** Name the function containing each xref site (rizin's axtj carries none). Bounded: past the cap, rows keep their bare address. */
-async function labelXrefs(
+const labelXrefs = async (
   rz: RzSession,
   rows: RzXrefRow[]
-): Promise<SelectItem[]> {
+): Promise<SelectItem[]> => {
   const LABEL_CAP = 64;
   const items: SelectItem[] = [];
   for (const [index, row] of rows.entries()) {
@@ -496,7 +460,7 @@ async function labelXrefs(
     items.push({ description: row.type, label, value: ea });
   }
   return items;
-}
+};
 
 /**
  * The code-view surface: disassembly (default) or decompiled pseudo-C, with
@@ -504,12 +468,12 @@ async function labelXrefs(
  * evidence means "the agent observed this"; recording a human's browsing
  * would let a claim be credited to something the model never actually saw.
  */
-export async function showCodeView(
+export const showCodeView = async (
   ctx: ExtensionContext,
   addr: string,
   name?: string,
   depth = 0
-): Promise<void> {
+): Promise<void> => {
   const session = await uiSession(ctx);
   if (!session) {
     return;
@@ -539,7 +503,7 @@ export async function showCodeView(
     return;
   }
 
-  async function followXrefs(): Promise<void> {
+  const followXrefs = async (): Promise<void> => {
     const rows = (
       (await rz.cmdj<RzXrefRow[]>(`axtj @ ${addr}`).catch(() => null)) ?? []
     ).filter((row) => typeof row.from === "number");
@@ -556,7 +520,7 @@ export async function showCodeView(
       },
       title: `omp-re: xrefs to ${name ?? addr}`,
     });
-  }
+  };
 
   await ctx.ui.custom<null>(
     (_tui, theme, keybindings, done) => {
@@ -605,7 +569,46 @@ export async function showCodeView(
     },
     { overlay: true }
   );
-}
+};
+
+export const showFunctionsPanel = async (
+  ctx: ExtensionContext
+): Promise<void> => {
+  const rz = await uiSession(ctx);
+  if (!rz) {
+    return;
+  }
+  interface Fn {
+    addr?: number;
+    offset?: number;
+    name: string;
+    size?: number;
+  }
+  const fns = (await rz.cmdj<Fn[]>("aflj").catch(() => null)) ?? [];
+  const items: SelectItem[] = fns.flatMap((fn) => {
+    const addr = addrOf(fn);
+    if (addr === undefined) {
+      return [];
+    }
+    const value = eaFromOffset(addr);
+    return [
+      {
+        description: fn.size === undefined ? value : `${value} · ${fn.size}b`,
+        label: fn.name,
+        value,
+      },
+    ];
+  });
+  await showPanel(ctx, {
+    hint: "enter open · type to filter · esc close",
+    items,
+    onChoose: async (item) => {
+      await showCodeView(ctx, item.value, item.label);
+      return "keep" as const;
+    },
+    title: "omp-re: functions",
+  });
+};
 
 export interface EvidenceRecord {
   id: string;
@@ -616,32 +619,41 @@ export interface EvidenceRecord {
 }
 
 /** Evidence on the current branch, oldest first. */
-export function evidenceRecords(ctx: ExtensionContext): EvidenceRecord[] {
-  return customEntries(branchEntries(ctx), "re.evidence")
+export const evidenceRecords = (ctx: ExtensionContext): EvidenceRecord[] =>
+  customEntries(branchEntries(ctx), "re.evidence")
     .map((entry) => entry.data as EvidenceRecord)
     .filter((data) => typeof data?.id === "string");
-}
 
 /** Prefix match: the picker only ever displays an 8-char slice of the UUID, so retyping what's shown could never satisfy an exact-equality lookup. Shared by `showEvidencePanel`, `/re cite`, and `/re` argument completion so there is exactly one lookup rule. */
-export function findEvidence(
+export const findEvidence = (
   ctx: ExtensionContext,
   id: string
-): EvidenceRecord | undefined {
+): EvidenceRecord | undefined => {
   const all = evidenceRecords(ctx);
   return all.find((e) => e.id === id) ?? all.find((e) => e.id.startsWith(id));
-}
+};
 
-function evidenceDetail(match: EvidenceRecord): string {
+const evidenceDetail = (match: EvidenceRecord): string => {
   const full = match.artifactId
     ? `\n\nfull output: artifact://${match.artifactId}`
     : "";
   return `[${match.tool}:${match.ea ?? "?"}]\n\n${match.summary}${full}`;
-}
+};
 
-export async function showEvidencePanel(
+/** Pull one evidence record into the editor as a prefilled message, so a follow-up carries its exact recorded content. */
+export const citeEvidence = (
+  ctx: ExtensionContext,
+  rec: EvidenceRecord
+): void => {
+  ctx.ui.setEditorText(
+    `Re: evidence ${rec.id.slice(0, 8)} (${rec.tool} @ ${rec.ea ?? "?"})\n\n${rec.summary}\n\n`
+  );
+};
+
+export const showEvidencePanel = async (
   ctx: ExtensionContext,
   id?: string
-): Promise<void> {
+): Promise<void> => {
   if (id) {
     const match = findEvidence(ctx, id);
     if (match) {
@@ -672,21 +684,16 @@ export async function showEvidencePanel(
     },
     title: "omp-re: evidence",
   });
-}
-
-/** Pull one evidence record into the editor as a prefilled message, so a follow-up carries its exact recorded content. */
-export function citeEvidence(ctx: ExtensionContext, rec: EvidenceRecord): void {
-  ctx.ui.setEditorText(
-    `Re: evidence ${rec.id.slice(0, 8)} (${rec.tool} @ ${rec.ea ?? "?"})\n\n${rec.summary}\n\n`
-  );
-}
+};
 
 interface RzString {
   vaddr?: number;
   string: string;
 }
 
-export async function showStringsPanel(ctx: ExtensionContext): Promise<void> {
+export const showStringsPanel = async (
+  ctx: ExtensionContext
+): Promise<void> => {
   const rz = await uiSession(ctx);
   if (!rz) {
     return;
@@ -731,14 +738,16 @@ export async function showStringsPanel(ctx: ExtensionContext): Promise<void> {
     },
     title: "omp-re: strings",
   });
-}
+};
 
 interface RzImport {
   name: string;
   plt?: number;
 }
 
-export async function showImportsPanel(ctx: ExtensionContext): Promise<void> {
+export const showImportsPanel = async (
+  ctx: ExtensionContext
+): Promise<void> => {
   const rz = await uiSession(ctx);
   if (!rz) {
     return;
@@ -779,9 +788,9 @@ export async function showImportsPanel(ctx: ExtensionContext): Promise<void> {
     },
     title: "omp-re: imports",
   });
-}
+};
 
-export function registerUI(pi: ExtensionAPI): void {
+export const registerUI = (pi: ExtensionAPI): void => {
   // Only RE tools change what the band shows, and the refresh is fire-and-forget: its rizin
   // query can queue behind a long decompile, which must never hold up a tool result.
   pi.on("tool_result", (event, ctx) => {
@@ -808,13 +817,13 @@ export function registerUI(pi: ExtensionAPI): void {
       await showImportsPanel(ctx);
     },
   });
-}
+};
 
 /** `/re findings [id]`: the live findings on this branch. Enter pulls one into the editor (claim, provenance, evidence ids) to discuss or revise; with an id, show its detail. */
-export async function showFindingsPanel(
+export const showFindingsPanel = async (
   ctx: ExtensionContext,
   id?: string
-): Promise<void> {
+): Promise<void> => {
   const all = liveFindings(ctx);
   const detail = (f: FindingRecord) =>
     `finding ${f.id.slice(0, 8)}: ${f.claim}\n${findingNote(f)}\nevidence: ${f.evidenceIds.map((e) => e.slice(0, 8)).join(", ")}`;
@@ -852,4 +861,4 @@ export async function showFindingsPanel(
     },
     title: "omp-re: findings",
   });
-}
+};

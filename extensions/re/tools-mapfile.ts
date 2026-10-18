@@ -24,7 +24,7 @@ import { reRenderers } from "./render.ts";
 import { resolveBinaryPath, validateAddr } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
-export function registerMapFileTools(pi: ExtensionAPI): void {
+export const registerMapFileTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const mapFileParams = z.object({
     addr: z
@@ -108,4 +108,4 @@ export function registerMapFileTools(pi: ExtensionAPI): void {
       );
     },
   });
-}
+};

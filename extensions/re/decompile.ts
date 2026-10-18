@@ -50,7 +50,7 @@ const DEFAULT_DECOMPILER_COMMANDS: readonly DecompilerKind[] = ["pdg", "pdd"];
  * reorders, never silently removes a working decompiler. A single bare word
  * (e.g. `pdg`) simply forces that one first.
  */
-export function decompilerCommands(): DecompilerKind[] {
+export const decompilerCommands = (): DecompilerKind[] => {
   const configured = (process.env.OMPRE_DECOMPILER ?? "")
     .split(",")
     .map((name) => name.trim())
@@ -62,24 +62,10 @@ export function decompilerCommands(): DecompilerKind[] {
     }
   }
   return ordered;
-}
-
-/** Every decompiler command whose plugin is actually loaded in this rizin, in priority order (for `/re status` and diagnostics). */
-export async function availableDecompilers(
-  rz: RzSession,
-  signal?: AbortSignal
-): Promise<DecompilerKind[]> {
-  const found: DecompilerKind[] = [];
-  for (const command of decompilerCommands()) {
-    if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
-      found.push(command);
-    }
-  }
-  return found;
-}
+};
 
 /** A human label for a decompiler command (the two known plugins get their names; anything else is shown as its command). */
-export function decompilerLabel(kind: DecompilerKind | null): string {
+export const decompilerLabel = (kind: DecompilerKind | null): string => {
   if (kind === "pdg") {
     return "rz-ghidra (pdg)";
   }
@@ -89,17 +75,31 @@ export function decompilerLabel(kind: DecompilerKind | null): string {
   return kind
     ? `${kind} (plugin)`
     : "none — decompile_function returns labeled disassembly";
-}
+};
 
 /** Never infer presence from anything short of the command's own help text. */
-function isAvailableReply(reply: string): boolean {
+const isAvailableReply = (reply: string): boolean => {
   const trimmed = reply.trim();
   return (
     trimmed.length > 0 &&
     !trimmed.includes("does not exist") &&
     !trimmed.startsWith("ERROR")
   );
-}
+};
+
+/** Every decompiler command whose plugin is actually loaded in this rizin, in priority order (for `/re status` and diagnostics). */
+export const availableDecompilers = async (
+  rz: RzSession,
+  signal?: AbortSignal
+): Promise<DecompilerKind[]> => {
+  const found: DecompilerKind[] = [];
+  for (const command of decompilerCommands()) {
+    if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
+      found.push(command);
+    }
+  }
+  return found;
+};
 
 /**
  * Per-session decompiler tier. A WeakMap drops a closed session's entry for
@@ -110,10 +110,10 @@ function isAvailableReply(reply: string): boolean {
  */
 const kindBySession = new WeakMap<RzSession, DecompilerKind | null>();
 
-export async function resolveDecompiler(
+export const resolveDecompiler = async (
   rz: RzSession,
   signal?: AbortSignal
-): Promise<DecompilerKind | null> {
+): Promise<DecompilerKind | null> => {
   if (kindBySession.has(rz)) {
     return kindBySession.get(rz) ?? null;
   }
@@ -125,18 +125,18 @@ export async function resolveDecompiler(
   }
   kindBySession.set(rz, null);
   return null;
-}
+};
 
 /**
  * Decompile the function at `ea` with the best available plugin, falling back
  * to labeled annotated disassembly. Returns null when there is no function at
  * `ea` at all.
  */
-export async function decompileAt(
+export const decompileAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<DecompileOutcome | null> {
+): Promise<DecompileOutcome | null> => {
   const kind = await resolveDecompiler(rz, signal);
   if (kind) {
     const code = (
@@ -157,4 +157,4 @@ export async function decompileAt(
   }
   const prefix = kind ? DECOMPILER_EMPTY_PREFIX : DISASM_ONLY_PREFIX;
   return { code: disasm.lines.join("\n"), kind: "disasm", prefix };
-}
+};

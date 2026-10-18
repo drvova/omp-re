@@ -9,7 +9,7 @@ import {
   listRelocationRows,
 } from "../extensions/re/tools-info.ts";
 
-function stubRz(replies: Record<string, string>) {
+const stubRz = (replies: Record<string, string>) => {
   const ran: string[] = [];
   const cmdj = <T>(command: string) => {
     ran.push(command);
@@ -25,7 +25,7 @@ function stubRz(replies: Record<string, string>) {
       cmdj,
     } as unknown as RzSession,
   };
-}
+};
 
 const text = (r: { content: { type: string; text?: string }[] }) =>
   r.content[0].type === "text" ? (r.content[0].text ?? "") : "";

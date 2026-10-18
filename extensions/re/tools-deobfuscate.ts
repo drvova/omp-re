@@ -50,7 +50,7 @@ const HEX = /^[0-9a-fA-F]+$/u;
 const ALGO = /^[a-z0-9][a-z0-9-]*$/iu;
 const MAX_SIZE = 65_536;
 
-function hexArg(key: string, value: string | undefined): string {
+const hexArg = (key: string, value: string | undefined): string => {
   if (value === undefined || value === "") {
     throw new Error(
       `omp-re: deobfuscate: ${key} is required (hex bytes, e.g. deadbeef)`
@@ -63,14 +63,14 @@ function hexArg(key: string, value: string | undefined): string {
     );
   }
   return h;
-}
+};
 
 /** Build the one `wo*` command (operating on the current block at `ea`). Throws on missing/invalid params before anything runs. */
-export function deobfuscateCommand(
+export const deobfuscateCommand = (
   op: string,
   ea: string,
   params: { key?: string; algo?: string; iv?: string }
-): string {
+): string => {
   if (op in KEYED_OPS) {
     return `${KEYED_OPS[op]} ${hexArg("key", params.key)} @ ${ea}`;
   }
@@ -91,9 +91,9 @@ export function deobfuscateCommand(
     return `woD ${params.algo} ${key}${iv} @ ${ea}`;
   }
   throw new Error(`omp-re: deobfuscate: unknown op ${JSON.stringify(op)}`);
-}
+};
 
-export function registerDeobfuscateTools(pi: ExtensionAPI): void {
+export const registerDeobfuscateTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const params = z.object({
     addr: z
@@ -176,4 +176,4 @@ export function registerDeobfuscateTools(pi: ExtensionAPI): void {
       }
     },
   });
-}
+};

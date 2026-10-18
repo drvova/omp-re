@@ -31,7 +31,7 @@ import {
 } from "./signatures.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
-export function registerSignatureTools(pi: ExtensionAPI): void {
+export const registerSignatureTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const applyParams = z.object({
     path: z
@@ -181,4 +181,4 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
       );
     },
   });
-}
+};

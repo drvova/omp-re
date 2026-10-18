@@ -52,11 +52,11 @@ interface AfvlVar {
 }
 
 /** The function containing `addr`: its start EA and current name. Mutations key on the start EA so an annotation stays addressable after the name it was requested by is gone (a rename can retire the old flag). */
-async function functionAt(
+const functionAt = async (
   rz: RzSession,
   addr: string,
   signal?: AbortSignal
-): Promise<{ ea: string; name: string }> {
+): Promise<{ ea: string; name: string }> => {
   const numeric = eaFromOffset(await resolveNumericAddr(rz, addr, signal));
   const fn = (await rz.cmdj<AfijRow[]>(`afij @ ${numeric}`, { signal }))?.[0];
   const start = fn ? addrOf(fn) : undefined;
@@ -64,14 +64,14 @@ async function functionAt(
     throw new Error(`omp-re: no function at ${addr}`);
   }
   return { ea: eaFromOffset(start), name: fn.name };
-}
+};
 
 /** afvlj groups variables by storage kind ({stack: [...], reg: [...], ...}); flatten every group. */
-async function variablesAt(
+const variablesAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<AfvlVar[]> {
+): Promise<AfvlVar[]> => {
   const grouped = await rz.cmdj<Record<string, unknown>>(`afvlj @ ${ea}`, {
     signal,
   });
@@ -86,66 +86,63 @@ async function variablesAt(
         )
       : []
   );
-}
+};
 
 /** `afs` read-back: rizin prints the stored signature with a trailing `;`. */
-async function signatureAt(
+const signatureAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<string> {
-  return (await rz.cmd(`afs @ ${ea}`, { signal })).trim().replace(/;\s*$/u, "");
-}
+): Promise<string> =>
+  (await rz.cmd(`afs @ ${ea}`, { signal })).trim().replace(/;\s*$/u, "");
 
 /** The function whose start address is exactly `ea`, or undefined when none begins there (`afij` returns the function *containing* ea, which may start earlier). */
-async function functionStartingAt(
+const functionStartingAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<AfijRow | undefined> {
+): Promise<AfijRow | undefined> => {
   const fn = (await rz.cmdj<AfijRow[]>(`afij @ ${ea}`, { signal }))?.[0];
   return fn && eaFromOffset(addrOf(fn) ?? -1) === ea ? fn : undefined;
-}
+};
 
 /** The current calling convention of the function at `ea` (`afc` with no argument prints it). */
-async function callingConventionAt(
+const callingConventionAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<string> {
-  return (await rz.cmd(`afc @ ${ea}`, { signal })).trim();
-}
+): Promise<string> => (await rz.cmd(`afc @ ${ea}`, { signal })).trim();
 
 /** The name of the flag at `ea`, or "" when none (`fdj` prints `{offset,name,realname}` for the flag there). */
-async function flagAt(
+const flagAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<string> => {
   const flag = await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`, { signal });
   return flag && typeof flag.name === "string" ? flag.name : "";
-}
+};
 
 /** The arch/bits hint at `ea`, or undefined when none (`ahl.j` prints `[{addr,arch?,bits?}]` for the hints there). */
-async function archHintAt(
+const archHintAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<{ arch?: string; bits?: number } | undefined> {
+): Promise<{ arch?: string; bits?: number } | undefined> => {
   const hints = await rz.cmdj<{ arch?: string; bits?: number }[]>(
     `ahl.j @ ${ea}`,
     { signal }
   );
   return Array.isArray(hints) && hints.length > 0 ? hints[0] : undefined;
-}
+};
 
 /** The current value of analysis hint `kind` at `ea` as a canonical string, or "" when unset. `ahl.j` prints `[{addr,immbase?,type?,size?,jump?,ret?,…}]` for the hints there. */
-async function hintValueAt(
+const hintValueAt = async (
   rz: RzSession,
   ea: string,
   kind: HintKind,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<string> => {
   const { key } = HINT_SPEC[kind];
   const hints = await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`, {
     signal,
@@ -160,14 +157,14 @@ async function hintValueAt(
     return `0x${raw.toString(16)}`;
   }
   return String(raw);
-}
+};
 
 /** The global variable named `name`, or undefined when none. `avglj` lists globals as `[{name,type,size,addr}]` (addr is a hex string). */
-async function globalByName(
+const globalByName = async (
   rz: RzSession,
   name: string,
   signal?: AbortSignal
-): Promise<{ type: string; addr: string } | undefined> {
+): Promise<{ type: string; addr: string } | undefined> => {
   const globals = await rz.cmdj<
     { name?: string; type?: string; addr?: string }[]
   >("avglj", { signal });
@@ -177,15 +174,15 @@ async function globalByName(
   return g && typeof g.type === "string"
     ? { addr: String(g.addr ?? ""), type: g.type }
     : undefined;
-}
+};
 
 /** The metadata item of a given type (`Cd`/`Cs`/`Cf`) at `ea`, or undefined when none. `C.j` lists all meta at an address as `[{offset,type,size?,...}]`. */
-async function metaAt(
+const metaAt = async (
   rz: RzSession,
   ea: string,
   type: string,
   signal?: AbortSignal
-): Promise<{ type: string; size?: number } | undefined> {
+): Promise<{ type: string; size?: number } | undefined> => {
   const meta = await rz.cmdj<{ type?: string; size?: number }[]>(
     `C.j @ ${ea}`,
     { signal }
@@ -195,32 +192,31 @@ async function metaAt(
         | { type: string; size?: number }
         | undefined)
     : undefined;
-}
+};
 
 /** Tolerate only rizin's own cosmetic re-punctuation (spacing, trailing `;`) when comparing signatures/types — never a semantic difference. */
-function normalizeCType(value: string): string {
-  return value
+const normalizeCType = (value: string): string =>
+  value
     .trim()
     .replace(/;+\s*$/u, "")
     .replaceAll(/\s+/gu, "");
-}
 
-async function apply(
+const apply = async (
   rz: RzSession,
   commands: string[],
   signal?: AbortSignal
-): Promise<void> {
+): Promise<void> => {
   for (const command of commands) {
     await rz.cmd(command, { signal });
   }
-}
+};
 
 /** Append the `re.annotation` entry (grounded by the latest evidence at the same EA, if any) and record that rizin now matches the branch. */
-function recordAnnotation(
+const recordAnnotation = (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   data: Omit<AnnotationData, "evidenceId" | "ungrounded">
-): void {
+): void => {
   const evidenceId =
     getState(ctx).evidenceByAddr.get(normalizeAddr(data.ea)) ?? "";
   pi.appendEntry("re.annotation", {
@@ -229,20 +225,30 @@ function recordAnnotation(
     ungrounded: evidenceId === "",
   });
   markAnnotationsApplied(ctx);
-}
+};
 
-function mutateResult(
+const mutateResult = (
   kind: AnnotationKind,
   data: { ea: string; oldValue: string; newValue: string; target?: string }
-): ReToolResult {
+): ReToolResult => {
   const what = data.target ? `${data.target}: ` : "";
   return plainResult(
     `${kind}: ${what}${JSON.stringify(data.oldValue)} -> ${JSON.stringify(data.newValue)} @ ${data.ea}`,
     data.ea
   );
-}
+};
 
-export function registerMutateTools(pi: ExtensionAPI): void {
+/** A tool argument for an approval prompt: quoted, and bounded so a huge value can't flood the dialog. */
+const describeArg = (args: unknown, key: string): string => {
+  const value =
+    args && typeof args === "object"
+      ? (args as Record<string, unknown>)[key]
+      : undefined;
+  const text = typeof value === "string" ? value : "?";
+  return JSON.stringify(text.length > 80 ? `${text.slice(0, 77)}...` : text);
+};
+
+export const registerMutateTools = (pi: ExtensionAPI): void => {
   // Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
   const z = pi.zod;
   const undoNote = "Reversible with /re undo.";
@@ -1076,23 +1082,13 @@ export function registerMutateTools(pi: ExtensionAPI): void {
       return mutateResult("set_format", data);
     },
   });
-}
-
-/** A tool argument for an approval prompt: quoted, and bounded so a huge value can't flood the dialog. */
-function describeArg(args: unknown, key: string): string {
-  const value =
-    args && typeof args === "object"
-      ? (args as Record<string, unknown>)[key]
-      : undefined;
-  const text = typeof value === "string" ? value : "?";
-  return JSON.stringify(text.length > 80 ? `${text.slice(0, 77)}...` : text);
-}
+};
 
 /** Reverse the most recent annotation still in effect on this branch by re-applying its oldValue, then record an `re.undo` marker so a repeated `/re undo` steps further back instead of re-applying the same reversal. */
-export async function undoLastAnnotation(
+export const undoLastAnnotation = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext
-): Promise<string> {
+): Promise<string> => {
   const { binaryPath } = getState(ctx);
   const last = binaryPath
     ? liveAnnotations(branchEntries(ctx), binaryPath).at(-1)
@@ -1117,4 +1113,4 @@ export async function undoLastAnnotation(
   pi.appendEntry("re.undo", { undidEntryId: last.entryId });
   markAnnotationsApplied(ctx);
   return `omp-re: undid ${data.kind} @ ${data.ea} (restored ${JSON.stringify(data.oldValue)})`;
-}
+};

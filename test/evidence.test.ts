@@ -100,7 +100,7 @@ describe("rebuildEvidenceIndex", () => {
 
 describe("the tool_result evidence hook", () => {
   /** A harness whose pi.on captures the tool_result handler, so it can be driven exactly as omp would. */
-  function hooked(sessionId: string) {
+  const hooked = (sessionId: string) => {
     const h = makeHarness(sessionId);
     let handler:
       | ((event: unknown, ctx: unknown) => Promise<unknown>)
@@ -128,7 +128,7 @@ describe("the tool_result evidence hook", () => {
         h.ctx
       ) as Promise<{ content?: { type: string; text?: string }[] } | undefined>;
     return { fire, h };
-  }
+  };
 
   test("records an evidence-tier result and tags what the model sees with its id", async () => {
     const { h, fire } = hooked("hook-tag");

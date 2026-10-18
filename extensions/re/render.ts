@@ -48,18 +48,18 @@ interface RenderableResult {
   isError?: boolean;
 }
 
-function firstText(result: RenderableResult): string {
+const firstText = (result: RenderableResult): string => {
   const block = result.content.find(
     (c) => c.type === "text" && typeof c.text === "string"
   );
   return block?.text ?? "";
-}
+};
 
-function callLine(
+const callLine = (
   spec: RenderSpec,
   args: RenderArgs | undefined,
   theme: Theme
-): string {
+): string => {
   const parts = [theme.fg("toolTitle", theme.bold(spec.title))];
   const subject = spec.subject ? args?.[spec.subject] : undefined;
   if (typeof subject === "string" && subject.length > 0) {
@@ -76,13 +76,13 @@ function callLine(
     parts.push(theme.fg("dim", meta.join(" ")));
   }
   return parts.join(" ");
-}
+};
 
 /** Split the content text into the header the details recorded and the body below it. */
-function splitBody(
+const splitBody = (
   content: string,
   details: ReToolDetails | undefined
-): { header: string; body: string } {
+): { header: string; body: string } => {
   const header = details?.header ?? content.split("\n")[0] ?? "";
   if (content.startsWith(`${header}\n`)) {
     return { body: content.slice(header.length + 1), header };
@@ -97,28 +97,27 @@ function splitBody(
   return nl === -1
     ? { body: "", header: content }
     : { body: content.slice(nl + 1), header: content.slice(0, nl) };
-}
+};
 
 /** omp's highlighter, degrading to plain lines: a renderer must never be the thing that breaks the transcript. */
-function highlighted(source: string, lang: string, theme: Theme): string[] {
+const highlighted = (source: string, lang: string, theme: Theme): string[] => {
   try {
     return highlightCode(source, lang, theme);
   } catch {
     return source.split("\n").map((line) => theme.fg("toolOutput", line));
   }
-}
+};
 
 /** Drop the trailing truncation/artifact notice; the header meta already says so. */
-function withoutNotice(body: string): string {
-  return body.replace(/\n\n\[Output truncated:[^\n]*\]$/u, "");
-}
+const withoutNotice = (body: string): string =>
+  body.replace(/\n\n\[Output truncated:[^\n]*\]$/u, "");
 
-function bodyLines(
+const bodyLines = (
   style: BodyStyle,
   body: string,
   details: ReToolDetails | undefined,
   theme: Theme
-): string[] {
+): string[] => {
   if (style === "none" || body.trim() === "") {
     return [];
   }
@@ -134,13 +133,13 @@ function bodyLines(
     return highlighted(trimmed, "json", theme);
   }
   return trimmed.split("\n").map((line) => theme.fg("toolOutput", line));
-}
+};
 
-function nativeHead(
+const nativeHead = (
   spec: RenderSpec,
   args: RenderArgs | undefined,
   meta: NativeToolHead["meta"] = []
-): NativeToolHead {
+): NativeToolHead => {
   const subject = spec.subject ? args?.[spec.subject] : undefined;
   return {
     title: spec.title,
@@ -149,14 +148,14 @@ function nativeHead(
       : {}),
     meta,
   };
-}
+};
 
 /** The result body as a native node: C for decompiler output, JSON for list payloads, plain text otherwise. */
-function nativeBody(
+const nativeBody = (
   style: BodyStyle,
   body: string,
   details: ReToolDetails | undefined
-) {
+) => {
   if (style === "none" || body.trim() === "") {
     return;
   }
@@ -172,146 +171,144 @@ function nativeBody(
     return code(source, { lang: "json", preview: { lines: 6 } });
   }
   return code(source, { preview: { lines: 12 } });
-}
+};
 
 /** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */
-export function reRenderers(spec: RenderSpec) {
-  return {
-    describeCall(args: RenderArgs): NativeToolView {
-      return { inline: true, tool: nativeHead(spec, args) };
-    },
+export const reRenderers = (spec: RenderSpec) => ({
+  describeCall(args: RenderArgs): NativeToolView {
+    return { inline: true, tool: nativeHead(spec, args) };
+  },
 
-    describeResult(
-      result: RenderableResult,
-      options: ToolRenderResultOptions,
-      args?: RenderArgs
-    ): NativeToolView {
-      const textContent = firstText(result);
-      if (options.isPartial) {
-        const progress = textContent || `${spec.title}…`;
-        return {
-          inline: true,
-          tool: nativeHead(spec, args, [
-            [span(progress, "muted", { fx: "shimmer" })],
-          ]),
-        };
-      }
-      if (result.isError) {
-        const full = textContent.trim() || "failed";
-        const first = full.split("\n", 1)[0]!.trim();
-        const gist =
-          first.length > ERROR_GIST_CHARS
-            ? `${first.slice(0, ERROR_GIST_CHARS - 1)}…`
-            : first;
-        return {
-          inline: true,
-          tone: "error",
-          tool: nativeHead(spec, args, [[span(`— ${gist}`, "muted")]]),
-          ...(gist === full
-            ? {}
-            : { body: [text([span(full, "error")], { wrap: "word" })] }),
-        };
-      }
-      const { details } = result;
-      const { header, body } = splitBody(textContent, details);
-      const meta = [
-        header,
-        ...(details?.decompiler === "disasm"
-          ? [[span("disassembly only", "warning")]]
-          : []),
-        ...(details?.truncated ? [[span("truncated", "warning")]] : []),
-        ...(details?.artifactId
-          ? [[span(`artifact://${details.artifactId}`, "muted")]]
-          : []),
-      ];
-      const node = nativeBody(spec.body, body, details);
-      return node
-        ? {
-            body: [node],
-            tool: nativeHead(spec, args, meta),
-            ...(details?.decompiler === "disasm"
-              ? { tone: "warning" as const }
-              : {}),
-          }
-        : { inline: true, tool: nativeHead(spec, args, meta) };
-    },
+  describeResult(
+    result: RenderableResult,
+    options: ToolRenderResultOptions,
+    args?: RenderArgs
+  ): NativeToolView {
+    const textContent = firstText(result);
+    if (options.isPartial) {
+      const progress = textContent || `${spec.title}…`;
+      return {
+        inline: true,
+        tool: nativeHead(spec, args, [
+          [span(progress, "muted", { fx: "shimmer" })],
+        ]),
+      };
+    }
+    if (result.isError) {
+      const full = textContent.trim() || "failed";
+      const first = full.split("\n", 1)[0]!.trim();
+      const gist =
+        first.length > ERROR_GIST_CHARS
+          ? `${first.slice(0, ERROR_GIST_CHARS - 1)}…`
+          : first;
+      return {
+        inline: true,
+        tone: "error",
+        tool: nativeHead(spec, args, [[span(`— ${gist}`, "muted")]]),
+        ...(gist === full
+          ? {}
+          : { body: [text([span(full, "error")], { wrap: "word" })] }),
+      };
+    }
+    const { details } = result;
+    const { header, body } = splitBody(textContent, details);
+    const meta = [
+      header,
+      ...(details?.decompiler === "disasm"
+        ? [[span("disassembly only", "warning")]]
+        : []),
+      ...(details?.truncated ? [[span("truncated", "warning")]] : []),
+      ...(details?.artifactId
+        ? [[span(`artifact://${details.artifactId}`, "muted")]]
+        : []),
+    ];
+    const node = nativeBody(spec.body, body, details);
+    return node
+      ? {
+          body: [node],
+          tool: nativeHead(spec, args, meta),
+          ...(details?.decompiler === "disasm"
+            ? { tone: "warning" as const }
+            : {}),
+        }
+      : { inline: true, tool: nativeHead(spec, args, meta) };
+  },
 
-    renderCall(
-      args: RenderArgs,
-      _options: ToolRenderResultOptions,
-      theme: Theme
-    ): Component {
-      return new Text(callLine(spec, args, theme), 0, 0);
-    },
+  renderCall(
+    args: RenderArgs,
+    _options: ToolRenderResultOptions,
+    theme: Theme
+  ): Component {
+    return new Text(callLine(spec, args, theme), 0, 0);
+  },
 
-    renderResult(
-      result: RenderableResult,
-      options: ToolRenderResultOptions,
-      theme: Theme,
-      args?: RenderArgs
-    ): Component {
-      const resultText = firstText(result);
-      if (options.isPartial) {
-        const frames = theme.spinnerFrames;
-        const spinner =
-          options.spinnerFrame !== undefined && frames.length > 0
-            ? frames[options.spinnerFrame % frames.length]
-            : theme.styledSymbol("status.running", "accent");
-        return new Text(
-          `${spinner} ${theme.fg("muted", resultText || `${spec.title}…`)}`,
-          0,
-          0
-        );
-      }
-      if (result.isError) {
-        const message = resultText.split("\n")[0] || "failed";
-        return new Text(
-          `${theme.styledSymbol("status.error", "error")} ${theme.fg("error", message)}`,
-          0,
-          0
-        );
-      }
+  renderResult(
+    result: RenderableResult,
+    options: ToolRenderResultOptions,
+    theme: Theme,
+    args?: RenderArgs
+  ): Component {
+    const resultText = firstText(result);
+    if (options.isPartial) {
+      const frames = theme.spinnerFrames;
+      const spinner =
+        options.spinnerFrame !== undefined && frames.length > 0
+          ? frames[options.spinnerFrame % frames.length]
+          : theme.styledSymbol("status.running", "accent");
+      return new Text(
+        `${spinner} ${theme.fg("muted", resultText || `${spec.title}…`)}`,
+        0,
+        0
+      );
+    }
+    if (result.isError) {
+      const message = resultText.split("\n")[0] || "failed";
+      return new Text(
+        `${theme.styledSymbol("status.error", "error")} ${theme.fg("error", message)}`,
+        0,
+        0
+      );
+    }
 
-      const { details } = result;
-      const { header, body } = splitBody(resultText, details);
-      const meta: string[] = [];
-      if (details?.decompiler === "disasm") {
-        meta.push(theme.fg("warning", "disassembly only"));
-      }
-      if (details?.truncated) {
-        meta.push(theme.fg("warning", "truncated"));
-      }
-      if (details?.artifactId) {
-        meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
-      }
-      const subject = spec.subject ? args?.[spec.subject] : undefined;
-      const headLine = [
-        theme.styledSymbol("status.success", "success"),
-        theme.fg("toolTitle", header),
-        ...(typeof subject === "string" && !header.includes(subject)
-          ? [theme.fg("dim", `(${subject})`)]
-          : []),
-        ...meta,
-      ].join(" ");
+    const { details } = result;
+    const { header, body } = splitBody(resultText, details);
+    const meta: string[] = [];
+    if (details?.decompiler === "disasm") {
+      meta.push(theme.fg("warning", "disassembly only"));
+    }
+    if (details?.truncated) {
+      meta.push(theme.fg("warning", "truncated"));
+    }
+    if (details?.artifactId) {
+      meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
+    }
+    const subject = spec.subject ? args?.[spec.subject] : undefined;
+    const headLine = [
+      theme.styledSymbol("status.success", "success"),
+      theme.fg("toolTitle", header),
+      ...(typeof subject === "string" && !header.includes(subject)
+        ? [theme.fg("dim", `(${subject})`)]
+        : []),
+      ...meta,
+    ].join(" ");
 
-      const lines = bodyLines(spec.body, body, details, theme);
-      const limit = options.expanded
-        ? EXPANDED_LINES
-        : spec.body === "json"
-          ? 0
-          : COLLAPSED_LINES;
-      const shown = lines.slice(0, limit);
-      const out = [headLine, ...shown];
-      const hidden = lines.length - shown.length;
-      if (hidden > 0) {
-        out.push(
-          theme.fg(
-            "dim",
-            `… ${hidden} more line${hidden === 1 ? "" : "s"}${options.expanded ? "" : " (expand to show)"}`
-          )
-        );
-      }
-      return new Text(out.join("\n"), 0, 0);
-    },
-  };
-}
+    const lines = bodyLines(spec.body, body, details, theme);
+    const limit = options.expanded
+      ? EXPANDED_LINES
+      : spec.body === "json"
+        ? 0
+        : COLLAPSED_LINES;
+    const shown = lines.slice(0, limit);
+    const out = [headLine, ...shown];
+    const hidden = lines.length - shown.length;
+    if (hidden > 0) {
+      out.push(
+        theme.fg(
+          "dim",
+          `… ${hidden} more line${hidden === 1 ? "" : "s"}${options.expanded ? "" : " (expand to show)"}`
+        )
+      );
+    }
+    return new Text(out.join("\n"), 0, 0);
+  },
+});

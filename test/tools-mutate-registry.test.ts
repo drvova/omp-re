@@ -56,11 +56,11 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
   let mainName: string;
   let firstVar: AfvlVar;
 
-  async function vars(): Promise<AfvlVar[]> {
+  const vars = async (): Promise<AfvlVar[]> => {
     const grouped =
       (await rz.cmdj<Record<string, AfvlVar[]>>(`afvlj @ ${mainEa}`)) ?? {};
     return Object.values(grouped).flat();
-  }
+  };
   const fnName = async (): Promise<string | undefined> =>
     (await rz.cmdj<{ name: string }[]>(`afij @ ${mainEa}`))?.[0]?.name;
 

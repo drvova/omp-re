@@ -71,7 +71,7 @@ export interface RzClassRow {
 }
 
 /** Binary info object, keyed by canonical field names where rizin reports them. */
-export async function getBinaryInfo(rz: RzSession): Promise<ReToolResult> {
+export const getBinaryInfo = async (rz: RzSession): Promise<ReToolResult> => {
   const info = (await rz.cmdj<RzBinaryInfo>("iIj")) ?? ({} as RzBinaryInfo);
   const rows: Record<string, unknown> = { ...info };
   if (typeof info.baddr === "number" && knownAddr(info.baddr) !== undefined) {
@@ -79,10 +79,12 @@ export async function getBinaryInfo(rz: RzSession): Promise<ReToolResult> {
   }
   const result = await jsonResult("binary info", rows);
   return markEmpty(result, Object.keys(rows).length === 0);
-}
+};
 
 /** Entry points with their EAs. */
-export async function listEntryPointRows(rz: RzSession): Promise<ReToolResult> {
+export const listEntryPointRows = async (
+  rz: RzSession
+): Promise<ReToolResult> => {
   const entries = (await rz.cmdj<RzEntryPoint[]>("iej")) ?? [];
   const rows = entries.map((entry) => ({
     ea: eaFromOffset(knownAddr(entry.vaddr) ?? 0),
@@ -94,13 +96,13 @@ export async function listEntryPointRows(rz: RzSession): Promise<ReToolResult> {
     rows
   );
   return markEmpty(result, rows.length === 0);
-}
+};
 
 /** Relocations with type and target EA. */
-export async function listRelocationRows(
+export const listRelocationRows = async (
   rz: RzSession,
   params: { offset?: number; limit?: number }
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const relocs = (await rz.cmdj<RzRelocation[]>("irj")) ?? [];
   const rows = relocs.map((reloc) => ({
     ea: eaFromOffset(knownAddr(reloc.vaddr) ?? 0),
@@ -112,13 +114,13 @@ export async function listRelocationRows(
     page
   );
   return markEmpty(result, page.length === 0);
-}
+};
 
 /** All flags (rizin flj), optionally name-filtered, paginated. */
-export async function listFlagRows(
+export const listFlagRows = async (
   rz: RzSession,
   params: { filter?: string; offset?: number; limit?: number }
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const flags = (await rz.cmdj<RzFlag[]>("flj")) ?? [];
   const filter = params.filter?.toLowerCase();
   const filtered = filter
@@ -135,13 +137,13 @@ export async function listFlagRows(
     rows
   );
   return markEmpty(result, rows.length === 0);
-}
+};
 
 /** Classes from binary metadata (RTTI etc.); empty on plain C binaries. */
-export async function listClassRows(
+export const listClassRows = async (
   rz: RzSession,
   params: { filter?: string; offset?: number; limit?: number }
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const classes = (await rz.cmdj<RzClassRow[]>("icj")) ?? [];
   const filter = params.filter?.toLowerCase();
   const filtered = filter
@@ -157,9 +159,9 @@ export async function listClassRows(
     page
   );
   return markEmpty(result, page.length === 0);
-}
+};
 
-export function registerInfoTools(pi: ExtensionAPI): void {
+export const registerInfoTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const noParams = z.object({});
   const offsetLimit = {
@@ -266,4 +268,4 @@ export function registerInfoTools(pi: ExtensionAPI): void {
       return listClassRows(rz, params);
     },
   });
-}
+};

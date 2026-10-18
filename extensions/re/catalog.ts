@@ -35,21 +35,7 @@ export type RzCatalog = ReadonlyMap<string, RzCommandSpec>;
 
 const catalogs = new Map<string, Promise<RzCatalog>>();
 
-/** The catalog of the rizin at `rizinPath` (default: the configured one), read once per process with no binary open (`rizin -qc '?*j' --`). */
-export function loadCatalog(
-  rizinPath = resolveRizinPath()
-): Promise<RzCatalog> {
-  let cached = catalogs.get(rizinPath);
-  if (!cached) {
-    cached = readCatalog(rizinPath);
-    catalogs.set(rizinPath, cached);
-    // A failed read (rizin missing) must not be cached: installing rizin mid-session should work.
-    cached.catch(() => catalogs.delete(rizinPath));
-  }
-  return cached;
-}
-
-async function readCatalog(rizinPath: string): Promise<RzCatalog> {
+const readCatalog = async (rizinPath: string): Promise<RzCatalog> => {
   // `-N` (skip user rizinrc) unless overridden, so the catalog reflects the same stock command set the session spawns with; plugins still load, so plugin commands (pdg, …) appear.
   const noUserConfig = !/^(1|true|yes|on)$/iu.test(
     (process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim()
@@ -76,10 +62,24 @@ async function readCatalog(rizinPath: string): Promise<RzCatalog> {
     }
   }
   return catalog;
-}
+};
+
+/** The catalog of the rizin at `rizinPath` (default: the configured one), read once per process with no binary open (`rizin -qc '?*j' --`). */
+export const loadCatalog = (
+  rizinPath = resolveRizinPath()
+): Promise<RzCatalog> => {
+  let cached = catalogs.get(rizinPath);
+  if (!cached) {
+    cached = readCatalog(rizinPath);
+    catalogs.set(rizinPath, cached);
+    // A failed read (rizin missing) must not be cached: installing rizin mid-session should work.
+    cached.catch(() => catalogs.delete(rizinPath));
+  }
+  return cached;
+};
 
 /** Whether `name` is a command in the catalog, or a command group whose subcommands are (rizin lists `iz` only as `izj`, `izq`, …). */
-export function isKnownCommand(catalog: RzCatalog, name: string): boolean {
+export const isKnownCommand = (catalog: RzCatalog, name: string): boolean => {
   if (catalog.has(name)) {
     return true;
   }
@@ -89,7 +89,7 @@ export function isKnownCommand(catalog: RzCatalog, name: string): boolean {
     }
   }
   return false;
-}
+};
 
 /** Every rizin command omp-re's own tools send. Checked against the installed rizin at open and by `/re status`. */
 export const REQUIRED_COMMANDS: readonly string[] = [
@@ -158,9 +158,8 @@ export const REQUIRED_COMMANDS: readonly string[] = [
   "wc-",
 ];
 
-export function missingRequiredCommands(catalog: RzCatalog): string[] {
-  return REQUIRED_COMMANDS.filter((cmd) => !catalog.has(cmd));
-}
+export const missingRequiredCommands = (catalog: RzCatalog): string[] =>
+  REQUIRED_COMMANDS.filter((cmd) => !catalog.has(cmd));
 
 /**
  * Read-only commands that the family-shaped {@link ALLOWED_COMMAND} regex does
@@ -442,21 +441,32 @@ export type CommandCheck =
  * pipe, `>`/`<` redirect to a file, and the rest substitute or grep — before
  * the string reaches the pipe.
  */
-export function forbiddenSyntaxReason(value: string): string | undefined {
+export const forbiddenSyntaxReason = (value: string): string | undefined => {
   for (const [pattern, label] of FORBIDDEN_SYNTAX) {
     if (pattern.test(value)) {
       return label;
     }
   }
   return undefined;
-}
+};
+
+/** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). The NOARG_DUALS run read-only with no argument, so they count as runnable here; `checkRizinCommand` enforces the no-argument constraint. */
+export const isRunnable = (name: string): boolean => {
+  if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) {
+    return true;
+  }
+  if (ENTROPY_MAP.test(name)) {
+    return true;
+  }
+  return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
+};
 
 /** Decide whether `command` (plus an optional `addr` to run it at) may run through `rizin_command`, and build the exact line sent to rizin. */
-export function checkRizinCommand(
+export const checkRizinCommand = (
   catalog: RzCatalog,
   command: string,
   addr?: string
-): CommandCheck {
+): CommandCheck => {
   const trimmed = command.trim();
   if (trimmed === "") {
     return { ok: false, reason: "omp-re: rizin_command: empty command" };
@@ -541,18 +551,7 @@ export function checkRizinCommand(
     name: specNote ? `${checked}${specNote}` : checked,
     ok: true,
   };
-}
-
-/** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). The NOARG_DUALS run read-only with no argument, so they count as runnable here; `checkRizinCommand` enforces the no-argument constraint. */
-export function isRunnable(name: string): boolean {
-  if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) {
-    return true;
-  }
-  if (ENTROPY_MAP.test(name)) {
-    return true;
-  }
-  return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
-}
+};
 
 /**
  * Read-only debugger-state commands a breakpoint on-hit command (`dbc`, the
@@ -676,10 +675,10 @@ const DEBUG_READ_COMMANDS: ReadonlySet<string> = new Set([
  * or a static view. The forbidden-syntax guards apply either way, and any `=`
  * is refused so the register-assign dual (`dr rax=0`) can never write.
  */
-export function checkDebugOnHitCommand(
+export const checkDebugOnHitCommand = (
   catalog: RzCatalog,
   command: string
-): CommandCheck {
+): CommandCheck => {
   const trimmed = command.trim();
   if (trimmed === "") {
     return { ok: false, reason: "omp-re: break_command: empty command" };
@@ -718,10 +717,10 @@ export function checkDebugOnHitCommand(
     ok: false,
     reason: `omp-re: break_command: ${JSON.stringify(name)} is not a read-only on-hit command. Allowed: read-only debugger state (registers \`drj\`/\`drr\`, maps \`dmj\`, modules \`dmmj\`, backtrace \`dbtj\`, heap \`dmhg\`), or a static read (print/info/search).`,
   };
-}
+};
 
-function describeArgs(spec: RzCommandSpec): string[] {
-  return (spec.args ?? []).map((arg) => {
+const describeArgs = (spec: RzCommandSpec): string[] =>
+  (spec.args ?? []).map((arg) => {
     const facts = [
       arg.type,
       arg.required ? "required" : "optional",
@@ -731,14 +730,13 @@ function describeArgs(spec: RzCommandSpec): string[] {
     ];
     return `  <${arg.name}>: ${facts.join(", ")}`;
   });
-}
 
-function oneLine(spec: RzCommandSpec): string {
+const oneLine = (spec: RzCommandSpec): string => {
   const runnable = isRunnable(spec.cmd)
     ? ""
     : "  [not runnable via rizin_command]";
   return `${spec.cmd}${spec.args_str ?? ""} — ${spec.summary ?? ""}${runnable}`;
-}
+};
 
 /**
  * Answer a help query from the catalog. A query that names a command or
@@ -746,11 +744,11 @@ function oneLine(spec: RzCommandSpec): string {
  * an exact match; anything else is a keyword search over summaries and
  * descriptions (`entropy`, `rop gadgets`), best matches first.
  */
-export function searchCatalog(
+export const searchCatalog = (
   catalog: RzCatalog,
   query: string,
   limit = 60
-): { header: string; lines: string[] } {
+): { header: string; lines: string[] } => {
   const q = query.trim();
   const exact = catalog.get(q);
   const family = [...catalog.values()]
@@ -810,4 +808,4 @@ export function searchCatalog(
             "no command matches; try a shorter keyword or a command prefix such as p, i, /, a",
           ],
   };
-}
+};

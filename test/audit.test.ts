@@ -93,11 +93,11 @@ type Handler = (
 ) => Promise<void>;
 
 /** Captures the handlers registerAuditLog installs, plus whatever it logs through pi.logger, without a real ExtensionAPI. */
-function captureHandlers(): {
+const captureHandlers = (): {
   toolCall: Handler;
   approval: Handler;
   warnings: string[];
-} {
+} => {
   const handlers = new Map<string, Handler>();
   const warnings: string[] = [];
   const fakePi = {
@@ -116,13 +116,13 @@ function captureHandlers(): {
     throw new Error("registerAuditLog did not register its handlers");
   }
   return { approval, toolCall, warnings };
-}
+};
 
-function makeCtx(
+const makeCtx = (
   sessionId: string,
   notifications: { message: string; type?: string }[]
-): ExtensionContext {
-  return {
+): ExtensionContext =>
+  ({
     hasUI: false,
     sessionManager: {
       getSessionId: () => sessionId,
@@ -132,17 +132,16 @@ function makeCtx(
         notifications.push({ message, type });
       },
     },
-  } as unknown as ExtensionContext;
-}
+  }) as unknown as ExtensionContext;
 
-async function readAuditLines(sessionId: string): Promise<string[]> {
+const readAuditLines = async (sessionId: string): Promise<string[]> => {
   const path = join(getAgentDir(), "re", "audit", `${sessionId}.log`);
   const raw = await readFile(path, "utf-8");
   return raw
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
-}
+};
 
 describe("audit log", () => {
   let tempDir: string;

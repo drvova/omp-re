@@ -694,9 +694,12 @@ describe("mapFileCommand", () => {
 });
 
 describe("liveAnnotations", () => {
-  function custom(id: string, customType: string, data: unknown): SessionEntry {
-    return { customType, data, id, type: "custom" } as unknown as SessionEntry;
-  }
+  const custom = (
+    id: string,
+    customType: string,
+    data: unknown
+  ): SessionEntry =>
+    ({ customType, data, id, type: "custom" }) as unknown as SessionEntry;
   const ann = (ea: string, newValue: string) => ({
     ea,
     kind: "rename_function",

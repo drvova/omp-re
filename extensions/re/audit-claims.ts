@@ -71,12 +71,11 @@ const REAL_VERDICTS = new Set<ClaimVerdict>([
   "overreach",
 ]);
 
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}…`;
-}
+const truncate = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max)}…`;
 
 /** The adversarial per-claim prompt. One batched call over all evidence-backed claims; JSON is requested in prose because the side turn has no structured-output path. */
-export function buildAuditPrompt(items: readonly AuditClaimInput[]): string {
+export const buildAuditPrompt = (items: readonly AuditClaimInput[]): string => {
   const lines: string[] = [
     "You are a strict reverse-engineering report auditor. For EACH numbered claim below, judge ONLY whether the quoted evidence actually supports what the claim asserts. Judge solely against the quoted evidence — do not use outside knowledge, and do not run or imagine any tools.",
     'Verdicts: "supported" = the evidence directly establishes the claim; "overreach" = the evidence is related but the claim asserts more than the evidence shows (stronger, broader, or attributive); "unsupported" = the evidence does not establish the claim (misattribution or wrong evidence).',
@@ -100,10 +99,10 @@ export function buildAuditPrompt(items: readonly AuditClaimInput[]): string {
     }
   }
   return lines.join("\n");
-}
+};
 
 /** Extract a JSON array/object from a free-text reply: a fenced ```json block first, else a balanced structure from the first `[`/`{`. Null when none is found. */
-function extractJson(text: string): string | null {
+const extractJson = (text: string): string | null => {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text);
   if (fenced?.[1]) {
     return fenced[1].trim();
@@ -144,10 +143,10 @@ function extractJson(text: string): string | null {
     }
   }
   return null;
-}
+};
 
 /** Parse the judge's free-text reply into verdicts; null on any parse/shape failure (degrade, never throw). Unknown verdict strings coerce to "unaudited". */
-export function parseAuditReply(replyText: string): ClaimAudit[] | null {
+export const parseAuditReply = (replyText: string): ClaimAudit[] | null => {
   const raw = extractJson(replyText);
   if (raw === null) {
     return null;
@@ -182,7 +181,7 @@ export function parseAuditReply(replyText: string): ClaimAudit[] | null {
     });
   }
   return out;
-}
+};
 
 /**
  * The default judge: omp's ephemeral side turn. Returns null (⇒ the audit is
@@ -190,7 +189,7 @@ export function parseAuditReply(replyText: string): ClaimAudit[] | null {
  * any throw (no model, a tools:false rejection on tool-heavy history, a provider
  * error, the 30s timeout) also degrades to null. Never throws.
  */
-export function ephemeralJudge(ctx: ExtensionContext): ClaimJudge | null {
+export const ephemeralJudge = (ctx: ExtensionContext): ClaimJudge | null => {
   const run = ctx.runEphemeralTurn;
   if (typeof run !== "function" || !ctx.model) {
     return null;
@@ -228,7 +227,7 @@ export function ephemeralJudge(ctx: ExtensionContext): ClaimJudge | null {
       return null;
     }
   };
-}
+};
 
 /**
  * Run the judge over the evidence-backed claims and assemble the outcome. Nothing
@@ -236,11 +235,11 @@ export function ephemeralJudge(ctx: ExtensionContext): ClaimJudge | null {
  * `audited:false` with a reason. A valid reply ⇒ `audited:true`, with any claim
  * the judge omitted individually marked "unaudited".
  */
-export async function auditClaims(
+export const auditClaims = async (
   items: readonly AuditClaimInput[],
   judge: ClaimJudge | null,
   mode: AuditMode
-): Promise<AuditOutcome> {
+): Promise<AuditOutcome> => {
   const byIndex = new Map<number, ClaimAudit>();
   if (mode === "off" || items.length === 0 || !judge) {
     return {
@@ -277,11 +276,10 @@ export async function auditClaims(
     }
   }
   return { audited: true, byIndex, itemCount: items.length };
-}
+};
 
 /** The claims a strict audit must withhold on: an explicit unsupported/overreach verdict (never an "unaudited" / infra failure — strict fails open). */
-export function flaggedVerdicts(outcome: AuditOutcome): ClaimAudit[] {
-  return [...outcome.byIndex.values()].filter(
+export const flaggedVerdicts = (outcome: AuditOutcome): ClaimAudit[] =>
+  [...outcome.byIndex.values()].filter(
     (v) => v.verdict === "unsupported" || v.verdict === "overreach"
   );
-}

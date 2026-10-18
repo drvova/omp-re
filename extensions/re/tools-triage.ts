@@ -56,10 +56,10 @@ const PLAIN_TRIAGE_TOOLS: PlainTriageDef[] = [
 const YARA_TIMEOUT_MS = 120_000;
 
 /** Resolve and validate an existing, readable file path (used for both the session binary and yara's rules file). */
-async function resolveExistingFile(
+const resolveExistingFile = async (
   label: string,
   value: string
-): Promise<string> {
+): Promise<string> => {
   let real: string;
   try {
     real = await fsRealpath(value);
@@ -72,10 +72,10 @@ async function resolveExistingFile(
     throw new Error(`omp-re: invalid ${label}: ${value}`);
   }
   return real;
-}
+};
 
 /** capa: pull rule name + ATT&CK/MBC mapping out of each matched rule's `meta`, not just a count. */
-function capaFindings(parsed: unknown): unknown {
+const capaFindings = (parsed: unknown): unknown => {
   if (typeof parsed !== "object" || parsed === null || !("rules" in parsed)) {
     return null;
   }
@@ -93,10 +93,10 @@ function capaFindings(parsed: unknown): unknown {
       return { meta, name };
     }
   );
-}
+};
 
 /** floss: return the actual decoded/stack/static strings, not just totals. */
-function flossFindings(parsed: unknown): unknown {
+const flossFindings = (parsed: unknown): unknown => {
   if (typeof parsed !== "object" || parsed === null || !("strings" in parsed)) {
     return null;
   }
@@ -111,10 +111,10 @@ function flossFindings(parsed: unknown): unknown {
     }
   }
   return out;
-}
+};
 
 /** die: return the actual per-scan detections, not just a count. */
-function dieFindings(parsed: unknown): unknown {
+const dieFindings = (parsed: unknown): unknown => {
   if (typeof parsed !== "object" || parsed === null || !("scans" in parsed)) {
     return null;
   }
@@ -123,7 +123,7 @@ function dieFindings(parsed: unknown): unknown {
     return null;
   }
   return scans;
-}
+};
 
 const FINDERS: Record<string, (parsed: unknown) => unknown> = {
   capa: capaFindings,
@@ -137,7 +137,7 @@ interface YaraMatch {
   file: string;
 }
 
-function parseYaraPlainText(stdout: string): YaraMatch[] {
+const parseYaraPlainText = (stdout: string): YaraMatch[] => {
   const matches: YaraMatch[] = [];
   for (const rawLine of stdout.split("\n")) {
     const line = rawLine.trim();
@@ -155,9 +155,9 @@ function parseYaraPlainText(stdout: string): YaraMatch[] {
     });
   }
   return matches;
-}
+};
 
-export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
+export const registerTriageTools = async (pi: ExtensionAPI): Promise<void> => {
   const z = pi.zod;
   const [plainAvailability, yaraAvailable] = await Promise.all([
     Promise.all(PLAIN_TRIAGE_TOOLS.map((def) => isExecutable(def.bin))),
@@ -284,4 +284,4 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
       },
     });
   }
-}
+};

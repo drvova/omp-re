@@ -157,8 +157,56 @@ export interface InheritOutcome {
   alreadyPresent: number;
 }
 
+/**
+ * Shape-check a manifest entry's anchor fingerprint. Untrusted input: the name and
+ * offset are only displayed, the delta becomes part of an address (so it must be a
+ * small non-negative integer), and the mnemonics only feed the similarity score.
+ * Anything malformed drops the fingerprint (the entry just can't be relocated).
+ */
+const parseAnchor = (raw: unknown): AnchorFingerprint | null => {
+  const a = raw as
+    | Partial<Record<keyof AnchorFingerprint, unknown>>
+    | null
+    | undefined;
+  if (!a || typeof a !== "object") {
+    return null;
+  }
+  const okNum = (v: unknown, max: number) =>
+    typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
+  if (
+    typeof a.anchor !== "string" ||
+    typeof a.function !== "string" ||
+    typeof a.offset !== "string"
+  ) {
+    return null;
+  }
+  if (
+    !okNum(a.delta, 1 << 24) ||
+    !okNum(a.size, 1 << 30) ||
+    !okNum(a.nbbs, 1 << 24)
+  ) {
+    return null;
+  }
+  if (
+    !Array.isArray(a.mnemonics) ||
+    a.mnemonics.length === 0 ||
+    !a.mnemonics.every((m) => typeof m === "string")
+  ) {
+    return null;
+  }
+  return {
+    anchor: a.anchor,
+    delta: a.delta as number,
+    function: a.function,
+    mnemonics: a.mnemonics as string[],
+    nbbs: a.nbbs as number,
+    offset: a.offset,
+    size: a.size as number,
+  };
+};
+
 /** Parse and shape-check a manifest's JSON text. Throws a clear error on anything that isn't a manifest; tolerates missing optional fields per entry. */
-export function parseManifest(text: string): CarryManifest {
+export const parseManifest = (text: string): CarryManifest => {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -234,55 +282,7 @@ export function parseManifest(text: string): CarryManifest {
     });
   }
   return { binarySha256: str(obj.binarySha256), entries, findings };
-}
-
-/**
- * Shape-check a manifest entry's anchor fingerprint. Untrusted input: the name and
- * offset are only displayed, the delta becomes part of an address (so it must be a
- * small non-negative integer), and the mnemonics only feed the similarity score.
- * Anything malformed drops the fingerprint (the entry just can't be relocated).
- */
-function parseAnchor(raw: unknown): AnchorFingerprint | null {
-  const a = raw as
-    | Partial<Record<keyof AnchorFingerprint, unknown>>
-    | null
-    | undefined;
-  if (!a || typeof a !== "object") {
-    return null;
-  }
-  const okNum = (v: unknown, max: number) =>
-    typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
-  if (
-    typeof a.anchor !== "string" ||
-    typeof a.function !== "string" ||
-    typeof a.offset !== "string"
-  ) {
-    return null;
-  }
-  if (
-    !okNum(a.delta, 1 << 24) ||
-    !okNum(a.size, 1 << 30) ||
-    !okNum(a.nbbs, 1 << 24)
-  ) {
-    return null;
-  }
-  if (
-    !Array.isArray(a.mnemonics) ||
-    a.mnemonics.length === 0 ||
-    !a.mnemonics.every((m) => typeof m === "string")
-  ) {
-    return null;
-  }
-  return {
-    anchor: a.anchor,
-    delta: a.delta as number,
-    function: a.function,
-    mnemonics: a.mnemonics as string[],
-    nbbs: a.nbbs as number,
-    offset: a.offset,
-    size: a.size as number,
-  };
-}
+};
 
 /**
  * The `{ command, addr }` to re-run for a manifest entry. Prefers the structured
@@ -290,9 +290,9 @@ function parseAnchor(raw: unknown): AnchorFingerprint | null {
  * line on its trailing ` @ <addr>` (what `checkRizinCommand` appends), leaving
  * `@!<blocksize>` alone since that is part of the command, not a seek.
  */
-export function entryRequest(
+export const entryRequest = (
   entry: ManifestEntry
-): { command: string; addr?: string } | undefined {
+): { command: string; addr?: string } | undefined => {
   if (entry.args) {
     return entry.args;
   }
@@ -308,7 +308,7 @@ export function entryRequest(
     return { addr: match[2]!, command: match[1]! };
   }
   return { command: line.trim() };
-}
+};
 
 /**
  * Line diff (LCS) of two short texts: unchanged lines prefixed `  `, removed `- `,
@@ -317,11 +317,11 @@ export function entryRequest(
  * unchanged (new form) and the diff keeps to what really changed. Inputs are
  * canonical excerpts (≤20 lines), so the O(n·m) table is trivial.
  */
-export function lineDiff(
+export const lineDiff = (
   before: string,
   after: string,
   key: (line: string) => string = (line) => line
-): string[] {
+): string[] => {
   const a = before === "" ? [] : before.split("\n");
   const b = after === "" ? [] : after.split("\n");
   const ka = a.map(key);
@@ -360,10 +360,10 @@ export function lineDiff(
     out.push(`+ ${b[j]}`);
   }
   return out;
-}
+};
 
 /** Keep only changed lines and `context` unchanged lines around each, eliding the rest as `  …` — a hunk view of a {@link lineDiff}. */
-export function compactDiff(diff: readonly string[], context = 2): string[] {
+export const compactDiff = (diff: readonly string[], context = 2): string[] => {
   const changed = diff.map((line) => !line.startsWith("  "));
   const keep = diff.map((_, i) =>
     changed.slice(Math.max(0, i - context), i + context + 1).some(Boolean)
@@ -377,7 +377,7 @@ export function compactDiff(diff: readonly string[], context = 2): string[] {
     }
   }
   return out;
-}
+};
 
 const RANK: Record<CarryStatus, number> = {
   broken: 4,
@@ -388,10 +388,10 @@ const RANK: Record<CarryStatus, number> = {
 };
 
 /** Roll evidence statuses up to claims: worst checked status wins; all-unchecked stays unchecked. Claim order follows first appearance in the manifest. */
-export function rollUpClaims(
+export const rollUpClaims = (
   manifest: CarryManifest,
   evidence: readonly CarryEvidenceRow[]
-): CarryClaimRow[] {
+): CarryClaimRow[] => {
   const statusById = new Map(
     evidence.map((row) => [row.evidenceId, row.status])
   );
@@ -415,7 +415,7 @@ export function rollUpClaims(
     }
     return { evidenceIds, status, text };
   });
-}
+};
 
 /**
  * Whether a re-run's output still says what the recorded one did: the exact
@@ -423,11 +423,11 @@ export function rollUpClaims(
  * `shiftHash`, which forgives a rebuild that only moved code. Returns the holds
  * detail, or undefined when the output really changed.
  */
-function compareOutput(
+const compareOutput = (
   entry: ManifestEntry,
   output: string,
   binaryPath: string
-): string | undefined {
+): string | undefined => {
   if (canonicalHash(output, binaryPath) === entry.reproHash) {
     return "output identical";
   }
@@ -435,14 +435,14 @@ function compareOutput(
     return "output identical apart from shifted addresses";
   }
   return undefined;
-}
+};
 
 /** Line diff of the recorded canonical excerpt against the new output's, capped; undefined when the excerpts are equal (the change lies further down). */
-function excerptDiff(
+const excerptDiff = (
   recordedExcerpt: string,
   output: string,
   binaryPath: string
-): string[] | undefined {
+): string[] | undefined => {
   const newExcerpt = canonicalExcerpt(output, binaryPath);
   if (recordedExcerpt === newExcerpt) {
     return undefined;
@@ -466,7 +466,7 @@ function excerptDiff(
         `  … ${diff.length - MAX_DIFF_LINES} more diff line(s)`,
       ]
     : diff;
-}
+};
 
 /**
  * Find the anchor's function in this build by fingerprint and re-run the command
@@ -476,14 +476,14 @@ function excerptDiff(
  * relocation noted and a diff when it doesn't — or undefined when nothing matches
  * the fingerprint or the relocated line can't run.
  */
-async function tryRelocated(
+const tryRelocated = async (
   rz: RzSession,
   catalog: RzCatalog,
   entry: ManifestEntry,
   request: { command: string; addr?: string },
   fp: AnchorFingerprint,
   binaryPath: string
-): Promise<Omit<CarryEvidenceRow, "evidenceId" | "tool"> | undefined> {
+): Promise<Omit<CarryEvidenceRow, "evidenceId" | "tool"> | undefined> => {
   const found = await relocateAnchor(rz, fp);
   if (!found) {
     return undefined;
@@ -534,17 +534,17 @@ async function tryRelocated(
     status: "drifted",
     ...(diff ? { diff } : {}),
   };
-}
+};
 
 /**
  * Re-run every reproducible manifest entry against the currently-open binary and
  * classify it. Never throws for a single entry — any per-entry failure degrades
  * that entry to "unchecked" (an infra problem) or "broken" (the anchor is gone).
  */
-export async function buildCarry(
+export const buildCarry = async (
   ctx: ExtensionContext,
   manifest: CarryManifest
-): Promise<CarryResult> {
+): Promise<CarryResult> => {
   const state = getState(ctx);
   const binaryPath = state.binaryPath ?? undefined;
   if (!binaryPath) {
@@ -733,11 +733,11 @@ export async function buildCarry(
     toPath: binaryPath,
     toSha256,
   };
-}
+};
 
-function counts(
+const counts = (
   rows: readonly { status: CarryStatus }[]
-): Record<CarryStatus, number> {
+): Record<CarryStatus, number> => {
   const c: Record<CarryStatus, number> = {
     broken: 0,
     drifted: 0,
@@ -749,13 +749,13 @@ function counts(
     c[row.status] += 1;
   }
   return c;
-}
+};
 
 const short = (sha: string | null) =>
   sha ? `${sha.slice(0, 12)}…` : "unknown";
 
 /** The one-line summary plus per-claim lines (non-holding first), for notify/console. */
-export function formatCarrySummary(result: CarryResult): string {
+export const formatCarrySummary = (result: CarryResult): string => {
   const c = counts(result.claims);
   const lines = [
     `omp-re: carry ${short(result.fromSha256)} → ${short(result.toSha256)} — ${c.holds} hold, ${c.relocated} relocated, ${c.drifted} drifted, ${c.broken} BROKEN, ${c.unchecked} unchecked (of ${result.claims.length} claim(s))`,
@@ -778,13 +778,13 @@ export function formatCarrySummary(result: CarryResult): string {
     }
   }
   return lines.join("\n");
-}
+};
 
 /** The full carry report as Markdown: claim matrix, then per-evidence detail with diffs for drifted records. */
-export function formatCarryMarkdown(
+export const formatCarryMarkdown = (
   result: CarryResult,
   manifestPath: string
-): string {
+): string => {
   const c = counts(result.claims);
   const evidenceById = new Map(
     result.evidence.map((row) => [row.evidenceId, row])
@@ -830,7 +830,27 @@ export function formatCarryMarkdown(
     }
   }
   return out.join("\n");
-}
+};
+
+/** Map a finding's address through a relocation: its old function name → the new name, its old start offset → the new one; anything else stays as is (undefined). */
+const followRelocation = (
+  addr: string,
+  relocation: { from: string; to: string; addr: string }
+): string | undefined => {
+  const [fromName, fromOffset] = relocation.from.split(" @ ");
+  const [toName, toOffset] = relocation.to.split(" @ ");
+  if (addr === fromName && toName) {
+    return toName;
+  }
+  if (
+    fromOffset &&
+    toOffset &&
+    normalizeAddr(addr) === normalizeAddr(fromOffset)
+  ) {
+    return toOffset;
+  }
+  return undefined;
+};
 
 /**
  * `/re carry <manifest> [--strict] [--out <path>]`: load the manifest, carry it
@@ -848,12 +868,12 @@ export function formatCarryMarkdown(
  * reproduced evidence, or one that drifted or broke, goes on the agenda instead.
  * Idempotent: a claim already live on this branch is not inherited twice.
  */
-export async function inheritFindings(
+export const inheritFindings = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   manifest: CarryManifest,
   result: CarryResult
-): Promise<InheritOutcome> {
+): Promise<InheritOutcome> => {
   const statusByClaim = new Map(result.claims.map((c) => [c.text, c.status]));
   const rowById = new Map(result.evidence.map((r) => [r.evidenceId, r]));
   const present = new Set(
@@ -970,33 +990,13 @@ export async function inheritFindings(
     });
   }
   return outcome;
-}
-
-/** Map a finding's address through a relocation: its old function name → the new name, its old start offset → the new one; anything else stays as is (undefined). */
-function followRelocation(
-  addr: string,
-  relocation: { from: string; to: string; addr: string }
-): string | undefined {
-  const [fromName, fromOffset] = relocation.from.split(" @ ");
-  const [toName, toOffset] = relocation.to.split(" @ ");
-  if (addr === fromName && toName) {
-    return toName;
-  }
-  if (
-    fromOffset &&
-    toOffset &&
-    normalizeAddr(addr) === normalizeAddr(fromOffset)
-  ) {
-    return toOffset;
-  }
-  return undefined;
-}
+};
 
 /** The agenda as a prompt for the model: each finding that no longer holds as written, with the evidence change under it. */
-export function formatAgendaPrompt(
+export const formatAgendaPrompt = (
   outcome: InheritOutcome,
   toSha256: string | null
-): string {
+): string => {
   const lines = [
     `These findings from the earlier report do not carry over unchanged to this build${toSha256 ? ` (\`${toSha256.slice(0, 12)}…\`)` : ""}. For each one, re-examine it with the RE tools, then record_finding a revised claim on fresh evidence, or leave it out if it no longer stands:`,
     "",
@@ -1017,9 +1017,9 @@ export function formatAgendaPrompt(
     }
   }
   return lines.join("\n");
-}
+};
 
-export async function carryManifest(
+export const carryManifest = async (
   ctx: ExtensionContext,
   manifestPath: string,
   opts: {
@@ -1028,7 +1028,7 @@ export async function carryManifest(
     inherit?: ExtensionAPI;
     resolve?: boolean;
   } = {}
-): Promise<CarryResult> {
+): Promise<CarryResult> => {
   let text: string;
   try {
     text = await readFile(manifestPath, "utf-8");
@@ -1113,4 +1113,4 @@ export async function carryManifest(
     }
   }
   return result;
-}
+};

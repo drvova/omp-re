@@ -24,17 +24,17 @@ import { access, realpath as fsRealpath } from "node:fs/promises";
  * substitution, a separator, a grep, or a pipe. */
 const ADDR_CHARS = /^[0-9a-zA-Z_.:$+-]+$/u;
 
-export function validateAddr(addr: string): string {
+export const validateAddr = (addr: string): string => {
   if (!ADDR_CHARS.test(addr)) {
     throw new Error(
       `omp-re: invalid address or expression: ${JSON.stringify(addr)}`
     );
   }
   return addr;
-}
+};
 
 /** Canonicalize an EA to "0x" + lowercase hex with no leading zeros (except "0x0"), or the lowercased raw value when it isn't 0x-prefixed. Used to key evidence/annotation lookups so "0x1100", "0X01100", and "0x1100 " all match. */
-export function normalizeAddr(raw: string): string {
+export const normalizeAddr = (raw: string): string => {
   let s = raw.trim().toLowerCase();
   if (!s.startsWith("0x")) {
     return s;
@@ -47,30 +47,27 @@ export function normalizeAddr(raw: string): string {
     s = s.slice(1);
   }
   return `0x${s}`;
-}
+};
 
 /** Identifiers for rename targets (function/variable names). */
 const IDENT_CHARS = /^[A-Za-z_][A-Za-z0-9_.]*$/u;
 
-export function validateIdent(key: string, value: string): string {
+export const validateIdent = (key: string, value: string): string => {
   if (!IDENT_CHARS.test(value)) {
     throw new Error(`omp-re: invalid ${key}: ${JSON.stringify(value)}`);
   }
   return value;
-}
+};
 
 /** Format a numeric offset as a lowercase `0x` hex string. */
-export function eaFromOffset(offset: number): string {
-  return `0x${offset.toString(16)}`;
-}
+export const eaFromOffset = (offset: number): string =>
+  `0x${offset.toString(16)}`;
 
 /** rizin reports most addresses as `offset` (aflj/afij, pdfj ops) and a few as `addr` (pdfj's top level, `xrefs_to` rows). Accept either. */
-export function addrOf(item: {
+export const addrOf = (item: {
   addr?: number;
   offset?: number;
-}): number | undefined {
-  return item.addr ?? item.offset;
-}
+}): number | undefined => item.addr ?? item.offset;
 
 /**
  * Wrap a value as a single-quoted rizin argument. Inside single quotes rizin's
@@ -79,12 +76,12 @@ export function addrOf(item: {
  * passes through here, so no model-supplied comment or signature can end the
  * current command and start another (including `!` shell escapes).
  */
-export function rzQuote(value: string): string {
+export const rzQuote = (value: string): string => {
   if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
     throw new Error("omp-re: invalid argument: contains a newline or NUL");
   }
   return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-}
+};
 
 /**
  * Resolve a name/expression to a concrete numeric address via rizin's `%v`,
@@ -92,23 +89,23 @@ export function rzQuote(value: string): string {
  * it prints "0x0". Failing fast here, before pdfj/pdg, gives a clear error
  * instead of treating base address 0 as real.
  */
-export async function resolveNumericAddr(
+export const resolveNumericAddr = async (
   rz: RzSession,
   addr: string,
   signal?: AbortSignal
-): Promise<number> {
+): Promise<number> => {
   const raw = (await rz.cmd(`%v ${validateAddr(addr)}`, { signal })).trim();
   const value = Number.parseInt(raw, 16);
   if (!Number.isFinite(value) || value === 0) {
     throw new Error(`omp-re: could not resolve address: ${addr}`);
   }
   return value;
-}
+};
 
 const FORBIDDEN_TYPE_CHARS = [";", "|", "&", "`", "$", "\n", "\0"];
 
 /** Validation for type/signature strings. The value is also rzQuote()d before it reaches rizin; rejecting characters no C type contains just turns a confusing rizin parse error into a clear one. */
-export function validateTypeLike(key: string, value: string): string {
+export const validateTypeLike = (key: string, value: string): string => {
   for (const c of FORBIDDEN_TYPE_CHARS) {
     if (value.includes(c)) {
       throw new Error(
@@ -117,15 +114,15 @@ export function validateTypeLike(key: string, value: string): string {
     }
   }
   return value;
-}
+};
 
 /** Validation for free-text comment bodies: only line breaks and NUL are forbidden (they would end the pipe line); everything else is made literal by rzQuote(). */
-export function validateText(value: string): string {
+export const validateText = (value: string): string => {
   if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
     throw new Error("omp-re: invalid text: contains forbidden character");
   }
   return value;
-}
+};
 
 export class RzProtocolError extends Error {
   override name = "RzProtocolError";
@@ -143,14 +140,12 @@ const COMMAND_TIMEOUT_MS = 60_000;
 const STDERR_TAIL_MAX = 4096;
 
 /** Budget for the one-time `aaa` on open: full analysis of a large or packed binary routinely runs minutes. */
-export function analysisTimeoutMs(): number {
-  return Number(process.env.OMPRE_ANALYSIS_TIMEOUT_MS) || 300_000;
-}
+export const analysisTimeoutMs = (): number =>
+  Number(process.env.OMPRE_ANALYSIS_TIMEOUT_MS) || 300_000;
 
 /** Budget for a single debugger step/continue: a resumed process runs until it hits a breakpoint, signals, or exits. A continue that never returns (a process blocked on input) is killed at this bound. */
-export function debugTimeoutMs(): number {
-  return Number(process.env.OMPRE_DEBUG_TIMEOUT_MS) || 60_000;
-}
+export const debugTimeoutMs = (): number =>
+  Number(process.env.OMPRE_DEBUG_TIMEOUT_MS) || 60_000;
 
 /**
  * The flags every omp-re rizin process shares.
@@ -165,7 +160,7 @@ export function debugTimeoutMs(): number {
  * are unaffected. `OMPRE_RIZIN_LOAD_USER_CONFIG=1` drops `-N` for anyone who
  * relies on their rizinrc (e.g. a custom `dir.plugins`).
  */
-export function baseRizinFlags(): string[] {
+export const baseRizinFlags = (): string[] => {
   const flags = ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false"];
   if (
     !/^(1|true|yes|on)$/iu.test(
@@ -175,7 +170,7 @@ export function baseRizinFlags(): string[] {
     flags.push("-N");
   }
   return flags;
-}
+};
 
 /**
  * Explicit load settings for a binary with no (or a misread) header: raw
@@ -207,7 +202,7 @@ const LOAD_BITS: ReadonlySet<number> = new Set([8, 16, 32, 64]);
  * than at the rizin layer. argv only — no shell is involved — so this is for
  * clarity and early rejection, not injection defense.
  */
-export function buildLoadFlags(opts?: LoadOptions): string[] {
+export const buildLoadFlags = (opts?: LoadOptions): string[] => {
   if (!opts) {
     return [];
   }
@@ -243,7 +238,7 @@ export function buildLoadFlags(opts?: LoadOptions): string[] {
     flags.push("-F", opts.format);
   }
   return flags;
-}
+};
 
 export interface CmdOptions {
   timeoutMs?: number;
@@ -269,11 +264,11 @@ export interface SpawnOptions {
 }
 
 /** Settle `task` normally, or reject early with RzAbortError when `signal` fires. The task itself keeps running. */
-export function raceAbort<T>(
+export const raceAbort = <T>(
   task: Promise<T>,
   signal: AbortSignal | undefined,
   what: string
-): Promise<T> {
+): Promise<T> => {
   if (!signal) {
     return task;
   }
@@ -287,7 +282,7 @@ export function raceAbort<T>(
     .then(resolve, reject)
     .finally(() => signal.removeEventListener("abort", onAbort));
   return promise;
-}
+};
 
 /** One rizin subprocess speaking the NUL-framed pipe protocol. */
 export class RzSession {
@@ -615,37 +610,13 @@ export class RzSession {
   }
 }
 
-export function resolveRizinPath(
-  binaryPath?: string,
-  bitsOverride?: 8 | 16 | 32 | 64
-): string {
-  // The open binary's bits decide which build runs it: the bits-sensitive
-  // surfaces (the debugger executes the process; the RzIL VM inherits the
-  // build's addressing) misbehave when the build's bits don't match the
-  // target — a 32-bit rizin emulates a 64-bit PE at a file-relative base
-  // with `esp`. Per-bits overrides win, then the general one, then PATH.
-  // An explicit load `bits` (raw/headerless target) wins over the header
-  // read, which returns nothing for a flat blob.
-  if (binaryPath || bitsOverride) {
-    const bits =
-      bitsOverride ?? (binaryPath ? readBinaryBits(binaryPath) : undefined);
-    if (bits === 64 && process.env.OMPRE_RIZIN_PATH_64?.trim()) {
-      return process.env.OMPRE_RIZIN_PATH_64.trim();
-    }
-    if (bits === 32 && process.env.OMPRE_RIZIN_PATH_32?.trim()) {
-      return process.env.OMPRE_RIZIN_PATH_32.trim();
-    }
-  }
-  return process.env.OMPRE_RIZIN_PATH?.trim() || "rizin";
-}
-
 /**
  * The target's pointer width from its file header — no session needed, so
  * spawn paths can use it. ELF (class byte), PE (machine type: x64/ARM64 =
  * 64, x86/ARM = 32) and Mach-O (magic) are covered; fat Mach-O and unknown
  * formats answer undefined rather than guessing.
  */
-export function readBinaryBits(path: string): 32 | 64 | undefined {
+export const readBinaryBits = (path: string): 32 | 64 | undefined => {
   let fd: number | undefined;
   try {
     fd = fsOpenSync(path, "r");
@@ -708,10 +679,34 @@ export function readBinaryBits(path: string): 32 | 64 | undefined {
       fsCloseSync(fd);
     }
   }
-}
+};
+
+export const resolveRizinPath = (
+  binaryPath?: string,
+  bitsOverride?: 8 | 16 | 32 | 64
+): string => {
+  // The open binary's bits decide which build runs it: the bits-sensitive
+  // surfaces (the debugger executes the process; the RzIL VM inherits the
+  // build's addressing) misbehave when the build's bits don't match the
+  // target — a 32-bit rizin emulates a 64-bit PE at a file-relative base
+  // with `esp`. Per-bits overrides win, then the general one, then PATH.
+  // An explicit load `bits` (raw/headerless target) wins over the header
+  // read, which returns nothing for a flat blob.
+  if (binaryPath || bitsOverride) {
+    const bits =
+      bitsOverride ?? (binaryPath ? readBinaryBits(binaryPath) : undefined);
+    if (bits === 64 && process.env.OMPRE_RIZIN_PATH_64?.trim()) {
+      return process.env.OMPRE_RIZIN_PATH_64.trim();
+    }
+    if (bits === 32 && process.env.OMPRE_RIZIN_PATH_32?.trim()) {
+      return process.env.OMPRE_RIZIN_PATH_32.trim();
+    }
+  }
+  return process.env.OMPRE_RIZIN_PATH?.trim() || "rizin";
+};
 
 /** The build's pointer width from `rizin -v`'s first line ("rizin 0.9.1 @ windows-x86-64"), or undefined when it doesn't say. */
-export function parseRizinVersionArch(version: string): 32 | 64 | undefined {
+export const parseRizinVersionArch = (version: string): 32 | 64 | undefined => {
   const m = /-(32|64)(?:\s|$)/u.exec(version);
   if (m) {
     return m[1] === "64" ? 64 : 32;
@@ -724,14 +719,14 @@ export function parseRizinVersionArch(version: string): 32 | 64 | undefined {
     return 32;
   }
   return undefined;
-}
+};
 
 const buildBitsCache: Record<string, 32 | 64 | undefined> = {};
 
 /** The resolved rizin's build bits, from `-v` (parsed once per path). */
-export async function rizinBuildBits(
+export const rizinBuildBits = async (
   rizinPath: string
-): Promise<32 | 64 | undefined> {
+): Promise<32 | 64 | undefined> => {
   if (rizinPath in buildBitsCache) {
     return buildBitsCache[rizinPath];
   }
@@ -749,12 +744,12 @@ export async function rizinBuildBits(
     buildBitsCache[rizinPath] = undefined;
     return undefined;
   }
-}
+};
 
 /** A human note when the resolved rizin build's bits don't match the open binary's, or undefined when they match (or either side is unknown). */
-export async function rizinBitsMismatch(
+export const rizinBitsMismatch = async (
   binaryPath: string
-): Promise<string | undefined> {
+): Promise<string | undefined> => {
   const buildBits = await rizinBuildBits(resolveRizinPath(binaryPath));
   const targetBits = readBinaryBits(binaryPath);
   if (
@@ -765,7 +760,7 @@ export async function rizinBitsMismatch(
     return undefined;
   }
   return `rizin build is ${buildBits}-bit but the target is ${targetBits}-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_${targetBits} to a matching build.`;
-}
+};
 
 /**
  * The path to a sibling rizin CLI tool (`rz-bin`, `rz-diff`, …). rizin ships
@@ -774,14 +769,14 @@ export async function rizinBitsMismatch(
  * install prefix keeps its own tools together); otherwise the bare name is
  * returned and resolved on PATH, exactly like `rizin` itself.
  */
-export function resolveRizinTool(tool: string): string {
+export const resolveRizinTool = (tool: string): string => {
   const rizin = resolveRizinPath();
   const slash = rizin.lastIndexOf("/");
   return slash === -1 ? tool : `${rizin.slice(0, slash + 1)}${tool}`;
-}
+};
 
 /** Whether `name` resolves to an executable, either as a path or via PATH. On Windows a path without an extension also tries the `.exe` form: a sibling tool resolved from OMPRE_RIZIN_PATH is "C:/dir/rz-hash", which access() cannot see but every spawn API runs fine. */
-export async function isExecutable(name: string): Promise<boolean> {
+export const isExecutable = async (name: string): Promise<boolean> => {
   if (!name.includes("/")) {
     return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
   }
@@ -797,18 +792,18 @@ export async function isExecutable(name: string): Promise<boolean> {
     }
   }
   return false;
-}
+};
 
-export async function assertRizinAvailable(): Promise<void> {
+export const assertRizinAvailable = async (): Promise<void> => {
   if (!(await isExecutable(resolveRizinPath()))) {
     throw new Error(
       "omp-re: rizin not found on PATH — install rizin (https://rizin.re) or set OMPRE_RIZIN_PATH"
     );
   }
-}
+};
 
 /** `rizin -v`'s first line (e.g. "rizin 0.9.1 @ linux-x86-64"), or null when it can't be run. */
-export async function rizinVersion(): Promise<string | null> {
+export const rizinVersion = async (): Promise<string | null> => {
   try {
     const proc = Bun.spawn([resolveRizinPath(), "-v"], {
       stderr: "ignore",
@@ -820,10 +815,10 @@ export async function rizinVersion(): Promise<string | null> {
   } catch {
     return null;
   }
-}
+};
 
 /** Resolve a user-supplied binary path to an absolute, existing, readable file path. */
-export async function resolveBinaryPath(inputPath: string): Promise<string> {
+export const resolveBinaryPath = async (inputPath: string): Promise<string> => {
   let real: string;
   try {
     real = await fsRealpath(inputPath);
@@ -836,4 +831,4 @@ export async function resolveBinaryPath(inputPath: string): Promise<string> {
     throw new Error(`omp-re: no such binary: ${inputPath}`);
   }
   return real;
-}
+};

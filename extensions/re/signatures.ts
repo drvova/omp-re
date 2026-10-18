@@ -13,7 +13,7 @@ import { rzQuote } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
 
 /** Reject paths that would break the NUL-framed pipe; everything else is made literal by rzQuote (so a path with spaces or rizin metacharacters is one argument). */
-export function validateSignaturePath(path: string): string {
+export const validateSignaturePath = (path: string): string => {
   if (path.includes("\n") || path.includes("\r") || path.includes("\0")) {
     throw new Error(
       "omp-re: apply_signatures: path must not contain a line break or NUL"
@@ -23,28 +23,27 @@ export function validateSignaturePath(path: string): string {
     throw new Error("omp-re: apply_signatures: empty path");
   }
   return path;
-}
+};
 
 /** The rizin command that applies one FLIRT file. */
-export function signatureApplyCommand(path: string): string {
-  return `Fs ${rzQuote(validateSignaturePath(path))}`;
-}
+export const signatureApplyCommand = (path: string): string =>
+  `Fs ${rzQuote(validateSignaturePath(path))}`;
 
 /** rizin's `Fs` prints `Found <n> FLIRT signatures via <path>`; pull out the count for a verifiable result. */
-export function parseAppliedCount(output: string): number | undefined {
+export const parseAppliedCount = (output: string): number | undefined => {
   const m = /Found\s+(\d+)\s+FLIRT signatures?/iu.exec(output);
   return m ? Number(m[1]) : undefined;
-}
+};
 
 /**
  * Re-apply custom FLIRT files to a freshly analyzed process, in order. A file
  * that no longer applies (moved, unreadable) is reported rather than aborting
  * the rest — matching replayAnnotations.
  */
-export async function replaySignatures(
+export const replaySignatures = async (
   rz: RzSession,
   paths: readonly string[]
-): Promise<string[]> {
+): Promise<string[]> => {
   const failures: string[] = [];
   for (const path of paths) {
     try {
@@ -56,4 +55,4 @@ export async function replaySignatures(
     }
   }
   return failures;
-}
+};

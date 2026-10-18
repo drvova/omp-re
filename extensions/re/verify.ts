@@ -33,7 +33,7 @@ import { ensureRizin, getState } from "./state.ts";
 const VERIFY_COMMAND_TIMEOUT_MS = 120_000;
 
 /** SHA-256 hex of a file, streamed (no rizin spawn). Used at open time (index.ts) and to re-hash the currently-open binary at verify time. */
-export async function sha256File(path: string): Promise<string> {
+export const sha256File = async (path: string): Promise<string> => {
   const hash = createHash("sha256");
   await new Promise<void>((resolve, reject) => {
     const stream = createReadStream(path);
@@ -42,7 +42,7 @@ export async function sha256File(path: string): Promise<string> {
     stream.on("error", reject);
   });
   return hash.digest("hex");
-}
+};
 
 /** Static status of a recorded evidence row, from its recorded fields alone (no re-run) — what the report manifest shows. */
 export type RecordedStatus =
@@ -51,7 +51,7 @@ export type RecordedStatus =
   | "unverifiable (legacy)";
 
 /** Classify an evidence record from what it recorded, without re-running anything. */
-export function recordedStatus(ev: EvidenceRecord): RecordedStatus {
+export const recordedStatus = (ev: EvidenceRecord): RecordedStatus => {
   if (ev.reproHash && ev.binarySha256) {
     return "reproducible";
   }
@@ -59,10 +59,10 @@ export function recordedStatus(ev: EvidenceRecord): RecordedStatus {
     return "provenance-only";
   }
   return "unverifiable (legacy)";
-}
+};
 
 /** The exact line(s) recorded for a record, for display; falls back to rendering the recorded args. */
-export function recordedCommand(ev: EvidenceRecord): string | undefined {
+export const recordedCommand = (ev: EvidenceRecord): string | undefined => {
   if (ev.commands && ev.commands.length > 0) {
     return ev.commands.join(" ; ");
   }
@@ -73,7 +73,7 @@ export function recordedCommand(ev: EvidenceRecord): string | undefined {
     return `${args.command}${addr}`;
   }
   return undefined;
-}
+};
 
 /** Live status of a record after an actual re-run (`/re verify`). */
 export type VerifyStatus = "reproducible" | "tampered" | "unverifiable";
@@ -94,9 +94,9 @@ export interface VerifyRow {
  * is genuinely re-runnable. Never throws — any error degrades that record to
  * "unverifiable".
  */
-export async function buildVerification(
+export const buildVerification = async (
   ctx: ExtensionContext
-): Promise<VerifyRow[]> {
+): Promise<VerifyRow[]> => {
   const state = getState(ctx);
   const binaryPath = state.binaryPath ?? undefined;
   const currentSha =
@@ -195,7 +195,7 @@ export async function buildVerification(
     }
   }
   return rows;
-}
+};
 
 /**
  * `/re verify [--strict]`: run {@link buildVerification} and report. Interactive →
@@ -205,10 +205,10 @@ export async function buildVerification(
  * by default — only with `--strict`, so resuming an old session never spuriously
  * breaks CI.
  */
-export async function verifyEvidence(
+export const verifyEvidence = async (
   ctx: ExtensionContext,
   opts: { strict?: boolean } = {}
-): Promise<VerifyRow[]> {
+): Promise<VerifyRow[]> => {
   const rows = await buildVerification(ctx);
   const reproducible = rows.filter((r) => r.status === "reproducible").length;
   const tampered = rows.filter((r) => r.status === "tampered");
@@ -243,4 +243,4 @@ export async function verifyEvidence(
     console.log(text);
   }
   return rows;
-}
+};

@@ -49,12 +49,12 @@ const DUMP_CHUNK = 0x1_00_00;
  * (unmapped page partway through) stops the dump at what was actually read,
  * reported by the caller.
  */
-async function readLiveBytes(
+const readLiveBytes = async (
   dbg: RzSession,
   ea: string,
   size: number,
   signal?: AbortSignal
-): Promise<Buffer> {
+): Promise<Buffer> => {
   const parts: Buffer[] = [];
   let read = 0;
   while (read < size) {
@@ -78,14 +78,11 @@ async function readLiveBytes(
     }
   }
   return Buffer.concat(parts);
-}
+};
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
-export function debuggerEnabled(): boolean {
-  return /^(1|true|yes|on)$/iu.test(
-    (process.env.OMPRE_ENABLE_DEBUGGER ?? "").trim()
-  );
-}
+export const debuggerEnabled = (): boolean =>
+  /^(1|true|yes|on)$/iu.test((process.env.OMPRE_ENABLE_DEBUGGER ?? "").trim());
 
 /** The loud banner shown when a debug session launches; the model (and the transcript) should never miss that a real process started. */
 export const DEBUG_LAUNCH_WARNING =
@@ -167,7 +164,7 @@ const MODIFYING_ACTIONS = new Set<DebugAction>([
   "break_add_hw",
 ]);
 
-function approvalReason(action: DebugAction): string {
+const approvalReason = (action: DebugAction): string => {
   if (action === "start") {
     return "Launch the target under a debugger — this EXECUTES it on this machine.";
   }
@@ -199,28 +196,28 @@ function approvalReason(action: DebugAction): string {
     return "Read a region of the debugged process's live memory and write it to a file in omp-re's output directory.";
   }
   return `Inspect the debugged process (${action}).`;
-}
+};
 
 /** A register name for `dr <reg>=...`. */
-function validateRegName(reg: string): string {
+const validateRegName = (reg: string): string => {
   if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(reg)) {
     throw new Error(`omp-re: debug: bad register name ${JSON.stringify(reg)}`);
   }
   return reg;
-}
+};
 
 /** A register value for `dr <reg>=<value>`: decimal or 0x hex. */
-function validateRegValue(value: string): string {
+const validateRegValue = (value: string): string => {
   if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/u.test(value)) {
     throw new Error(
       `omp-re: debug: bad register value ${JSON.stringify(value)} — use decimal or 0x hex`
     );
   }
   return value;
-}
+};
 
 /** Hex bytes for `wx <bytes>`: an even-length string of hex digits, no spaces. */
-function validateHexBytes(bytes: string): string {
+const validateHexBytes = (bytes: string): string => {
   const b = bytes.replaceAll(/\s+/gu, "");
   if (!/^[0-9a-fA-F]+$/u.test(b) || b.length % 2 !== 0) {
     throw new Error(
@@ -228,20 +225,20 @@ function validateHexBytes(bytes: string): string {
     );
   }
   return b;
-}
+};
 
 /** A library or symbol name for `dmi` (allows the dots/versioning of lib names like libc.so.6). */
-function validateSymbolQuery(name: string): string {
+const validateSymbolQuery = (name: string): string => {
   if (!/^[A-Za-z0-9_.+-]+$/u.test(name)) {
     throw new Error(
       `omp-re: debug: bad symbol/library name ${JSON.stringify(name)}`
     );
   }
   return name;
-}
+};
 
 /** A watchpoint permission for `dbw <perm>`. */
-function validateWatchPerm(perm: string | undefined): string {
+const validateWatchPerm = (perm: string | undefined): string => {
   const p = (perm ?? "rw").toLowerCase();
   if (p !== "r" && p !== "w" && p !== "rw") {
     throw new Error(
@@ -249,7 +246,7 @@ function validateWatchPerm(perm: string | undefined): string {
     );
   }
   return p;
-}
+};
 
 const REMOTE_URI = /^(gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/u;
 
@@ -260,7 +257,7 @@ const REMOTE_URI = /^(gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/u;
  * through argv, no shell, but a flag-shaped or spaced value is rejected here
  * with a clear message). Returns undefined when no attach was requested.
  */
-export function buildDebugTarget(attach?: unknown): string | undefined {
+export const buildDebugTarget = (attach?: unknown): string | undefined => {
   if (attach === undefined) {
     return undefined;
   }
@@ -289,19 +286,19 @@ export function buildDebugTarget(attach?: unknown): string | undefined {
     );
   }
   return a.remote;
-}
+};
 
 /** Clamp a positive integer parameter to a sane range. */
-function clampInt(
+const clampInt = (
   value: number | undefined,
   fallback: number,
   max: number
-): number {
+): number => {
   if (value === undefined || !Number.isFinite(value)) {
     return fallback;
   }
   return Math.max(1, Math.min(Math.floor(value), max));
-}
+};
 
 /**
  * The debuggee's program counter as a `<reg> = 0x…` line. `dr rip` is the
@@ -309,16 +306,16 @@ function clampInt(
  * ARM/MIPS), tried as a fallback so the result is meaningful on every target.
  * Empty string when neither resolves (e.g. the process already exited).
  */
-async function programCounter(
+const programCounter = async (
   dbg: RzSession,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<string> => {
   const rip = (await dbg.cmd("dr rip", { signal })).trim();
   if (rip) {
     return rip;
   }
   return (await dbg.cmd("dr PC", { signal })).trim();
-}
+};
 
 /**
  * Build rz-run directives for the debug launch (book: tools/rz-run — rizin
@@ -327,7 +324,7 @@ async function programCounter(
  * format and are refused everywhere. `!`-prefixed stdio targets execute
  * shell commands on this machine and stay out of the contract.
  */
-export function buildRunDirectives(run?: unknown): string[] | undefined {
+export const buildRunDirectives = (run?: unknown): string[] | undefined => {
   if (run === undefined) {
     return undefined;
   }
@@ -433,9 +430,9 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
     }
   }
   return directives.length > 0 ? directives : undefined;
-}
+};
 
-export function registerDebugTools(pi: ExtensionAPI): void {
+export const registerDebugTools = (pi: ExtensionAPI): void => {
   if (!debuggerEnabled()) {
     return;
     // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
@@ -1248,4 +1245,4 @@ export function registerDebugTools(pi: ExtensionAPI): void {
       }
     },
   });
-}
+};

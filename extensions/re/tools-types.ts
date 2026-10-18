@@ -54,10 +54,10 @@ const KIND_LABELS: Record<RzListTypesParams["kind"], string> = {
 };
 
 /** List one type family with an optional name-substring filter, paginated. */
-export async function listTypeRows(
+export const listTypeRows = async (
   rz: RzSession,
   params: RzListTypesParams
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const rows =
     (await rz.cmdj<RzTypeListRow[]>(KIND_COMMANDS[params.kind])) ?? [];
   const filter = params.filter?.toLowerCase();
@@ -70,7 +70,7 @@ export async function listTypeRows(
     page
   );
   return markEmpty(result, page.length === 0);
-}
+};
 
 /**
  * Validate and double-quote a `td` C definition. rizin's command parser splits
@@ -81,7 +81,7 @@ export async function listTypeRows(
  * backtick, `$`, `\`, or control character (none of which appears in a C type)
  * is refused rather than passed through.
  */
-export function quoteTypeDefinition(definition: string): string {
+export const quoteTypeDefinition = (definition: string): string => {
   const trimmed = definition.trim();
   if (trimmed === "") {
     throw new Error("omp-re: define_types: empty definition");
@@ -93,13 +93,13 @@ export function quoteTypeDefinition(definition: string): string {
     );
   }
   return `td "${trimmed}"`;
-}
+};
 
 /** Define types from C statements, one td per entry. Each definition is double-quoted so its member `;`s survive rizin's line splitter. Surfaces rizin's stderr verbatim. */
-export async function defineTypeLines(
+export const defineTypeLines = async (
   rz: RzSession,
   definitions: string[]
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const lines: string[] = [];
   for (const definition of definitions) {
     const { output, stderr } = await rz.cmdWithStderr(
@@ -123,15 +123,15 @@ export async function defineTypeLines(
     };
   }
   return { content: [{ text: lines.join("\n"), type: "text" }] };
-}
+};
 
 /** Print memory at an address cast as a named type (rizin tp). */
-export async function castMemory(
+export const castMemory = async (
   rz: RzSession,
   addr: string,
   type: string,
   signal?: AbortSignal
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const ea = await resolveNumericAddr(rz, validateAddr(addr), signal);
   const { output, stderr } = await rz.cmdWithStderr(`tp ${type} @ ${ea}`, {
     signal,
@@ -142,9 +142,9 @@ export async function castMemory(
   return {
     content: [{ text: text.length > 0 ? text : "(no output)", type: "text" }],
   };
-}
+};
 
-export function registerTypeTools(pi: ExtensionAPI): void {
+export const registerTypeTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const listTypesParams = z.object({
     filter: z
@@ -227,4 +227,4 @@ export function registerTypeTools(pi: ExtensionAPI): void {
       return castMemory(rz, params.addr, params.type, signal);
     },
   });
-}
+};

@@ -52,7 +52,7 @@ interface TruncationResult {
   outputBytes: number;
 }
 
-function splitLinesForCounting(content: string): string[] {
+const splitLinesForCounting = (content: string): string[] => {
   if (content.length === 0) {
     return [];
   }
@@ -61,10 +61,10 @@ function splitLinesForCounting(content: string): string[] {
     lines.pop();
   }
   return lines;
-}
+};
 
 /** Format bytes as human-readable size. */
-function formatSize(bytes: number): string {
+const formatSize = (bytes: number): string => {
   if (bytes < 1024) {
     return `${bytes}B`;
   }
@@ -72,18 +72,18 @@ function formatSize(bytes: number): string {
     return `${(bytes / 1024).toFixed(1)}KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+};
 
 /**
  * Truncate content from the head (keep first N lines/bytes). Never returns a
  * partial line; if the first line alone exceeds the byte limit, returns empty
  * content rather than a fragment.
  */
-function truncateHead(
+const truncateHead = (
   content: string,
   maxLines = MAX_LINES,
   maxBytes = MAX_BYTES
-): TruncationResult {
+): TruncationResult => {
   const totalBytes = Buffer.byteLength(content, "utf-8");
   const lines = splitLinesForCounting(content);
   const totalLines = lines.length;
@@ -133,7 +133,7 @@ function truncateHead(
     totalLines,
     truncated: true,
   };
-}
+};
 
 export interface ResultOptions {
   ea?: string;
@@ -153,10 +153,10 @@ export interface ResultOptions {
   shiftHash?: string;
 }
 
-async function spill(
+const spill = async (
   full: string,
   options: ResultOptions
-): Promise<string | undefined> {
+): Promise<string | undefined> => {
   if (!options.ctx) {
     return undefined;
   }
@@ -169,15 +169,15 @@ async function spill(
     // A save failure (disk full, EACCES) must never turn a successful call into an error; the result just stays truncated.
     return undefined;
   }
-}
+};
 
 /** Assemble `${lead}${body}` with truncation, artifact spill, and the standard details shape. `lead` is the header line plus newline, or a fixed prefix that must stay at byte 0. */
-async function buildResult(
+const buildResult = async (
   lead: string,
   header: string,
   body: string,
   options: ResultOptions
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const truncation = truncateHead(body);
   let text = `${lead}${truncation.content}`;
   let artifactId: string | undefined;
@@ -205,14 +205,14 @@ async function buildResult(
       ...(options.shiftHash ? { shiftHash: options.shiftHash } : {}),
     },
   };
-}
+};
 
 /**
  * JSON for a model's context: an array is one compact row per line (a third of
  * the tokens of pretty-printing, and line truncation then always cuts between
  * whole rows), any other value is pretty-printed. Both forms are valid JSON.
  */
-export function formatJson(data: unknown): string {
+export const formatJson = (data: unknown): string => {
   if (!Array.isArray(data)) {
     return JSON.stringify(data, null, 2);
   }
@@ -220,7 +220,7 @@ export function formatJson(data: unknown): string {
     return "[]";
   }
   return `[\n${data.map((row) => `  ${JSON.stringify(row)}`).join(",\n")}\n]`;
-}
+};
 
 const ANSI_ESCAPE = /\u001B\[[0-9;?]*[A-Za-z]/gu;
 
@@ -233,10 +233,10 @@ const ANSI_ESCAPE = /\u001B\[[0-9;?]*[A-Za-z]/gu;
  * SHA-256 of. Prefer a command's JSON (`*j`) form where possible: rizin JSON is
  * ANSI-free and field-order-stable within a version, so it canonicalizes cleanly.
  */
-export function canonicalizeRizinOutput(
+export const canonicalizeRizinOutput = (
   raw: string,
   binaryPath?: string
-): string {
+): string => {
   let text = raw.replace(ANSI_ESCAPE, "").replaceAll(/\r\n?/gu, "\n");
   if (binaryPath && binaryPath.length > 0) {
     text = text.split(binaryPath).join("<BINARY>");
@@ -246,14 +246,13 @@ export function canonicalizeRizinOutput(
     lines.pop();
   }
   return lines.join("\n");
-}
+};
 
 /** SHA-256 hex of the canonical form of `raw` (see {@link canonicalizeRizinOutput}) — the reproducibility key recorded as `reproHash` and recomputed at verify time. */
-export function canonicalHash(raw: string, binaryPath?: string): string {
-  return createHash("sha256")
+export const canonicalHash = (raw: string, binaryPath?: string): string =>
+  createHash("sha256")
     .update(canonicalizeRizinOutput(raw, binaryPath), "utf-8")
     .digest("hex");
-}
 
 /**
  * Mask addresses in canonical rizin output where they are positional, not semantic,
@@ -265,8 +264,8 @@ export function canonicalHash(raw: string, binaryPath?: string): string {
  * changes the result. Shaped around rizin's text disassembly and listings; JSON
  * output is left as is (its offsets are decimal), so it compares exactly.
  */
-export function maskAddresses(canonical: string): string {
-  return canonical
+export const maskAddresses = (canonical: string): string =>
+  canonical
     .split("\n")
     .map((line) => {
       const ripMasked = /\brip\b/u.test(line)
@@ -285,67 +284,58 @@ export function maskAddresses(canonical: string): string {
         );
     })
     .join("\n");
-}
 
 /** SHA-256 hex of the address-masked canonical output — equal across builds that differ only in where the code sits. */
-export function shiftHash(raw: string, binaryPath?: string): string {
-  return createHash("sha256")
+export const shiftHash = (raw: string, binaryPath?: string): string =>
+  createHash("sha256")
     .update(maskAddresses(canonicalizeRizinOutput(raw, binaryPath)), "utf-8")
     .digest("hex");
-}
 
 /** The first `maxLines` lines (≤ `maxBytes`) of the canonical output, stored for human diffing in the verification manifest. Display-only — never hashed. */
-export function canonicalExcerpt(
+export const canonicalExcerpt = (
   raw: string,
   binaryPath?: string,
   maxLines = 20,
   maxBytes = 1024
-): string {
+): string => {
   const head = canonicalizeRizinOutput(raw, binaryPath)
     .split("\n")
     .slice(0, maxLines)
     .join("\n");
   return head.length <= maxBytes ? head : head.slice(0, maxBytes);
-}
+};
 
 /** A tool result whose content is the real JSON payload (not just a count), truncated defensively for huge outputs. */
-export function jsonResult(
+export const jsonResult = (
   header: string,
   data: unknown,
   options: ResultOptions = {}
-): Promise<ReToolResult> {
-  return buildResult(`${header}\n`, header, formatJson(data), {
+): Promise<ReToolResult> =>
+  buildResult(`${header}\n`, header, formatJson(data), {
     narrowHint: "Narrow with offset/limit or filter.",
     ...options,
   });
-}
 
 /** Same idea for plain-text output (disassembly, decompiled code, triage stdout). */
-export function textResult(
+export const textResult = (
   header: string,
   body: string,
   options: ResultOptions = {}
-): Promise<ReToolResult> {
-  return buildResult(`${header}\n`, header, body, options);
-}
+): Promise<ReToolResult> => buildResult(`${header}\n`, header, body, options);
 
 /** Like textResult, but keeps `prefix` at byte 0 of the content (the disassembly-only label). */
-export function prefixedTextResult(
+export const prefixedTextResult = (
   prefix: string,
   body: string,
   options: ResultOptions = {}
-): Promise<ReToolResult> {
-  return buildResult(prefix, prefix.trim(), body, options);
-}
+): Promise<ReToolResult> => buildResult(prefix, prefix.trim(), body, options);
 
 /** Plain, untruncated one-off result (mutations, hashes, session setup). */
-export function plainResult(text: string, ea?: string): ReToolResult {
-  return {
-    content: [{ text, type: "text" }],
-    details: {
-      ea,
-      header: text.split("\n")[0] ?? text,
-      summary: text.slice(0, 512),
-    },
-  };
-}
+export const plainResult = (text: string, ea?: string): ReToolResult => ({
+  content: [{ text, type: "text" }],
+  details: {
+    ea,
+    header: text.split("\n")[0] ?? text,
+    summary: text.slice(0, 512),
+  },
+});

@@ -30,7 +30,7 @@ const PRESERVED_EVIDENCE = 8;
 const PRESERVED_FINDINGS = 24;
 
 /** The lines folded into a compaction summary, or `[]` when no RE session is active. */
-export function preservedStateLines(ctx: ExtensionContext): string[] {
+export const preservedStateLines = (ctx: ExtensionContext): string[] => {
   const state = getState(ctx);
   const evidence = evidenceRecords(ctx);
   const annotations = state.binaryPath
@@ -70,16 +70,16 @@ export function preservedStateLines(ctx: ExtensionContext): string[] {
     "- Every address stated after this must still come from tool output on this branch; do not invent one from the summary."
   );
   return lines;
-}
+};
 
 /**
  * The compaction-preservation subsystem. Registered like every other
  * subsystem (see app.ts); the `session.compacting` handler returns extra
  * context lines for the summary.
  */
-export function registerPreservation(pi: ExtensionAPI): void {
+export const registerPreservation = (pi: ExtensionAPI): void => {
   pi.on("session.compacting", (_event, ctx) => {
     const context = preservedStateLines(ctx);
     return context.length > 0 ? { context } : undefined;
   });
-}
+};

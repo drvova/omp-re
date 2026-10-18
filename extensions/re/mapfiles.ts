@@ -27,25 +27,24 @@ export interface MapFile {
 }
 
 /** Validate an IO-map permission string (`r`, `rw`, `rwx`, …) — the access the mapped VA region allows, not a file write mode. */
-export function validateMapPerm(perm: string): string {
+export const validateMapPerm = (perm: string): string => {
   if (!/^[rwx]+$/u.test(perm)) {
     throw new Error(
       `omp-re: map_file: invalid permission ${JSON.stringify(perm)} — use r, w, x characters (e.g. r, rw, rx)`
     );
   }
   return perm;
-}
+};
 
 /** The `o <file> <addr> [<perm>]` command that maps `m`. `o` (not `o+`) keeps the file read-only on disk; the path is single-quoted and the address validated. */
-export function mapFileCommand(m: MapFile): string {
-  return `o ${rzQuote(m.path)} ${validateAddr(m.addr)}${m.perm ? ` ${validateMapPerm(m.perm)}` : ""}`;
-}
+export const mapFileCommand = (m: MapFile): string =>
+  `o ${rzQuote(m.path)} ${validateAddr(m.addr)}${m.perm ? ` ${validateMapPerm(m.perm)}` : ""}`;
 
 /** Re-apply `maps` to a freshly spawned process, in order. A map that no longer applies (the file moved since it was recorded) is reported rather than aborting the rest. */
-export async function replayMapFiles(
+export const replayMapFiles = async (
   rz: RzSession,
   maps: readonly MapFile[]
-): Promise<string[]> {
+): Promise<string[]> => {
   const failures: string[] = [];
   for (const m of maps) {
     try {
@@ -57,4 +56,4 @@ export async function replayMapFiles(
     }
   }
   return failures;
-}
+};

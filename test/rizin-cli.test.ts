@@ -562,7 +562,7 @@ const CATALOG: RzCatalog = new Map(
   Object.entries(SPECS).map(([cmd, spec]) => [cmd, { ...spec, cmd }])
 );
 
-function refusal(command: string, addr?: string): string {
+const refusal = (command: string, addr?: string): string => {
   const check = checkRizinCommand(CATALOG, command, addr);
   if (check.ok) {
     throw new Error(
@@ -570,7 +570,7 @@ function refusal(command: string, addr?: string): string {
     );
   }
   return check.reason;
-}
+};
 
 describe("checkRizinCommand (no rizin needed)", () => {
   test("allows read-only commands and appends addr as the only seek", () => {

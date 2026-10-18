@@ -47,10 +47,10 @@ import { recordedCommand, recordedStatus } from "./verify.ts";
  * evidence.ts writes). Never throws — a missing or unreadable source degrades
  * a capa/floss claim to "no extra evidence" rather than crashing the report.
  */
-async function readEvidenceOutput(
+const readEvidenceOutput = async (
   ctx: ExtensionContext,
   ev: EvidenceRecord
-): Promise<string | null> {
+): Promise<string | null> => {
   if (ev.artifactId) {
     try {
       const path = await ctx.sessionManager.getArtifactPath(ev.artifactId);
@@ -77,7 +77,7 @@ async function readEvidenceOutput(
   } catch {
     return null;
   }
-}
+};
 
 interface Claim {
   text: string;
@@ -103,14 +103,14 @@ interface AnnotationRecord {
 }
 
 /** Annotations on this branch that `/re undo` has not reversed. */
-function collectAnnotations(
+const collectAnnotations = (
   entries: readonly {
     id?: string;
     type: string;
     customType?: string;
     data?: unknown;
   }[]
-): AnnotationRecord[] {
+): AnnotationRecord[] => {
   const undone = new Set<string>();
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== "re.undo") {
@@ -143,7 +143,7 @@ function collectAnnotations(
     });
   }
   return out;
-}
+};
 
 // --- IOC extraction, ported from ioc.go ---
 
@@ -159,11 +159,10 @@ const URL_SHAPE = /^(?:https?|hxxps?):\/\//iu;
 const IPV4_SHAPE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u;
 
 /** Evidence text scanned here includes raw JSON (`ev.summary`), whose escaping/delimiters (trailing `",`, `),`, etc.) can hang off an otherwise-real match — trim them so an IOC never ends mid-punctuation. */
-function trimTrailingPunctuation(match: string): string {
-  return match.replace(/["'),;.]+$/u, "");
-}
+const trimTrailingPunctuation = (match: string): string =>
+  match.replace(/["'),;.]+$/u, "");
 
-function extractIOCsFromString(text: string): string[] {
+const extractIOCsFromString = (text: string): string[] => {
   const iocs: string[] = [];
   for (const pattern of [
     PATH_PATTERN,
@@ -176,7 +175,7 @@ function extractIOCsFromString(text: string): string[] {
     }
   }
   return iocs;
-}
+};
 
 /**
  * Defang an IOC so it can't be accidentally clicked/resolved when pasted from
@@ -185,7 +184,7 @@ function extractIOCsFromString(text: string): string[] {
  * matches the IOC shapes it's relevant to, so applying all three is safe
  * for paths and registry keys too (no-ops for those).
  */
-export function defangIOC(ioc: string): string {
+export const defangIOC = (ioc: string): string => {
   let out = ioc.replace(/^https?/iu, (scheme) =>
     scheme.toLowerCase().replace("tt", "xx")
   );
@@ -195,9 +194,9 @@ export function defangIOC(ioc: string): string {
   }
   out = out.replaceAll("@", "[@]");
   return out;
-}
+};
 
-function extractStringsFromJson(value: unknown): string[] {
+const extractStringsFromJson = (value: unknown): string[] => {
   if (typeof value === "string") {
     return [value];
   }
@@ -208,7 +207,7 @@ function extractStringsFromJson(value: unknown): string[] {
     return Object.values(value).flatMap(extractStringsFromJson);
   }
   return [];
-}
+};
 
 /**
  * `tools-triage.ts`'s `capaFindings()` turns capa's real `{rules: {name: {meta}}}` map into a flat
@@ -232,7 +231,7 @@ interface CapaFinding {
  * format.ts) — never pure JSON. Try a direct parse first so a blob that genuinely is pure JSON
  * still works, then fall back to stripping the leading header line before parsing.
  */
-function parseEvidenceJson(raw: string): unknown {
+const parseEvidenceJson = (raw: string): unknown => {
   try {
     return JSON.parse(raw);
   } catch {
@@ -242,9 +241,9 @@ function parseEvidenceJson(raw: string): unknown {
     }
     return JSON.parse(raw.slice(nl + 1));
   }
-}
+};
 
-async function extractCapabilities(
+const extractCapabilities = async (
   ctx: ExtensionContext,
   capaEvidence: EvidenceRecord[]
 ): Promise<{
@@ -253,7 +252,7 @@ async function extractCapabilities(
   sourceByCapability: Map<string, string>;
   sourceByAttack: Map<string, string>;
   labelByAttack: Map<string, string>;
-}> {
+}> => {
   // capability name -> evidence id
   const capSet = new Map<string, string>();
   // attack id -> evidence id
@@ -309,7 +308,7 @@ async function extractCapabilities(
     sourceByAttack: attackSet,
     sourceByCapability: capSet,
   };
-}
+};
 
 /** 22-entry MITRE ATT&CK lookup, ported verbatim from internal/report/attack.go. */
 const MITRE_ATTACK: Record<string, string> = {
@@ -337,11 +336,11 @@ const MITRE_ATTACK: Record<string, string> = {
   T1568: "Dynamic Resolution",
 };
 
-async function buildIOCClaims(
+const buildIOCClaims = async (
   ctx: ExtensionContext,
   evidence: EvidenceRecord[],
   annotations: AnnotationRecord[]
-): Promise<Claim[]> {
+): Promise<Claim[]> => {
   const claims: Claim[] = [];
 
   for (const ev of evidence) {
@@ -395,7 +394,7 @@ async function buildIOCClaims(
     }
   }
   return [...seen.values()].toSorted((a, b) => a.text.localeCompare(b.text));
-}
+};
 
 interface BuiltReport {
   title: string;
@@ -410,7 +409,7 @@ interface BuiltReport {
   findings: FindingRecord[];
 }
 
-async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
+const buildReport = async (ctx: ExtensionContext): Promise<BuiltReport> => {
   const sessionId = ctx.sessionManager.getSessionId();
   const entries = branchEntries(ctx);
   const evidence = collectEvidence(entries);
@@ -502,46 +501,7 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
     title: `Analysis Report — Session ${sessionId.length > 8 ? sessionId.slice(-8) : sessionId}`,
     toolById,
   };
-}
-
-function formatMarkdown(report: BuiltReport, outcome?: AuditOutcome): string {
-  const lines: string[] = [`# ${report.title}`, ""];
-  let claimIndex = 0;
-  for (const section of report.sections) {
-    lines.push(`## ${section.title}`, "");
-    if (section.intro) {
-      lines.push(section.intro, "");
-    }
-    if (section.claims.length > 0) {
-      for (const claim of section.claims) {
-        lines.push(`- ${claim.text}`);
-        if (claim.note) {
-          lines.push(`  _${claim.note}_`);
-        }
-        const anchors = claim.evidenceIds
-          .map((id) => `[${report.toolById.get(id) ?? "unknown"}:${id}]`)
-          .join(" ");
-        if (anchors) {
-          lines.push(`  **Evidence:** ${anchors}`);
-        }
-        const audit = outcome?.byIndex.get(claimIndex);
-        if (
-          audit &&
-          (audit.verdict === "unsupported" || audit.verdict === "overreach")
-        ) {
-          lines.push(`  _⚠ Support audit: ${audit.verdict} — ${audit.reason}_`);
-        }
-        claimIndex += 1;
-      }
-      lines.push("");
-    }
-  }
-  if (outcome) {
-    appendClaimAudit(lines, outcome);
-  }
-  appendVerificationManifest(lines, report);
-  return `${lines.join("\n").trimEnd()}\n`;
-}
+};
 
 /**
  * Append the claim↔evidence support-audit summary note (prose, never a gated
@@ -550,7 +510,7 @@ function formatMarkdown(report: BuiltReport, outcome?: AuditOutcome): string {
  * degrade note when the side turn was unavailable. Per-claim flags render inline
  * above, next to each claim.
  */
-function appendClaimAudit(lines: string[], outcome: AuditOutcome): void {
+const appendClaimAudit = (lines: string[], outcome: AuditOutcome): void => {
   if (outcome.itemCount === 0) {
     return;
   }
@@ -571,7 +531,13 @@ function appendClaimAudit(lines: string[], outcome: AuditOutcome): void {
     `> _Claim–evidence support audit: ${supported} supported, ${flagged} flagged, ${unaudited} unaudited._`,
     ""
   );
-}
+};
+
+/** The manifest table's Command cell: the recorded rizin line(s) in inline code, or an em dash. */
+const manifestCommandCell = (ev: EvidenceRecord): string => {
+  const command = recordedCommand(ev);
+  return command ? `\`${command}\`` : "—";
+};
 
 /**
  * Append the Verification Manifest: one row per distinct cited evidence id — the
@@ -580,10 +546,10 @@ function appendClaimAudit(lines: string[], outcome: AuditOutcome): void {
  * (`/re verify`, or re-running the command read-only). Prose/table only, never a
  * gated `claims` entry, so {@link findUngroundedClaims} is unaffected.
  */
-function appendVerificationManifest(
+const appendVerificationManifest = (
   lines: string[],
   report: BuiltReport
-): void {
+): void => {
   const citedIds: string[] = [];
   const seen = new Set<string>();
   for (const section of report.sections) {
@@ -622,16 +588,52 @@ function appendVerificationManifest(
     );
   }
   lines.push("");
-}
+};
 
-/** The manifest table's Command cell: the recorded rizin line(s) in inline code, or an em dash. */
-function manifestCommandCell(ev: EvidenceRecord): string {
-  const command = recordedCommand(ev);
-  return command ? `\`${command}\`` : "—";
-}
+const formatMarkdown = (
+  report: BuiltReport,
+  outcome?: AuditOutcome
+): string => {
+  const lines: string[] = [`# ${report.title}`, ""];
+  let claimIndex = 0;
+  for (const section of report.sections) {
+    lines.push(`## ${section.title}`, "");
+    if (section.intro) {
+      lines.push(section.intro, "");
+    }
+    if (section.claims.length > 0) {
+      for (const claim of section.claims) {
+        lines.push(`- ${claim.text}`);
+        if (claim.note) {
+          lines.push(`  _${claim.note}_`);
+        }
+        const anchors = claim.evidenceIds
+          .map((id) => `[${report.toolById.get(id) ?? "unknown"}:${id}]`)
+          .join(" ");
+        if (anchors) {
+          lines.push(`  **Evidence:** ${anchors}`);
+        }
+        const audit = outcome?.byIndex.get(claimIndex);
+        if (
+          audit &&
+          (audit.verdict === "unsupported" || audit.verdict === "overreach")
+        ) {
+          lines.push(`  _⚠ Support audit: ${audit.verdict} — ${audit.reason}_`);
+        }
+        claimIndex += 1;
+      }
+      lines.push("");
+    }
+  }
+  if (outcome) {
+    appendClaimAudit(lines, outcome);
+  }
+  appendVerificationManifest(lines, report);
+  return `${lines.join("\n").trimEnd()}\n`;
+};
 
 /** Every claim across the whole report must resolve to at least one evidence/annotation id. A partial or annotated report is not an acceptable substitute — the point of the gate is that an ungrounded report never reaches a ticket. */
-function findUngroundedClaims(report: BuiltReport): Claim[] {
+const findUngroundedClaims = (report: BuiltReport): Claim[] => {
   const ungrounded: Claim[] = [];
   for (const section of report.sections) {
     for (const claim of section.claims) {
@@ -641,7 +643,7 @@ function findUngroundedClaims(report: BuiltReport): Claim[] {
     }
   }
   return ungrounded;
-}
+};
 
 /**
  * Assemble the audit input for the grounded claims: one entry per claim with at
@@ -651,11 +653,11 @@ function findUngroundedClaims(report: BuiltReport): Claim[] {
  * `index` is the claim's flat position across the report, which the verdicts map
  * back on and `formatMarkdown` renders flags by.
  */
-async function buildAuditInputs(
+const buildAuditInputs = async (
   ctx: ExtensionContext,
   report: BuiltReport,
   withFullText: boolean
-): Promise<AuditClaimInput[]> {
+): Promise<AuditClaimInput[]> => {
   const items: AuditClaimInput[] = [];
   const textCache = new Map<string, string | undefined>();
   let index = 0;
@@ -690,7 +692,140 @@ async function buildAuditInputs(
     }
   }
   return items;
-}
+};
+
+/** A `rizin_command` record's `{ command, addr }` params, or null for any other tool or a malformed record. */
+const rizinCommandArgs = (
+  ev: EvidenceRecord
+): { command: string; addr?: string } | null => {
+  if (ev.tool !== "rizin_command") {
+    return null;
+  }
+  const args = ev.args as { command?: unknown; addr?: unknown } | undefined;
+  if (!args || typeof args.command !== "string") {
+    return null;
+  }
+  return typeof args.addr === "string" && args.addr
+    ? { addr: args.addr, command: args.command }
+    : { command: args.command };
+};
+
+/**
+ * The machine-readable verification manifest written beside the report
+ * (`<report>.manifest.json`): the binary hash plus one entry per distinct cited
+ * evidence id — its command(s), reproducible-output hash, canonical excerpt, bound
+ * binary hash, recorded status, and the claims it backs. The artifact "anyone with
+ * the binary can re-derive it" from: re-run each command read-only, canonicalize,
+ * hash, compare.
+ */
+const buildManifestJson = (
+  report: BuiltReport,
+  anchors: ReadonlyMap<string, AnchorFingerprint> = new Map()
+): {
+  binarySha256: string | null;
+  /** The report's findings — what `/re carry --inherit` re-proves on another build. */
+  findings: {
+    id: string;
+    claim: string;
+    evidenceIds: string[];
+    addr: string | null;
+    confidence: string;
+  }[];
+  entries: {
+    evidenceId: string;
+    tool: string;
+    /** `rizin_command` only: the structured `{ command, addr }` params, so `/re carry` re-runs the exact request against another binary. */
+    args: { command: string; addr?: string } | null;
+    command: string | null;
+    commands: string[] | null;
+    reproHash: string | null;
+    canonicalExcerpt: string | null;
+    shiftHash: string | null;
+    /** Fingerprint of the function containing the command's anchor, so `/re carry` can find it again in another build. */
+    anchor: AnchorFingerprint | null;
+    binarySha256: string | null;
+    status: string;
+    claims: string[];
+  }[];
+} => {
+  const claimsById = new Map<string, string[]>();
+  for (const section of report.sections) {
+    for (const claim of section.claims) {
+      for (const id of claim.evidenceIds) {
+        const list = claimsById.get(id) ?? [];
+        list.push(claim.text);
+        claimsById.set(id, list);
+      }
+    }
+  }
+  return {
+    binarySha256: report.binarySha256 ?? null,
+    entries: [...claimsById.keys()].map((id) => {
+      const ev = report.evidenceById.get(id);
+      return {
+        anchor: anchors.get(id) ?? null,
+        args: ev ? rizinCommandArgs(ev) : null,
+        binarySha256: ev?.binarySha256 ?? null,
+        canonicalExcerpt: ev?.canonicalExcerpt ?? null,
+        claims: claimsById.get(id) ?? [],
+        command: ev ? (recordedCommand(ev) ?? null) : null,
+        commands: ev?.commands ?? null,
+        evidenceId: id,
+        reproHash: ev?.reproHash ?? null,
+        shiftHash: ev?.shiftHash ?? null,
+        status: ev ? recordedStatus(ev) : "unverifiable (legacy)",
+        tool: report.toolById.get(id) ?? ev?.tool ?? "unknown",
+      };
+    }),
+    findings: report.findings.map((f) => ({
+      addr: f.addr ?? null,
+      claim: f.claim,
+      confidence: f.confidence,
+      evidenceIds: f.evidenceIds,
+      id: f.id,
+    })),
+  };
+};
+
+/**
+ * Fingerprint the anchor of every cited, address-pinned `rizin_command` record —
+ * but only while the binary that evidence was taken against is the one open, since
+ * a fingerprint of any other build would point `/re carry` at the wrong code.
+ * Best-effort: no open binary, a different binary, or any rizin failure just
+ * leaves the entry without an anchor (carry then can't relocate it).
+ */
+const collectAnchors = async (
+  ctx: ExtensionContext,
+  report: BuiltReport
+): Promise<Map<string, AnchorFingerprint>> => {
+  const anchors = new Map<string, AnchorFingerprint>();
+  const state = getState(ctx);
+  if (!state.binaryPath || !state.binarySha256) {
+    return anchors;
+  }
+  const cited = new Set(
+    report.sections.flatMap((s) => s.claims.flatMap((c) => c.evidenceIds))
+  );
+  try {
+    for (const id of cited) {
+      const ev = report.evidenceById.get(id);
+      if (!ev || ev.binarySha256 !== state.binarySha256) {
+        continue;
+      }
+      const addr = rizinCommandArgs(ev)?.addr;
+      if (!addr) {
+        continue;
+      }
+      const fp = await fingerprintAnchor(await ensureRizin(ctx), addr);
+      if (fp) {
+        anchors.set(id, fp);
+      }
+    }
+  } catch {
+    // rizin unavailable: the manifest is still complete, just without relocation fingerprints.
+  }
+  return anchors;
+};
 
 /**
  * Build the analysis report for the current session and either write it to
@@ -704,11 +839,11 @@ async function buildAuditInputs(
  * visible — console.error plus a non-zero exit code — never a silently
  * dropped report.
  */
-export async function writeReport(
+export const writeReport = async (
   ctx: ExtensionContext,
   outputPath?: string,
   opts?: { audit?: AuditMode; judge?: ClaimJudge }
-): Promise<void> {
+): Promise<void> => {
   const report = await buildReport(ctx);
   const ungrounded = findUngroundedClaims(report);
   if (ungrounded.length > 0) {
@@ -793,137 +928,4 @@ export async function writeReport(
   } else {
     console.log(successMessage);
   }
-}
-
-/**
- * The machine-readable verification manifest written beside the report
- * (`<report>.manifest.json`): the binary hash plus one entry per distinct cited
- * evidence id — its command(s), reproducible-output hash, canonical excerpt, bound
- * binary hash, recorded status, and the claims it backs. The artifact "anyone with
- * the binary can re-derive it" from: re-run each command read-only, canonicalize,
- * hash, compare.
- */
-function buildManifestJson(
-  report: BuiltReport,
-  anchors: ReadonlyMap<string, AnchorFingerprint> = new Map()
-): {
-  binarySha256: string | null;
-  /** The report's findings — what `/re carry --inherit` re-proves on another build. */
-  findings: {
-    id: string;
-    claim: string;
-    evidenceIds: string[];
-    addr: string | null;
-    confidence: string;
-  }[];
-  entries: {
-    evidenceId: string;
-    tool: string;
-    /** `rizin_command` only: the structured `{ command, addr }` params, so `/re carry` re-runs the exact request against another binary. */
-    args: { command: string; addr?: string } | null;
-    command: string | null;
-    commands: string[] | null;
-    reproHash: string | null;
-    canonicalExcerpt: string | null;
-    shiftHash: string | null;
-    /** Fingerprint of the function containing the command's anchor, so `/re carry` can find it again in another build. */
-    anchor: AnchorFingerprint | null;
-    binarySha256: string | null;
-    status: string;
-    claims: string[];
-  }[];
-} {
-  const claimsById = new Map<string, string[]>();
-  for (const section of report.sections) {
-    for (const claim of section.claims) {
-      for (const id of claim.evidenceIds) {
-        const list = claimsById.get(id) ?? [];
-        list.push(claim.text);
-        claimsById.set(id, list);
-      }
-    }
-  }
-  return {
-    binarySha256: report.binarySha256 ?? null,
-    entries: [...claimsById.keys()].map((id) => {
-      const ev = report.evidenceById.get(id);
-      return {
-        anchor: anchors.get(id) ?? null,
-        args: ev ? rizinCommandArgs(ev) : null,
-        binarySha256: ev?.binarySha256 ?? null,
-        canonicalExcerpt: ev?.canonicalExcerpt ?? null,
-        claims: claimsById.get(id) ?? [],
-        command: ev ? (recordedCommand(ev) ?? null) : null,
-        commands: ev?.commands ?? null,
-        evidenceId: id,
-        reproHash: ev?.reproHash ?? null,
-        shiftHash: ev?.shiftHash ?? null,
-        status: ev ? recordedStatus(ev) : "unverifiable (legacy)",
-        tool: report.toolById.get(id) ?? ev?.tool ?? "unknown",
-      };
-    }),
-    findings: report.findings.map((f) => ({
-      addr: f.addr ?? null,
-      claim: f.claim,
-      confidence: f.confidence,
-      evidenceIds: f.evidenceIds,
-      id: f.id,
-    })),
-  };
-}
-
-/** A `rizin_command` record's `{ command, addr }` params, or null for any other tool or a malformed record. */
-function rizinCommandArgs(
-  ev: EvidenceRecord
-): { command: string; addr?: string } | null {
-  if (ev.tool !== "rizin_command") {
-    return null;
-  }
-  const args = ev.args as { command?: unknown; addr?: unknown } | undefined;
-  if (!args || typeof args.command !== "string") {
-    return null;
-  }
-  return typeof args.addr === "string" && args.addr
-    ? { addr: args.addr, command: args.command }
-    : { command: args.command };
-}
-
-/**
- * Fingerprint the anchor of every cited, address-pinned `rizin_command` record —
- * but only while the binary that evidence was taken against is the one open, since
- * a fingerprint of any other build would point `/re carry` at the wrong code.
- * Best-effort: no open binary, a different binary, or any rizin failure just
- * leaves the entry without an anchor (carry then can't relocate it).
- */
-async function collectAnchors(
-  ctx: ExtensionContext,
-  report: BuiltReport
-): Promise<Map<string, AnchorFingerprint>> {
-  const anchors = new Map<string, AnchorFingerprint>();
-  const state = getState(ctx);
-  if (!state.binaryPath || !state.binarySha256) {
-    return anchors;
-  }
-  const cited = new Set(
-    report.sections.flatMap((s) => s.claims.flatMap((c) => c.evidenceIds))
-  );
-  try {
-    for (const id of cited) {
-      const ev = report.evidenceById.get(id);
-      if (!ev || ev.binarySha256 !== state.binarySha256) {
-        continue;
-      }
-      const addr = rizinCommandArgs(ev)?.addr;
-      if (!addr) {
-        continue;
-      }
-      const fp = await fingerprintAnchor(await ensureRizin(ctx), addr);
-      if (fp) {
-        anchors.set(id, fp);
-      }
-    }
-  } catch {
-    // rizin unavailable: the manifest is still complete, just without relocation fingerprints.
-  }
-  return anchors;
-}
+};

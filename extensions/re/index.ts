@@ -86,13 +86,13 @@ interface OpenOptions {
 }
 
 /** Collect the open_binary load params into a LoadOptions, or undefined when none were given (ordinary header autodetection). */
-function toLoadOptions(params: {
+const toLoadOptions = (params: {
   arch?: string;
   bits?: 8 | 16 | 32 | 64;
   base?: string;
   map?: string;
   format?: string;
-}): LoadOptions | undefined {
+}): LoadOptions | undefined => {
   const load: LoadOptions = {};
   if (params.arch !== undefined) {
     load.arch = params.arch;
@@ -110,7 +110,7 @@ function toLoadOptions(params: {
     load.format = params.format;
   }
   return Object.keys(load).length > 0 ? load : undefined;
-}
+};
 
 /**
  * Open a binary for this session: resolve the path, verify rizin is
@@ -121,12 +121,12 @@ function toLoadOptions(params: {
  * the LLM); sendMessage feeds the `re.binary` renderer, which only fires for
  * role:"custom" messages.
  */
-async function openBinary(
+const openBinary = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   inputPath: string,
   options: OpenOptions = {}
-): Promise<OpenResult> {
+): Promise<OpenResult> => {
   const resolved = await resolveBinaryPath(inputPath);
   // SHA-256 of the exact bytes, streamed with Node crypto (no rizin spawn). Bound into every
   // evidence record taken this session so `/re verify` confirms it is re-running against the same
@@ -157,7 +157,7 @@ async function openBinary(
     () => []
   );
   return { missingCommands, path: resolved, replayFailures, replayed };
-}
+};
 
 interface OpenResult {
   path: string;
@@ -167,10 +167,10 @@ interface OpenResult {
 }
 
 /** Footer status while rizin analyzes, cleared when done. */
-function analysisStatus(
+const analysisStatus = (
   ctx: ExtensionContext,
   name: string
-): OpenOptions["onProgress"] {
+): OpenOptions["onProgress"] => {
   if (!ctx.hasUI) {
     return undefined;
   }
@@ -180,17 +180,20 @@ function analysisStatus(
       "re",
       `rizin: analyzing ${name}… ${Math.round(elapsedMs / 1000)}s`
     );
-}
+};
 
-function clearAnalysisStatus(ctx: ExtensionContext): void {
+const clearAnalysisStatus = (ctx: ExtensionContext): void => {
   if (ctx.hasUI) {
     ctx.ui.setStatus("re", undefined);
   }
-}
+};
 
-function describeOpen(
+const missingCommandsWarning = (missing: string[]): string =>
+  `Warning: this rizin build lacks ${missing.join(", ")}, which omp-re's tools send; the tools that use them will fail. Upgrade rizin (omp-re is tested with 0.9.1).`;
+
+const describeOpen = (
   result: OpenResult & { loadOptions?: LoadOptions }
-): string {
+): string => {
   const lines = [`Binary opened: ${result.path}`];
   if (result.loadOptions) {
     const parts = Object.entries(result.loadOptions).map(
@@ -212,11 +215,7 @@ function describeOpen(
     lines.push(missingCommandsWarning(result.missingCommands));
   }
   return lines.join("\n");
-}
-
-function missingCommandsWarning(missing: string[]): string {
-  return `Warning: this rizin build lacks ${missing.join(", ")}, which omp-re's tools send; the tools that use them will fail. Upgrade rizin (omp-re is tested with 0.9.1).`;
-}
+};
 
 const SUBCOMMANDS: readonly {
   name: string;
@@ -291,7 +290,7 @@ const HELP_TEXT = [
   "/re off              disable RE tools (quick toggle, no restart)",
 ].join("\n");
 
-async function statusText(ctx: ExtensionContext): Promise<string> {
+const statusText = async (ctx: ExtensionContext): Promise<string> => {
   const state = getState(ctx);
   const version = await rizinVersion();
   const lines = [`rizin: ${version ?? `not found (${resolveRizinPath()})`}`];
@@ -338,7 +337,7 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
     `audit log signing: ${process.env.OMPRE_AUDIT_HMAC_KEY ? "HMAC-SHA256" : "unsigned (set OMPRE_AUDIT_HMAC_KEY)"}`
   );
   return lines.join("\n");
-}
+};
 
 /**
  * The command shell subsystem: the `re.binary` renderer, the `open_binary`
@@ -346,7 +345,7 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
  * completion, and the `/re` command. Applied like every other subsystem (see
  * the default export), with the host handed to it.
  */
-function registerShell(pi: ExtensionAPI): void {
+const registerShell = (pi: ExtensionAPI): void => {
   /** Session id this instance last saw, to tell a branch into a new session file apart from navigation within one. */
   let lastSessionId: string | undefined;
   /** Latest context, for argument completion (which receives no ctx of its own). */
@@ -445,10 +444,10 @@ function registerShell(pi: ExtensionAPI): void {
    * branch already records it) and runs in the background so a large binary
    * never blocks session startup.
    */
-  function syncToBranch(
+  const syncToBranch = (
     ctx: ExtensionContext,
     opts: { flag?: string } = {}
-  ): void {
+  ): void => {
     latestCtx = ctx;
     lastSessionId = ctx.sessionManager.getSessionId();
     rebuildEvidenceIndex(ctx);
@@ -500,7 +499,7 @@ function registerShell(pi: ExtensionAPI): void {
         )
       )
       .finally(() => clearAnalysisStatus(ctx));
-  }
+  };
 
   pi.on("session_start", (_event, ctx) => {
     const flag = pi.getFlag("binary");
@@ -528,7 +527,7 @@ function registerShell(pi: ExtensionAPI): void {
     shutdownState(ctx.sessionManager.getSessionId());
   });
 
-  function completeArguments(prefix: string): AutocompleteItem[] | null {
+  const completeArguments = (prefix: string): AutocompleteItem[] | null => {
     const space = prefix.indexOf(" ");
     if (space === -1) {
       const lower = prefix.toLowerCase();
@@ -561,12 +560,12 @@ function registerShell(pi: ExtensionAPI): void {
     } catch {
       return null;
     }
-  }
+  };
 
-  async function runOpen(
+  const runOpen = async (
     ctx: ExtensionCommandContext,
     path: string
-  ): Promise<void> {
+  ): Promise<void> => {
     const onProgress = analysisStatus(ctx, basename(path));
     try {
       const result = await openBinary(pi, ctx, path, { onProgress });
@@ -579,7 +578,7 @@ function registerShell(pi: ExtensionAPI): void {
     } finally {
       clearAnalysisStatus(ctx);
     }
-  }
+  };
 
   pi.registerCommand("re", {
     description:
@@ -753,7 +752,7 @@ function registerShell(pi: ExtensionAPI): void {
       }
     },
   });
-}
+};
 
 /**
  * Extension entry: apply every omp-re subsystem in order. The tool groups,
@@ -761,7 +760,7 @@ function registerShell(pi: ExtensionAPI): void {
  * `composeApp` awaits their registration (the triage/CLI probes are async)
  * before init completes. See app.ts.
  */
-export default async function registerOmpRe(pi: ExtensionAPI): Promise<void> {
+const registerOmpRe = async (pi: ExtensionAPI): Promise<void> => {
   await composeApp(pi, [
     { apply: registerReadTools, name: "re:read-tools" },
     { apply: registerInfoTools, name: "re:info-tools" },
@@ -786,4 +785,5 @@ export default async function registerOmpRe(pi: ExtensionAPI): Promise<void> {
     { apply: registerUI, name: "re:ui" },
     { apply: registerShell, name: "re:shell" },
   ]);
-}
+};
+export default registerOmpRe;

@@ -4,7 +4,7 @@ import { decompileAt } from "../extensions/re/decompile.ts";
 import type { RzSession } from "../extensions/re/rizin.ts";
 
 /** Stub session whose cmd() replays canned replies; only what decompileAt needs. */
-function stubRz(replies: Record<string, string>): RzSession {
+const stubRz = (replies: Record<string, string>): RzSession => {
   const cmd = (command: string) => {
     const [key] = command.trim().split(/\s+/u);
     return Promise.resolve(replies[key] ?? "");
@@ -14,7 +14,7 @@ function stubRz(replies: Record<string, string>): RzSession {
     return Promise.resolve(raw ? JSON.parse(raw) : null);
   };
   return { cmd, cmdj } as unknown as RzSession;
-}
+};
 
 describe("decompileAt", () => {
   test("normalizes CRLF from a Windows rizin before handing code to the renderer", async () => {

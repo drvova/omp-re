@@ -67,12 +67,11 @@ const COMBINING_RANGES: [number, number][] = [
   [0xfe_20, 0xfe_2f],
 ];
 
-function inRanges(cp: number, ranges: [number, number][]): boolean {
-  return ranges.some(([lo, hi]) => cp >= lo && cp <= hi);
-}
+const inRanges = (cp: number, ranges: [number, number][]): boolean =>
+  ranges.some(([lo, hi]) => cp >= lo && cp <= hi);
 
 /** 0 for combining marks (compose onto the previous cell), 2 for East Asian Wide/Fullwidth, else 1. */
-function charWidth(cp: number): 0 | 1 | 2 {
+const charWidth = (cp: number): 0 | 1 | 2 => {
   if (inRanges(cp, COMBINING_RANGES)) {
     return 0;
   }
@@ -80,7 +79,7 @@ function charWidth(cp: number): 0 | 1 | 2 {
     return 2;
   }
   return 1;
-}
+};
 
 // --- entity-aware per-character cell wrapping -------------------------------
 // ansi-to-html (escapeXML: true) delegates to the `entities` package's
@@ -106,8 +105,8 @@ const CHAR_TO_ENTITY: Record<string, string> = {
   ">": "&gt;",
 };
 
-function decodeEntities(text: string): string {
-  return text.replaceAll(
+const decodeEntities = (text: string): string =>
+  text.replaceAll(
     /&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z]+);/gu,
     (whole, body: string) => {
       if (body[0] === "#") {
@@ -122,9 +121,8 @@ function decodeEntities(text: string): string {
       return NAMED_ENTITY_TO_CHAR[body] ?? whole;
     }
   );
-}
 
-function wrapTextRun(text: string): string {
+const wrapTextRun = (text: string): string => {
   const decoded = decodeEntities(text);
   let out = "";
   for (const ch of decoded) {
@@ -145,18 +143,17 @@ function wrapTextRun(text: string): string {
     out += `<span style="display:inline-block;width:${width}ch;overflow:hidden;text-align:center${emStyle}">${safe}</span>`;
   }
   return out;
-}
+};
 
 /** Splits `html` into tag/text tokens and wraps only the text tokens — tags (the ansi-to-html color spans) pass through untouched, so color survives. */
-function applyCellGrid(html: string): string {
-  return html
+const applyCellGrid = (html: string): string =>
+  html
     .split(/(<[^>]+>)/u)
     .map((token) => (token.startsWith("<") ? token : wrapTextRun(token)))
     .join("");
-}
 
-function renderPage(bodyHtml: string): string {
-  return `<!doctype html>
+const renderPage = (bodyHtml: string): string =>
+  `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -180,9 +177,8 @@ function renderPage(bodyHtml: string): string {
 </body>
 </html>
 `;
-}
 
-async function main(): Promise<void> {
+const main = async (): Promise<void> => {
   const entries = await readdir(OUT_DIR, { withFileTypes: true });
   const ansiFiles = entries
     .filter((e) => e.isFile() && e.name.endsWith(".ansi"))
@@ -209,6 +205,6 @@ async function main(): Promise<void> {
     await Bun.write(outPath, page);
     console.log(`render.ts: wrote ${outPath}`);
   }
-}
+};
 
 await main();

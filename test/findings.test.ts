@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 /** A harness with the finding tools registered, the open binary bound to SHA_A, and one reproducible evidence record. */
-function setup(sessionId: string, judge: ClaimJudge | null) {
+const setup = (sessionId: string, judge: ClaimJudge | null) => {
   const h = makeHarness(sessionId);
   registerFindingTools(h.pi, { judge: () => judge });
   getState(h.ctx).binarySha256 = SHA_A;
@@ -97,7 +97,7 @@ function setup(sessionId: string, judge: ClaimJudge | null) {
   const run = (name: string, params: Record<string, unknown>) =>
     h.tool(name).execute("call", params, undefined, undefined, h.ctx);
   return { h, run };
-}
+};
 
 describe("record_finding gates (no rizin needed)", () => {
   test("records a supported finding citing an evidence prefix, and reports it carryable", async () => {

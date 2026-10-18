@@ -38,13 +38,13 @@ import {
 logSkip("debugger tests");
 
 const originalEnable = process.env.OMPRE_ENABLE_DEBUGGER;
-function restoreEnable() {
+const restoreEnable = () => {
   if (originalEnable === undefined) {
     delete process.env.OMPRE_ENABLE_DEBUGGER;
   } else {
     process.env.OMPRE_ENABLE_DEBUGGER = originalEnable;
   }
-}
+};
 
 // macOS hosted runners don't grant rizin's debugger task_for_pid without a
 // codesigned/entitled rizin or root, so a live debug drive (which executes the

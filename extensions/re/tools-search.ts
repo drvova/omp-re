@@ -40,11 +40,11 @@ interface AfijBounds {
 }
 
 /** The [from, to) extent of the function at `nameOrAddr`, for scoping a search to it. Uses the function's full bounds (minbound/maxbound), falling back to offset+size. */
-async function functionRange(
+const functionRange = async (
   rz: RzSession,
   nameOrAddr: string,
   signal?: AbortSignal
-): Promise<{ from: number; to: number; name: string }> {
+): Promise<{ from: number; to: number; name: string }> => {
   const fn = (
     await rz.cmdj<AfijBounds[]>(`afij @ ${validateAddr(nameOrAddr)}`, {
       signal,
@@ -67,7 +67,7 @@ async function functionRange(
     );
   }
   return { from, name: fn.name ?? nameOrAddr, to };
-}
+};
 
 /**
  * Run `fn` with rizin's search restricted to [from, to), then restore the
@@ -76,13 +76,13 @@ async function functionRange(
  * values back in a finally, so a scoped search never leaks its scope into the
  * next one (the session is shared).
  */
-async function withSearchScope<T>(
+const withSearchScope = async <T>(
   rz: RzSession,
   from: number,
   to: number,
   signal: AbortSignal | undefined,
   fn: () => Promise<T>
-): Promise<T> {
+): Promise<T> => {
   const savedIn = (await rz.cmd("e search.in", { signal })).trim() || "io.maps";
   const savedFrom = (await rz.cmd("e search.from", { signal })).trim() || "0";
   const savedTo = (await rz.cmd("e search.to", { signal })).trim() || "0";
@@ -96,7 +96,7 @@ async function withSearchScope<T>(
     await rz.cmd(`e search.from=${savedFrom}`);
     await rz.cmd(`e search.to=${savedTo}`);
   }
-}
+};
 
 export interface RzSearchHit {
   address: number;
@@ -110,13 +110,11 @@ interface SearchHitRow {
   flag: string;
 }
 
-function hitRow(hit: RzSearchHit): SearchHitRow {
-  return {
-    ea: eaFromOffset(knownAddr(hit.address) ?? 0),
-    flag: hit.flag,
-    size: hit.size,
-  };
-}
+const hitRow = (hit: RzSearchHit): SearchHitRow => ({
+  ea: eaFromOffset(knownAddr(hit.address) ?? 0),
+  flag: hit.flag,
+  size: hit.size,
+});
 
 /**
  * Reject a free-form search argument (a regex, assembly text, or a gadget
@@ -129,7 +127,7 @@ function hitRow(hit: RzSearchHit): SearchHitRow {
  * through this transport anyway: rizin runs the second instruction as its own
  * command.)
  */
-export function validateSearchArg(kind: string, value: string): string {
+export const validateSearchArg = (kind: string, value: string): string => {
   const bad = forbiddenSyntaxReason(value);
   if (bad) {
     throw new Error(
@@ -137,15 +135,15 @@ export function validateSearchArg(kind: string, value: string): string {
     );
   }
   return value;
-}
+};
 
 /** Core shared by the three search tools: run one JSON search command and render its hits as paginated rows. */
-export async function searchCommand(
+export const searchCommand = async (
   rz: RzSession,
   command: string,
   label: string,
   params: { offset?: number; limit?: number }
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const hits = (await rz.cmdj<RzSearchHit[]>(command)) ?? [];
   const { page, total } = paginate(hits, params.offset, params.limit);
   const rows = page.map(hitRow);
@@ -154,16 +152,16 @@ export async function searchCommand(
     rows
   );
   return markEmpty(result, rows.length === 0);
-}
+};
 
 /** Run a {@link searchCommand}, optionally scoped to the function named by `in_function` (whole binary when omitted). */
-export async function scopedSearch(
+export const scopedSearch = async (
   rz: RzSession,
   command: string,
   label: string,
   params: { in_function?: string; offset?: number; limit?: number },
   signal?: AbortSignal
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   if (params.in_function === undefined) {
     return searchCommand(rz, command, label, params);
   }
@@ -171,7 +169,7 @@ export async function scopedSearch(
   return withSearchScope(rz, range.from, range.to, signal, () =>
     searchCommand(rz, command, `${label} in ${range.name}`, params)
   );
-}
+};
 
 export interface RzGadgetOpcode {
   offset: number;
@@ -187,12 +185,12 @@ export interface RzGadgetRow {
 }
 
 /** ROP/COP gadget search, native: prime the gadget cache with a text-mode run, then take rizin's own JSON rows. The filter string is rizin's own gadget filter. */
-export async function searchGadgets(
+export const searchGadgets = async (
   rz: RzSession,
   kind: "rop" | "cop",
   filter: string | undefined,
   params: { offset?: number; limit?: number }
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const base = kind === "rop" ? "/R" : "/C";
   const safeFilter =
     filter === undefined
@@ -215,9 +213,9 @@ export async function searchGadgets(
     page
   );
   return markEmpty(result, rows.length === 0);
-}
+};
 
-export function registerSearchTools(pi: ExtensionAPI): void {
+export const registerSearchTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const offsetLimit = {
     in_function: z
@@ -456,4 +454,4 @@ export function registerSearchTools(pi: ExtensionAPI): void {
       );
     },
   });
-}
+};

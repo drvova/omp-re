@@ -33,45 +33,44 @@ export const DEFAULT_LIMIT = 200;
 export const MAX_LIMIT = 1000;
 
 /** Clamp a user-supplied limit: unset/invalid/non-positive falls back to DEFAULT_LIMIT; everything else caps at MAX_LIMIT. */
-export function clampLimit(limit: number | undefined): number {
+export const clampLimit = (limit: number | undefined): number => {
   if (limit === undefined || !Number.isFinite(limit) || limit <= 0) {
     return DEFAULT_LIMIT;
   }
   return Math.min(limit, MAX_LIMIT);
-}
+};
 
 /** offset<0 clamps to 0; offset>=len returns an empty page (never null). Always reports total so callers can tell the model the view is partial. */
-export function paginate<T>(
+export const paginate = <T>(
   items: T[],
   offset: number | undefined,
   limit: number | undefined
-): { page: T[]; total: number } {
+): { page: T[]; total: number } => {
   const start = Math.max(0, offset ?? 0);
   const total = items.length;
   if (start >= total) {
     return { page: [], total };
   }
   return { page: items.slice(start, start + clampLimit(limit)), total };
-}
+};
 
-export function pageHeader(
+export const pageHeader = (
   label: string,
   page: unknown[],
   total: number,
   offset: number | undefined
-): string {
+): string => {
   if (page.length >= total) {
     return `${page.length} ${label}`;
   }
   return `${page.length} of ${total} ${label} (offset=${offset ?? 0}; use offset/limit to page through the rest)`;
-}
+};
 
 /** rizin reports a few "no address" sentinels as UINT64_MAX (e.g. the NULL section in iSj), which a JS number can't even represent exactly. Anything beyond the safe-integer range is treated as unknown, never printed as an address. */
-export function knownAddr(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isSafeInteger(value) && value >= 0
+export const knownAddr = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
-}
 
 interface RzRef {
   from: number;
@@ -110,7 +109,7 @@ interface RzFunc {
 }
 
 /** One function list row: what an analyst scans a function list for, with `callers` (rizin's indegree) as the cheapest "what matters" signal. */
-function functionRow(fn: RzFunc): Record<string, unknown> {
+const functionRow = (fn: RzFunc): Record<string, unknown> => {
   const addr = knownAddr(addrOf(fn));
   return {
     ...(addr === undefined ? {} : { ea: eaFromOffset(addr) }),
@@ -121,7 +120,7 @@ function functionRow(fn: RzFunc): Record<string, unknown> {
     ...(fn.outdegree === undefined ? {} : { callees: fn.outdegree }),
     ...(fn.signature ? { signature: fn.signature.replace(/;\s*$/u, "") } : {}),
   };
-}
+};
 
 const SORTERS: Record<string, (a: RzFunc, b: RzFunc) => number> = {
   address: (a, b) => (addrOf(a) ?? 0) - (addrOf(b) ?? 0),
@@ -131,7 +130,7 @@ const SORTERS: Record<string, (a: RzFunc, b: RzFunc) => number> = {
 
 const REF_CAP = 100;
 
-function storageOf(v: RzVar): string | undefined {
+const storageOf = (v: RzVar): string | undefined => {
   if (v.storage?.type === "reg" && v.storage.reg) {
     return v.storage.reg;
   }
@@ -140,7 +139,7 @@ function storageOf(v: RzVar): string | undefined {
     return `stack${off < 0 ? "-" : "+"}0x${Math.abs(off).toString(16)}`;
   }
   return v.storage?.type;
-}
+};
 
 /**
  * get_function's payload: the function's metrics and signature, its
@@ -150,12 +149,12 @@ function storageOf(v: RzVar): string | undefined {
  * entries of noise for a model, and disassemble_function/get_xrefs_* expose
  * them precisely when needed.
  */
-async function functionSummary(
+const functionSummary = async (
   rz: RzSession,
   fn: RzFunc,
   ea: string,
   signal?: AbortSignal
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown>> => {
   const refs = (key: string): RzRef[] =>
     Array.isArray(fn[key]) ? (fn[key] as RzRef[]) : [];
   const vars = [
@@ -232,7 +231,7 @@ async function functionSummary(
       dataXrefs: refs("dataxrefs").length,
     },
   };
-}
+};
 
 /** axtj rows carry `from` and `to`; rizin adds no function name. Never fabricate a missing side. */
 interface RzXref {
@@ -290,28 +289,26 @@ interface RzSegment extends RzVaddrRow {
 }
 
 /** Annotate each row with a hex `ea` so the model quotes the address rizin computed, not one it derived from a decimal offset. Omit `ea` rather than fabricate when no address is known. */
-function withVaddrEa<T extends RzVaddrRow>(
+const withVaddrEa = <T extends RzVaddrRow>(
   items: T[]
-): (T & { ea?: string })[] {
-  return items.map((item) => {
+): (T & { ea?: string })[] =>
+  items.map((item) => {
     const addr = knownAddr(item.vaddr) ?? knownAddr(item.paddr);
     return addr === undefined
       ? { ...item }
       : { ...item, ea: eaFromOffset(addr) };
   });
-}
 
 /** plt 0/absent means no PLT stub — omit `ea` rather than emit "0x0". */
-function withPltEa(items: RzImport[]): (RzImport & { ea?: string })[] {
-  return items.map((item) =>
+const withPltEa = (items: RzImport[]): (RzImport & { ea?: string })[] =>
+  items.map((item) =>
     item.plt ? { ...item, ea: eaFromOffset(item.plt) } : { ...item }
   );
-}
 
-function withXrefEa(
+const withXrefEa = (
   items: RzXref[]
-): (RzXref & { fromEa?: string; toEa?: string })[] {
-  return items.map((item) => {
+): (RzXref & { fromEa?: string; toEa?: string })[] =>
+  items.map((item) => {
     const out: RzXref & { fromEa?: string; toEa?: string } = { ...item };
     if (typeof item.from === "number") {
       out.fromEa = eaFromOffset(item.from);
@@ -321,14 +318,14 @@ function withXrefEa(
     }
     return out;
   });
-}
 
 /** An empty page is still evidence ("no xrefs to X" is a finding), but omp may elide it from context once consumed. */
-export function markEmpty(result: ReToolResult, empty: boolean): ReToolResult {
-  return empty ? { ...result, useless: true } : result;
-}
+export const markEmpty = (
+  result: ReToolResult,
+  empty: boolean
+): ReToolResult => (empty ? { ...result, useless: true } : result);
 
-export function registerReadTools(pi: ExtensionAPI): void {
+export const registerReadTools = (pi: ExtensionAPI): void => {
   // Schemas are named consts, not inline in registerTool({...}): omp 18's zod-compatible builder
   // infers each tool's params type only from a schema value declared outside the call.
   const z = pi.zod;
@@ -834,4 +831,4 @@ export function registerReadTools(pi: ExtensionAPI): void {
       return markEmpty(result, rows.length === 0);
     },
   });
-}
+};

@@ -15,20 +15,18 @@ import type {
 
 import type { LoadOptions } from "./rizin.ts";
 
-export function branchEntries(ctx: ExtensionContext): SessionEntry[] {
-  return ctx.sessionManager.getBranch();
-}
+export const branchEntries = (ctx: ExtensionContext): SessionEntry[] =>
+  ctx.sessionManager.getBranch();
 
 /** Custom entries of one `customType`, in branch order. */
-export function customEntries(
+export const customEntries = (
   entries: readonly SessionEntry[],
   customType: string
-): CustomEntry[] {
-  return entries.filter(
+): CustomEntry[] =>
+  entries.filter(
     (entry): entry is CustomEntry =>
       entry.type === "custom" && entry.customType === customType
   );
-}
 
 /**
  * One recorded `re.evidence` entry, read back from the branch. The reproducibility
@@ -63,9 +61,9 @@ export interface EvidenceRecord {
  * id/tool/summary); the provenance fields are copied through when present and
  * left undefined on legacy records, so old sessions load without crashing.
  */
-export function collectEvidence(
+export const collectEvidence = (
   entries: readonly { type: string; customType?: string; data?: unknown }[]
-): EvidenceRecord[] {
+): EvidenceRecord[] => {
   const out: EvidenceRecord[] = [];
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== "re.evidence") {
@@ -108,12 +106,12 @@ export function collectEvidence(
     });
   }
   return out;
-}
+};
 
 /** The binary path the latest `re.binary` entry on this branch opened, if any. */
-export function lastRecordedBinaryPath(
+export const lastRecordedBinaryPath = (
   entries: readonly SessionEntry[]
-): string | undefined {
+): string | undefined => {
   let last: string | undefined;
   for (const entry of customEntries(entries, "re.binary")) {
     const path = (entry.data as { path?: unknown } | undefined)?.path;
@@ -122,12 +120,12 @@ export function lastRecordedBinaryPath(
     }
   }
   return last;
-}
+};
 
 /** The SHA-256 of the binary the latest `re.binary` entry on this branch opened, if one was recorded (absent on entries written before verifiable reports). */
-export function lastRecordedBinarySha256(
+export const lastRecordedBinarySha256 = (
   entries: readonly SessionEntry[]
-): string | undefined {
+): string | undefined => {
   let last: string | undefined;
   for (const entry of customEntries(entries, "re.binary")) {
     const sha = (entry.data as { sha256?: unknown } | undefined)?.sha256;
@@ -136,16 +134,16 @@ export function lastRecordedBinarySha256(
     }
   }
   return last;
-}
+};
 
 /**
  * The load options (`-a/-b/-B/-F`) recorded with the latest `re.binary` entry,
  * so a resume reopens a raw/headerless target the same way it was first
  * opened. Undefined when the last open used plain header autodetection.
  */
-export function lastRecordedLoadOptions(
+export const lastRecordedLoadOptions = (
   entries: readonly SessionEntry[]
-): LoadOptions | undefined {
+): LoadOptions | undefined => {
   let last: LoadOptions | undefined;
   for (const entry of customEntries(entries, "re.binary")) {
     const load = (entry.data as { load?: unknown } | undefined)?.load;
@@ -155,7 +153,7 @@ export function lastRecordedLoadOptions(
         : undefined;
   }
   return last;
-}
+};
 
 /**
  * The custom FLIRT signature files applied to `binaryPath` on this branch, in
@@ -163,10 +161,10 @@ export function lastRecordedLoadOptions(
  * way annotations are: an `re.signature` entry belongs to whichever `re.binary`
  * opened most recently before it.
  */
-export function recordedSignatures(
+export const recordedSignatures = (
   entries: readonly SessionEntry[],
   binaryPath: string
-): string[] {
+): string[] => {
   const paths: string[] = [];
   let current: string | undefined;
   for (const entry of entries) {
@@ -186,7 +184,7 @@ export function recordedSignatures(
     }
   }
   return paths;
-}
+};
 
 /**
  * The analysis passes (`analyze` tool) run against `binaryPath` on this
@@ -194,10 +192,10 @@ export function recordedSignatures(
  * passes (`aaa` runs on every spawn, but these extra passes don't). Scoped to
  * the binary like signatures and annotations.
  */
-export function recordedAnalysisPasses(
+export const recordedAnalysisPasses = (
   entries: readonly SessionEntry[],
   binaryPath: string
-): string[] {
+): string[] => {
   const passes: string[] = [];
   let current: string | undefined;
   for (const entry of entries) {
@@ -217,17 +215,17 @@ export function recordedAnalysisPasses(
     }
   }
   return passes;
-}
+};
 
 /**
  * The files mapped into the session (`map_file`) against `binaryPath` on this
  * branch, de-duplicated by path+address and in first-map order, so a resume
  * re-maps them. Scoped to the binary like signatures and annotations.
  */
-export function recordedMapFiles(
+export const recordedMapFiles = (
   entries: readonly SessionEntry[],
   binaryPath: string
-): { path: string; addr: string; perm?: string }[] {
+): { path: string; addr: string; perm?: string }[] => {
   const maps: { path: string; addr: string; perm?: string }[] = [];
   let current: string | undefined;
   for (const entry of entries) {
@@ -257,4 +255,4 @@ export function recordedMapFiles(
     }
   }
   return maps;
-}
+};

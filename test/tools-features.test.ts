@@ -18,7 +18,7 @@ import {
 } from "../extensions/re/tools-types.ts";
 
 /** Stub session replaying canned replies; records every command for assertions. */
-function stubRz(replies: Record<string, string>) {
+const stubRz = (replies: Record<string, string>) => {
   const ran: string[] = [];
   const cmd = (command: string) => {
     ran.push(command);
@@ -39,7 +39,7 @@ function stubRz(replies: Record<string, string>) {
     );
   };
   return { ran, rz: { cmd, cmdWithStderr, cmdj } as unknown as RzSession };
-}
+};
 
 describe("searchCommand", () => {
   test("maps /xj hit rows to ea/size/flag rows", async () => {

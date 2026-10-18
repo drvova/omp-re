@@ -36,13 +36,13 @@ const def = (tool: string): RzCliToolDef => {
   return found;
 };
 
-function refusal(tool: string, args: string[]): string {
+const refusal = (tool: string, args: string[]): string => {
   const check = checkRzCli(def(tool), args);
   if (check.ok) {
     throw new Error(`expected ${tool} ${args.join(" ")} to be refused`);
   }
   return check.reason;
-}
+};
 
 describe("checkRzCli (no binaries needed)", () => {
   test("allows ordinary read-only invocations", () => {

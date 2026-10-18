@@ -29,17 +29,16 @@ const RIZIN_COMMAND_TIMEOUT_MS = 120_000;
  * clear-line escape (`ESC[2K`) behind when they find nothing; that is not an
  * error message.
  */
-export function cleanStderr(stderr: string): string {
-  return stderr
+export const cleanStderr = (stderr: string): string =>
+  stderr
     .replaceAll(/\u001B\[[0-9;?]*[A-Za-z]/gu, "")
     .replaceAll("\r", "\n")
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim() !== "")
     .join("\n");
-}
 
-function describeCommand(args: unknown): string {
+const describeCommand = (args: unknown): string => {
   const record =
     args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const command = typeof record.command === "string" ? record.command : "?";
@@ -47,9 +46,65 @@ function describeCommand(args: unknown): string {
     typeof record.addr === "string" && record.addr ? ` @ ${record.addr}` : "";
   const line = `${command}${addr}`;
   return JSON.stringify(line.length > 120 ? `${line.slice(0, 117)}...` : line);
-}
+};
 
-export function registerRizinTools(pi: ExtensionAPI): void {
+/**
+ * The body of `rizin_command`: gate the line through the read-only catalog check,
+ * run it, and build the result with its reproducibility fields (commands,
+ * reproHash, canonicalExcerpt, shiftHash). Exported so `/re carry --inherit` can
+ * re-run a carried command and record it exactly as the tool would.
+ */
+export const runRizinCommand = async (
+  ctx: ExtensionContext,
+  command: string,
+  addr: string | undefined,
+  signal?: AbortSignal
+): Promise<ReToolResult> => {
+  const catalog = await loadCatalog();
+  const check = checkRizinCommand(catalog, command, addr);
+  if (!check.ok) {
+    throw new Error(check.reason);
+  }
+  const rz = await ensureRizin(ctx, { signal });
+  // An address rizin can't resolve just leaves the result without an ea; the command still runs.
+  let ea: string | undefined;
+  if (addr) {
+    try {
+      ea = eaFromOffset(await resolveNumericAddr(rz, addr, signal));
+    } catch {
+      ea = undefined;
+    }
+  }
+  const { output, stderr } = await rz.cmdWithStderr(check.line, {
+    signal,
+    timeoutMs: RIZIN_COMMAND_TIMEOUT_MS,
+  });
+  const header = `rizin> ${check.line}`;
+  if (output.trim() === "") {
+    const errors = cleanStderr(stderr);
+    return errors
+      ? {
+          ...plainResult(`${header}\n(no output; rizin said:)\n${errors}`, ea),
+          isError: true,
+        }
+      : plainResult(`${header}\n(no output)`, ea);
+  }
+  // reproHash is over the RAW output (pre-trim/pre-truncation), canonicalized and bound to the
+  // open binary's path, so `/re verify` can re-run this exact line and hash-compare. The body
+  // sent to the model is still the trimmed/truncated text; only the verification key sees raw.
+  const binaryPath = getState(ctx).binaryPath ?? undefined;
+  return textResult(header, output.replace(/\n+$/u, ""), {
+    canonicalExcerpt: canonicalExcerpt(output, binaryPath),
+    commands: [check.line],
+    ctx,
+    ea,
+    reproHash: canonicalHash(output, binaryPath),
+    shiftHash: shiftHash(output, binaryPath),
+    tool: "rizin_command",
+  });
+};
+
+export const registerRizinTools = (pi: ExtensionAPI): void => {
   // Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
   const z = pi.zod;
   const helpParams = z.object({
@@ -103,60 +158,4 @@ export function registerRizinTools(pi: ExtensionAPI): void {
       return runRizinCommand(ctx, params.command, params.addr, signal);
     },
   });
-}
-
-/**
- * The body of `rizin_command`: gate the line through the read-only catalog check,
- * run it, and build the result with its reproducibility fields (commands,
- * reproHash, canonicalExcerpt, shiftHash). Exported so `/re carry --inherit` can
- * re-run a carried command and record it exactly as the tool would.
- */
-export async function runRizinCommand(
-  ctx: ExtensionContext,
-  command: string,
-  addr: string | undefined,
-  signal?: AbortSignal
-): Promise<ReToolResult> {
-  const catalog = await loadCatalog();
-  const check = checkRizinCommand(catalog, command, addr);
-  if (!check.ok) {
-    throw new Error(check.reason);
-  }
-  const rz = await ensureRizin(ctx, { signal });
-  // An address rizin can't resolve just leaves the result without an ea; the command still runs.
-  let ea: string | undefined;
-  if (addr) {
-    try {
-      ea = eaFromOffset(await resolveNumericAddr(rz, addr, signal));
-    } catch {
-      ea = undefined;
-    }
-  }
-  const { output, stderr } = await rz.cmdWithStderr(check.line, {
-    signal,
-    timeoutMs: RIZIN_COMMAND_TIMEOUT_MS,
-  });
-  const header = `rizin> ${check.line}`;
-  if (output.trim() === "") {
-    const errors = cleanStderr(stderr);
-    return errors
-      ? {
-          ...plainResult(`${header}\n(no output; rizin said:)\n${errors}`, ea),
-          isError: true,
-        }
-      : plainResult(`${header}\n(no output)`, ea);
-  }
-  // reproHash is over the RAW output (pre-trim/pre-truncation), canonicalized and bound to the
-  // open binary's path, so `/re verify` can re-run this exact line and hash-compare. The body
-  // sent to the model is still the trimmed/truncated text; only the verification key sees raw.
-  const binaryPath = getState(ctx).binaryPath ?? undefined;
-  return textResult(header, output.replace(/\n+$/u, ""), {
-    canonicalExcerpt: canonicalExcerpt(output, binaryPath),
-    commands: [check.line],
-    ctx,
-    ea,
-    reproHash: canonicalHash(output, binaryPath),
-    shiftHash: shiftHash(output, binaryPath),
-    tool: "rizin_command",
-  });
-}
+};

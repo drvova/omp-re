@@ -45,20 +45,19 @@ export const ANALYSIS_PASSES = {
 
 export type AnalysisPass = keyof typeof ANALYSIS_PASSES;
 
-export function isAnalysisPass(name: string): name is AnalysisPass {
-  return Object.hasOwn(ANALYSIS_PASSES, name);
-}
+export const isAnalysisPass = (name: string): name is AnalysisPass =>
+  Object.hasOwn(ANALYSIS_PASSES, name);
 
 /**
  * Re-run recorded analysis passes on a freshly analyzed process, in order. An
  * unknown or failing pass is reported rather than aborting the rest, matching
  * replayAnnotations / replaySignatures.
  */
-export async function replayAnalysisPasses(
+export const replayAnalysisPasses = async (
   rz: RzSession,
   passes: readonly string[],
   timeoutMs?: number
-): Promise<string[]> {
+): Promise<string[]> => {
   const failures: string[] = [];
   for (const pass of passes) {
     if (!isAnalysisPass(pass)) {
@@ -77,4 +76,4 @@ export async function replayAnalysisPasses(
     }
   }
   return failures;
-}
+};

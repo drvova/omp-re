@@ -13,14 +13,14 @@ import {
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { makeHarness } from "./helpers.ts";
 
-function withEvidence(
+const withEvidence = (
   h: ReturnType<typeof makeHarness>,
   items: { id: string; tool: string; ea?: string }[]
-): void {
+): void => {
   for (const it of items) {
     h.pi.appendEntry("re.evidence", { ...it, summary: `${it.tool} output` });
   }
-}
+};
 
 describe("preservedStateLines", () => {
   test("is empty when no RE session is active", () => {

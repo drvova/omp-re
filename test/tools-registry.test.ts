@@ -44,19 +44,23 @@ const invalidAddrMessage = (addr: string) =>
   `omp-re: invalid address or expression: ${JSON.stringify(addr)}`;
 
 /** Mirrors tools-read.ts's own (unexported) pageHeader() so header assertions test real behavior without importing a private helper. */
-function expectedPageHeader(
+const expectedPageHeader = (
   label: string,
   pageLen: number,
   total: number,
   offset = 0
-): string {
+): string => {
   if (pageLen >= total) {
     return `${pageLen} ${label}`;
   }
   return `${pageLen} of ${total} ${label} (offset=${offset}; use offset/limit to page through the rest)`;
-}
+};
 
-function mustFind<T>(items: T[], pred: (item: T) => boolean, label: string): T {
+const mustFind = <T>(
+  items: T[],
+  pred: (item: T) => boolean,
+  label: string
+): T => {
   const found = items.find(pred);
   if (!found) {
     throw new Error(
@@ -64,7 +68,7 @@ function mustFind<T>(items: T[], pred: (item: T) => boolean, label: string): T {
     );
   }
   return found;
-}
+};
 
 interface GroundFn {
   offset?: number;

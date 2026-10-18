@@ -25,7 +25,7 @@ const PASS_NAMES = Object.keys(ANALYSIS_PASSES) as [
   ...AnalysisPass[],
 ];
 
-export function registerAnalyzeTools(pi: ExtensionAPI): void {
+export const registerAnalyzeTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const analyzeParams = z.object({
     pass: z
@@ -95,4 +95,4 @@ export function registerAnalyzeTools(pi: ExtensionAPI): void {
       return errored ? { ...result, isError: true } : result;
     },
   });
-}
+};

@@ -56,19 +56,19 @@ interface FnInfo {
   nbbs: number;
 }
 
-function parseJson<T>(raw: string): T | undefined {
+const parseJson = <T>(raw: string): T | undefined => {
   try {
     return JSON.parse(raw) as T;
   } catch {
     return undefined;
   }
-}
+};
 
 /** The mnemonic sequence of the function starting at `offset` (`pdfj`), or undefined when rizin has none there. */
-async function mnemonicsAt(
+const mnemonicsAt = async (
   rz: RzSession,
   offset: number
-): Promise<string[] | undefined> {
+): Promise<string[] | undefined> => {
   const pdf = parseJson<{ ops?: { disasm?: unknown; type?: unknown }[] }>(
     await rz.cmd(`pdfj @ ${eaFromOffset(offset)}`)
   );
@@ -81,13 +81,13 @@ async function mnemonicsAt(
       (op.disasm as string).trim().split(/\s+/u, 1)[0]!.toLowerCase()
     )
     .slice(0, MAX_MNEMONICS);
-}
+};
 
 /** Fingerprint the function containing `anchor` in the open build, or undefined when the anchor is in no function (data, a gap) or doesn't resolve. Never throws. */
-export async function fingerprintAnchor(
+export const fingerprintAnchor = async (
   rz: RzSession,
   anchor: string
-): Promise<AnchorFingerprint | undefined> {
+): Promise<AnchorFingerprint | undefined> => {
   try {
     const at = await resolveNumericAddr(rz, anchor);
     const fn = parseJson<FnInfo[]>(
@@ -112,13 +112,13 @@ export async function fingerprintAnchor(
   } catch {
     return undefined;
   }
-}
+};
 
 /** Similarity of two sequences: 2·LCS / (|a| + |b|), in [0, 1]. */
-export function sequenceSimilarity(
+export const sequenceSimilarity = (
   a: readonly string[],
   b: readonly string[]
-): number {
+): number => {
   if (a.length === 0 && b.length === 0) {
     return 1;
   }
@@ -134,7 +134,7 @@ export function sequenceSimilarity(
     prev = cur;
   }
   return (2 * prev[b.length]!) / (a.length + b.length);
-}
+};
 
 /**
  * Find the function in the open build that best matches `fp`: prefilter the
@@ -143,10 +143,10 @@ export function sequenceSimilarity(
  * mnemonic similarity, and return the best at or above {@link RELOCATE_THRESHOLD}
  * (ties go to a candidate with the recorded name). Never throws.
  */
-export async function relocateAnchor(
+export const relocateAnchor = async (
   rz: RzSession,
   fp: AnchorFingerprint
-): Promise<Relocation | undefined> {
+): Promise<Relocation | undefined> => {
   try {
     const fns = parseJson<FnInfo[]>(await rz.cmd("aflj")) ?? [];
     const candidates = fns
@@ -190,4 +190,4 @@ export async function relocateAnchor(
   } catch {
     return undefined;
   }
-}
+};

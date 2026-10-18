@@ -37,14 +37,14 @@ import {
 } from "./helpers.ts";
 
 /** The hit total from a search result's header ("N hits" / "N of M hits" — M is the total). */
-function hitTotal(result: {
+const hitTotal = (result: {
   content: { type: string; text?: string }[];
-}): number {
+}): number => {
   const text =
     result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
   const m = [...text.matchAll(/(\d+) hits/gu)].at(-1);
   return m ? Number(m[1]) : -1;
-}
+};
 
 /** A flat x86-32 blob with no header: `mov eax,1; add eax,2; ret`. */
 const FLAT_X86_32 = Buffer.from([

@@ -38,10 +38,10 @@ export interface RzSyscallLookupParams {
 }
 
 /** List the active syscall profile, optionally name-filtered, paginated. */
-export async function listSyscallRows(
+export const listSyscallRows = async (
   rz: RzSession,
   params: RzListSyscallsParams
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const rows = (await rz.cmdj<RzSyscallRow[]>("aslj")) ?? [];
   const filter = params.filter?.toLowerCase();
   const filtered = filter
@@ -53,14 +53,14 @@ export async function listSyscallRows(
     page
   );
   return markEmpty(result, page.length === 0);
-}
+};
 
 /** Resolve one syscall by name (asn) or number (asr); exactly one of the two must be given. */
-export async function syscallLookupText(
+export const syscallLookupText = async (
   rz: RzSession,
   params: RzSyscallLookupParams,
   signal?: AbortSignal
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   if (params.name !== undefined && params.number !== undefined) {
     throw new Error("Pass exactly one of name or number.");
   }
@@ -73,9 +73,9 @@ export async function syscallLookupText(
   return {
     content: [{ text: text.length > 0 ? text : "(no match)", type: "text" }],
   };
-}
+};
 
-export function registerSyscallTools(pi: ExtensionAPI): void {
+export const registerSyscallTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const listSyscallsParams = z.object({
     filter: z
@@ -137,4 +137,4 @@ export function registerSyscallTools(pi: ExtensionAPI): void {
       return syscallLookupText(rz, params, signal);
     },
   });
-}
+};

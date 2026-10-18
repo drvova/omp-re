@@ -42,7 +42,7 @@ const LEVELS = ["none", "patch", "minor", "major"];
 const rank = (level) => LEVELS.indexOf(level);
 
 /** Run `git log` with the given revision args and split into per-commit messages. */
-function gitLog(...revArgs) {
+const gitLog = (...revArgs) => {
   // %H <unit sep> raw body, commits separated by a record separator.
   const out = execFileSync(
     "git",
@@ -59,10 +59,10 @@ function gitLog(...revArgs) {
       const sep = e.indexOf("\u001F");
       return { hash: e.slice(0, sep), message: e.slice(sep + 1) };
     });
-}
+};
 
 /** Resolve the commit range to inspect, tolerating a missing/zero/invalid base. */
-function resolveCommits() {
+const resolveCommits = () => {
   const isZero = (s) => !s || /^0+$/u.test(s);
   if (!isZero(base)) {
     try {
@@ -87,12 +87,12 @@ function resolveCommits() {
   }
   // Last resort: just the head commit.
   return gitLog(head, "-1");
-}
+};
 
 const TYPE_RE = /^([a-zA-Z]+)(?:\([^)]*\))?(!)?:/u;
 
 /** The release level a single commit implies, or "none". */
-function levelOf(message) {
+const levelOf = (message) => {
   const subject = message.split("\n")[0].trim();
   const m = TYPE_RE.exec(subject);
   const breakingFooter = /(^|\n)BREAKING[ -]CHANGE:/u.test(message);
@@ -110,17 +110,17 @@ function levelOf(message) {
     return "patch";
   }
   return "none";
-}
+};
 
 /** The level actually applied, capping a breaking change to minor while in 0.x. */
-function effectiveLevel(version, level) {
+const effectiveLevel = (version, level) => {
   const maj = Number.parseInt(version.split(".")[0], 10);
   // a stray `!` shouldn't cut 1.0.0
   return level === "major" && maj === 0 ? "minor" : level;
-}
+};
 
 /** Apply a (already-effective) bump level to a semver string. */
-function bump(version, level) {
+const bump = (version, level) => {
   const [maj, min, pat] = version.split(".").map((n) => Number.parseInt(n, 10));
   if ([maj, min, pat].some(Number.isNaN)) {
     throw new Error(`unparseable version: ${version}`);
@@ -139,10 +139,10 @@ function bump(version, level) {
       return version;
     }
   }
-}
+};
 
 /** Replace the first `"version": "..."` value in a raw JSON string. */
-function setJsonVersion(raw, next) {
+const setJsonVersion = (raw, next) => {
   let done = false;
   const out = raw.replace(/("version":\s*")[^"]*(")/u, (_, pre, post) => {
     done = true;
@@ -152,9 +152,9 @@ function setJsonVersion(raw, next) {
     throw new Error('no "version" field found');
   }
   return out;
-}
+};
 
-function emit(outputs) {
+const emit = (outputs) => {
   const file = process.env.GITHUB_OUTPUT;
   if (!file) {
     return;
@@ -163,7 +163,7 @@ function emit(outputs) {
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");
   writeFileSync(file, `${lines}\n`, { flag: "a" });
-}
+};
 
 // --- decide -----------------------------------------------------------------
 

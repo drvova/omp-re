@@ -19,6 +19,9 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { rzQuote } from "./rizin.ts";
 
+/** Forward-slash form of a path, which rizin accepts on every platform. Used by {@link rizinPathArg} and by callers that build their own rizin argument. */
+export const toRizinPath = (path: string): string => path.replaceAll("\\", "/");
+
 /**
  * A rizin command argument for an output path: forward-slash normalized (rizin
  * accepts `/` on every platform) and single-quoted, so rizin takes the whole
@@ -29,14 +32,8 @@ import { rzQuote } from "./rizin.ts";
  * annotations and `Fs` already use. Callers keep the native path for Node's own
  * fs calls and for what they report to the user.
  */
-export function rizinPathArg(path: string): string {
-  return rzQuote(toRizinPath(path));
-}
-
-/** Forward-slash form of a path, which rizin accepts on every platform. Used by {@link rizinPathArg} and by callers that build their own rizin argument. */
-export function toRizinPath(path: string): string {
-  return path.replaceAll("\\", "/");
-}
+export const rizinPathArg = (path: string): string =>
+  rzQuote(toRizinPath(path));
 
 /**
  * Reject a path that can't ride the NUL-framed pipe. The path reaches rizin
@@ -46,26 +43,26 @@ export function toRizinPath(path: string): string {
  * break or NUL, which would end the pipe line. (The model-supplied part is a
  * {@link safeBasename} besides.)
  */
-function assertRizinSafePath(path: string): void {
+const assertRizinSafePath = (path: string): void => {
   if (/[\r\n\0]/u.test(path)) {
     throw new Error(
       `omp-re: the output path ${JSON.stringify(path)} contains a line break or NUL`
     );
   }
-}
+};
 
 /** The directory omp-re writes output artifacts to (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`). */
-export function outputDir(): string {
+export const outputDir = (): string => {
   const configured = (process.env.OMPRE_OUTPUT_DIR ?? "").trim();
   return configured === "" ? join(tmpdir(), "omp-re-out") : resolve(configured);
-}
+};
 
 /**
  * Validate a model-supplied output filename: a bare basename of safe
  * characters, no path separators, no `..`, not absolute. This is the guard
  * that keeps a chosen name from escaping {@link outputDir}.
  */
-export function safeBasename(name: string): string {
+export const safeBasename = (name: string): string => {
   const trimmed = name.trim();
   if (trimmed === "" || trimmed === "." || trimmed === "..") {
     throw new Error(`omp-re: invalid output filename ${JSON.stringify(name)}`);
@@ -80,10 +77,10 @@ export function safeBasename(name: string): string {
     );
   }
   return trimmed;
-}
+};
 
 /** Ensure {@link outputDir} exists and return the absolute path for `basename` inside it. The returned path is always within the output directory (verified after resolve). */
-export async function prepareOutputPath(basename: string): Promise<string> {
+export const prepareOutputPath = async (basename: string): Promise<string> => {
   const dir = outputDir();
   const full = resolve(dir, safeBasename(basename));
   // Defense in depth: safeBasename already forbids separators, but confirm the
@@ -96,7 +93,7 @@ export async function prepareOutputPath(basename: string): Promise<string> {
   }
   await mkdir(dir, { recursive: true });
   return full;
-}
+};
 
 /**
  * Like {@link prepareOutputPath}: the native absolute path for `basename`,
@@ -104,11 +101,11 @@ export async function prepareOutputPath(basename: string): Promise<string> {
  * `.rzdb`, a signature `.pat`), so the caller reports/stats this path and
  * hands rizin {@link rizinPathArg}(it) for the command.
  */
-export async function rizinOutputPath(basename: string): Promise<string> {
+export const rizinOutputPath = async (basename: string): Promise<string> => {
   const full = await prepareOutputPath(basename);
   assertRizinSafePath(full);
   return full;
-}
+};
 
 /**
  * The absolute path of a subdirectory `basename` inside {@link outputDir},
@@ -116,10 +113,10 @@ export async function rizinOutputPath(basename: string): Promise<string> {
  * load), the caller checks existence. Used for trace sessions, which rizin
  * writes and reads itself (so the path, not just the bytes, reaches rizin).
  */
-export async function outputSubdir(
+export const outputSubdir = async (
   basename: string,
   create: boolean
-): Promise<string> {
+): Promise<string> => {
   const dir = outputDir();
   const full = resolve(dir, safeBasename(basename));
   if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
@@ -133,4 +130,4 @@ export async function outputSubdir(
   }
   // native path — the caller wraps it with rizinPathArg for the rizin command
   return full;
-}
+};

@@ -24,7 +24,7 @@ import { normalizeAddr } from "./rizin.ts";
 import { getState } from "./state.ts";
 
 /** Write content to the content-addressed blob store, returning its SHA-256 hex hash. Idempotent: skips the write if the target already exists. Atomic: writes to a temp file in the same directory, then renames. */
-export async function writeBlob(content: string): Promise<string> {
+export const writeBlob = async (content: string): Promise<string> => {
   const hash = createHash("sha256").update(content, "utf-8").digest("hex");
   const dir = join(
     getAgentDir(),
@@ -48,10 +48,10 @@ export async function writeBlob(content: string): Promise<string> {
   await writeFile(tmp, content, { mode: 0o600 });
   await rename(tmp, target);
   return hash;
-}
+};
 
 /** Read a previously written blob by its SHA-256 hash. Returns null when the blob is missing (never throws) — a missing blob must degrade to "no evidence" for the adviser, not crash it. */
-export async function readBlob(hash: string): Promise<string | null> {
+export const readBlob = async (hash: string): Promise<string | null> => {
   const target = join(
     getAgentDir(),
     "re",
@@ -65,10 +65,10 @@ export async function readBlob(hash: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
+};
 
 /** Truncate to at most maxBytes, cutting on a UTF-8 character boundary (never mid-codepoint, and — since maxBytes comfortably exceeds the disassembly-only prefix's length — never mid-prefix either). */
-function truncateUtf8Safe(text: string, maxBytes: number): string {
+const truncateUtf8Safe = (text: string, maxBytes: number): string => {
   const buf = Buffer.from(text, "utf-8");
   if (buf.length <= maxBytes) {
     return text;
@@ -79,19 +79,18 @@ function truncateUtf8Safe(text: string, maxBytes: number): string {
     end -= 1;
   }
   return buf.subarray(0, end).toString("utf-8");
-}
+};
 
 const EVIDENCE_SUMMARY_MAX_BYTES = 512;
 
 /** Join every text content block into one string; image blocks contribute nothing. */
-function extractText(
+const extractText = (
   content: readonly { type: string; text?: string }[]
-): string {
-  return content
+): string =>
+  content
     .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("\n");
-}
 
 /**
  * Rebuild the in-memory evidence index from the current branch. The index is
@@ -99,7 +98,7 @@ function extractText(
  * navigation, the branch's `re.evidence` entries are the truth, and every
  * mutate tool's grounding lookup must see exactly those.
  */
-export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
+export const rebuildEvidenceIndex = (ctx: ExtensionContext): void => {
   const state = getState(ctx);
   state.evidenceByAddr.clear();
   state.evidenceCount = 0;
@@ -113,7 +112,7 @@ export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
       state.evidenceByAddr.set(normalizeAddr(data.ea), data.id);
     }
   }
-}
+};
 
 /**
  * Append one `re.evidence` record for a successful evidence-tier tool result and
@@ -122,14 +121,14 @@ export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
  * would — same blob store, same reproducibility fields, same binary binding.
  * Throws on a blob-store failure; the caller decides how loud that is.
  */
-export async function recordEvidence(
+export const recordEvidence = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   toolName: string,
   input: unknown,
   content: readonly { type: string; text?: string }[],
   rawDetails: unknown
-): Promise<string> {
+): Promise<string> => {
   const state = getState(ctx);
   const rawText = extractText(content);
   const outputHash = await writeBlob(rawText);
@@ -186,14 +185,13 @@ export async function recordEvidence(
     summary,
   });
   return id;
-}
+};
 
 /** The trailing tag appended to every evidence-tier tool result: the id prefix record_finding accepts. */
-export function evidenceTag(id: string): string {
-  return `[evidence ${id.slice(0, 8)} — cite it in record_finding]`;
-}
+export const evidenceTag = (id: string): string =>
+  `[evidence ${id.slice(0, 8)} — cite it in record_finding]`;
 
-export function registerEvidenceStore(pi: ExtensionAPI): void {
+export const registerEvidenceStore = (pi: ExtensionAPI): void => {
   pi.on("tool_result", async (event, ctx) => {
     if (event.isError) {
       return;
@@ -232,4 +230,4 @@ export function registerEvidenceStore(pi: ExtensionAPI): void {
       }
     }
   });
-}
+};

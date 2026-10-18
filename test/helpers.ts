@@ -26,12 +26,12 @@ export const binaryAvailable = existsSync(TEST_BINARY);
 export const canRunRizin = rizinAvailable && binaryAvailable;
 
 /** Whether a sibling rizin CLI tool (`rz-bin`, `rz-diff`, …) is present next to the configured rizin or on PATH. */
-export function isRzToolAvailable(tool: string): boolean {
+export const isRzToolAvailable = (tool: string): boolean => {
   const path = resolveRizinTool(tool);
   return path.includes("/") ? existsSync(path) : Bun.which(path) !== null;
-}
+};
 
-export function logSkip(suite: string): void {
+export const logSkip = (suite: string): void => {
   if (canRunRizin) {
     return;
   }
@@ -42,7 +42,7 @@ export function logSkip(suite: string): void {
       : [`test binary not found at ${TEST_BINARY} (set OMPRE_TEST_BINARY)`]),
   ];
   console.log(`omp-re: skipping ${suite} — ${reasons.join("; ")}`);
-}
+};
 
 /**
  * Remove a temp dir recursively, tolerating the Windows lag between killing a
@@ -51,7 +51,7 @@ export function logSkip(suite: string): void {
  * on POSIX there is nothing to retry. It is only teardown, so a residual
  * failure is swallowed rather than failing an otherwise-green test.
  */
-export function rmDirSafe(dir: string): void {
+export const rmDirSafe = (dir: string): void => {
   try {
     rmSync(dir, {
       force: true,
@@ -62,7 +62,7 @@ export function rmDirSafe(dir: string): void {
   } catch {
     // A temp dir the OS will reclaim; never worth failing a green run over.
   }
-}
+};
 
 export interface StubEntry {
   type: "custom";
@@ -81,7 +81,7 @@ export interface Harness {
   tool: (name: string) => ToolDefinition<any, any>;
 }
 
-export function makeHarness(sessionId: string): Harness {
+export const makeHarness = (sessionId: string): Harness => {
   const entries: StubEntry[] = [];
   const artifacts = new Map<string, string>();
   const notifications: { message: string; type?: string }[] = [];
@@ -157,36 +157,40 @@ export function makeHarness(sessionId: string): Harness {
       return def;
     },
   };
-}
+};
 
-export function textOf(result: {
+export const textOf = (result: {
   content: { type: string; text?: string }[];
-}): string {
+}): string => {
   const [block] = result.content;
   if (!block || block.type !== "text" || typeof block.text !== "string") {
     throw new Error("expected a text content block");
   }
   return block.text;
-}
+};
 
 /** Splits a tool result's text into its header line and the remaining body. */
-export function splitHeaderBody(text: string): {
+export const splitHeaderBody = (
+  text: string
+): {
   header: string;
   body: string;
-} {
+} => {
   const nl = text.indexOf("\n");
   if (nl === -1) {
     return { body: "", header: text };
   }
   return { body: text.slice(nl + 1), header: text.slice(0, nl) };
-}
+};
 
 /** Awaits a promise expected to reject and returns the rejection, for exact `.message` assertions. */
-export async function captureError(promise: Promise<unknown>): Promise<Error> {
+export const captureError = async (
+  promise: Promise<unknown>
+): Promise<Error> => {
   try {
     await promise;
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error));
   }
   throw new Error("expected the promise to reject, but it resolved");
-}
+};

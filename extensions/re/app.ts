@@ -31,11 +31,11 @@ export interface ReSubsystem {
  * groups are async) so all tools and listeners are registered before the
  * extension finishes initializing.
  */
-export async function composeApp(
+export const composeApp = async (
   pi: ExtensionAPI,
   subsystems: readonly ReSubsystem[]
-): Promise<void> {
+): Promise<void> => {
   for (const sub of subsystems) {
     await sub.apply(pi);
   }
-}
+};

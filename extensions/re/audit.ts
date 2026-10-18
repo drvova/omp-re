@@ -183,11 +183,11 @@ interface AuditLine {
  * log is a mirror for operator review, not the source of truth — it must
  * never abort the tool call being audited.
  */
-async function appendAuditLine(
+const appendAuditLine = async (
   ctx: ExtensionContext,
   line: Omit<AuditLine, "ts" | "sessionId" | "hmac">,
   logger?: ExtensionAPI["logger"]
-): Promise<void> {
+): Promise<void> => {
   try {
     const state = getState(ctx);
     const dir = join(getAgentDir(), "re", "audit");
@@ -237,14 +237,14 @@ async function appendAuditLine(
       logger?.error(msg);
     }
   }
-}
+};
 
 /**
  * Register the RE audit trail: records every RE tool call (read + mutate +
  * triage + session setup) and every approval decision for one to a
  * per-session log. Never blocks — the handlers always return `undefined`.
  */
-export function registerAuditLog(pi: ExtensionAPI): void {
+export const registerAuditLog = (pi: ExtensionAPI): void => {
   pi.on("tool_call", async (event, ctx) => {
     if (RE_ALL_TOOL_NAMES[event.toolName] !== true) {
       return;
@@ -271,4 +271,4 @@ export function registerAuditLog(pi: ExtensionAPI): void {
       pi.logger
     );
   });
-}
+};

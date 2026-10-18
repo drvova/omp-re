@@ -77,9 +77,9 @@ const MIN_ID_PREFIX = 6;
  * The live findings on a branch, in order: every `re.finding` minus those later
  * superseded by another finding or withdrawn by a `re.finding.retract`.
  */
-export function collectFindings(
+export const collectFindings = (
   entries: readonly { type: string; customType?: string; data?: unknown }[]
-): FindingRecord[] {
+): FindingRecord[] => {
   const live = new Map<string, FindingRecord>();
   for (const entry of entries) {
     if (entry.type !== "custom") {
@@ -131,13 +131,13 @@ export function collectFindings(
     });
   }
   return [...live.values()];
-}
+};
 
 /** Resolve one id by exact match or unique prefix (≥ {@link MIN_ID_PREFIX} chars). */
-function resolveId<T extends { id: string }>(
+const resolveId = <T extends { id: string }>(
   items: readonly T[],
   id: string
-): { ok: true; item: T } | { ok: false; reason: string } {
+): { ok: true; item: T } | { ok: false; reason: string } => {
   const exact = items.find((i) => i.id === id);
   if (exact) {
     return { item: exact, ok: true };
@@ -159,10 +159,10 @@ function resolveId<T extends { id: string }>(
         ? `no id starting ${JSON.stringify(id)} on this branch`
         : `${JSON.stringify(id)} is ambiguous (${matches.length} matches)`,
   };
-}
+};
 
 /** One-line rendering of a finding's provenance for the report and tool results: confidence, inheritance, and any audit override. */
-export function findingNote(f: FindingRecord): string {
+export const findingNote = (f: FindingRecord): string => {
   const parts = [`confidence: ${f.confidence}`];
   if (f.addr) {
     parts.push(`at \`${f.addr}\``);
@@ -184,7 +184,7 @@ export function findingNote(f: FindingRecord): string {
     );
   }
   return parts.join(" · ");
-}
+};
 
 interface FindingInput {
   claim: string;
@@ -203,14 +203,14 @@ interface FindingInput {
  * and a result that says whether the finding can carry. Shared by
  * `record_finding` and `adopt_finding`, so the two can never gate differently.
  */
-async function gateAndRecord(
+const gateAndRecord = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   options: FindingToolOptions,
   tool: string,
   input: FindingInput,
   resolved: readonly EvidenceRecord[]
-): Promise<ReToolResult> {
+): Promise<ReToolResult> => {
   const item: AuditClaimInput = {
     claimText: input.claim,
     evidence: resolved.map((ev) => ({
@@ -279,17 +279,17 @@ async function gateAndRecord(
       : `evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable`,
   ];
   return plainResult(lines.join("\n"), input.addr);
-}
+};
 
 export interface FindingToolOptions {
   /** The support auditor; defaults to the session's ephemeral side turn. A test seam, like writeReport's `judge`. */
   judge?: (ctx: ExtensionContext) => ClaimJudge | null;
 }
 
-export function registerFindingTools(
+export const registerFindingTools = (
   pi: ExtensionAPI,
   options: FindingToolOptions = {}
-): void {
+): void => {
   const z = pi.zod;
   const recordFindingParams = z.object({
     addr: z
@@ -544,9 +544,8 @@ export function registerFindingTools(
       );
     },
   });
-}
+};
 
 /** Live findings on the current branch. */
-export function liveFindings(ctx: ExtensionContext): FindingRecord[] {
-  return collectFindings(branchEntries(ctx));
-}
+export const liveFindings = (ctx: ExtensionContext): FindingRecord[] =>
+  collectFindings(branchEntries(ctx));

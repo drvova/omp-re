@@ -28,7 +28,7 @@ export interface PdfjResult {
 }
 
 /** Render one op as 1-2 lines: an optional flag/label line, then the address-prefixed instruction with any comment/xrefs folded in as a trailing annotation. Compact on purpose — this feeds an LLM context window. */
-export function formatPdfOp(op: PdfjOp): string[] {
+export const formatPdfOp = (op: PdfjOp): string[] => {
   const opAddr = addrOf(op);
   if (opAddr === undefined) {
     return [];
@@ -61,7 +61,7 @@ export function formatPdfOp(op: PdfjOp): string[] {
   const suffix = annotations.length > 0 ? `  ; ${annotations.join(" | ")}` : "";
   lines.push(`${eaFromOffset(opAddr)}  ${op.disasm}${suffix}`);
   return lines;
-}
+};
 
 export interface Disassembly {
   name?: string;
@@ -70,11 +70,11 @@ export interface Disassembly {
 }
 
 /** Disassemble the function containing `ea`. Returns null when rizin knows no function there. */
-export async function disassembleAt(
+export const disassembleAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<Disassembly | null> {
+): Promise<Disassembly | null> => {
   const pdf = await rz.cmdj<PdfjResult>(`pdfj @ ${ea}`, { signal });
   if (!pdf || !Array.isArray(pdf.ops) || pdf.ops.length === 0) {
     return null;
@@ -84,4 +84,4 @@ export async function disassembleAt(
     name: pdf.name,
     opCount: pdf.ops.length,
   };
-}
+};

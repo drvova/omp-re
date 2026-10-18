@@ -35,24 +35,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- **Linting and formatting with Ultracite v8 (Oxlint + Oxfmt).** The project
-  previously had no linter or formatter. It now uses `oxlint.config.mts`
-  (the `ultracite/oxlint/core` preset; no framework presets apply) and
-  `oxfmt.config.mts`, plus a `bun run fix` script. The existing `check`
-  script is still the type-check. There is also an `AGENTS.md`, a Claude
-  Code hook that runs `ultracite fix --hook` after edits, and the Ultracite
-  skill. The repo was formatted and the mechanical findings were fixed:
+- **Linting and formatting with Ultracite v8 (Oxlint + Oxfmt).** The project previously had no linter or formatter. It now uses `oxlint.config.mts` (the `ultracite/oxlint/core` preset; no framework presets apply) and `oxfmt.config.mts`, plus a `bun run fix` script. The existing `check` script is still the type-check. There is also an `AGENTS.md`, a Claude Code hook that runs `ultracite fix --hook` after edits, and the Ultracite skill. The repo was formatted and the mechanical findings were fixed:
   - the `u` flag on all 178 regex literals;
   - inline comments moved onto their own lines;
   - `++`/`--` rewritten as `+= 1`/`-= 1`;
   - numeric separators, escapes, `curly`, `toSorted` and `toReversed`;
   - small correctness rules: unused code, `eqeqeq`, `radix`, error `cause`.
-- **Ultracite check backlog: 1,635 → 1,060 findings.** The rest need
-  judgement or restructuring rather than a mechanical rewrite: `func-style`
-  (361), `no-await-expression-member` (178), `no-non-null-assertion` (141),
-  `sort-keys` (75), `no-use-before-define` (53), `no-await-in-loop` (53,
-  mostly deliberate sequential commands on rizin's single pipe), named
-  capture groups (40), and a long tail.
+- **Ultracite check backlog: 1,635 → 1,060 findings.** The rest need judgement or restructuring rather than a mechanical rewrite: `func-style` (361), `no-await-expression-member` (178), `no-non-null-assertion` (141), `sort-keys` (75), `no-use-before-define` (53), `no-await-in-loop` (53, mostly deliberate sequential commands on rizin's single pipe), named capture groups (40), and a long tail.
 
 ### Fixed
 

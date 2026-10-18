@@ -25,7 +25,7 @@ const EMULATE_ACTIONS = [
 ] as const;
 type EmulateAction = (typeof EMULATE_ACTIONS)[number];
 
-function approvalReason(action: EmulateAction): string {
+const approvalReason = (action: EmulateAction): string => {
   switch (action) {
     case "init":
     case "set_var": {
@@ -44,33 +44,41 @@ function approvalReason(action: EmulateAction): string {
       return unhandled;
     }
   }
-}
+};
 
 /**
  * A VM variable name for `aezv` — the live state dump shows keys like
  * `PC`, `rsp`, `rax`, `zf`, `xmm0` (alphanumeric), and rizin rejects
  * anything else anyway; validating here keeps the error message ours.
  */
-function validateVarName(name: string): string {
+const validateVarName = (name: string): string => {
   if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(name)) {
     throw new Error(
       `omp-re: emulate: bad variable name ${JSON.stringify(name)} — use a name from the vars action`
     );
   }
   return name;
-}
+};
 
 /** A value for `aezv <name> <number>` — rizin accepts decimal and 0x hex. */
-function validateVarValue(value: string): string {
+const validateVarValue = (value: string): string => {
   if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/u.test(value)) {
     throw new Error(
       `omp-re: emulate: bad value ${JSON.stringify(value)} — use a decimal or 0x hex number`
     );
   }
   return value;
-}
+};
 
-export function registerEmulateTools(pi: ExtensionAPI): void {
+/** Clamp the step count to a sane range (1..1000 instructions). */
+const clampCount = (value: number | undefined): number => {
+  if (value === undefined || !Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(1, Math.min(Math.floor(value), 1000));
+};
+
+export const registerEmulateTools = (pi: ExtensionAPI): void => {
   const z = pi.zod;
   const emulateParams = z.object({
     action: z
@@ -208,12 +216,4 @@ export function registerEmulateTools(pi: ExtensionAPI): void {
       }
     },
   });
-}
-
-/** Clamp the step count to a sane range (1..1000 instructions). */
-function clampCount(value: number | undefined): number {
-  if (value === undefined || !Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.max(1, Math.min(Math.floor(value), 1000));
-}
+};

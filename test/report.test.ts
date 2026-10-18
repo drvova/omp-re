@@ -15,11 +15,11 @@ interface StubEntry {
   data?: unknown;
 }
 
-function makeCtx(
+const makeCtx = (
   entries: StubEntry[],
   notifications: { message: string; type?: string }[]
-): ExtensionContext {
-  return {
+): ExtensionContext =>
+  ({
     hasUI: false,
     sessionManager: {
       getArtifactPath: async () => null,
@@ -31,8 +31,7 @@ function makeCtx(
         notifications.push({ message, type });
       },
     },
-  } as unknown as ExtensionContext;
-}
+  }) as unknown as ExtensionContext;
 
 let tempDir: string;
 let consoleErrorCalls: unknown[][];
@@ -62,14 +61,14 @@ afterEach(async () => {
   await rm(tempDir, { force: true, recursive: true });
 });
 
-async function fileExists(path: string): Promise<boolean> {
+const fileExists = async (path: string): Promise<boolean> => {
   try {
     await access(path);
     return true;
   } catch {
     return false;
   }
-}
+};
 
 describe("writeReport", () => {
   test("ungrounded: an IOC-shaped claim with no evidence id withholds the report", async () => {

@@ -52,7 +52,7 @@ interface Harness {
 }
 
 /** A minimal ExtensionUIContext: records what the extension tells the user, renders nothing. */
-function makeUi(notes: string[], editor: { text: string }) {
+const makeUi = (notes: string[], editor: { text: string }) => {
   const noop = () => {};
   return {
     addAutocompleteProvider: noop,
@@ -82,9 +82,9 @@ function makeUi(notes: string[], editor: { text: string }) {
     setWidget: noop,
     setWorkingMessage: noop,
   };
-}
+};
 
-async function boot(sessionManager: unknown): Promise<Harness> {
+const boot = async (sessionManager: unknown): Promise<Harness> => {
   const sdk = await import("@oh-my-pi/pi-coding-agent");
   const { initializeExtensions } =
     await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
@@ -112,7 +112,7 @@ async function boot(sessionManager: unknown): Promise<Harness> {
     session,
     shutdown: () => session.dispose(),
   };
-}
+};
 
 const activeRe = (session: AgentSession) =>
   session.getActiveToolNames().filter((name) => RE_ALL_TOOL_NAMES[name]);

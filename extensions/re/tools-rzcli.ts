@@ -126,10 +126,9 @@ export const RZ_CLI_TOOLS: readonly RzCliToolDef[] = [
 
 export type RzCliCheck = { ok: true } | { ok: false; reason: string };
 
-function isShortCluster(token: string): boolean {
+const isShortCluster = (token: string): boolean =>
   // A single-dash run of letters (`-ij`, `-qO`); not `--long`, not a negative number, not a bare `-` (stdin).
-  return /^-[A-Za-z]+$/u.test(token);
-}
+  /^-[A-Za-z]+$/u.test(token);
 
 /**
  * The value a short-flag `letter` receives, in each getopt spelling, scanned
@@ -137,7 +136,7 @@ function isShortCluster(token: string): boolean {
  * `-Xtcommand`), or the next token when the letter ends its cluster (`-t
  * command`, `-Xt command`). Returns every value the flag is given.
  */
-function flagValues(args: readonly string[], letter: string): string[] {
+const flagValues = (args: readonly string[], letter: string): string[] => {
   const values: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i]!;
@@ -156,7 +155,7 @@ function flagValues(args: readonly string[], letter: string): string[] {
     }
   }
   return values;
-}
+};
 
 /**
  * Validate the flags of one `rz-*` invocation. Pure: no binary substitution,
@@ -165,10 +164,10 @@ function flagValues(args: readonly string[], letter: string): string[] {
  * repeat-escalation flag is caught however the repetition is spelled — so a
  * denied capability cannot be smuggled past by respelling the flag.
  */
-export function checkRzCli(
+export const checkRzCli = (
   def: RzCliToolDef,
   args: readonly string[]
-): RzCliCheck {
+): RzCliCheck => {
   const denied = new Set(def.deniedTokens);
   const letters = new Set(def.deniedLetters.split(""));
   const repeatCounts = new Map<string, number>();
@@ -219,17 +218,17 @@ export function checkRzCli(
     }
   }
   return { ok: true };
-}
+};
 
 /** Resolve which `rz-*` tools are actually installed beside rizin (they ship together, but a minimal build may lack some). */
-export async function availableRzCliTools(): Promise<RzCliToolDef[]> {
+export const availableRzCliTools = async (): Promise<RzCliToolDef[]> => {
   const checks = await Promise.all(
     RZ_CLI_TOOLS.map((def) => isExecutable(resolveRizinTool(def.tool)))
   );
   return RZ_CLI_TOOLS.filter((_, i) => checks[i]);
-}
+};
 
-export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
+export const registerRzCliTools = async (pi: ExtensionAPI): Promise<void> => {
   const available = await availableRzCliTools();
   if (available.length === 0) {
     return;
@@ -327,4 +326,4 @@ export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
       return textResult(header, stdout, { ctx, tool: "rizin_cli" });
     },
   });
-}
+};
