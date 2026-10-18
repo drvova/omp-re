@@ -578,6 +578,8 @@ function buildManifestJson(report: BuiltReport): {
 	entries: Array<{
 		evidenceId: string;
 		tool: string;
+		/** `rizin_command` only: the structured `{ command, addr }` params, so `/re carry` re-runs the exact request against another binary. */
+		args: { command: string; addr?: string } | null;
 		command: string | null;
 		commands: string[] | null;
 		reproHash: string | null;
@@ -604,6 +606,7 @@ function buildManifestJson(report: BuiltReport): {
 			return {
 				evidenceId: id,
 				tool: report.toolById.get(id) ?? ev?.tool ?? "unknown",
+				args: ev ? rizinCommandArgs(ev) : null,
 				command: ev ? (recordedCommand(ev) ?? null) : null,
 				commands: ev?.commands ?? null,
 				reproHash: ev?.reproHash ?? null,
@@ -614,4 +617,12 @@ function buildManifestJson(report: BuiltReport): {
 			};
 		}),
 	};
+}
+
+/** A `rizin_command` record's `{ command, addr }` params, or null for any other tool or a malformed record. */
+function rizinCommandArgs(ev: EvidenceRecord): { command: string; addr?: string } | null {
+	if (ev.tool !== "rizin_command") return null;
+	const args = ev.args as { command?: unknown; addr?: unknown } | undefined;
+	if (!args || typeof args.command !== "string") return null;
+	return typeof args.addr === "string" && args.addr ? { command: args.command, addr: args.addr } : { command: args.command };
 }

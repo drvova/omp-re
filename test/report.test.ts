@@ -190,6 +190,8 @@ describe("writeReport", () => {
 		expect(entry?.reproHash).toBe("b".repeat(64));
 		expect(entry?.status).toBe("reproducible");
 		expect(entry?.claims.length).toBeGreaterThan(0);
+		// the structured request /re carry re-runs against another build
+		expect((entry as { args?: unknown } | undefined)?.args).toEqual({ command: "iz" });
 	});
 });
 

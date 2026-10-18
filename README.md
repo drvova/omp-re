@@ -63,6 +63,7 @@ x                # follow the selected xref
 a                # hand the function off to the model with a grounding prompt
 /re report       # write a Markdown report from what was gathered
 /re verify       # re-run the cited commands and prove the report reproducible
+/re carry report.md.manifest.json --against ./v2   # which findings survive the next build?
 ```
 
 Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a
@@ -254,6 +255,21 @@ on any unsupported/overreach (and `--no-audit` skips it). It fails open: with no
 model or side-turn host it degrades to an "unaudited" note and never blocks, so
 the two deterministic gates stay authoritative.
 
+### Carried to the next build
+
+A report's manifest is also a regression test. `/re carry <manifest.json>
+[--against <binary>] [--strict] [--out <path>]` replays every cited command
+against a *different* binary (the next sample of a family, a firmware update,
+a patched build) and gives each claim a status. **holds** means the output is
+identical. **drifted** means the command still runs but its output changed;
+the recorded excerpt is line-diffed against the new one, so the claim arrives
+with the exact change under it. **broken** means the symbol it was anchored to
+is gone or the command now produces nothing. **unchecked** means the evidence
+was provenance-only. Headless, a broken claim exits non-zero, and `--strict`
+also fails on drift. Every command still goes through the read-only
+`rizin_command` gate, because a manifest is untrusted input, and carrying
+records no evidence.
+
 ## Prerequisites
 
 | Requirement | Notes |
@@ -276,6 +292,7 @@ the two deterministic gates stay authoritative.
 /re undo             revert annotation
 /re report [path]    write report (--audit=strict gates claim support)
 /re verify [--strict] re-verify report evidence is reproducible
+/re carry <manifest>  replay a report on another build (--against <bin>, --strict, --out <path>)
 /re status           rizin, decompiler, and session status
 /re on               enable RE tools
 /re off              disable RE tools (quick toggle, no restart)

@@ -30,6 +30,11 @@ system binary like `/bin/ls` is enough to learn the flow.
 9. `/re verify [--strict]` re-runs each cited `rizin_command` read-only against
    the open binary and checks its recorded output hash — proving the report's
    evidence is not just cited but reproducible.
+10. `/re carry <report>.manifest.json --against <next-build>` replays that
+    report on a different binary and labels each claim holds, drifted (with
+    a line diff of what changed), broken (its anchor is gone), or unchecked.
+    It works as a regression test for the next build: a broken claim exits
+    non-zero headless, and `--strict` also fails on drift.
 
 ## How the evidence chain actually works
 
@@ -77,6 +82,19 @@ default (flags claims inline, still writes the report); `/re report --audit=stri
 withholds the report on an unsupported/overreach verdict, and it fails open to an
 "unaudited" note when no model or side turn is available, so the two deterministic
 gates stay authoritative.
+
+All three gates stop at the binary that was analysed. `/re carry` takes a report
+to other binaries: the manifest's entries are `claim → exact read-only command →
+canonical output hash`, so re-running them on another build and comparing hashes
+tells you which findings carry over (`holds`), which still run but now say
+something different (`drifted`, shown as a diff of the canonical excerpt), and
+which point at something that no longer exists (`broken`: a symbolic anchor such
+as `sym.decrypt_config` that does not resolve, or a command that now produces
+nothing). A claim takes the worst status among its checked evidence. Evidence
+anchored to a numeric address is flagged when it drifts, because the code it
+named may have moved. Manifests written since carry shipped record each
+`rizin_command`'s structured `{ command, addr }`. Older manifests are handled by
+splitting the recorded line on its trailing `@ addr`.
 
 Evidence and annotation entries persist in the session JSONL and survive a
 `--continue`/reload, but they are **not** injected into LLM context and are

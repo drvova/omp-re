@@ -26,6 +26,7 @@ import { plainResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { writeReport } from "./report.ts";
 import { sha256File, verifyEvidence } from "./verify.ts";
+import { carryManifest } from "./carry.ts";
 import type { AuditMode } from "./audit-claims.ts";
 import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
@@ -145,6 +146,7 @@ const SUBCOMMANDS: readonly { name: string; usage?: string; description: string 
 	{ name: "undo", description: "revert the last annotation" },
 	{ name: "report", usage: "[path] [--audit=strict]", description: "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)" },
 	{ name: "verify", usage: "[--strict]", description: "re-run cited rizin commands and check recorded output hashes" },
+	{ name: "carry", usage: "<manifest.json> [--against <binary>] [--strict] [--out <path>]", description: "replay a report's findings against another build: which claims hold, drifted, or broke" },
 	{ name: "status", description: "rizin, decompiler, binary, and evidence status" },
 	{ name: "on", description: "enable the RE tools for this session" },
 	{ name: "off", description: "disable the RE tools for this session" },
@@ -161,6 +163,7 @@ const HELP_TEXT = [
 	"/re undo             revert annotation",
 	"/re report [path]    write report (--audit=strict gates claim support)",
 	"/re verify [--strict] re-verify evidence is reproducible",
+	"/re carry <manifest>  replay a report on another build (--against <bin>, --strict, --out <path>)",
 	"/re status           rizin, decompiler, and session status",
 	"/re on               enable RE tools",
 	"/re off              disable RE tools (quick toggle, no restart)",
@@ -357,7 +360,7 @@ function registerShell(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("re", {
-		description: "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | undo | report [path] | verify [--strict] | status | on | off | help",
+		description: "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | undo | report [path] | verify [--strict] | carry <manifest> | status | on | off | help",
 		getArgumentCompletions: completeArguments,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
@@ -409,6 +412,29 @@ function registerShell(pi: ExtensionAPI): void {
 					case "verify":
 						await verifyEvidence(ctx, { strict: rest.includes("--strict") });
 						return;
+					case "carry": {
+						// /re carry <manifest> [--against <binary>] [--strict] [--out <path>]: flags take the next
+						// token as their value; everything else joins back into the manifest path.
+						let against: string | undefined;
+						let out: string | undefined;
+						let strict = false;
+						const pathTokens: string[] = [];
+						for (let i = 0; i < rest.length; i++) {
+							const tok = rest[i]!;
+							if (tok === "--strict") strict = true;
+							else if (tok === "--against") against = rest[++i];
+							else if (tok === "--out") out = rest[++i];
+							else pathTokens.push(tok);
+						}
+						const manifestPath = pathTokens.join(" ");
+						if (!manifestPath) {
+							ctx.ui.notify("Usage: /re carry <report.md.manifest.json> [--against <binary>] [--strict] [--out <path>]", "error");
+							return;
+						}
+						if (against) await runOpen(ctx, against);
+						await carryManifest(ctx, manifestPath, { strict, out });
+						return;
+					}
 					case "status":
 						ctx.ui.notify(await statusText(ctx), "info");
 						return;

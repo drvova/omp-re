@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`/re carry`: a report becomes a regression test for the next build.**
+  `/re carry <report>.manifest.json [--against <binary>] [--strict] [--out
+  <path>]` replays a finished report's cited commands against a *different*
+  binary (a new malware variant, a firmware update, a patched build) and
+  classifies every claim. **holds**: the canonical output hash is identical.
+  **drifted**: the command runs but the output changed, shown as a line diff
+  of the recorded excerpt against the new one. **broken**: the symbolic anchor
+  no longer resolves, or the command now produces nothing. **unchecked**: the
+  evidence was provenance-only or legacy. A claim takes the worst status among
+  its evidence. Headless, any broken claim sets a non-zero exit code;
+  `--strict` also fails on drifted or unchecked claims. `--out` writes a
+  Markdown carry report plus a `.json` sidecar. Deterministic and read-only
+  like `/re verify`: the manifest is treated as untrusted input, so every
+  command passes back through the `rizin_command` read-only gate and address
+  validation, and carrying records no evidence. The report manifest now also
+  records each `rizin_command`'s structured `args` (`{ command, addr }`).
+  Older manifests still work, because the recorded line is split on its
+  trailing `@ addr`.
+
 ## [0.5.0] - 2026-10-17
 
 ### Added
