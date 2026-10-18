@@ -20,18 +20,20 @@ import type { RzSession } from "./rizin.ts";
 export type DecompilerKind = "pdg" | "pdd" | (string & {});
 
 export interface DecompileOutcome {
-	/** The decompiler that produced `code`, or "disasm" when none did. */
-	kind: DecompilerKind | "disasm";
-	code: string;
-	/** For kind "disasm": the exact label the output carries (one of the *_PREFIX constants). */
-	prefix?: string;
+  /** The decompiler that produced `code`, or "disasm" when none did. */
+  kind: DecompilerKind | "disasm";
+  code: string;
+  /** For kind "disasm": the exact label the output carries (one of the *_PREFIX constants). */
+  prefix?: string;
 }
 
 /** Exact formatting matters (em dash U+2014, one trailing space): the re-triage skill and WATCHDOG.md quote this literal so the model and an advisor can tell a fallback from a real decompile. */
-export const DISASM_ONLY_PREFIX = "(disassembly only — no decompiler plugin available) ";
+export const DISASM_ONLY_PREFIX =
+  "(disassembly only — no decompiler plugin available) ";
 
 /** The other honest fallback: a decompiler is installed but produced nothing for this function. */
-export const DECOMPILER_EMPTY_PREFIX = "(disassembly only — the decompiler produced no output for this function) ";
+export const DECOMPILER_EMPTY_PREFIX =
+  "(disassembly only — the decompiler produced no output for this function) ";
 
 /** A real decompile (pdg especially — full Ghidra Sleigh analysis) can run far longer than a plain rizin command. */
 const DECOMPILE_TIMEOUT_MS = 180_000;
@@ -49,35 +51,52 @@ const DEFAULT_DECOMPILER_COMMANDS: readonly DecompilerKind[] = ["pdg", "pdd"];
  * (e.g. `pdg`) simply forces that one first.
  */
 export function decompilerCommands(): DecompilerKind[] {
-	const configured = (process.env.OMPRE_DECOMPILER ?? "")
-		.split(",")
-		.map((name) => name.trim())
-		.filter((name) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(name));
-	const ordered: DecompilerKind[] = [];
-	for (const name of [...configured, ...DEFAULT_DECOMPILER_COMMANDS]) if (!ordered.includes(name)) ordered.push(name);
-	return ordered;
+  const configured = (process.env.OMPRE_DECOMPILER ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(name));
+  const ordered: DecompilerKind[] = [];
+  for (const name of [...configured, ...DEFAULT_DECOMPILER_COMMANDS]) {
+    if (!ordered.includes(name)) ordered.push(name);
+  }
+  return ordered;
 }
 
 /** Every decompiler command whose plugin is actually loaded in this rizin, in priority order (for `/re status` and diagnostics). */
-export async function availableDecompilers(rz: RzSession, signal?: AbortSignal): Promise<DecompilerKind[]> {
-	const found: DecompilerKind[] = [];
-	for (const command of decompilerCommands()) {
-		if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) found.push(command);
-	}
-	return found;
+export async function availableDecompilers(
+  rz: RzSession,
+  signal?: AbortSignal
+): Promise<DecompilerKind[]> {
+  const found: DecompilerKind[] = [];
+  for (const command of decompilerCommands()) {
+    if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
+      found.push(command);
+    }
+  }
+  return found;
 }
 
 /** A human label for a decompiler command (the two known plugins get their names; anything else is shown as its command). */
 export function decompilerLabel(kind: DecompilerKind | null): string {
-	if (kind === "pdg") return "rz-ghidra (pdg)";
-	if (kind === "pdd") return "jsdec (pdd)";
-	return kind ? `${kind} (plugin)` : "none — decompile_function returns labeled disassembly";
+  if (kind === "pdg") {
+    return "rz-ghidra (pdg)";
+  }
+  if (kind === "pdd") {
+    return "jsdec (pdd)";
+  }
+  return kind
+    ? `${kind} (plugin)`
+    : "none — decompile_function returns labeled disassembly";
 }
 
 /** Never infer presence from anything short of the command's own help text. */
 function isAvailableReply(reply: string): boolean {
-	const trimmed = reply.trim();
-	return trimmed.length > 0 && !trimmed.includes("does not exist") && !trimmed.startsWith("ERROR");
+  const trimmed = reply.trim();
+  return (
+    trimmed.length > 0 &&
+    !trimmed.includes("does not exist") &&
+    !trimmed.startsWith("ERROR")
+  );
 }
 
 /**
@@ -89,16 +108,21 @@ function isAvailableReply(reply: string): boolean {
  */
 const kindBySession = new WeakMap<RzSession, DecompilerKind | null>();
 
-export async function resolveDecompiler(rz: RzSession, signal?: AbortSignal): Promise<DecompilerKind | null> {
-	if (kindBySession.has(rz)) return kindBySession.get(rz) ?? null;
-	for (const command of decompilerCommands()) {
-		if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
-			kindBySession.set(rz, command);
-			return command;
-		}
-	}
-	kindBySession.set(rz, null);
-	return null;
+export async function resolveDecompiler(
+  rz: RzSession,
+  signal?: AbortSignal
+): Promise<DecompilerKind | null> {
+  if (kindBySession.has(rz)) {
+    return kindBySession.get(rz) ?? null;
+  }
+  for (const command of decompilerCommands()) {
+    if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
+      kindBySession.set(rz, command);
+      return command;
+    }
+  }
+  kindBySession.set(rz, null);
+  return null;
 }
 
 /**
@@ -106,14 +130,29 @@ export async function resolveDecompiler(rz: RzSession, signal?: AbortSignal): Pr
  * to labeled annotated disassembly. Returns null when there is no function at
  * `ea` at all.
  */
-export async function decompileAt(rz: RzSession, ea: string, signal?: AbortSignal): Promise<DecompileOutcome | null> {
-	const kind = await resolveDecompiler(rz, signal);
-	if (kind) {
-		const code = (await rz.cmd(`${kind} @ ${ea}`, { timeoutMs: DECOMPILE_TIMEOUT_MS, signal })).replace(/\r\n/g, "\n").replace(/^\n+/, "");
-		if (code.trim().length > 0) return { kind, code };
-	}
-	const disasm = await disassembleAt(rz, ea, signal);
-	if (!disasm) return null;
-	const prefix = kind ? DECOMPILER_EMPTY_PREFIX : DISASM_ONLY_PREFIX;
-	return { kind: "disasm", code: disasm.lines.join("\n"), prefix };
+export async function decompileAt(
+  rz: RzSession,
+  ea: string,
+  signal?: AbortSignal
+): Promise<DecompileOutcome | null> {
+  const kind = await resolveDecompiler(rz, signal);
+  if (kind) {
+    const code = (
+      await rz.cmd(`${kind} @ ${ea}`, {
+        signal,
+        timeoutMs: DECOMPILE_TIMEOUT_MS,
+      })
+    )
+      .replaceAll("\r\n", "\n")
+      .replace(/^\n+/, "");
+    if (code.trim().length > 0) {
+      return { kind, code };
+    }
+  }
+  const disasm = await disassembleAt(rz, ea, signal);
+  if (!disasm) {
+    return null;
+  }
+  const prefix = kind ? DECOMPILER_EMPTY_PREFIX : DISASM_ONLY_PREFIX;
+  return { code: disasm.lines.join("\n"), kind: "disasm", prefix };
 }

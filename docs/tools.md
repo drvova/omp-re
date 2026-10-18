@@ -1,20 +1,10 @@
 # Tool reference
 
-All 64 `omp-re` tools, grouped by tier. Triage tools register only when their
-backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 64 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+All 64 `omp-re` tools, grouped by tier. Triage tools register only when their backing binary is on PATH at load time, so your own tool list may legitimately show fewer than 64 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
-Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
-whether omp prompts before running it (`tools.approvalMode` /
-`tools.approval.<name>` in your omp config), every tool has its own
-transcript renderer, and every read-tier and `rizin_command` call also
-becomes a `re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor
-cancellation.
+Every tool follows omp's standard `ToolDefinition` shape: `approval` gates whether omp prompts before running it (`tools.approvalMode` / `tools.approval.<name>` in your omp config), every tool has its own transcript renderer, and every read-tier and `rizin_command` call also becomes a `re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor cancellation.
 
-Output larger than the context cap (2000 lines or 50 KB) is truncated for the
-model and saved in full to the session's artifact store; the result ends with
-`[Output truncated: … Full output: artifact://<id>]` and the model can `read`
-that artifact. List results are JSON arrays with one compact row per line.
+Output larger than the context cap (2000 lines or 50 KB) is truncated for the model and saved in full to the session's artifact store; the result ends with `[Output truncated: … Full output: artifact://<id>]` and the model can `read` that artifact. List results are JSON arrays with one compact row per line.
 
 ## Session (3 tools)
 
@@ -62,25 +52,13 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 | `list_flags` | `read` | `filter?, offset?, limit?` | All flags rizin knows (`flj`) as `{ea, name, size}` — analysis, reloc, and section labels. |
 | `list_classes` | `read` | `filter?, offset?, limit?` | Classes from binary metadata (`icj`) — C++ RTTI, Objective-C, Swift; empty on plain C binaries. |
 
-`offset`/`limit` default to 0/200 and cap at 1000; every paginated result
-reports its total so the model knows a view is partial. An empty page is
-marked as compactable, so omp can drop it from context once it has been read.
+`offset`/`limit` default to 0/200 and cap at 1000; every paginated result reports its total so the model knows a view is partial. An empty page is marked as compactable, so omp can drop it from context once it has been read.
 
-Every `search_*` tool accepts `in_function` (an address or name): the search
-is restricted to that function's extent (rizin's `search.in=range` plus
-`search.from`/`search.to`), and the previous scope is always restored
-afterward. Omit it to search the whole binary.
+Every `search_*` tool accepts `in_function` (an address or name): the search is restricted to that function's extent (rizin's `search.in=range` plus `search.from`/`search.to`), and the previous scope is always restored afterward. Omit it to search the whole binary.
 
 ## Mutate tier (15 tools)
 
-Every mutate tool follows resolve → read-old → write → read-back → verify: it
-throws with what rizin actually stored rather than reporting success when the
-requested mutation did not land. Annotations are keyed on the function's
-start address (or the exact address, for comments). `/re undo` reverses the
-most recently applied annotation, and the session replays annotations into a
-fresh rizin process on resume or respawn. Each approval prompt states the
-exact change (e.g. `Rename function "main" to "parse_args". Reversible with
-/re undo.`).
+Every mutate tool follows resolve → read-old → write → read-back → verify: it throws with what rizin actually stored rather than reporting success when the requested mutation did not land. Annotations are keyed on the function's start address (or the exact address, for comments). `/re undo` reverses the most recently applied annotation, and the session replays annotations into a fresh rizin process on resume or respawn. Each approval prompt states the exact change (e.g. `Rename function "main" to "parse_args". Reversible with /re undo.`).
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -102,12 +80,7 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 
 ## Findings (3 tools)
 
-The model's own conclusions, recorded as report claims (`re.finding` entries).
-A finding is gated when it is recorded, while the model can still act on the
-result, and again at `/re report`. It lands in the report's **Findings**
-section and in the verification manifest, and `/re carry --inherit` re-proves
-it on the next build. Neither tool reads the binary, and neither records
-evidence.
+The model's own conclusions, recorded as report claims (`re.finding` entries). A finding is gated when it is recorded, while the model can still act on the result, and again at `/re report`. It lands in the report's **Findings** section and in the verification manifest, and `/re carry --inherit` re-proves it on the next build. Neither tool reads the binary, and neither records evidence.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -117,42 +90,23 @@ evidence.
 
 ## rizin REPL (2 tools)
 
-For everything the dedicated tools don't cover. Both read the catalog the
-installed rizin publishes about itself (`rizin -qc '?*j'`, read once per
-process with no binary open), so they match the user's rizin version and
-plugins exactly.
+For everything the dedicated tools don't cover. Both read the catalog the installed rizin publishes about itself (`rizin -qc '?*j'`, read once per process with no binary open), so they match the user's rizin version and plugins exactly.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rizin_help` | `read` | `query: string` | A command or prefix (`ph`, `afv`, `/R`) lists that family; an exact match adds its typed arguments (required/optional, defaults, choices) and description. Anything else is a keyword search over summaries and descriptions (`entropy`, `rop gadgets`). Entries `rizin_command` would refuse are marked `[not runnable via rizin_command]`. |
 | `rizin_command` | `exec` (reason names the command) | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
 
-`rizin_command` accepts a command only if all of these hold, checked before
-anything reaches rizin:
+`rizin_command` accepts a command only if all of these hold, checked before anything reaches rizin:
 
-- **Read-only family**: print (`p…`), info (`i…`), search (`/…`), graphs
-  (`ag…`), op/ESIL analysis (`ao…`, `ab…`), xref and function queries
-  (`axt`, `axf`, `afl`, `afi`, `afb`, `afx`, `afvl`, `afvx`, `afvR`, `afvW`,
-  `afvd`, `afo`, `afM`), comment queries (`CC.`, `CCl`, `CCf`), and flag
-  descriptions (`fd…`).
-- **Not an exception inside those families**: `pf`/`po`/`pw` (formats and
-  writes), `pr`/`prz`/`prg`/`p6d` (raw bytes — a NUL ends a `-q0` frame; use
-  `px`, `p8`, or `prx`), `pkill`, `pm`, `/F` (searches a file's content),
-  `ag[enw]`, `afb[cer]`, `afii`, `ica`, `id`, or any command name containing
-  `+ - = ! *`. A command whose catalog entry takes a file or path argument
-  (`/m <magic-file>`) runs only with no arguments.
-- **No syntax that leaves the command**: `;`, `|`, `<`/`>`, backticks,
-  `$(`/`${`, `~`, `#`, `"`, `\`, line breaks, and every `@` modifier except
-  `@!<n>` (a temporary block size, e.g. `ph entropy @!4096`). Seek with `addr`.
+- **Read-only family**: print (`p…`), info (`i…`), search (`/…`), graphs (`ag…`), op/ESIL analysis (`ao…`, `ab…`), xref and function queries (`axt`, `axf`, `afl`, `afi`, `afb`, `afx`, `afvl`, `afvx`, `afvR`, `afvW`, `afvd`, `afo`, `afM`), comment queries (`CC.`, `CCl`, `CCf`), and flag descriptions (`fd…`).
+- **Not an exception inside those families**: `pf`/`po`/`pw` (formats and writes), `pr`/`prz`/`prg`/`p6d` (raw bytes — a NUL ends a `-q0` frame; use `px`, `p8`, or `prx`), `pkill`, `pm`, `/F` (searches a file's content), `ag[enw]`, `afb[cer]`, `afii`, `ica`, `id`, or any command name containing `+ - = ! *`. A command whose catalog entry takes a file or path argument (`/m <magic-file>`) runs only with no arguments.
+- **No syntax that leaves the command**: `;`, `|`, `<`/`>`, backticks, `$(`/`${`, `~`, `#`, `"`, `\`, line breaks, and every `@` modifier except `@!<n>` (a temporary block size, e.g. `ph entropy @!4096`). Seek with `addr`.
 - **In this rizin's catalog**, and not an `interactive` output mode.
 
 ## rizin CLI suite (1 tool)
 
-`rizin_cli` fronts the standalone `rz-*` executables that ship beside rizin,
-for analysis the in-core commands don't cover. It registers only when those
-binaries are found next to the configured rizin (or on PATH). Invoked by argv
-through omp's `exec` — no shell — so there is no `;`/`|`/`$()` surface; the
-gating is on the flags.
+`rizin_cli` fronts the standalone `rz-*` executables that ship beside rizin, for analysis the in-core commands don't cover. It registers only when those binaries are found next to the configured rizin (or on PATH). Invoked by argv through omp's `exec` — no shell — so there is no `;`/`|`/`$()` surface; the gating is on the flags.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -167,28 +121,11 @@ gating is on the flags.
 | `rz-asm` | standalone assemble / disassemble | `rz-asm -a x86 -b 64 -d 4889e5` |
 | `rz-ax` | base and format conversion | `rz-ax 0xdead` |
 
-Refused before the tool is spawned: any flag that runs code (`rz-find
--E`/`-R`, `rz-diff -t command`), writes or extracts to disk (`rz-bin
--O`/`-o`/`-C`/`-x`, `rz-asm -O`), fetches over the network (`rz-bin
--dd`/`-PP`), or opens an interactive view (`rz-diff -H`/`-S`), and any
-argument with a line break or NUL. The check is getopt-aware: the flag is
-caught whether written split (`-t command`), attached (`-tcommand`), or
-clustered (`-ddj`), and a single `-d`/`-P` (local read) stays allowed while
-`-dd`/`-d -d`/`-ddj` (network fetch) are refused. rz-gg (shellcode
-generation) is not exposed — it generates rather than
-analyzes. rz-run is not exposed as a CLI tool either, but its directives
-(argv, env, cwd, stdio, limits) do configure the debugger's launch
-environment through `rizin_debug`'s `run` option — the one place omp-re
-executes a sample.
+Refused before the tool is spawned: any flag that runs code (`rz-find -E`/`-R`, `rz-diff -t command`), writes or extracts to disk (`rz-bin -O`/`-o`/`-C`/`-x`, `rz-asm -O`), fetches over the network (`rz-bin -dd`/`-PP`), or opens an interactive view (`rz-diff -H`/`-S`), and any argument with a line break or NUL. The check is getopt-aware: the flag is caught whether written split (`-t command`), attached (`-tcommand`), or clustered (`-ddj`), and a single `-d`/`-P` (local read) stays allowed while `-dd`/`-d -d`/`-ddj` (network fetch) are refused. rz-gg (shellcode generation) is not exposed — it generates rather than analyzes. rz-run is not exposed as a CLI tool either, but its directives (argv, env, cwd, stdio, limits) do configure the debugger's launch environment through `rizin_debug`'s `run` option — the one place omp-re executes a sample.
 
 ## Signatures (2 tools)
 
-FLIRT signatures name library functions from a signature database (book:
-analysis/signatures). `open_binary`'s analysis (`aaa`) already applies rizin's
-built-in database, so this covers what that doesn't: re-applying it on demand,
-applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't, because
-it refuses file arguments — and creating a new signature from the analyzed
-functions. List the built-in database with `rizin_command Flt`.
+FLIRT signatures name library functions from a signature database (book: analysis/signatures). `open_binary`'s analysis (`aaa`) already applies rizin's built-in database, so this covers what that doesn't: re-applying it on demand, applying a _custom_ `.sig`/`.pat` file — which `rizin_command` can't, because it refuses file arguments — and creating a new signature from the analyzed functions. List the built-in database with `rizin_command Flt`.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -197,12 +134,7 @@ functions. List the built-in database with `rizin_command Flt`.
 
 ## Analysis passes — `analyze` (1 tool)
 
-`open_binary`'s `aaa` is the analysis baseline. `analyze` re-runs the deeper
-or format-specific passes it skips (book: analysis/code_analysis), each
-additive — it finds functions, xrefs, names, or types; none deletes. The pass
-is recorded and re-run on resume/respawn (before signatures and annotations,
-so each layer sees the one before it), not as an undoable annotation —
-reopen the binary to return to the baseline.
+`open_binary`'s `aaa` is the analysis baseline. `analyze` re-runs the deeper or format-specific passes it skips (book: analysis/code_analysis), each additive — it finds functions, xrefs, names, or types; none deletes. The pass is recorded and re-run on resume/respawn (before signatures and annotations, so each layer sees the one before it), not as an undoable annotation — reopen the binary to return to the baseline.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -210,11 +142,7 @@ reopen the binary to return to the baseline.
 
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 
-`rizin_debug` launches the open binary under rizin's debugger and drives it.
-It **executes the sample**, so it registers only when `OMPRE_ENABLE_DEBUGGER`
-is set, runs in a debug session separate from the static one (which never
-executes the file), and is killed with its debuggee on `stop` or session
-shutdown. Run untrusted samples only in an isolated, disposable environment.
+`rizin_debug` launches the open binary under rizin's debugger and drives it. It **executes the sample**, so it registers only when `OMPRE_ENABLE_DEBUGGER` is set, runs in a debug session separate from the static one (which never executes the file), and is killed with its debuggee on `stop` or session shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -222,68 +150,22 @@ shutdown. Run untrusted samples only in an isolated, disposable environment.
 
 Actions:
 
-- **Start:** `start` launches the open binary, stopped at entry (`run`
-  configures its argv/env/stdio). With `attach` it instead controls an
-  existing target without launching: `attach: {pid: N}` attaches to a running
-  process, `attach: {remote: "gdb://host:port"}` (or `windbg://…`) connects to
-  a remote stub — e.g. a sample running in an isolated VM — with the open
-  binary as the symbol source. `attach` is not combined with `run`.
-- **Execution:** `continue` / `continue_until` (`addr`),
-  `continue_to_syscall` / `continue_to_call` / `continue_to_ret`, `step` /
-  `step_over` (`count` instructions).
-- **Reverse debugging:** `trace_start` / `trace_stop` record a trace;
-  `step_back` (`count`) / `continue_back` then move backward through it (they
-  error until a trace is recorded). `trace_save` / `trace_load` (`file`)
-  persist the recorded session to, and restore it from, a directory in
-  omp-re's output directory — so an expensive recording survives across debug
-  sessions.
-- **Registers & memory:** `registers`, `registers_telescope` (each register
-  resolved to what it points at), `write_register` (`reg`=`value`),
-  `read_memory` (`size` bytes at `addr`, returned inline as hex),
-  `dump_memory` (`size` bytes of live memory at `addr` written to a file in
-  omp-re's output directory — for an unpacked/decrypted region too large to
-  return inline; returns the path, size, and SHA-256), `write_memory` (`bytes`
-  hex at `addr`, into the live process), `disassemble` (`count` instructions at
-  `addr`, default the PC — reads *live* memory, so it shows self-modified or
-  unpacked code the static view can't), `resolve_symbol` (`name`, optional
-  `lib`) — the live, post-ASLR address of a loaded symbol such as libc
-  `system`.
-- **Breakpoints & watchpoints:** `break_add` / `break_remove` / `break_list`,
-  `break_add_hw` (hardware breakpoint via debug registers — breaks on
-  read-only / self-modifying / packed pages without patching int3 bytes),
-  `break_enable` / `break_disable` (toggle the breakpoint at `addr`),
-  `break_condition` (`condition`, e.g. `rax>0` — stop only when it holds; the
-  expression is passed literally so `>`/`<`/`==` are not shell redirects),
-  `break_command` (`command` — run a **read-only** rizin command on each hit,
-  e.g. `drj` to log registers or `dbtj` the backtrace; restricted to vetted
-  debugger-state reads plus static print/info/search, never shell, writes,
-  config, or debugger control), `watch_add` (hardware watchpoint at `addr`,
-  `perm` r/w/rw, `size` 1/2/4/8 — removed with `break_remove`), `backtrace`.
-- **Process state:** `maps`, `modules`, `libraries`, `sections`, `processes`,
-  `threads`, `fds`, `signals`, `windows`.
-- **Heaps:** `heaps` / `heap_blocks` (Windows), `heap_arenas` / `heap_chunks`
-  (optional arena in `addr`) / `heap_bins` (optional
-  `tcache`/`fast`/`unsorted`/`small`/`large` in `addr`) — glibc.
+- **Start:** `start` launches the open binary, stopped at entry (`run` configures its argv/env/stdio). With `attach` it instead controls an existing target without launching: `attach: {pid: N}` attaches to a running process, `attach: {remote: "gdb://host:port"}` (or `windbg://…`) connects to a remote stub — e.g. a sample running in an isolated VM — with the open binary as the symbol source. `attach` is not combined with `run`.
+- **Execution:** `continue` / `continue_until` (`addr`), `continue_to_syscall` / `continue_to_call` / `continue_to_ret`, `step` / `step_over` (`count` instructions).
+- **Reverse debugging:** `trace_start` / `trace_stop` record a trace; `step_back` (`count`) / `continue_back` then move backward through it (they error until a trace is recorded). `trace_save` / `trace_load` (`file`) persist the recorded session to, and restore it from, a directory in omp-re's output directory — so an expensive recording survives across debug sessions.
+- **Registers & memory:** `registers`, `registers_telescope` (each register resolved to what it points at), `write_register` (`reg`=`value`), `read_memory` (`size` bytes at `addr`, returned inline as hex), `dump_memory` (`size` bytes of live memory at `addr` written to a file in omp-re's output directory — for an unpacked/decrypted region too large to return inline; returns the path, size, and SHA-256), `write_memory` (`bytes` hex at `addr`, into the live process), `disassemble` (`count` instructions at `addr`, default the PC — reads _live_ memory, so it shows self-modified or unpacked code the static view can't), `resolve_symbol` (`name`, optional `lib`) — the live, post-ASLR address of a loaded symbol such as libc `system`.
+- **Breakpoints & watchpoints:** `break_add` / `break_remove` / `break_list`, `break_add_hw` (hardware breakpoint via debug registers — breaks on read-only / self-modifying / packed pages without patching int3 bytes), `break_enable` / `break_disable` (toggle the breakpoint at `addr`), `break_condition` (`condition`, e.g. `rax>0` — stop only when it holds; the expression is passed literally so `>`/`<`/`==` are not shell redirects), `break_command` (`command` — run a **read-only** rizin command on each hit, e.g. `drj` to log registers or `dbtj` the backtrace; restricted to vetted debugger-state reads plus static print/info/search, never shell, writes, config, or debugger control), `watch_add` (hardware watchpoint at `addr`, `perm` r/w/rw, `size` 1/2/4/8 — removed with `break_remove`), `backtrace`.
+- **Process state:** `maps`, `modules`, `libraries`, `sections`, `processes`, `threads`, `fds`, `signals`, `windows`.
+- **Heaps:** `heaps` / `heap_blocks` (Windows), `heap_arenas` / `heap_chunks` (optional arena in `addr`) / `heap_bins` (optional `tcache`/`fast`/`unsorted`/`small`/`large` in `addr`) — glibc.
 - **Lifecycle:** `stop` (kill and end the session).
 
-Every action needs a session started first except `start`; nothing is ever
-launched implicitly. The `write_*` and `watch_add` actions change the live
-process and are called out as such in the approval reason. A
-`continue`/`step` that never returns (a debuggee blocked on input) is killed
-at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
-no facilities for evading detection or hiding the debuggee; see
-[`SECURITY.md`](../SECURITY.md#rizin_debug).
+Every action needs a session started first except `start`; nothing is ever launched implicitly. The `write_*` and `watch_add` actions change the live process and are called out as such in the approval reason. A `continue`/`step` that never returns (a debuggee blocked on input) is killed at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has no facilities for evading detection or hiding the debuggee; see [`SECURITY.md`](../SECURITY.md#rizin_debug).
 
-`dump_memory` is the one tool that emits a file (the sample itself is still
-never written). Dumps go to `OMPRE_OUTPUT_DIR` — or `<tmpdir>/omp-re-out` when
-unset — under a bare filename it validates; it never writes to a path the
-model chose, so it can't traverse out of that directory or clobber an
-arbitrary file.
+`dump_memory` is the one tool that emits a file (the sample itself is still never written). Dumps go to `OMPRE_OUTPUT_DIR` — or `<tmpdir>/omp-re-out` when unset — under a bare filename it validates; it never writes to a path the model chose, so it can't traverse out of that directory or clobber an arbitrary file.
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 
-Each runs against the currently open binary via omp's `exec`, so cancelling
-the tool call stops the scanner.
+Each runs against the currently open binary via omp's `exec`, so cancelling the tool call stops the scanner.
 
 | Tool | Approval | Requires on PATH | Parameters | What it does |
 | --- | --- | --- | --- | --- |
@@ -292,8 +174,4 @@ the tool call stops the scanner.
 | `triage_die` | `exec` | `diec` | (none) | Detect packers, compilers, and file types via Detect It Easy. |
 | `triage_yara` | `exec` | `yara` | `rules_path` (required — no default ruleset ships) | Scan the binary with user-supplied YARA rules. |
 
-For `triage_capa`/`triage_floss`/`triage_die`, a non-zero exit code with
-non-empty stdout is treated as "the tool ran and reported zero findings",
-matching how capa signals "no matches". A non-zero exit with *empty* stdout
-is treated as a real failure and throws, so a tool that never ran doesn't
-read as a false all-clear.
+For `triage_capa`/`triage_floss`/`triage_die`, a non-zero exit code with non-empty stdout is treated as "the tool ran and reported zero findings", matching how capa signals "no matches". A non-zero exit with _empty_ stdout is treated as a real failure and throws, so a tool that never ran doesn't read as a false all-clear.

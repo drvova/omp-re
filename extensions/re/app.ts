@@ -22,8 +22,8 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 /** A subsystem: a name and the registration it runs with the host. */
 export interface ReSubsystem {
-	name: string;
-	apply: (pi: ExtensionAPI) => void | Promise<void>;
+  name: string;
+  apply: (pi: ExtensionAPI) => void | Promise<void>;
 }
 
 /**
@@ -31,8 +31,11 @@ export interface ReSubsystem {
  * groups are async) so all tools and listeners are registered before the
  * extension finishes initializing.
  */
-export async function composeApp(pi: ExtensionAPI, subsystems: readonly ReSubsystem[]): Promise<void> {
-	for (const sub of subsystems) {
-		await sub.apply(pi);
-	}
+export async function composeApp(
+  pi: ExtensionAPI,
+  subsystems: readonly ReSubsystem[]
+): Promise<void> {
+  for (const sub of subsystems) {
+    await sub.apply(pi);
+  }
 }

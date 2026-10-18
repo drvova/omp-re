@@ -27,77 +27,111 @@ const MAX_CANDIDATES = 64;
 export const RELOCATE_THRESHOLD = 0.8;
 
 export interface AnchorFingerprint {
-	/** The anchor expression as cited (`sym.fib`, `0x1292`). */
-	anchor: string;
-	/** Name of the function containing the anchor, in the report's binary. */
-	function: string;
-	/** That function's start address (hex) in the report's binary. */
-	offset: string;
-	/** Byte offset of the anchor from the function start, so an anchor inside a function relocates to the same spot. */
-	delta: number;
-	size: number;
-	nbbs: number;
-	mnemonics: string[];
+  /** The anchor expression as cited (`sym.fib`, `0x1292`). */
+  anchor: string;
+  /** Name of the function containing the anchor, in the report's binary. */
+  function: string;
+  /** That function's start address (hex) in the report's binary. */
+  offset: string;
+  /** Byte offset of the anchor from the function start, so an anchor inside a function relocates to the same spot. */
+  delta: number;
+  size: number;
+  nbbs: number;
+  mnemonics: string[];
 }
 
 export interface Relocation {
-	function: string;
-	/** The matched function's start address (hex) in the new build. */
-	offset: string;
-	/** Where to re-run the command: the matched function's start plus the recorded delta (hex). */
-	addr: string;
-	similarity: number;
+  function: string;
+  /** The matched function's start address (hex) in the new build. */
+  offset: string;
+  /** Where to re-run the command: the matched function's start plus the recorded delta (hex). */
+  addr: string;
+  similarity: number;
 }
 
 interface FnInfo {
-	offset: number;
-	name: string;
-	size: number;
-	nbbs: number;
+  offset: number;
+  name: string;
+  size: number;
+  nbbs: number;
 }
 
 function parseJson<T>(raw: string): T | undefined {
-	try {
-		return JSON.parse(raw) as T;
-	} catch {
-		return undefined;
-	}
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The mnemonic sequence of the function starting at `offset` (`pdfj`), or undefined when rizin has none there. */
-async function mnemonicsAt(rz: RzSession, offset: number): Promise<string[] | undefined> {
-	const pdf = parseJson<{ ops?: { disasm?: unknown; type?: unknown }[] }>(await rz.cmd(`pdfj @ ${eaFromOffset(offset)}`));
-	if (!pdf?.ops) return undefined;
-	return pdf.ops
-		.filter((op) => typeof op.disasm === "string" && op.type !== "invalid")
-		.map((op) => (op.disasm as string).trim().split(/\s+/, 1)[0]!.toLowerCase())
-		.slice(0, MAX_MNEMONICS);
+async function mnemonicsAt(
+  rz: RzSession,
+  offset: number
+): Promise<string[] | undefined> {
+  const pdf = parseJson<{ ops?: { disasm?: unknown; type?: unknown }[] }>(
+    await rz.cmd(`pdfj @ ${eaFromOffset(offset)}`)
+  );
+  if (!pdf?.ops) {
+    return undefined;
+  }
+  return pdf.ops
+    .filter((op) => typeof op.disasm === "string" && op.type !== "invalid")
+    .map((op) => (op.disasm as string).trim().split(/\s+/, 1)[0]!.toLowerCase())
+    .slice(0, MAX_MNEMONICS);
 }
 
 /** Fingerprint the function containing `anchor` in the open build, or undefined when the anchor is in no function (data, a gap) or doesn't resolve. Never throws. */
-export async function fingerprintAnchor(rz: RzSession, anchor: string): Promise<AnchorFingerprint | undefined> {
-	try {
-		const at = await resolveNumericAddr(rz, anchor);
-		const fn = parseJson<FnInfo[]>(await rz.cmd(`afij @ ${eaFromOffset(at)}`))?.[0];
-		if (!fn || typeof fn.offset !== "number") return undefined;
-		const mnemonics = await mnemonicsAt(rz, fn.offset);
-		if (!mnemonics || mnemonics.length === 0) return undefined;
-		return { anchor, function: fn.name, offset: eaFromOffset(fn.offset), delta: at - fn.offset, size: fn.size, nbbs: fn.nbbs, mnemonics };
-	} catch {
-		return undefined;
-	}
+export async function fingerprintAnchor(
+  rz: RzSession,
+  anchor: string
+): Promise<AnchorFingerprint | undefined> {
+  try {
+    const at = await resolveNumericAddr(rz, anchor);
+    const fn = parseJson<FnInfo[]>(
+      await rz.cmd(`afij @ ${eaFromOffset(at)}`)
+    )?.[0];
+    if (!fn || typeof fn.offset !== "number") {
+      return undefined;
+    }
+    const mnemonics = await mnemonicsAt(rz, fn.offset);
+    if (!mnemonics || mnemonics.length === 0) {
+      return undefined;
+    }
+    return {
+      anchor,
+      delta: at - fn.offset,
+      function: fn.name,
+      mnemonics,
+      nbbs: fn.nbbs,
+      offset: eaFromOffset(fn.offset),
+      size: fn.size,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /** Similarity of two sequences: 2·LCS / (|a| + |b|), in [0, 1]. */
-export function sequenceSimilarity(a: readonly string[], b: readonly string[]): number {
-	if (a.length === 0 && b.length === 0) return 1;
-	let prev = new Array<number>(b.length + 1).fill(0);
-	for (let i = 1; i <= a.length; i++) {
-		const cur = new Array<number>(b.length + 1).fill(0);
-		for (let j = 1; j <= b.length; j++) cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1]! + 1 : Math.max(prev[j]!, cur[j - 1]!);
-		prev = cur;
-	}
-	return (2 * prev[b.length]!) / (a.length + b.length);
+export function sequenceSimilarity(
+  a: readonly string[],
+  b: readonly string[]
+): number {
+  if (a.length === 0 && b.length === 0) {
+    return 1;
+  }
+  let prev = new Array<number>(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = new Array<number>(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] =
+        a[i - 1] === b[j - 1]
+          ? prev[j - 1]! + 1
+          : Math.max(prev[j]!, cur[j - 1]!);
+    }
+    prev = cur;
+  }
+  return (2 * prev[b.length]!) / (a.length + b.length);
 }
 
 /**
@@ -107,29 +141,51 @@ export function sequenceSimilarity(a: readonly string[], b: readonly string[]): 
  * mnemonic similarity, and return the best at or above {@link RELOCATE_THRESHOLD}
  * (ties go to a candidate with the recorded name). Never throws.
  */
-export async function relocateAnchor(rz: RzSession, fp: AnchorFingerprint): Promise<Relocation | undefined> {
-	try {
-		const fns = parseJson<FnInfo[]>(await rz.cmd("aflj")) ?? [];
-		const candidates = fns
-			.filter((fn) => typeof fn.offset === "number" && Math.abs(fn.size - fp.size) <= fp.size * 0.5 && Math.abs(fn.nbbs - fp.nbbs) <= fp.nbbs * 0.5 + 2)
-			.sort((x, y) => Math.abs(x.size - fp.size) / fp.size + Math.abs(x.nbbs - fp.nbbs) - (Math.abs(y.size - fp.size) / fp.size + Math.abs(y.nbbs - fp.nbbs)))
-			.slice(0, MAX_CANDIDATES);
-		let best: { fn: FnInfo; similarity: number } | undefined;
-		for (const fn of candidates) {
-			const mnemonics = await mnemonicsAt(rz, fn.offset);
-			if (!mnemonics) continue;
-			const similarity = sequenceSimilarity(fp.mnemonics, mnemonics);
-			const better = !best || similarity > best.similarity || (similarity === best.similarity && fn.name === fp.function);
-			if (better) best = { fn, similarity };
-		}
-		if (!best || best.similarity < RELOCATE_THRESHOLD) return undefined;
-		return {
-			function: best.fn.name,
-			offset: eaFromOffset(best.fn.offset),
-			addr: eaFromOffset(best.fn.offset + fp.delta),
-			similarity: Math.round(best.similarity * 1000) / 1000,
-		};
-	} catch {
-		return undefined;
-	}
+export async function relocateAnchor(
+  rz: RzSession,
+  fp: AnchorFingerprint
+): Promise<Relocation | undefined> {
+  try {
+    const fns = parseJson<FnInfo[]>(await rz.cmd("aflj")) ?? [];
+    const candidates = fns
+      .filter(
+        (fn) =>
+          typeof fn.offset === "number" &&
+          Math.abs(fn.size - fp.size) <= fp.size * 0.5 &&
+          Math.abs(fn.nbbs - fp.nbbs) <= fp.nbbs * 0.5 + 2
+      )
+      .sort(
+        (x, y) =>
+          Math.abs(x.size - fp.size) / fp.size +
+          Math.abs(x.nbbs - fp.nbbs) -
+          (Math.abs(y.size - fp.size) / fp.size + Math.abs(y.nbbs - fp.nbbs))
+      )
+      .slice(0, MAX_CANDIDATES);
+    let best: { fn: FnInfo; similarity: number } | undefined;
+    for (const fn of candidates) {
+      const mnemonics = await mnemonicsAt(rz, fn.offset);
+      if (!mnemonics) {
+        continue;
+      }
+      const similarity = sequenceSimilarity(fp.mnemonics, mnemonics);
+      const better =
+        !best ||
+        similarity > best.similarity ||
+        (similarity === best.similarity && fn.name === fp.function);
+      if (better) {
+        best = { fn, similarity };
+      }
+    }
+    if (!best || best.similarity < RELOCATE_THRESHOLD) {
+      return undefined;
+    }
+    return {
+      addr: eaFromOffset(best.fn.offset + fp.delta),
+      function: best.fn.name,
+      offset: eaFromOffset(best.fn.offset),
+      similarity: Math.round(best.similarity * 1000) / 1000,
+    };
+  } catch {
+    return undefined;
+  }
 }

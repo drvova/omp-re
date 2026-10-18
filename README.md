@@ -1,20 +1,10 @@
 # omp-re
 
-[![CI](https://github.com/drvova/omp-re/actions/workflows/ci.yml/badge.svg)](https://github.com/drvova/omp-re/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
-![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![64 tools](https://img.shields.io/badge/tools-64-informational)
+[![CI](https://github.com/drvova/omp-re/actions/workflows/ci.yml/badge.svg)](https://github.com/drvova/omp-re/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational) ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational) ![64 tools](https://img.shields.io/badge/tools-64-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
-`omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 64 agent tools, a `/re` slash
-command, five overlay panels, a packaged `re-analyst` subagent, a
-content-addressed evidence store, an HMAC-signable audit log, and a report
-writer that refuses to write a claim with no supporting evidence. The agent
-gathers facts through the tools; the evidence store remembers exactly what it
-observed; the report writer will not let it claim more than that.
+`omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi): it drives [rizin](https://rizin.re) behind 64 agent tools, a `/re` slash command, five overlay panels, a packaged `re-analyst` subagent, a content-addressed evidence store, an HMAC-signable audit log, and a report writer that refuses to write a claim with no supporting evidence. The agent gathers facts through the tools; the evidence store remembers exactly what it observed; the report writer will not let it claim more than that.
 
 ## Install
 
@@ -23,13 +13,9 @@ omp plugin marketplace add drvova/omp-re
 omp plugin install omp-re@drvova
 ```
 
-`drvova` after the `@` is the *marketplace catalog name* declared inside
-`.omp-plugin/marketplace.json`; it happens to match the GitHub owner but is a
-separate identifier (the `marketplace add` argument is the GitHub `owner/repo`,
-the `@name` is the catalog).
+`drvova` after the `@` is the _marketplace catalog name_ declared inside `.omp-plugin/marketplace.json`; it happens to match the GitHub owner but is a separate identifier (the `marketplace add` argument is the GitHub `owner/repo`, the `@name` is the catalog).
 
-To develop against a local checkout instead of installing as a plugin, point
-omp at the extension directory directly:
+To develop against a local checkout instead of installing as a plugin, point omp at the extension directory directly:
 
 ```yaml
 # ~/.omp/agent/config.yml
@@ -37,22 +23,13 @@ extensions:
   - /path/to/omp-re/extensions/re
 ```
 
-TypeScript loads natively through Bun; an edit is picked up on the next omp
-start with no build step. Never use a real home directory in this config
-(`/path/to/omp-re`, not a machine-specific path).
+TypeScript loads natively through Bun; an edit is picked up on the next omp start with no build step. Never use a real home directory in this config (`/path/to/omp-re`, not a machine-specific path).
 
-**rizin is required, and it is yours.** omp-re does not bundle, download,
-or build rizin: it runs the `rizin` on your `PATH` (or the one
-`OMPRE_RIZIN_PATH` names), so you choose the version, update it with your
-package manager, and keep the decompiler plugins you already have. Without
-it, `/re open` throws exactly: `omp-re: rizin not found on PATH — install
-rizin (https://rizin.re) or set OMPRE_RIZIN_PATH`. See
-[Prerequisites](#prerequisites) and [`docs/install.md`](docs/install.md).
+**rizin is required, and it is yours.** omp-re does not bundle, download, or build rizin: it runs the `rizin` on your `PATH` (or the one `OMPRE_RIZIN_PATH` names), so you choose the version, update it with your package manager, and keep the decompiler plugins you already have. Without it, `/re open` throws exactly: `omp-re: rizin not found on PATH — install rizin (https://rizin.re) or set OMPRE_RIZIN_PATH`. See [Prerequisites](#prerequisites) and [`docs/install.md`](docs/install.md).
 
 ## Quickstart
 
-A copy-pasteable first run against `/bin/ls` — no sample binary, no setup
-beyond rizin on PATH:
+A copy-pasteable first run against `/bin/ls` — no sample binary, no setup beyond rizin on PATH:
 
 ```
 /re open /bin/ls
@@ -66,10 +43,7 @@ a                # hand the function off to the model with a grounding prompt
 /re carry report.md.manifest.json --against ./v2 --inherit   # re-prove what survives on the next build
 ```
 
-Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a
-binary path. It opens the binary in its own rizin process, follows the triage
-order, and returns structured findings that each cite the tool output and
-address behind them.
+Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a binary path. It opens the binary in its own rizin process, follows the triage order, and returns structured findings that each cite the tool output and address behind them.
 
 ## What's omp-native
 
@@ -92,122 +66,49 @@ address behind them.
 
 ## Using all of rizin
 
-The dedicated tools cover the common path; rizin has about 2,000 commands.
-Rather than hardcode a list, omp-re reads the catalog rizin publishes about
-itself (`rizin -qc '?*j'`: every command in the installed build, plugins
-included, with typed arguments and a summary) and uses it three ways:
+The dedicated tools cover the common path; rizin has about 2,000 commands. Rather than hardcode a list, omp-re reads the catalog rizin publishes about itself (`rizin -qc '?*j'`: every command in the installed build, plugins included, with typed arguments and a summary) and uses it three ways:
 
-- **`rizin_help`** answers "which command, and what arguments?" from the rizin
-  you actually have, so the model never guesses syntax for the wrong version.
-  `rizin_help ph` shows `ph <algo>` with its choices; `rizin_help "rop gadgets"`
-  finds `/R`.
-- **`rizin_command`** runs one read-only command from that catalog — function
-  summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy
-  (`ph entropy @!4096`), byte and ROP searches (`/x`, `/R`), op analysis
-  (`ao`), headers (`iH`), config reads (`e asm.arch`, `elj`), metadata and
-  string listings (`C`, `Csl`), classes (`acl`), unions and type
-  cross-references (`tu`, `tx`), and the FLIRT sigdb listing (`Flt`) — and
-  returns rizin's own error and usage text when the arguments are wrong.
-  Writes, setting config (`e key=value`), shell escapes, file reads, and
-  analysis changes are refused before anything reaches rizin; the get/set
-  commands (`e`, `tn`, `Ld`) run only in their read form. See
-  [`SECURITY.md`](SECURITY.md#rizin_command).
-- **A compatibility check**: when a binary opens, every command omp-re's own
-  tools send is looked up in the catalog, and any your rizin lacks is named in
-  a warning instead of failing later as an empty result. `/re status` shows
-  the result and which decompiler the catalog lists.
+- **`rizin_help`** answers "which command, and what arguments?" from the rizin you actually have, so the model never guesses syntax for the wrong version. `rizin_help ph` shows `ph <algo>` with its choices; `rizin_help "rop gadgets"` finds `/R`.
+- **`rizin_command`** runs one read-only command from that catalog — function summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy (`ph entropy @!4096`), byte and ROP searches (`/x`, `/R`), op analysis (`ao`), headers (`iH`), config reads (`e asm.arch`, `elj`), metadata and string listings (`C`, `Csl`), classes (`acl`), unions and type cross-references (`tu`, `tx`), and the FLIRT sigdb listing (`Flt`) — and returns rizin's own error and usage text when the arguments are wrong. Writes, setting config (`e key=value`), shell escapes, file reads, and analysis changes are refused before anything reaches rizin; the get/set commands (`e`, `tn`, `Ld`) run only in their read form. See [`SECURITY.md`](SECURITY.md#rizin_command).
+- **A compatibility check**: when a binary opens, every command omp-re's own tools send is looked up in the catalog, and any your rizin lacks is named in a warning instead of failing later as an empty result. `/re status` shows the result and which decompiler the catalog lists.
 
-Beyond the in-core commands, rizin's **standalone CLI tools** are one tool
-away. `rizin_cli` fronts `rz-bin` (fast headers/imports/strings without full
-analysis), `rz-diff` (compare two binaries — versions of a sample, patched vs.
-original), `rz-hash` (hashing and entropy), `rz-find` (raw pattern search),
-`rz-asm` (standalone assemble/disassemble), and `rz-ax` (base conversion),
-each with its own arguments and its own `-h`. Argv only — no shell — and the
-flags that write files, run code, fetch over the network, or open an
-interactive view are refused.
+Beyond the in-core commands, rizin's **standalone CLI tools** are one tool away. `rizin_cli` fronts `rz-bin` (fast headers/imports/strings without full analysis), `rz-diff` (compare two binaries — versions of a sample, patched vs. original), `rz-hash` (hashing and entropy), `rz-find` (raw pattern search), `rz-asm` (standalone assemble/disassemble), and `rz-ax` (base conversion), each with its own arguments and its own `-h`. Argv only — no shell — and the flags that write files, run code, fetch over the network, or open an interactive view are refused.
 
 ### Decompiler: whatever you have
 
-`decompile_function` and the code view use the best decompiler plugin
-installed — rz-ghidra (`pdg`) then jsdec (`pdd`) by default. `OMPRE_DECOMPILER`
-reorders that, or names another plugin's command entirely (any `pdX`-style
-decompiler is probed the same way); the built-ins stay as a fallback. Without
-any plugin, output is labeled annotated disassembly, never passed off as
-decompiled code.
+`decompile_function` and the code view use the best decompiler plugin installed — rz-ghidra (`pdg`) then jsdec (`pdd`) by default. `OMPRE_DECOMPILER` reorders that, or names another plugin's command entirely (any `pdX`-style decompiler is probed the same way); the built-ins stay as a fallback. Without any plugin, output is labeled annotated disassembly, never passed off as decompiled code.
 
 ### Dynamic analysis: the debugger (opt-in)
 
-rizin is also a debugger, and `rizin_debug` drives it — launch the target
-(with a controlled argv/env/stdio via `run`), set breakpoints and hardware
-watchpoints, continue (including to the next syscall, call, or return),
-single-step, read and write registers and memory, disassemble **live**
-memory (so self-modified or unpacked code is visible where the static view
-can't reach), walk the backtrace, and inspect maps, modules, threads, and
-Windows or glibc heaps. This **executes the sample**, so it is off until you
-set `OMPRE_ENABLE_DEBUGGER`, runs in a session separate from the static one
-that only ever reads the file, and every resume or modification is an
-`exec`-tier approval that says which it is. Run untrusted samples only in an
-isolated, disposable VM or container — see
-[`SECURITY.md`](SECURITY.md#rizin_debug).
+rizin is also a debugger, and `rizin_debug` drives it — launch the target (with a controlled argv/env/stdio via `run`), set breakpoints and hardware watchpoints, continue (including to the next syscall, call, or return), single-step, read and write registers and memory, disassemble **live** memory (so self-modified or unpacked code is visible where the static view can't reach), walk the backtrace, and inspect maps, modules, threads, and Windows or glibc heaps. This **executes the sample**, so it is off until you set `OMPRE_ENABLE_DEBUGGER`, runs in a session separate from the static one that only ever reads the file, and every resume or modification is an `exec`-tier approval that says which it is. Run untrusted samples only in an isolated, disposable VM or container — see [`SECURITY.md`](SECURITY.md#rizin_debug).
 
-Instead of launching locally, `start` can **attach** to an already-running
-process (`attach: {pid}`) or **connect to a remote stub** (`attach: {remote:
-"gdb://host:port"}`, or `windbg://…`) — so you can drive a sample running
-inside an isolated VM from omp-re on the host, the open binary serving as the
-symbol source. Everything else about the tool is unchanged.
+Instead of launching locally, `start` can **attach** to an already-running process (`attach: {pid}`) or **connect to a remote stub** (`attach: {remote: "gdb://host:port"}`, or `windbg://…`) — so you can drive a sample running inside an isolated VM from omp-re on the host, the open binary serving as the symbol source. Everything else about the tool is unchanged.
 
 ### Emulation and signatures
 
-Between pure static reading and executing the sample, two more rizin
-capabilities are one tool away. `rizin_emulate` runs the target's own code
-inside rizin's RzIL VM — no OS process — to recover an argument computation or
-walk a decryptor loop. `apply_signatures` names library functions from FLIRT
-signatures: `aaa` applies rizin's built-in database on open, and this
-re-applies it or applies a custom `.sig`/`.pat` file you provide (re-applied
-automatically on resume). `rizin_command Flt` lists the built-in database.
+Between pure static reading and executing the sample, two more rizin capabilities are one tool away. `rizin_emulate` runs the target's own code inside rizin's RzIL VM — no OS process — to recover an argument computation or walk a decryptor loop. `apply_signatures` names library functions from FLIRT signatures: `aaa` applies rizin's built-in database on open, and this re-applies it or applies a custom `.sig`/`.pat` file you provide (re-applied automatically on resume). `rizin_command Flt` lists the built-in database.
 
-`deobfuscate` reveals hidden bytes in place: xor/add/sub a window with a key,
-swap endianness, or decrypt it with a named cipher (RC4, AES) — shown as hex
-and as a string, so an xor-masked URL or an embedded config becomes readable.
-The transform runs under rizin's write cache and is reset immediately, so the
-file on disk is never modified.
+`deobfuscate` reveals hidden bytes in place: xor/add/sub a window with a key, swap endianness, or decrypt it with a named cipher (RC4, AES) — shown as hex and as a string, so an xor-masked URL or an embedded config becomes readable. The transform runs under rizin's write cache and is reset immediately, so the file on disk is never modified.
 
-`open_binary` runs rizin's baseline analysis (`aaa`); `analyze` re-runs the
-deeper passes it skips — prelude scans that recover functions in stripped
-binaries, Go and Objective-C recovery, pointer analysis, recursive type
-matching — and reports the function count before and after. A pass is re-run
-on resume, before signatures and annotations, so each layer sees the one
-below it.
+`open_binary` runs rizin's baseline analysis (`aaa`); `analyze` re-runs the deeper passes it skips — prelude scans that recover functions in stripped binaries, Go and Objective-C recovery, pointer analysis, recursive type matching — and reports the function count before and after. A pass is re-run on resume, before signatures and annotations, so each layer sees the one below it.
 
 ### Loading raw and headerless targets
 
-`open_binary` normally autodetects architecture and base from the file
-header. For flat shellcode, a firmware image, or a ROM dump — which have no
-header — pass `arch`/`bits`/`map`/`format` (rizin's own `-a`/`-b`/`-m`/`-F`)
-so it's disassembled correctly. The choice is remembered and reused if the
-session resumes or rizin respawns.
+`open_binary` normally autodetects architecture and base from the file header. For flat shellcode, a firmware image, or a ROM dump — which have no header — pass `arch`/`bits`/`map`/`format` (rizin's own `-a`/`-b`/`-m`/`-F`) so it's disassembled correctly. The choice is remembered and reused if the session resumes or rizin respawns.
 
 ## What it looks like
 
-The screenshots below are real, unmodified captures of an `omp-re` session
-triaging a small demo binary (`fixture.exe`, built from the C source in
-[`tools/shotgen/fixture`](tools/shotgen/fixture)) on Windows — not mockups. The
-text-UI layout is current; [`tools/shotgen`](tools/shotgen) regenerates them
-against your own rizin install.
+The screenshots below are real, unmodified captures of an `omp-re` session triaging a small demo binary (`fixture.exe`, built from the C source in [`tools/shotgen/fixture`](tools/shotgen/fixture)) on Windows — not mockups. The text-UI layout is current; [`tools/shotgen`](tools/shotgen) regenerates them against your own rizin install.
 
 ### Function navigator
 
-`alt+g` opens a fuzzy-filterable, scrollable panel over every analyzed
-function:
+`alt+g` opens a fuzzy-filterable, scrollable panel over every analyzed function:
 
 ![Function navigator filtered to "fcn"](docs/img/functions.png)
 
 ### Decompile and cross-references
 
-`d` inside the code view toggles decompiled C from rz-ghidra. Without a
-decompiler plugin the same view degrades honestly to annotated disassembly,
-labeled `(disassembly only — no decompiler plugin available)`, rather than
-pretending to have a real decompile — see [Prerequisites](#prerequisites).
+`d` inside the code view toggles decompiled C from rz-ghidra. Without a decompiler plugin the same view degrades honestly to annotated disassembly, labeled `(disassembly only — no decompiler plugin available)`, rather than pretending to have a real decompile — see [Prerequisites](#prerequisites).
 
 ![Decompiled view of main()](docs/img/decompile.png)
 
@@ -215,98 +116,33 @@ pretending to have a real decompile — see [Prerequisites](#prerequisites).
 
 ### Evidence, cited
 
-`/re evidence` lists every fact gathered on this branch by an 8-character id;
-Enter on a row (or `/re cite <id>`) pulls it straight into the editor as a
-prefilled message — here, the exact SHA-256/SHA-1/MD5 `hash_binary` actually
-returned, not a retyped guess:
+`/re evidence` lists every fact gathered on this branch by an 8-character id; Enter on a row (or `/re cite <id>`) pulls it straight into the editor as a prefilled message — here, the exact SHA-256/SHA-1/MD5 `hash_binary` actually returned, not a retyped guess:
 
 ![/re cite prefilling the editor with a hash_binary evidence entry](docs/img/evidence-cite.png)
 
 ### The report gate, proven
 
-`/re report` refuses to write a report containing any claim with zero
-backing evidence. Here the model is instructed to record an unverified
-IOC-shaped claim directly (bypassing the RE tools on purpose) — the write is
-blocked, and the IOC is defanged even in the error message:
+`/re report` refuses to write a report containing any claim with zero backing evidence. Here the model is instructed to record an unverified IOC-shaped claim directly (bypassing the RE tools on purpose) — the write is blocked, and the IOC is defanged even in the error message:
 
 ![/re report withholding the whole report over one ungrounded IOC claim](docs/img/report-gate.png)
 
 ### Verified, reproducible
 
-Grounding proves a claim was *cited*; `/re verify` proves its evidence is
-*reproducible*. Every `rizin_command` evidence record stores the exact command,
-the SHA-256 of its canonicalized output, and the open binary's SHA-256 (stamped
-at open time). `/re verify [--strict]` re-runs each cited command read-only
-against the same binary and confirms the hash still matches — a mismatch is a
-hard failure with a non-zero headless exit, the same loud signal the report gate
-uses. `/re report` ships this as a **Verification Manifest** (claim → command →
-output hash → binary hash) plus a machine-readable `<report>.manifest.json`
-sidecar, so anyone with the binary can re-derive the report rather than trust it.
+Grounding proves a claim was _cited_; `/re verify` proves its evidence is _reproducible_. Every `rizin_command` evidence record stores the exact command, the SHA-256 of its canonicalized output, and the open binary's SHA-256 (stamped at open time). `/re verify [--strict]` re-runs each cited command read-only against the same binary and confirms the hash still matches — a mismatch is a hard failure with a non-zero headless exit, the same loud signal the report gate uses. `/re report` ships this as a **Verification Manifest** (claim → command → output hash → binary hash) plus a machine-readable `<report>.manifest.json` sidecar, so anyone with the binary can re-derive the report rather than trust it.
 
 ### Supported, not just cited
 
-Two gates prove a claim is *cited* and *reproducible*; a third proves its evidence
-actually *supports* it. Before `/re report` emits, each grounded claim and its
-cited evidence are put to a self-audit through omp's `ctx.runEphemeralTurn` side
-turn (no tools, no history writes), judged **supported / overreach / unsupported**.
-It is **advisory** by default — unsupported claims are flagged inline and the
-report is still written — while `/re report --audit=strict` withholds the report
-on any unsupported/overreach (and `--no-audit` skips it). It fails open: with no
-model or side-turn host it degrades to an "unaudited" note and never blocks, so
-the two deterministic gates stay authoritative.
+Two gates prove a claim is _cited_ and _reproducible_; a third proves its evidence actually _supports_ it. Before `/re report` emits, each grounded claim and its cited evidence are put to a self-audit through omp's `ctx.runEphemeralTurn` side turn (no tools, no history writes), judged **supported / overreach / unsupported**. It is **advisory** by default — unsupported claims are flagged inline and the report is still written — while `/re report --audit=strict` withholds the report on any unsupported/overreach (and `--no-audit` skips it). It fails open: with no model or side-turn host it degrades to an "unaudited" note and never blocks, so the two deterministic gates stay authoritative.
 
 ### Findings: the model's own conclusions, gated
 
-capa lines and IOC strings get into a report on their own. The model's actual
-conclusions, such as "checksum is a djb2 hash" or "the config is RC4-decrypted
-with a key from the volume serial", get in through `record_finding`. Each
-finding cites evidence ids and is checked when it is recorded. Every id must
-resolve on this branch and must have been taken against the open binary, and
-the claim goes to the same support audit `/re report` uses. An overreaching
-claim is refused with the auditor's reason, so the model narrows it while it is
-still analysing. Overriding the auditor takes a written justification, which is
-kept and shown. Findings appear in the report's **Findings** section with their
-confidence and provenance, go into the manifest, and carry like any other
-claim. `retract_finding` withdraws one, and `supersedes` revises one.
-`adopt_finding` brings in a finding from the `re-analyst` subagent, whose
-evidence lives in its own session. It re-runs the finding's reproducing
-commands in this session, records them as evidence here, and gates the claim
-the same way. A subagent's conclusion only reaches the report after it has been
-re-proven where the report is written.
+capa lines and IOC strings get into a report on their own. The model's actual conclusions, such as "checksum is a djb2 hash" or "the config is RC4-decrypted with a key from the volume serial", get in through `record_finding`. Each finding cites evidence ids and is checked when it is recorded. Every id must resolve on this branch and must have been taken against the open binary, and the claim goes to the same support audit `/re report` uses. An overreaching claim is refused with the auditor's reason, so the model narrows it while it is still analysing. Overriding the auditor takes a written justification, which is kept and shown. Findings appear in the report's **Findings** section with their confidence and provenance, go into the manifest, and carry like any other claim. `retract_finding` withdraws one, and `supersedes` revises one. `adopt_finding` brings in a finding from the `re-analyst` subagent, whose evidence lives in its own session. It re-runs the finding's reproducing commands in this session, records them as evidence here, and gates the claim the same way. A subagent's conclusion only reaches the report after it has been re-proven where the report is written.
 
 ### Carried to the next build
 
-A report's manifest is also a regression test. `/re carry <manifest.json>
-[--against <binary>] [--strict] [--out <path>]` replays every cited command
-against a *different* binary (the next sample of a family, a firmware update,
-a patched build) and gives each claim a status. **holds** means the output is
-identical, or identical once positional addresses are masked, so a rebuild that
-only moved code still passes. **relocated** means the anchor was renamed or
-moved, but its function was found again by a fingerprint (size, block count and
-mnemonic sequence, recorded when the report was written) and the command says
-the same thing there. **drifted** means the command still runs but its output
-changed; the claim arrives with a diff limited to what really changed, not every
-shifted address. **broken** means the anchor is gone and nothing matches its
-fingerprint, or the command now produces nothing. **unchecked** means the
-evidence was provenance-only. Headless, a broken claim exits non-zero, and
-`--strict` also fails on relocation or drift.
+A report's manifest is also a regression test. `/re carry <manifest.json> [--against <binary>] [--strict] [--out <path>]` replays every cited command against a _different_ binary (the next sample of a family, a firmware update, a patched build) and gives each claim a status. **holds** means the output is identical, or identical once positional addresses are masked, so a rebuild that only moved code still passes. **relocated** means the anchor was renamed or moved, but its function was found again by a fingerprint (size, block count and mnemonic sequence, recorded when the report was written) and the command says the same thing there. **drifted** means the command still runs but its output changed; the claim arrives with a diff limited to what really changed, not every shifted address. **broken** means the anchor is gone and nothing matches its fingerprint, or the command now produces nothing. **unchecked** means the evidence was provenance-only. Headless, a broken claim exits non-zero, and `--strict` also fails on relocation or drift.
 
-`--inherit` turns the carry into the new build's starting point. Every finding
-that holds or relocated is re-proven: its commands are re-run through
-`rizin_command`'s own code path, the output is recorded as fresh evidence bound
-to the new binary (never copied from the manifest), and the finding is
-re-recorded with its provenance, e.g. "inherited from `646243…`, re-verified on
-this build (relocated: sym.fib → sym.fibonacci)". Findings that drifted or broke
-become an agenda that is placed in the editor, each with a compact diff of
-exactly what changed, ready to hand to the model: "this no longer holds as
-written; here is the change; revise or retract". `--resolve` goes further: it
-sends that agenda to the model as a turn, so a single command takes v1's report
-to a v2 analysis that is already re-proven, plus the model working through
-exactly what changed. `/re findings` lists the findings on the branch, and they
-are restated in the context summary when the conversation is compacted, so the
-model doesn't re-derive or contradict what it already recorded. Every command still goes through the read-only
-`rizin_command` gate, because a manifest is untrusted input, and carrying
-records no evidence.
+`--inherit` turns the carry into the new build's starting point. Every finding that holds or relocated is re-proven: its commands are re-run through `rizin_command`'s own code path, the output is recorded as fresh evidence bound to the new binary (never copied from the manifest), and the finding is re-recorded with its provenance, e.g. "inherited from `646243…`, re-verified on this build (relocated: sym.fib → sym.fibonacci)". Findings that drifted or broke become an agenda that is placed in the editor, each with a compact diff of exactly what changed, ready to hand to the model: "this no longer holds as written; here is the change; revise or retract". `--resolve` goes further: it sends that agenda to the model as a turn, so a single command takes v1's report to a v2 analysis that is already re-proven, plus the model working through exactly what changed. `/re findings` lists the findings on the branch, and they are restated in the context summary when the conversation is compacted, so the model doesn't re-derive or contradict what it already recorded. Every command still goes through the read-only `rizin_command` gate, because a manifest is untrusted input, and carrying records no evidence.
 
 ## Prerequisites
 
@@ -341,10 +177,7 @@ records no evidence.
 
 ## Tool reference
 
-All 64 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
-tables. Triage tools appear only when their backing binary is on PATH, and
-`rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
-may legitimately show fewer than 64.
+All 64 tools — see [`docs/tools.md`](docs/tools.md) for full parameter tables. Triage tools appear only when their backing binary is on PATH, and `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list may legitimately show fewer than 64.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
@@ -410,12 +243,7 @@ may legitimately show fewer than 64.
 | `triage_die` | triage | Detect packers/compilers/file types (Detect It Easy). |
 | `triage_yara` | triage | Scan with user-supplied YARA rules. |
 
-Every mutate tool follows resolve → read-old → write → read-back → verify,
-and throws with what rizin actually stored rather than reporting success when
-the mutation did not land as requested. `/re undo` reverses the most recently
-applied annotation. Every free-text and type argument reaches rizin as a
-single-quoted literal, so a comment like `x; !id` is stored as text, never
-run.
+Every mutate tool follows resolve → read-old → write → read-back → verify, and throws with what rizin actually stored rather than reporting success when the mutation did not land as requested. `/re undo` reverses the most recently applied annotation. Every free-text and type argument reaches rizin as a single-quoted literal, so a comment like `x; !id` is stored as text, never run.
 
 ## Configuration
 
@@ -443,20 +271,10 @@ Three environment variables, all optional:
 
 ## Known limitations
 
-- **A notify raised while the code view is open can render underneath it.**
-  Panels now close before reporting "nothing to open", and Enter on an
-  evidence row cites it into the editor, so this only affects the code view's
-  own `d` notice when a function has no decompiler output.
-- **Annotations made by a `re-analyst` subagent stay in that subagent's
-  rizin process.** They are not merged back into the parent session; the
-  agent is instructed not to annotate unless asked.
-- **`/re report` withholds the entire report, not just the ungrounded part,**
-  when any claim has zero backing evidence ids — see
-  [`docs/workflow.md`](docs/workflow.md) for why that's the point, not a bug.
-- **Renaming a function can change rizin's idea of its prototype.** rizin
-  drops a known library prototype (e.g. `int main(int argc, char **argv,
-  char **envp)`) once the function no longer carries that name; set it back
-  with `set_prototype` if it matters.
+- **A notify raised while the code view is open can render underneath it.** Panels now close before reporting "nothing to open", and Enter on an evidence row cites it into the editor, so this only affects the code view's own `d` notice when a function has no decompiler output.
+- **Annotations made by a `re-analyst` subagent stay in that subagent's rizin process.** They are not merged back into the parent session; the agent is instructed not to annotate unless asked.
+- **`/re report` withholds the entire report, not just the ungrounded part,** when any claim has zero backing evidence ids — see [`docs/workflow.md`](docs/workflow.md) for why that's the point, not a bug.
+- **Renaming a function can change rizin's idea of its prototype.** rizin drops a known library prototype (e.g. `int main(int argc, char **argv, char **envp)`) once the function no longer carries that name; set it back with `set_prototype` if it matters.
 
 ## License
 

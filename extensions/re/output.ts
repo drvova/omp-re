@@ -16,6 +16,7 @@
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
+
 import { rzQuote } from "./rizin.ts";
 
 /**
@@ -29,12 +30,12 @@ import { rzQuote } from "./rizin.ts";
  * fs calls and for what they report to the user.
  */
 export function rizinPathArg(path: string): string {
-	return rzQuote(toRizinPath(path));
+  return rzQuote(toRizinPath(path));
 }
 
 /** Forward-slash form of a path, which rizin accepts on every platform. Used by {@link rizinPathArg} and by callers that build their own rizin argument. */
 export function toRizinPath(path: string): string {
-	return path.replace(/\\/g, "/");
+  return path.replaceAll("\\", "/");
 }
 
 /**
@@ -46,15 +47,17 @@ export function toRizinPath(path: string): string {
  * {@link safeBasename} besides.)
  */
 function assertRizinSafePath(path: string): void {
-	if (/[\r\n\0]/.test(path)) {
-		throw new Error(`omp-re: the output path ${JSON.stringify(path)} contains a line break or NUL`);
-	}
+  if (/[\r\n\0]/.test(path)) {
+    throw new Error(
+      `omp-re: the output path ${JSON.stringify(path)} contains a line break or NUL`
+    );
+  }
 }
 
 /** The directory omp-re writes output artifacts to (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`). */
 export function outputDir(): string {
-	const configured = (process.env.OMPRE_OUTPUT_DIR ?? "").trim();
-	return configured !== "" ? resolve(configured) : join(tmpdir(), "omp-re-out");
+  const configured = (process.env.OMPRE_OUTPUT_DIR ?? "").trim();
+  return configured === "" ? join(tmpdir(), "omp-re-out") : resolve(configured);
 }
 
 /**
@@ -63,26 +66,36 @@ export function outputDir(): string {
  * that keeps a chosen name from escaping {@link outputDir}.
  */
 export function safeBasename(name: string): string {
-	const trimmed = name.trim();
-	if (trimmed === "" || trimmed === "." || trimmed === "..") throw new Error(`omp-re: invalid output filename ${JSON.stringify(name)}`);
-	if (!/^[A-Za-z0-9._-]+$/.test(trimmed) || trimmed.includes("..") || isAbsolute(trimmed)) {
-		throw new Error(`omp-re: invalid output filename ${JSON.stringify(name)} — use a bare name of letters, digits, '.', '_' or '-' (no path separators)`);
-	}
-	return trimmed;
+  const trimmed = name.trim();
+  if (trimmed === "" || trimmed === "." || trimmed === "..") {
+    throw new Error(`omp-re: invalid output filename ${JSON.stringify(name)}`);
+  }
+  if (
+    !/^[A-Za-z0-9._-]+$/.test(trimmed) ||
+    trimmed.includes("..") ||
+    isAbsolute(trimmed)
+  ) {
+    throw new Error(
+      `omp-re: invalid output filename ${JSON.stringify(name)} — use a bare name of letters, digits, '.', '_' or '-' (no path separators)`
+    );
+  }
+  return trimmed;
 }
 
 /** Ensure {@link outputDir} exists and return the absolute path for `basename` inside it. The returned path is always within the output directory (verified after resolve). */
 export async function prepareOutputPath(basename: string): Promise<string> {
-	const dir = outputDir();
-	const full = resolve(dir, safeBasename(basename));
-	// Defense in depth: safeBasename already forbids separators, but confirm the
-	// join stayed inside the directory. `sep` (not a literal `/`) so the
-	// containment check holds on Windows, where resolve/join use `\`.
-	if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
-		throw new Error(`omp-re: refusing to write outside the output directory: ${JSON.stringify(basename)}`);
-	}
-	await mkdir(dir, { recursive: true });
-	return full;
+  const dir = outputDir();
+  const full = resolve(dir, safeBasename(basename));
+  // Defense in depth: safeBasename already forbids separators, but confirm the
+  // join stayed inside the directory. `sep` (not a literal `/`) so the
+  // containment check holds on Windows, where resolve/join use `\`.
+  if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
+    throw new Error(
+      `omp-re: refusing to write outside the output directory: ${JSON.stringify(basename)}`
+    );
+  }
+  await mkdir(dir, { recursive: true });
+  return full;
 }
 
 /**
@@ -92,9 +105,9 @@ export async function prepareOutputPath(basename: string): Promise<string> {
  * hands rizin {@link rizinPathArg}(it) for the command.
  */
 export async function rizinOutputPath(basename: string): Promise<string> {
-	const full = await prepareOutputPath(basename);
-	assertRizinSafePath(full);
-	return full;
+  const full = await prepareOutputPath(basename);
+  assertRizinSafePath(full);
+  return full;
 }
 
 /**
@@ -103,13 +116,20 @@ export async function rizinOutputPath(basename: string): Promise<string> {
  * load), the caller checks existence. Used for trace sessions, which rizin
  * writes and reads itself (so the path, not just the bytes, reaches rizin).
  */
-export async function outputSubdir(basename: string, create: boolean): Promise<string> {
-	const dir = outputDir();
-	const full = resolve(dir, safeBasename(basename));
-	if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
-		throw new Error(`omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`);
-	}
-	assertRizinSafePath(full);
-	if (create) await mkdir(full, { recursive: true });
-	return full; // native path — the caller wraps it with rizinPathArg for the rizin command
+export async function outputSubdir(
+  basename: string,
+  create: boolean
+): Promise<string> {
+  const dir = outputDir();
+  const full = resolve(dir, safeBasename(basename));
+  if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
+    throw new Error(
+      `omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`
+    );
+  }
+  assertRizinSafePath(full);
+  if (create) {
+    await mkdir(full, { recursive: true });
+  }
+  return full; // native path — the caller wraps it with rizinPathArg for the rizin command
 }

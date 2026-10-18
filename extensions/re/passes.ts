@@ -15,25 +15,25 @@ import type { RzSession } from "./rizin.ts";
 
 /** Analysis passes exposed by the `analyze` tool, each a rizin analysis command. All are additive (they find functions/xrefs/names, match types, or recover classes); none deletes analysis. */
 export const ANALYSIS_PASSES = {
-	calls: "aac", // analyze function calls
-	xrefs: "aar", // analyze cross-references
-	pointers: "aav", // analyze values that reference a section/map (pointers)
-	preludes: "aap", // find functions by prologue byte patterns (recovers stripped code)
-	all_functions: "aaf", // analyze all functions
-	data_refs: "aad", // analyze data references to code
-	autoname: "aan", // name functions from the strings/calls they use
-	types: "aaft", // recursive type matching across all functions
-	struct_offsets: "aat", // convert immediates to linked structure-member offsets across functions
-	golang: "aalg", // recover Go functions and strings
-	objc: "aalor", // recover Objective-C references from selector usage
-	rtti_classes: "avrr", // recover C++ class info from all RTTI
-	emulate_functions: "aaef", // analyze references by emulating every function (slow)
+  all_functions: "aaf", // analyze all functions
+  autoname: "aan", // name functions from the strings/calls they use
+  calls: "aac", // analyze function calls
+  data_refs: "aad", // analyze data references to code
+  emulate_functions: "aaef", // analyze references by emulating every function (slow)
+  golang: "aalg", // recover Go functions and strings
+  objc: "aalor", // recover Objective-C references from selector usage
+  pointers: "aav", // analyze values that reference a section/map (pointers)
+  preludes: "aap", // find functions by prologue byte patterns (recovers stripped code)
+  rtti_classes: "avrr", // recover C++ class info from all RTTI
+  struct_offsets: "aat", // convert immediates to linked structure-member offsets across functions
+  types: "aaft", // recursive type matching across all functions
+  xrefs: "aar", // analyze cross-references
 } as const;
 
 export type AnalysisPass = keyof typeof ANALYSIS_PASSES;
 
 export function isAnalysisPass(name: string): name is AnalysisPass {
-	return Object.hasOwn(ANALYSIS_PASSES, name);
+  return Object.hasOwn(ANALYSIS_PASSES, name);
 }
 
 /**
@@ -41,18 +41,27 @@ export function isAnalysisPass(name: string): name is AnalysisPass {
  * unknown or failing pass is reported rather than aborting the rest, matching
  * replayAnnotations / replaySignatures.
  */
-export async function replayAnalysisPasses(rz: RzSession, passes: readonly string[], timeoutMs?: number): Promise<string[]> {
-	const failures: string[] = [];
-	for (const pass of passes) {
-		if (!isAnalysisPass(pass)) {
-			failures.push(`analysis pass ${pass}: unknown`);
-			continue;
-		}
-		try {
-			await rz.cmd(ANALYSIS_PASSES[pass], timeoutMs !== undefined ? { timeoutMs } : {});
-		} catch (err) {
-			failures.push(`analysis pass ${pass}: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	}
-	return failures;
+export async function replayAnalysisPasses(
+  rz: RzSession,
+  passes: readonly string[],
+  timeoutMs?: number
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const pass of passes) {
+    if (!isAnalysisPass(pass)) {
+      failures.push(`analysis pass ${pass}: unknown`);
+      continue;
+    }
+    try {
+      await rz.cmd(
+        ANALYSIS_PASSES[pass],
+        timeoutMs === undefined ? {} : { timeoutMs }
+      );
+    } catch (error) {
+      failures.push(
+        `analysis pass ${pass}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+  return failures;
 }

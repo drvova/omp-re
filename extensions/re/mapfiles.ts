@@ -17,34 +17,44 @@
  * characters cannot inject a second command; the address and permission are
  * validated.
  */
-import { rzQuote, validateAddr, type RzSession } from "./rizin.ts";
+import { rzQuote, validateAddr } from "./rizin.ts";
+import type { RzSession } from "./rizin.ts";
 
 export interface MapFile {
-	path: string;
-	addr: string;
-	perm?: string;
+  path: string;
+  addr: string;
+  perm?: string;
 }
 
 /** Validate an IO-map permission string (`r`, `rw`, `rwx`, …) — the access the mapped VA region allows, not a file write mode. */
 export function validateMapPerm(perm: string): string {
-	if (!/^[rwx]+$/.test(perm)) throw new Error(`omp-re: map_file: invalid permission ${JSON.stringify(perm)} — use r, w, x characters (e.g. r, rw, rx)`);
-	return perm;
+  if (!/^[rwx]+$/.test(perm)) {
+    throw new Error(
+      `omp-re: map_file: invalid permission ${JSON.stringify(perm)} — use r, w, x characters (e.g. r, rw, rx)`
+    );
+  }
+  return perm;
 }
 
 /** The `o <file> <addr> [<perm>]` command that maps `m`. `o` (not `o+`) keeps the file read-only on disk; the path is single-quoted and the address validated. */
 export function mapFileCommand(m: MapFile): string {
-	return `o ${rzQuote(m.path)} ${validateAddr(m.addr)}${m.perm ? ` ${validateMapPerm(m.perm)}` : ""}`;
+  return `o ${rzQuote(m.path)} ${validateAddr(m.addr)}${m.perm ? ` ${validateMapPerm(m.perm)}` : ""}`;
 }
 
 /** Re-apply `maps` to a freshly spawned process, in order. A map that no longer applies (the file moved since it was recorded) is reported rather than aborting the rest. */
-export async function replayMapFiles(rz: RzSession, maps: readonly MapFile[]): Promise<string[]> {
-	const failures: string[] = [];
-	for (const m of maps) {
-		try {
-			await rz.cmd(mapFileCommand(m));
-		} catch (err) {
-			failures.push(`map ${m.path} @ ${m.addr}: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	}
-	return failures;
+export async function replayMapFiles(
+  rz: RzSession,
+  maps: readonly MapFile[]
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const m of maps) {
+    try {
+      await rz.cmd(mapFileCommand(m));
+    } catch (error) {
+      failures.push(
+        `map ${m.path} @ ${m.addr}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+  return failures;
 }

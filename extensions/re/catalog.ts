@@ -12,23 +12,23 @@
 import { resolveRizinPath, validateAddr } from "./rizin.ts";
 
 export interface RzArgSpec {
-	type: string;
-	name: string;
-	required?: boolean;
-	is_array?: boolean;
-	is_last?: boolean;
-	default?: string;
-	choices?: string[];
+  type: string;
+  name: string;
+  required?: boolean;
+  is_array?: boolean;
+  is_last?: boolean;
+  default?: string;
+  choices?: string[];
 }
 
 export interface RzCommandSpec {
-	cmd: string;
-	type?: string;
-	args_str?: string;
-	args?: RzArgSpec[];
-	summary?: string;
-	description?: string;
-	details?: unknown[];
+  cmd: string;
+  type?: string;
+  args_str?: string;
+  args?: RzArgSpec[];
+  summary?: string;
+  description?: string;
+  details?: unknown[];
 }
 
 export type RzCatalog = ReadonlyMap<string, RzCommandSpec>;
@@ -36,107 +36,128 @@ export type RzCatalog = ReadonlyMap<string, RzCommandSpec>;
 const catalogs = new Map<string, Promise<RzCatalog>>();
 
 /** The catalog of the rizin at `rizinPath` (default: the configured one), read once per process with no binary open (`rizin -qc '?*j' --`). */
-export function loadCatalog(rizinPath = resolveRizinPath()): Promise<RzCatalog> {
-	let cached = catalogs.get(rizinPath);
-	if (!cached) {
-		cached = readCatalog(rizinPath);
-		catalogs.set(rizinPath, cached);
-		// A failed read (rizin missing) must not be cached: installing rizin mid-session should work.
-		cached.catch(() => catalogs.delete(rizinPath));
-	}
-	return cached;
+export function loadCatalog(
+  rizinPath = resolveRizinPath()
+): Promise<RzCatalog> {
+  let cached = catalogs.get(rizinPath);
+  if (!cached) {
+    cached = readCatalog(rizinPath);
+    catalogs.set(rizinPath, cached);
+    // A failed read (rizin missing) must not be cached: installing rizin mid-session should work.
+    cached.catch(() => catalogs.delete(rizinPath));
+  }
+  return cached;
 }
 
 async function readCatalog(rizinPath: string): Promise<RzCatalog> {
-	// `-N` (skip user rizinrc) unless overridden, so the catalog reflects the same stock command set the session spawns with; plugins still load, so plugin commands (pdg, …) appear.
-	const noUserConfig = !/^(1|true|yes|on)$/i.test((process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim());
-	const proc = Bun.spawn([rizinPath, "-e", "scr.color=0", ...(noUserConfig ? ["-N"] : []), "-qc", "?*j", "--"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-	const out = await new Response(proc.stdout).text();
-	await proc.exited;
-	const parsed = JSON.parse(out) as Record<string, RzCommandSpec | null>;
-	const catalog = new Map<string, RzCommandSpec>();
-	for (const [cmd, spec] of Object.entries(parsed)) {
-		if (spec && typeof spec === "object") catalog.set(cmd, { ...spec, cmd });
-	}
-	return catalog;
+  // `-N` (skip user rizinrc) unless overridden, so the catalog reflects the same stock command set the session spawns with; plugins still load, so plugin commands (pdg, …) appear.
+  const noUserConfig = !/^(1|true|yes|on)$/i.test(
+    (process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim()
+  );
+  const proc = Bun.spawn(
+    [
+      rizinPath,
+      "-e",
+      "scr.color=0",
+      ...(noUserConfig ? ["-N"] : []),
+      "-qc",
+      "?*j",
+      "--",
+    ],
+    { stderr: "ignore", stdin: "ignore", stdout: "pipe" }
+  );
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  const parsed = JSON.parse(out) as Record<string, RzCommandSpec | null>;
+  const catalog = new Map<string, RzCommandSpec>();
+  for (const [cmd, spec] of Object.entries(parsed)) {
+    if (spec && typeof spec === "object") {
+      catalog.set(cmd, { ...spec, cmd });
+    }
+  }
+  return catalog;
 }
 
 /** Whether `name` is a command in the catalog, or a command group whose subcommands are (rizin lists `iz` only as `izj`, `izq`, …). */
 export function isKnownCommand(catalog: RzCatalog, name: string): boolean {
-	if (catalog.has(name)) return true;
-	for (const cmd of catalog.keys()) if (cmd.startsWith(name)) return true;
-	return false;
+  if (catalog.has(name)) {
+    return true;
+  }
+  for (const cmd of catalog.keys()) {
+    if (cmd.startsWith(name)) return true;
+  }
+  return false;
 }
 
 /** Every rizin command omp-re's own tools send. Checked against the installed rizin at open and by `/re status`. */
 export const REQUIRED_COMMANDS: readonly string[] = [
-	"aaa",
-	"aflj",
-	"aflc",
-	"afij",
-	"pdfj",
-	"axtj",
-	"axfj",
-	"iij",
-	"iEj",
-	"isj",
-	"izj",
-	"iSj",
-	"ij",
-	"iej",
-	"afvlj",
-	"afn",
-	"afvn",
-	"afvt",
-	"afs",
-	"CC",
-	"CC-",
-	"CC.",
-	"fdj",
-	"%v",
-	"echo",
-// search tools: /xj search family; /R+/C prime the gadget cache for /Rj+/Cj
-"/xj",
-"/xrj",
-"/aj",
-"/vj",
-"/v1j",
-"/v2j",
-"/v4j",
-"/v8j",
-"/V1j",
-"/V2j",
-"/V4j",
-"/V8j",
-"/R",
-"/Rj",
-"/C",
-"/Cj",
-// type tools
-"tsj",
-"tej",
-"ttj",
-"tfj",
-"td",
-"tp",
-// syscall tools
-"aslj",
-"asn",
-"asr",
-// binary-info tools
-"iIj",
-"iej",
-"irj",
-"flj",
-"icj",
-// deobfuscate tool: block transforms + decrypt under the write cache
-"wox",
-"woD",
-"wc-",
+  "aaa",
+  "aflj",
+  "aflc",
+  "afij",
+  "pdfj",
+  "axtj",
+  "axfj",
+  "iij",
+  "iEj",
+  "isj",
+  "izj",
+  "iSj",
+  "ij",
+  "iej",
+  "afvlj",
+  "afn",
+  "afvn",
+  "afvt",
+  "afs",
+  "CC",
+  "CC-",
+  "CC.",
+  "fdj",
+  "%v",
+  "echo",
+  // search tools: /xj search family; /R+/C prime the gadget cache for /Rj+/Cj
+  "/xj",
+  "/xrj",
+  "/aj",
+  "/vj",
+  "/v1j",
+  "/v2j",
+  "/v4j",
+  "/v8j",
+  "/V1j",
+  "/V2j",
+  "/V4j",
+  "/V8j",
+  "/R",
+  "/Rj",
+  "/C",
+  "/Cj",
+  // type tools
+  "tsj",
+  "tej",
+  "ttj",
+  "tfj",
+  "td",
+  "tp",
+  // syscall tools
+  "aslj",
+  "asn",
+  "asr",
+  // binary-info tools
+  "iIj",
+  "iej",
+  "irj",
+  "flj",
+  "icj",
+  // deobfuscate tool: block transforms + decrypt under the write cache
+  "wox",
+  "woD",
+  "wc-",
 ];
 
 export function missingRequiredCommands(catalog: RzCatalog): string[] {
-	return REQUIRED_COMMANDS.filter((cmd) => !catalog.has(cmd));
+  return REQUIRED_COMMANDS.filter((cmd) => !catalog.has(cmd));
 }
 
 /**
@@ -152,33 +173,132 @@ export function missingRequiredCommands(catalog: RzCatalog): string[] {
  * {@link NOARG_DUALS} and run only with no argument.
  */
 export const READ_ONLY_EXTRAS: ReadonlySet<string> = new Set([
-	// Configuration (book: configuration/*) — read a value / list / type / spaces.
-	"e", "el", "elj", "elq", "ell", "elJ", "et", "es",
-	// Analysis hints (book: analysis/code_analysis) — list only; the aha/ahb/… setters and ah- stay out.
-	"ahl", "ahlj", "ahl.", "ahl.j",
-	// Address information (book: analysis/code_analysis) — `aii` (add global import) stays out.
-	"ai", "aij",
-	// Classes (book: analysis/vtables) — the list/show/graph reads; bare `ac`/`acn`/`acm`/`acb`/`acv` add or rename.
-	"acl", "aclj", "acll", "aci", "acij", "acil", "acg", "acbl", "acvl", "acvf",
-	// Metadata & strings (book: disassembling/adding_metadata) — list/show forms; the setters (Cs/Cd/Ch/Cm/Ct/Cf, CS create, C-) stay out, and comments go through set_comment.
-	"C", "Cj", "Cl",
-	"Csl", "Cslj", "Cslq", "Cs.", "Cs.j", "Cs.q", "Cs.l",
-	"Cdl", "Cdlj", "Cd.", "Cfl", "Cflj", "Chl", "Chlj", "Cml", "Cmlj", "Ctl", "Ctlj", "CSl", "CSlj", "CSlq",
-	// Types (book: analysis/types) — lists, unions, enums, typedefs, calling-convention lists, type xrefs, typeclass reads.
-	// The writers stay out: td/tdf (define → define_types tool), tfc (set cc), tn (NOARG_DUALS), tks (set typeclass), to/toe/tos (load file), tr (rename), t- (delete).
-	"t", "tj", "tl",
-	"tu", "tuj", "tul", "tuc", "tud",
-	"te", "tej", "teb", "tec", "ted", "tef",
-	"tt", "ttj", "ttc",
-	"tf", "tfj", "tc", "tcd", "tcc", "tccj", "tcck", "tccl",
-	"tx", "txf", "txg", "txl",
-	"tk", "tkl", "tklj", "tkll", "tklt",
-	// Plugin listings (book: plugins/*) — list only. The bare `L`/`L-` load/unload a plugin file; `Lo`/`Ld` are in NOARG_DUALS.
-	"Ll", "Llj", "Llq", "Llt", "La", "Laj", "Laq", "Lat", "Lac", "Lacj",
-	"Lc", "Lcj", "Lcq", "Lct", "LC", "LCj", "LCq", "LCt", "Lh", "Lhj", "Lhq", "Lht",
-	"Li", "Lij", "Liq", "Lit", "Lp", "Lpj", "Lpq", "Lpt", "LD", "LDj", "LDq", "LDt",
-	// Signatures (book: analysis/signatures) — list the FLIRT sigdb. Applying is the apply_signatures tool; Fc/Fd/Fs/Ff read or write a file.
-	"Flt",
+  // Configuration (book: configuration/*) — read a value / list / type / spaces.
+  "e",
+  "el",
+  "elj",
+  "elq",
+  "ell",
+  "elJ",
+  "et",
+  "es",
+  // Analysis hints (book: analysis/code_analysis) — list only; the aha/ahb/… setters and ah- stay out.
+  "ahl",
+  "ahlj",
+  "ahl.",
+  "ahl.j",
+  // Address information (book: analysis/code_analysis) — `aii` (add global import) stays out.
+  "ai",
+  "aij",
+  // Classes (book: analysis/vtables) — the list/show/graph reads; bare `ac`/`acn`/`acm`/`acb`/`acv` add or rename.
+  "acl",
+  "aclj",
+  "acll",
+  "aci",
+  "acij",
+  "acil",
+  "acg",
+  "acbl",
+  "acvl",
+  "acvf",
+  // Metadata & strings (book: disassembling/adding_metadata) — list/show forms; the setters (Cs/Cd/Ch/Cm/Ct/Cf, CS create, C-) stay out, and comments go through set_comment.
+  "C",
+  "Cj",
+  "Cl",
+  "Csl",
+  "Cslj",
+  "Cslq",
+  "Cs.",
+  "Cs.j",
+  "Cs.q",
+  "Cs.l",
+  "Cdl",
+  "Cdlj",
+  "Cd.",
+  "Cfl",
+  "Cflj",
+  "Chl",
+  "Chlj",
+  "Cml",
+  "Cmlj",
+  "Ctl",
+  "Ctlj",
+  "CSl",
+  "CSlj",
+  "CSlq",
+  // Types (book: analysis/types) — lists, unions, enums, typedefs, calling-convention lists, type xrefs, typeclass reads.
+  // The writers stay out: td/tdf (define → define_types tool), tfc (set cc), tn (NOARG_DUALS), tks (set typeclass), to/toe/tos (load file), tr (rename), t- (delete).
+  "t",
+  "tj",
+  "tl",
+  "tu",
+  "tuj",
+  "tul",
+  "tuc",
+  "tud",
+  "te",
+  "tej",
+  "teb",
+  "tec",
+  "ted",
+  "tef",
+  "tt",
+  "ttj",
+  "ttc",
+  "tf",
+  "tfj",
+  "tc",
+  "tcd",
+  "tcc",
+  "tccj",
+  "tcck",
+  "tccl",
+  "tx",
+  "txf",
+  "txg",
+  "txl",
+  "tk",
+  "tkl",
+  "tklj",
+  "tkll",
+  "tklt",
+  // Plugin listings (book: plugins/*) — list only. The bare `L`/`L-` load/unload a plugin file; `Lo`/`Ld` are in NOARG_DUALS.
+  "Ll",
+  "Llj",
+  "Llq",
+  "Llt",
+  "La",
+  "Laj",
+  "Laq",
+  "Lat",
+  "Lac",
+  "Lacj",
+  "Lc",
+  "Lcj",
+  "Lcq",
+  "Lct",
+  "LC",
+  "LCj",
+  "LCq",
+  "LCt",
+  "Lh",
+  "Lhj",
+  "Lhq",
+  "Lht",
+  "Li",
+  "Lij",
+  "Liq",
+  "Lit",
+  "Lp",
+  "Lpj",
+  "Lpq",
+  "Lpt",
+  "LD",
+  "LDj",
+  "LDq",
+  "LDt",
+  // Signatures (book: analysis/signatures) — list the FLIRT sigdb. Applying is the apply_signatures tool; Fc/Fd/Fs/Ff read or write a file.
+  "Flt",
 ]);
 
 /**
@@ -189,9 +309,16 @@ export const READ_ONLY_EXTRAS: ReadonlySet<string> = new Set([
  * them with an argument.
  */
 export const NOARG_DUALS: ReadonlySet<string> = new Set([
-	"tn", "tnj",
-	"Ld", "Ldj", "Ldq", "Ldt",
-	"Lo", "Loj", "Loq", "Lot",
+  "tn",
+  "tnj",
+  "Ld",
+  "Ldj",
+  "Ldq",
+  "Ldt",
+  "Lo",
+  "Loj",
+  "Loq",
+  "Lot",
 ]);
 
 /**
@@ -238,7 +365,8 @@ export const NOARG_DUALS: ReadonlySet<string> = new Set([
  * listings) and {@link NOARG_DUALS} (list-vs-set positional duals), both
  * checked by {@link isRunnable} and gated in {@link checkRizinCommand}.
  */
-const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
+const ALLOWED_COMMAND =
+  /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:
@@ -257,7 +385,8 @@ const ALLOWED_COMMAND = /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afb
  * format file), `pfw` (writes data), `pfn` (defines formats), `pf-` — is
  * still denied.
  */
-const DENIED_COMMAND = /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
+const DENIED_COMMAND =
+  /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
 
 /**
  * The `p=`/`p==` statistical-histogram family (book: print_modes) — entropy
@@ -282,20 +411,25 @@ const ENTROPY_MAP = /^p={1,2}(?![0-9A-Za-z]*v$)[0-9A-Za-z]*$/;
  * `\` escapes, and line breaks end the pipe line.
  */
 const FORBIDDEN_SYNTAX: readonly [RegExp, string][] = [
-	[/;/, "`;` (command chaining)"],
-	[/\|/, "`|` (pipes)"],
-	[/[<>]/, "`<`/`>` (redirection)"],
-	[/`/, "backticks (command substitution)"],
-	[/\$[({]/, "`$(`/`${` (substitution)"],
-	[/~/, "`~` (grep)"],
-	[/@(?!!(?:0x[0-9a-fA-F]+|\d+)(?:\s|$))/, "`@` modifiers other than `@!<blocksize>` (use the addr parameter to seek)"],
-	[/"/, "double quotes (use single quotes)"],
-	[/#/, "`#`"],
-	[/\\/, "backslashes"],
-	[/[\n\r\0]/, "line breaks or NUL"],
+  [/;/, "`;` (command chaining)"],
+  [/\|/, "`|` (pipes)"],
+  [/[<>]/, "`<`/`>` (redirection)"],
+  [/`/, "backticks (command substitution)"],
+  [/\$[({]/, "`$(`/`${` (substitution)"],
+  [/~/, "`~` (grep)"],
+  [
+    /@(?!!(?:0x[0-9a-fA-F]+|\d+)(?:\s|$))/,
+    "`@` modifiers other than `@!<blocksize>` (use the addr parameter to seek)",
+  ],
+  [/"/, "double quotes (use single quotes)"],
+  [/#/, "`#`"],
+  [/\\/, "backslashes"],
+  [/[\n\r\0]/, "line breaks or NUL"],
 ];
 
-export type CommandCheck = { ok: true; name: string; line: string } | { ok: false; reason: string };
+export type CommandCheck =
+  | { ok: true; name: string; line: string }
+  | { ok: false; reason: string };
 
 /**
  * The label of the first forbidden-syntax character in `value`, or undefined
@@ -307,69 +441,113 @@ export type CommandCheck = { ok: true; name: string; line: string } | { ok: fals
  * the string reaches the pipe.
  */
 export function forbiddenSyntaxReason(value: string): string | undefined {
-	for (const [pattern, label] of FORBIDDEN_SYNTAX) if (pattern.test(value)) return label;
-	return undefined;
+  for (const [pattern, label] of FORBIDDEN_SYNTAX) {
+    if (pattern.test(value)) return label;
+  }
+  return undefined;
 }
 
 /** Decide whether `command` (plus an optional `addr` to run it at) may run through `rizin_command`, and build the exact line sent to rizin. */
-export function checkRizinCommand(catalog: RzCatalog, command: string, addr?: string): CommandCheck {
-	const trimmed = command.trim();
-	if (trimmed === "") return { ok: false, reason: "omp-re: rizin_command: empty command" };
-	const forbidden = forbiddenSyntaxReason(trimmed);
-	if (forbidden) return { ok: false, reason: `omp-re: rizin_command: ${forbidden} is not allowed in a command` };
-	const name = trimmed.split(/\s+/, 1)[0]!;
-	// Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
-	// sorts/filters/paginates/reformats the command's table. Only the head must
-	// be runnable and known; every spec part must be table-grammar-shaped
-	// (column names, /sort//page//head//csv word grammar) — no paths, no
-	// quoting. FORBIDDEN_SYNTAX above already removed the worst characters.
-	// The spec tail rides along in the line verbatim.
-	let specNote = "";
-	let checked = name;
-	if (checked.includes(":")) {
-		const head = checked.slice(0, checked.indexOf(":"));
-		const specs = checked.slice(checked.indexOf(":") + 1).split(":");
-		if (!specs.every((s) => /^[A-Za-z0-9_*/.-]+$/.test(s))) {
-			return { ok: false, reason: "omp-re: rizin_command: table spec parts must match [A-Za-z0-9_*/.-] (see the table query grammar)" };
-		}
-		checked = head;
-		specNote = " (table spec)";
-	}
-	if (!isRunnable(checked)) {
-		return {
-			ok: false,
-			reason: `omp-re: rizin_command: ${JSON.stringify(name)} is not available here: only read-only print, info, search, graph, and listing commands run through this tool. Use rename_function, set_comment, set_prototype, rename_variable, or set_variable_type to annotate.`,
-		};
-	}
-	if (!isKnownCommand(catalog, checked)) {
-		return { ok: false, reason: `omp-re: rizin_command: this rizin has no command ${JSON.stringify(checked)} — look it up with rizin_help` };
-	}
-	if (/(^|\s)interactive(\s|$)/.test(trimmed)) {
-		return { ok: false, reason: "omp-re: rizin_command: interactive output modes would wait for keyboard input" };
-	}
-	// The argument text after the command name (table spec already stripped from `checked`).
-	const argPortion = trimmed.slice(name.length).trim();
-	// Configuration: `e <key>` reads a value; `e <key>=<value>` sets it. Reading is fine; setting is a write.
-	if (checked === "e" && argPortion.includes("=")) {
-		return { ok: false, reason: "omp-re: rizin_command: setting config variables (`e key=value`) is a write and is not allowed; `e <key>` reads a value, `el`/`elj` list them" };
-	}
-	// Get/set positional duals: they list with no argument and mutate with one.
-	if (NOARG_DUALS.has(checked) && argPortion !== "") {
-		return { ok: false, reason: `omp-re: rizin_command: ${checked} runs read-only only with no argument (an argument makes it set/add); it lists when run bare` };
-	}
-	// A command whose catalog entry takes a file or path argument (`/m <magic-file>`) reads from disk; it runs only with none given.
-	const fileArg = catalog.get(checked)?.args?.find((arg) => /file|path|dir/i.test(arg.name));
-	if (fileArg && trimmed !== name) {
-		return { ok: false, reason: `omp-re: rizin_command: ${checked} reads <${fileArg.name}> from disk; run it without arguments or not at all` };
-	}
-	return { ok: true, name: specNote ? `${checked}${specNote}` : checked, line: addr ? `${trimmed} @ ${validateAddr(addr)}` : trimmed };
+export function checkRizinCommand(
+  catalog: RzCatalog,
+  command: string,
+  addr?: string
+): CommandCheck {
+  const trimmed = command.trim();
+  if (trimmed === "") {
+    return { ok: false, reason: "omp-re: rizin_command: empty command" };
+  }
+  const forbidden = forbiddenSyntaxReason(trimmed);
+  if (forbidden) {
+    return {
+      ok: false,
+      reason: `omp-re: rizin_command: ${forbidden} is not allowed in a command`,
+    };
+  }
+  const name = trimmed.split(/\s+/, 1)[0]!;
+  // Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
+  // sorts/filters/paginates/reformats the command's table. Only the head must
+  // be runnable and known; every spec part must be table-grammar-shaped
+  // (column names, /sort//page//head//csv word grammar) — no paths, no
+  // quoting. FORBIDDEN_SYNTAX above already removed the worst characters.
+  // The spec tail rides along in the line verbatim.
+  let specNote = "";
+  let checked = name;
+  if (checked.includes(":")) {
+    const head = checked.slice(0, checked.indexOf(":"));
+    const specs = checked.slice(checked.indexOf(":") + 1).split(":");
+    if (!specs.every((s) => /^[A-Za-z0-9_*/.-]+$/.test(s))) {
+      return {
+        ok: false,
+        reason:
+          "omp-re: rizin_command: table spec parts must match [A-Za-z0-9_*/.-] (see the table query grammar)",
+      };
+    }
+    checked = head;
+    specNote = " (table spec)";
+  }
+  if (!isRunnable(checked)) {
+    return {
+      ok: false,
+      reason: `omp-re: rizin_command: ${JSON.stringify(name)} is not available here: only read-only print, info, search, graph, and listing commands run through this tool. Use rename_function, set_comment, set_prototype, rename_variable, or set_variable_type to annotate.`,
+    };
+  }
+  if (!isKnownCommand(catalog, checked)) {
+    return {
+      ok: false,
+      reason: `omp-re: rizin_command: this rizin has no command ${JSON.stringify(checked)} — look it up with rizin_help`,
+    };
+  }
+  if (/(^|\s)interactive(\s|$)/.test(trimmed)) {
+    return {
+      ok: false,
+      reason:
+        "omp-re: rizin_command: interactive output modes would wait for keyboard input",
+    };
+  }
+  // The argument text after the command name (table spec already stripped from `checked`).
+  const argPortion = trimmed.slice(name.length).trim();
+  // Configuration: `e <key>` reads a value; `e <key>=<value>` sets it. Reading is fine; setting is a write.
+  if (checked === "e" && argPortion.includes("=")) {
+    return {
+      ok: false,
+      reason:
+        "omp-re: rizin_command: setting config variables (`e key=value`) is a write and is not allowed; `e <key>` reads a value, `el`/`elj` list them",
+    };
+  }
+  // Get/set positional duals: they list with no argument and mutate with one.
+  if (NOARG_DUALS.has(checked) && argPortion !== "") {
+    return {
+      ok: false,
+      reason: `omp-re: rizin_command: ${checked} runs read-only only with no argument (an argument makes it set/add); it lists when run bare`,
+    };
+  }
+  // A command whose catalog entry takes a file or path argument (`/m <magic-file>`) reads from disk; it runs only with none given.
+  const fileArg = catalog
+    .get(checked)
+    ?.args?.find((arg) => /file|path|dir/i.test(arg.name));
+  if (fileArg && trimmed !== name) {
+    return {
+      ok: false,
+      reason: `omp-re: rizin_command: ${checked} reads <${fileArg.name}> from disk; run it without arguments or not at all`,
+    };
+  }
+  return {
+    line: addr ? `${trimmed} @ ${validateAddr(addr)}` : trimmed,
+    name: specNote ? `${checked}${specNote}` : checked,
+    ok: true,
+  };
 }
 
 /** Whether `rizin_command` would run this command name (used to mark entries in `rizin_help`). The NOARG_DUALS run read-only with no argument, so they count as runnable here; `checkRizinCommand` enforces the no-argument constraint. */
 export function isRunnable(name: string): boolean {
-	if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) return true;
-	if (ENTROPY_MAP.test(name)) return true;
-	return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
+  if (READ_ONLY_EXTRAS.has(name) || NOARG_DUALS.has(name)) {
+    return true;
+  }
+  if (ENTROPY_MAP.test(name)) {
+    return true;
+  }
+  return ALLOWED_COMMAND.test(name) && !DENIED_COMMAND.test(name);
 }
 
 /**
@@ -394,23 +572,96 @@ export function isRunnable(name: string): boolean {
  * (register assignment, `dm=`/`dr=`/`dp=` select/display) is refused outright.
  */
 const DEBUG_READ_COMMANDS: ReadonlySet<string> = new Set([
-	// Registers & arenas (show forms; `dr reg=val` assign carries `=`, refused below).
-	"dr", "drj", "drq", "drt", "drr", "drrj", "dro", "droj", "droq", "drot",
-	"drd", "dri", "drc", "drcc", "drA", "drAj", "drF", "drR", "drT",
-	"drp", "drpj", "drpc", "dra", "draS", "drab",
-	// Memory maps, modules, libraries, sections.
-	"dm", "dmj", "dmq", "dmt", "dm.", "dmm", "dmmj", "dmm.", "dmm.j",
-	"dmi", "dmij", "dmiq", "dmi.", "dmi.j", "dmia", "dmiaj", "dmiaq", "dmS", "dmSj",
-	// Heap reads.
-	"dmh", "dmhg", "dmhgj", "dmhgb", "dmhgc", "dmhgm", "dmhgl", "dmhgt", "dmhja", "dmhjb", "dmhjc",
-	// Backtrace display.
-	"dbt", "dbtj", "dbtq", "dbtt", "dbtv", "dbta",
-	// Process / threads / debug info.
-	"dp", "dpj", "dpt", "dpe", "dpl", "dplj", "dplt", "dpT", "dpTj", "dpTt", "di", "dij", "diq",
-	// Signal-handler listings and name/number resolvers.
-	"dkl", "dklj", "dklq", "dklt", "dkN", "dkn",
-	// File-descriptor listing (list only).
-	"ddl", "ddlj", "ddlt",
+  // Registers & arenas (show forms; `dr reg=val` assign carries `=`, refused below).
+  "dr",
+  "drj",
+  "drq",
+  "drt",
+  "drr",
+  "drrj",
+  "dro",
+  "droj",
+  "droq",
+  "drot",
+  "drd",
+  "dri",
+  "drc",
+  "drcc",
+  "drA",
+  "drAj",
+  "drF",
+  "drR",
+  "drT",
+  "drp",
+  "drpj",
+  "drpc",
+  "dra",
+  "draS",
+  "drab",
+  // Memory maps, modules, libraries, sections.
+  "dm",
+  "dmj",
+  "dmq",
+  "dmt",
+  "dm.",
+  "dmm",
+  "dmmj",
+  "dmm.",
+  "dmm.j",
+  "dmi",
+  "dmij",
+  "dmiq",
+  "dmi.",
+  "dmi.j",
+  "dmia",
+  "dmiaj",
+  "dmiaq",
+  "dmS",
+  "dmSj",
+  // Heap reads.
+  "dmh",
+  "dmhg",
+  "dmhgj",
+  "dmhgb",
+  "dmhgc",
+  "dmhgm",
+  "dmhgl",
+  "dmhgt",
+  "dmhja",
+  "dmhjb",
+  "dmhjc",
+  // Backtrace display.
+  "dbt",
+  "dbtj",
+  "dbtq",
+  "dbtt",
+  "dbtv",
+  "dbta",
+  // Process / threads / debug info.
+  "dp",
+  "dpj",
+  "dpt",
+  "dpe",
+  "dpl",
+  "dplj",
+  "dplt",
+  "dpT",
+  "dpTj",
+  "dpTt",
+  "di",
+  "dij",
+  "diq",
+  // Signal-handler listings and name/number resolvers.
+  "dkl",
+  "dklj",
+  "dklq",
+  "dklt",
+  "dkN",
+  "dkn",
+  // File-descriptor listing (list only).
+  "ddl",
+  "ddlj",
+  "ddlt",
 ]);
 
 /**
@@ -421,48 +672,68 @@ const DEBUG_READ_COMMANDS: ReadonlySet<string> = new Set([
  * or a static view. The forbidden-syntax guards apply either way, and any `=`
  * is refused so the register-assign dual (`dr rax=0`) can never write.
  */
-export function checkDebugOnHitCommand(catalog: RzCatalog, command: string): CommandCheck {
-	const trimmed = command.trim();
-	if (trimmed === "") return { ok: false, reason: "omp-re: break_command: empty command" };
-	for (const [pattern, label] of FORBIDDEN_SYNTAX) {
-		if (pattern.test(trimmed)) return { ok: false, reason: `omp-re: break_command: ${label} is not allowed in an on-hit command` };
-	}
-	const name = trimmed.split(/\s+/, 1)[0]!;
-	if (DEBUG_READ_COMMANDS.has(name)) {
-		// `=` is the only way these turn into a write (register assignment) or a stateful select (`dm=`/`dp=`); refuse it.
-		if (trimmed.includes("=")) {
-			return { ok: false, reason: `omp-re: break_command: ${JSON.stringify(name)} with \`=\` would assign/select (a write); use the bare read form to log state` };
-		}
-		if (!isKnownCommand(catalog, name)) {
-			return { ok: false, reason: `omp-re: break_command: this rizin has no command ${JSON.stringify(name)} — look it up with rizin_help` };
-		}
-		return { ok: true, name, line: trimmed };
-	}
-	// Not a debugger read — fall back to the static read-only policy (print/info/search), which does its own validation.
-	const check = checkRizinCommand(catalog, command);
-	if (check.ok) return check;
-	return {
-		ok: false,
-		reason: `omp-re: break_command: ${JSON.stringify(name)} is not a read-only on-hit command. Allowed: read-only debugger state (registers \`drj\`/\`drr\`, maps \`dmj\`, modules \`dmmj\`, backtrace \`dbtj\`, heap \`dmhg\`), or a static read (print/info/search).`,
-	};
+export function checkDebugOnHitCommand(
+  catalog: RzCatalog,
+  command: string
+): CommandCheck {
+  const trimmed = command.trim();
+  if (trimmed === "") {
+    return { ok: false, reason: "omp-re: break_command: empty command" };
+  }
+  for (const [pattern, label] of FORBIDDEN_SYNTAX) {
+    if (pattern.test(trimmed)) {
+      return {
+        ok: false,
+        reason: `omp-re: break_command: ${label} is not allowed in an on-hit command`,
+      };
+    }
+  }
+  const name = trimmed.split(/\s+/, 1)[0]!;
+  if (DEBUG_READ_COMMANDS.has(name)) {
+    // `=` is the only way these turn into a write (register assignment) or a stateful select (`dm=`/`dp=`); refuse it.
+    if (trimmed.includes("=")) {
+      return {
+        ok: false,
+        reason: `omp-re: break_command: ${JSON.stringify(name)} with \`=\` would assign/select (a write); use the bare read form to log state`,
+      };
+    }
+    if (!isKnownCommand(catalog, name)) {
+      return {
+        ok: false,
+        reason: `omp-re: break_command: this rizin has no command ${JSON.stringify(name)} — look it up with rizin_help`,
+      };
+    }
+    return { line: trimmed, name, ok: true };
+  }
+  // Not a debugger read — fall back to the static read-only policy (print/info/search), which does its own validation.
+  const check = checkRizinCommand(catalog, command);
+  if (check.ok) {
+    return check;
+  }
+  return {
+    ok: false,
+    reason: `omp-re: break_command: ${JSON.stringify(name)} is not a read-only on-hit command. Allowed: read-only debugger state (registers \`drj\`/\`drr\`, maps \`dmj\`, modules \`dmmj\`, backtrace \`dbtj\`, heap \`dmhg\`), or a static read (print/info/search).`,
+  };
 }
 
 function describeArgs(spec: RzCommandSpec): string[] {
-	return (spec.args ?? []).map((arg) => {
-		const facts = [
-			arg.type,
-			arg.required ? "required" : "optional",
-			...(arg.is_array ? ["repeatable"] : []),
-			...(arg.default !== undefined ? [`default ${arg.default}`] : []),
-			...(arg.choices ? [`one of: ${arg.choices.join(", ")}`] : []),
-		];
-		return `  <${arg.name}>: ${facts.join(", ")}`;
-	});
+  return (spec.args ?? []).map((arg) => {
+    const facts = [
+      arg.type,
+      arg.required ? "required" : "optional",
+      ...(arg.is_array ? ["repeatable"] : []),
+      ...(arg.default === undefined ? [] : [`default ${arg.default}`]),
+      ...(arg.choices ? [`one of: ${arg.choices.join(", ")}`] : []),
+    ];
+    return `  <${arg.name}>: ${facts.join(", ")}`;
+  });
 }
 
 function oneLine(spec: RzCommandSpec): string {
-	const runnable = isRunnable(spec.cmd) ? "" : "  [not runnable via rizin_command]";
-	return `${spec.cmd}${spec.args_str ?? ""} — ${spec.summary ?? ""}${runnable}`;
+  const runnable = isRunnable(spec.cmd)
+    ? ""
+    : "  [not runnable via rizin_command]";
+  return `${spec.cmd}${spec.args_str ?? ""} — ${spec.summary ?? ""}${runnable}`;
 }
 
 /**
@@ -471,42 +742,68 @@ function oneLine(spec: RzCommandSpec): string {
  * an exact match; anything else is a keyword search over summaries and
  * descriptions (`entropy`, `rop gadgets`), best matches first.
  */
-export function searchCatalog(catalog: RzCatalog, query: string, limit = 60): { header: string; lines: string[] } {
-	const q = query.trim();
-	const exact = catalog.get(q);
-	const family = [...catalog.values()].filter((spec) => spec.cmd.startsWith(q) && q !== "").sort((a, b) => a.cmd.localeCompare(b.cmd));
-	if (exact || family.length > 0) {
-		const lines: string[] = [];
-		if (exact) {
-			lines.push(oneLine(exact), ...describeArgs(exact));
-			if (exact.description) lines.push(`  ${exact.description}`);
-			if (Array.isArray(exact.details) && exact.details.length > 0) lines.push(`  details: ${JSON.stringify(exact.details)}`);
-			if (family.length > 1) lines.push("", "related:");
-		}
-		const rest = family.filter((spec) => spec.cmd !== q);
-		lines.push(...rest.slice(0, limit).map(oneLine));
-		if (rest.length > limit) lines.push(`… ${rest.length - limit} more; narrow the prefix`);
-		return { header: `rizin help: ${q} (${family.length} command${family.length === 1 ? "" : "s"})`, lines };
-	}
+export function searchCatalog(
+  catalog: RzCatalog,
+  query: string,
+  limit = 60
+): { header: string; lines: string[] } {
+  const q = query.trim();
+  const exact = catalog.get(q);
+  const family = [...catalog.values()]
+    .filter((spec) => spec.cmd.startsWith(q) && q !== "")
+    .sort((a, b) => a.cmd.localeCompare(b.cmd));
+  if (exact || family.length > 0) {
+    const lines: string[] = [];
+    if (exact) {
+      lines.push(oneLine(exact), ...describeArgs(exact));
+      if (exact.description) {
+        lines.push(`  ${exact.description}`);
+      }
+      if (Array.isArray(exact.details) && exact.details.length > 0) {
+        lines.push(`  details: ${JSON.stringify(exact.details)}`);
+      }
+      if (family.length > 1) {
+        lines.push("", "related:");
+      }
+    }
+    const rest = family.filter((spec) => spec.cmd !== q);
+    lines.push(...rest.slice(0, limit).map(oneLine));
+    if (rest.length > limit) {
+      lines.push(`… ${rest.length - limit} more; narrow the prefix`);
+    }
+    return {
+      header: `rizin help: ${q} (${family.length} command${family.length === 1 ? "" : "s"})`,
+      lines,
+    };
+  }
 
-	const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-	const scored = [...catalog.values()]
-		.map((spec) => {
-			const summary = (spec.summary ?? "").toLowerCase();
-			const description = (spec.description ?? "").toLowerCase();
-			let score = 0;
-			for (const word of words) {
-				if (summary.includes(word)) score += 2;
-				else if (description.includes(word)) score += 1;
-				else return { spec, score: 0 };
-			}
-			// Prefer the plain form over its j/q/t output-mode twins.
-			return { spec, score: score - spec.cmd.length * 0.01 };
-		})
-		.filter((entry) => entry.score > 0)
-		.sort((a, b) => b.score - a.score);
-	return {
-		header: `rizin help search: ${JSON.stringify(q)} (${scored.length} match${scored.length === 1 ? "" : "es"})`,
-		lines: scored.length > 0 ? scored.slice(0, limit).map((entry) => oneLine(entry.spec)) : ["no command matches; try a shorter keyword or a command prefix such as p, i, /, a"],
-	};
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const scored = [...catalog.values()]
+    .map((spec) => {
+      const summary = (spec.summary ?? "").toLowerCase();
+      const description = (spec.description ?? "").toLowerCase();
+      let score = 0;
+      for (const word of words) {
+        if (summary.includes(word)) {
+          score += 2;
+        } else if (description.includes(word)) {
+          score += 1;
+        } else {
+          return { spec, score: 0 };
+        }
+      }
+      // Prefer the plain form over its j/q/t output-mode twins.
+      return { score: score - spec.cmd.length * 0.01, spec };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return {
+    header: `rizin help search: ${JSON.stringify(q)} (${scored.length} match${scored.length === 1 ? "" : "es"})`,
+    lines:
+      scored.length > 0
+        ? scored.slice(0, limit).map((entry) => oneLine(entry.spec))
+        : [
+            "no command matches; try a shorter keyword or a command prefix such as p, i, /, a",
+          ],
+  };
 }
