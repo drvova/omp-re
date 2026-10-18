@@ -120,7 +120,7 @@ function extractJson(text: string): string | null {
   let depth = 0;
   let inStr = false;
   let esc = false;
-  for (let i = start; i < text.length; i++) {
+  for (let i = start; i < text.length; i += 1) {
     const c = text[i];
     if (inStr) {
       if (esc) {
@@ -135,9 +135,12 @@ function extractJson(text: string): string | null {
     if (c === '"') {
       inStr = true;
     } else if (c === open) {
-      depth++;
-    } else if (c === close && --depth === 0) {
-      return text.slice(start, i + 1);
+      depth += 1;
+    } else if (c === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
     }
   }
   return null;
@@ -198,8 +201,10 @@ export function ephemeralJudge(ctx: ExtensionContext): ClaimJudge | null {
       run.call(ctx, {
         promptText: buildAuditPrompt(items),
         ...(toolsOff ? { tools: false } : {}),
-        dedupeReply: false, // keep multi-claim JSON intact (default collapses repeated lines)
-        replyMaxBytes: Number.POSITIVE_INFINITY, // defeat the 4 KiB reply cap
+        // keep multi-claim JSON intact (default collapses repeated lines)
+        dedupeReply: false,
+        // defeat the 4 KiB reply cap
+        replyMaxBytes: Number.POSITIVE_INFINITY,
         signal,
       });
     try {

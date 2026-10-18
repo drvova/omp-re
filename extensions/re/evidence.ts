@@ -37,7 +37,8 @@ export async function writeBlob(content: string): Promise<string> {
 
   try {
     await stat(target);
-    return hash; // already stored
+    // already stored
+    return hash;
   } catch {
     // not yet stored — fall through and write it
   }
@@ -75,7 +76,7 @@ function truncateUtf8Safe(text: string, maxBytes: number): string {
   let end = maxBytes;
   // Back off while we're in the middle of a multi-byte UTF-8 sequence (continuation bytes are 10xxxxxx).
   while (end > 0 && (buf[end]! & 0xc0) === 0x80) {
-    end--;
+    end -= 1;
   }
   return buf.subarray(0, end).toString("utf-8");
 }
@@ -107,7 +108,7 @@ export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
     if (!data || typeof data.id !== "string") {
       continue;
     }
-    state.evidenceCount++;
+    state.evidenceCount += 1;
     if (typeof data.ea === "string" && data.ea) {
       state.evidenceByAddr.set(normalizeAddr(data.ea), data.id);
     }
@@ -165,7 +166,7 @@ export async function recordEvidence(
     typeof state.binarySha256 === "string" ? state.binarySha256 : undefined;
 
   const id = randomUUID();
-  state.evidenceCount++;
+  state.evidenceCount += 1;
   if (ea) {
     state.evidenceByAddr.set(normalizeAddr(ea), id);
   }

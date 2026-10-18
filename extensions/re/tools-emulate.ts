@@ -38,6 +38,11 @@ function approvalReason(action: EmulateAction): string {
     case "vars": {
       return "Read the RzIL VM state.";
     }
+    default: {
+      // Exhaustive over EmulateAction: a new action is a type error here.
+      const unhandled: never = action;
+      return unhandled;
+    }
   }
 }
 

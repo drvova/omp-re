@@ -78,7 +78,7 @@ export interface Harness {
   entries: StubEntry[];
   artifacts: Map<string, string>;
   notifications: { message: string; type?: string }[];
-  tool(name: string): ToolDefinition<any, any>;
+  tool: (name: string) => ToolDefinition<any, any>;
 }
 
 export function makeHarness(sessionId: string): Harness {
@@ -96,12 +96,9 @@ export function makeHarness(sessionId: string): Harness {
       tools.set(def.name, def);
     },
     appendEntry: (customType: string, data?: unknown) => {
-      entries.push({
-        customType,
-        data,
-        id: `entry-${counter++}`,
-        type: "custom",
-      });
+      const id = `entry-${counter}`;
+      counter += 1;
+      entries.push({ customType, data, id, type: "custom" });
     },
     on: noop,
     // A real argv exec (no shell), matching omp's pi.exec shape, so the rz-* CLI tools run against the actual binaries in tests.
@@ -165,7 +162,7 @@ export function makeHarness(sessionId: string): Harness {
 export function textOf(result: {
   content: { type: string; text?: string }[];
 }): string {
-  const block = result.content[0];
+  const [block] = result.content;
   if (!block || block.type !== "text" || typeof block.text !== "string") {
     throw new Error("expected a text content block");
   }

@@ -286,5 +286,6 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
         process.env.OMPRE_ENABLE_DEBUGGER = prev;
       }
     }
-  }, 30_000); // two full SDK boots plus a real launch; the default 5s is too tight
+    // two full SDK boots plus a real launch; the default 5s is too tight
+  }, 30_000);
 });

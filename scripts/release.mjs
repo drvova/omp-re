@@ -115,7 +115,8 @@ function levelOf(message) {
 /** The level actually applied, capping a breaking change to minor while in 0.x. */
 function effectiveLevel(version, level) {
   const maj = Number.parseInt(version.split(".")[0], 10);
-  return level === "major" && maj === 0 ? "minor" : level; // a stray `!` shouldn't cut 1.0.0
+  // a stray `!` shouldn't cut 1.0.0
+  return level === "major" && maj === 0 ? "minor" : level;
 }
 
 /** Apply a (already-effective) bump level to a semver string. */

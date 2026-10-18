@@ -146,7 +146,8 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
       const name = /\.(pat|sig)$/iu.test(requested)
         ? requested
         : `${requested}.pat`;
-      const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin
+      // validates the basename and asserts a rizin-safe path, before touching rizin
+      const path = await rizinOutputPath(name);
       const { stderr } = await rz.cmdWithStderr(`Fc ${rizinPathArg(path)}`, {
         signal,
       });
@@ -155,7 +156,7 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
       }
       let size = 0;
       try {
-        size = statSync(path).size;
+        ({ size } = statSync(path));
       } catch {
         throw new Error(
           `omp-re: create_signature: rizin reported no error but wrote no signature file at ${path} (are there analyzed functions? run analyze/open_binary first)`

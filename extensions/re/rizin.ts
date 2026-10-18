@@ -127,7 +127,9 @@ export function validateText(value: string): string {
   return value;
 }
 
-export class RzProtocolError extends Error {}
+export class RzProtocolError extends Error {
+  override name = "RzProtocolError";
+}
 
 /** Thrown when the caller's AbortSignal fires. The rizin process is left alone for ordinary commands (their frames are still drained in order), so an aborted tool call never forces a respawn. */
 export class RzAbortError extends Error {
@@ -433,14 +435,16 @@ export class RzSession {
       if (this.closedFlag) {
         throw new RzProtocolError("omp-re: rizin process exited");
       }
-      const marker = `__OMPRE_SYNC_${(this.cmdCounter++).toString(36)}_${process.hrtime.bigint().toString(36)}__`;
+      const sequence = this.cmdCounter;
+      this.cmdCounter += 1;
+      const marker = `__OMPRE_SYNC_${sequence.toString(36)}_${process.hrtime.bigint().toString(36)}__`;
       const deadline = Date.now() + timeoutMs;
       const stderrStart = this.stderrSeen;
       this.proc.stdin?.write(`${command}\necho ${marker}\n`);
 
       const collected: string[] = [];
       // The loop bound is a defensive ceiling against a genuinely desynced stream, not the expected path.
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 8; i += 1) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
           const err = this.timeoutError(command, timeoutMs);
@@ -669,12 +673,14 @@ export function readBinaryBits(path: string): 32 | 64 | undefined {
         return undefined;
       }
       switch (buf.readUInt16LE(lfanew + 4)) {
-        case 0x86_64: // IMAGE_FILE_MACHINE_AMD64
+        // IMAGE_FILE_MACHINE_AMD64
+        case 0x86_64:
         case 0xaa_64: {
           // ARM64
           return 64;
         }
-        case 0x01_4c: // i386
+        // i386
+        case 0x01_4c:
         case 0x01_c0: {
           // ARM
           return 32;
@@ -687,11 +693,14 @@ export function readBinaryBits(path: string): 32 | 64 | undefined {
     const magic = buf.readUInt32LE(0);
     if (magic === 0xfe_ed_fa_cf) {
       return 64;
-    } // Mach-O 64
+      // Mach-O 64
+    }
     if (magic === 0xfe_ed_fa_ce) {
       return 32;
-    } // Mach-O 32
-    return undefined; // fat/universal Mach-O and unknown formats: don't guess
+      // Mach-O 32
+    }
+    // fat/universal Mach-O and unknown formats: don't guess
+    return undefined;
   } catch {
     return undefined;
   } finally {

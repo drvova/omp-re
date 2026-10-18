@@ -113,9 +113,10 @@ function truncateHead(
 
   const outputLinesArr: string[] = [];
   let outputBytesCount = 0;
-  for (let i = 0; i < lines.length && i < maxLines; i++) {
+  for (let i = 0; i < lines.length && i < maxLines; i += 1) {
     const line = lines[i] ?? "";
-    const lineBytes = Buffer.byteLength(line, "utf-8") + (i > 0 ? 1 : 0); // +1 for the joining newline
+    // +1 for the joining newline
+    const lineBytes = Buffer.byteLength(line, "utf-8") + (i > 0 ? 1 : 0);
     if (outputBytesCount + lineBytes > maxBytes) {
       break;
     }
@@ -268,10 +269,10 @@ export function maskAddresses(canonical: string): string {
   return canonical
     .split("\n")
     .map((line) => {
-      if (/\brip\b/u.test(line)) {
-        line = line.replaceAll(/0x[0-9a-fA-F]+/gu, "<ADDR>");
-      }
-      return line
+      const ripMasked = /\brip\b/u.test(line)
+        ? line.replaceAll(/0x[0-9a-fA-F]+/gu, "<ADDR>")
+        : line;
+      return ripMasked
         .replace(/^([\s|\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+/u, "$1<ADDR>")
         .replaceAll(/@ 0x[0-9a-fA-F]+/gu, "@ <ADDR>")
         .replaceAll(

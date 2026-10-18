@@ -131,5 +131,6 @@ export async function outputSubdir(
   if (create) {
     await mkdir(full, { recursive: true });
   }
-  return full; // native path — the caller wraps it with rizinPathArg for the rizin command
+  // native path — the caller wraps it with rizinPathArg for the rizin command
+  return full;
 }

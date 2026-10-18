@@ -267,7 +267,7 @@ describe.skipIf(!canRunRizin)(
           ...groundFns.map((f) => (f as { indegree?: number }).indegree ?? 0)
         );
         expect(parsed[0]?.callers).toBe(most);
-        for (let i = 1; i < parsed.length; i++) {
+        for (let i = 1; i < parsed.length; i += 1) {
           expect(parsed[i - 1]!.callers).toBeGreaterThanOrEqual(
             parsed[i]!.callers
           );
@@ -693,7 +693,9 @@ describe("reRenderers", () => {
     styledSymbol: (key: string) =>
       key === "status.error" ? "x" : key === "status.success" ? "ok" : "*",
   } as never;
-  const render = (component: { render(width: number): readonly string[] }) =>
+  const render = (component: {
+    render: (width: number) => readonly string[];
+  }) =>
     component
       .render(200)
       .map((line) => line.trimEnd())

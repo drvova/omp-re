@@ -54,7 +54,8 @@ export function registerProjectTools(pi: ExtensionAPI): void {
       const name = /\.rzdb$/iu.test(requested)
         ? requested
         : `${requested}.rzdb`;
-      const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin
+      // validates the basename and asserts a rizin-safe path, before touching rizin
+      const path = await rizinOutputPath(name);
       const { stderr } = await rz.cmdWithStderr(`Ps ${rizinPathArg(path)}`, {
         signal,
       });
@@ -63,7 +64,7 @@ export function registerProjectTools(pi: ExtensionAPI): void {
       }
       let size = 0;
       try {
-        size = statSync(path).size;
+        ({ size } = statSync(path));
       } catch {
         throw new Error(
           `omp-re: export_project: rizin reported no error but wrote no project file at ${path}`

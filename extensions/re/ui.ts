@@ -173,7 +173,7 @@ function formatSize(bytes: number): string {
   let unitIndex = -1;
   while (value >= 1024 && unitIndex < units.length - 1) {
     value /= 1024;
-    unitIndex++;
+    unitIndex += 1;
   }
   return `${value.toFixed(1).replace(/\.0$/u, "")}${units[unitIndex]}`;
 }
@@ -245,7 +245,7 @@ interface PickerOptions {
   onChoose?: (item: SelectItem) => "close" | "keep" | Promise<"close" | "keep">;
   /** Right-hand hint text, e.g. "enter open · esc back". */
   hint?: string;
-  done: (result?: undefined) => void;
+  done: (result: null) => void;
 }
 
 /** A scrollable, fuzzy-filterable list: a SelectList wrapped in custom panel chrome (title + count, a styled filter line, a custom hint, and esc clears the filter then closes). The filter is driven here and fuzzy-matches on `label` only (omp's fuzzyFilter), so addresses in `value` don't pollute matches; the SelectList is rebuilt on each filter change. */
@@ -266,10 +266,10 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
     );
     sl.onSelect = async (item) => {
       if ((await opts.onChoose?.(item)) !== "keep") {
-        opts.done();
+        opts.done(null);
       }
     };
-    sl.onCancel = () => opts.done();
+    sl.onCancel = () => opts.done(null);
     return sl;
   }
 
@@ -277,7 +277,7 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
     handleInput(data: string) {
       if (matchesKey(data, "escape")) {
         if (filter === "") {
-          opts.done(undefined);
+          opts.done(null);
         } else {
           filter = "";
           selectList = buildSelectList();
@@ -333,7 +333,7 @@ async function showPanel(
     ctx.ui.notify(`${opts.title}\n${body}`.slice(0, 4000), "info");
     return;
   }
-  await ctx.ui.custom<void>(
+  await ctx.ui.custom<null>(
     (_tui, theme, _keybindings, done) =>
       makePickerPanel(theme, { ...opts, done }),
     { overlay: true }
@@ -395,7 +395,7 @@ function makeCodeView(opts: {
   onToggle: () => boolean;
   onXrefs: () => void;
   onAsk: () => void;
-  done: (result?: undefined) => void;
+  done: (result: null) => void;
 }): Component {
   let mode: CodeViewMode = "disasm";
   let offset = 0;
@@ -414,7 +414,7 @@ function makeCodeView(opts: {
   return {
     handleInput(data: string) {
       if (matchesKey(data, "escape")) {
-        opts.done();
+        opts.done(null);
         return;
       }
       if (data === "d") {
@@ -558,7 +558,7 @@ export async function showCodeView(
     });
   }
 
-  await ctx.ui.custom<void>(
+  await ctx.ui.custom<null>(
     (_tui, theme, keybindings, done) => {
       let decompileLines: string[] | null = null;
       let decompileLabel = "decompile";
@@ -584,7 +584,7 @@ export async function showCodeView(
           ctx.ui.setEditorText(
             `Analyze function ${name ?? addr} at ${addr}. Use the RE tools to gather evidence first; report only what the evidence supports.`
           );
-          done();
+          done(null);
         },
         onToggle: () => {
           if (!decompileLines) {

@@ -615,7 +615,7 @@ function registerShell(pi: ExtensionAPI): void {
             return await showFindingsPanel(ctx, rest[0]);
           }
           case "cite": {
-            const id = rest[0];
+            const [id] = rest;
             if (!id) {
               ctx.ui.notify("Usage: /re cite <id>", "error");
               return;
@@ -666,7 +666,7 @@ function registerShell(pi: ExtensionAPI): void {
             let inherit = false;
             let resolve = false;
             const pathTokens: string[] = [];
-            for (let i = 0; i < rest.length; i++) {
+            for (let i = 0; i < rest.length; i += 1) {
               const tok = rest[i]!;
               if (tok === "--strict") {
                 strict = true;
@@ -675,9 +675,11 @@ function registerShell(pi: ExtensionAPI): void {
               } else if (tok === "--resolve") {
                 resolve = true;
               } else if (tok === "--against") {
-                against = rest[++i];
+                i += 1;
+                against = rest[i];
               } else if (tok === "--out") {
-                out = rest[++i];
+                i += 1;
+                out = rest[i];
               } else {
                 pathTokens.push(tok);
               }
@@ -759,7 +761,7 @@ function registerShell(pi: ExtensionAPI): void {
  * `composeApp` awaits their registration (the triage/CLI probes are async)
  * before init completes. See app.ts.
  */
-export default async function (pi: ExtensionAPI): Promise<void> {
+export default async function registerOmpRe(pi: ExtensionAPI): Promise<void> {
   await composeApp(pi, [
     { apply: registerReadTools, name: "re:read-tools" },
     { apply: registerInfoTools, name: "re:info-tools" },

@@ -42,7 +42,8 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "omp-re-mapfile-"));
     blob = join(dir, "overlay.bin");
-    writeFileSync(blob, "MAPFILETOOLDATA7"); // 16 bytes
+    // 16 bytes
+    writeFileSync(blob, "MAPFILETOOLDATA7");
     binaryPath = await resolveBinaryPath(TEST_BINARY);
     entries.push({
       customType: "re.binary",
@@ -50,7 +51,8 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
       id: "bin-0",
       type: "custom",
     });
-    rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa`
+    // spawn runs `aaa`
+    rz = await RzSession.spawn(rizinPath, binaryPath);
     getState(ctx).binaryPath = binaryPath;
     getState(ctx).rz = rz;
   });

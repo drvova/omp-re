@@ -74,7 +74,8 @@ export function registerMapFileTools(pi: ExtensionAPI): void {
       const addr = validateAddr(params.addr);
       const perm =
         params.perm === undefined ? undefined : validateMapPerm(params.perm);
-      const path = await resolveBinaryPath(params.path); // realpath + readability check, with omp-re's own error; absolute so rizin's cwd doesn't matter
+      // realpath + readability check, with omp-re's own error; absolute so rizin's cwd doesn't matter
+      const path = await resolveBinaryPath(params.path);
 
       const before = ((await rz.cmdj<unknown[]>("omlj", { signal })) ?? [])
         .length;

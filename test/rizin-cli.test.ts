@@ -643,11 +643,15 @@ describe("checkRizinCommand (no rizin needed)", () => {
       ["pdf @ main", "`@` modifiers"],
       ["px @f:/etc/passwd", "`@` modifiers"],
       ["px @e:io.cache=0", "`@` modifiers"],
-      ["px @x:9090 @ main", "`@` modifiers"], // temp-block-replace modifier
-      ["px @r:rsp", "`@` modifiers"], // seek-to-register modifier
+      // temp-block-replace modifier
+      ["px @x:9090 @ main", "`@` modifiers"],
+      // seek-to-register modifier
+      ["px @r:rsp", "`@` modifiers"],
       ["ph entropy @!4096x", "`@` modifiers"],
-      ["iij 2> /tmp/x", "redirection"], // stderr redirect
-      ["iij H> /tmp/x", "redirection"], // html redirect
+      // stderr redirect
+      ["iij 2> /tmp/x", "redirection"],
+      // html redirect
+      ["iij H> /tmp/x", "redirection"],
       ['"px 16 !id"', "double quotes"],
       ["px #!pipe sh", "`#`"],
       ["px 16\\x3b", "backslashes"],

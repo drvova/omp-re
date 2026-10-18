@@ -47,7 +47,8 @@ function refusal(tool: string, args: string[]): string {
 describe("checkRzCli (no binaries needed)", () => {
   test("allows ordinary read-only invocations", () => {
     expect(checkRzCli(def("rz-bin"), ["-I", "-j"])).toEqual({ ok: true });
-    expect(checkRzCli(def("rz-bin"), ["-c"])).toEqual({ ok: true }); // -c (classes) is NOT the denied -C (create)
+    // -c (classes) is NOT the denied -C (create)
+    expect(checkRzCli(def("rz-bin"), ["-c"])).toEqual({ ok: true });
     expect(
       checkRzCli(def("rz-asm"), [
         "-a",
@@ -59,7 +60,8 @@ describe("checkRzCli (no binaries needed)", () => {
         "-d",
         "90",
       ])
-    ).toEqual({ ok: true }); // -o here is start address, allowed
+      // -o here is start address, allowed
+    ).toEqual({ ok: true });
     expect(
       checkRzCli(def("rz-hash"), ["-a", "sha256,entropy", BINARY_PLACEHOLDER])
     ).toEqual({ ok: true });
@@ -72,7 +74,8 @@ describe("checkRzCli (no binaries needed)", () => {
   test("refuses flags that execute code", () => {
     expect(refusal("rz-find", ["-E", "id", "f"])).toContain("rz-find -E");
     expect(refusal("rz-find", ["-R", "w0", "f"])).toContain("rz-find -R");
-    expect(refusal("rz-find", ["-jR", "w0", "f"])).toContain("rz-find -R"); // hidden in a short cluster
+    // hidden in a short cluster
+    expect(refusal("rz-find", ["-jR", "w0", "f"])).toContain("rz-find -R");
     expect(refusal("rz-diff", ["-t", "command", "a", "b"])).toContain(
       "runs a command"
     );
@@ -84,11 +87,16 @@ describe("checkRzCli (no binaries needed)", () => {
   test("refuses the rz-diff -t command RCE in every getopt spelling (not just the split form)", () => {
     // `-t command` makes rz-diff run a rizin command per file, and rizin `!` reaches the shell.
     for (const args of [
-      ["-t", "command", "-0", "!touch X", "a", "b"], // split
-      ["-tcommand", "-0", "!touch X", "a", "b"], // attached — the old pair check missed this
-      ["-t", "commands", "a", "b"], // plural, split
-      ["-tcommands", "a", "b"], // plural, attached
-      ["-Xtcommand", "a", "b"], // clustered behind another flag
+      // split
+      ["-t", "command", "-0", "!touch X", "a", "b"],
+      // attached — the old pair check missed this
+      ["-tcommand", "-0", "!touch X", "a", "b"],
+      // plural, split
+      ["-t", "commands", "a", "b"],
+      // plural, attached
+      ["-tcommands", "a", "b"],
+      // clustered behind another flag
+      ["-Xtcommand", "a", "b"],
     ]) {
       expect(refusal("rz-diff", args)).toContain("runs a command");
     }
@@ -105,8 +113,10 @@ describe("checkRzCli (no binaries needed)", () => {
     expect(refusal("rz-bin", ["-O", "d/s/1"])).toContain("rz-bin -O");
     expect(refusal("rz-bin", ["-o", "/tmp/x"])).toContain("rz-bin -o");
     expect(refusal("rz-bin", ["-C", "elf:90:"])).toContain("rz-bin -C");
-    expect(refusal("rz-bin", ["-x"])).toContain("rz-bin -x"); // extract sub-binaries to disk
-    expect(refusal("rz-bin", ["-xj"])).toContain("rz-bin -x"); // even clustered
+    // extract sub-binaries to disk
+    expect(refusal("rz-bin", ["-x"])).toContain("rz-bin -x");
+    // even clustered
+    expect(refusal("rz-bin", ["-xj"])).toContain("rz-bin -x");
     expect(refusal("rz-asm", ["-O", "/tmp/out", "nop"])).toContain("rz-asm -O");
   });
 
@@ -134,10 +144,12 @@ describe("checkRzCli (no binaries needed)", () => {
     expect(refusal("rz-diff", ["-S", "80x25", "a", "b"])).toContain(
       "rz-diff -S"
     );
-    expect(checkRzCli(def("rz-diff"), ["-A", "a", "b"])).toEqual({ ok: true }); // -A (compare addresses) is read-only
+    // -A (compare addresses) is read-only
+    expect(checkRzCli(def("rz-diff"), ["-A", "a", "b"])).toEqual({ ok: true });
     expect(checkRzCli(def("rz-diff"), ["-tbytes", "a", "b"])).toEqual({
       ok: true,
-    }); // the 'e' in "bytes" is a value char, not a flag
+      // the 'e' in "bytes" is a value char, not a flag
+    });
   });
 
   test("refuses newlines and NUL in an argument", () => {

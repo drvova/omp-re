@@ -80,9 +80,9 @@ type Teardown = () => Promise<void> | void;
  */
 interface Scope {
   /** Run `setup` now and keep the teardown it returns; the returned disposer runs that teardown once and unregisters it. */
-  effect(setup: () => Teardown): Disposer;
+  effect: (setup: () => Teardown) => Disposer;
   /** Run every teardown still registered, most-recent first. */
-  dispose(): Promise<void>;
+  dispose: () => Promise<void>;
 }
 
 function newScope(): Scope {
@@ -230,7 +230,8 @@ class RizinBackend {
     rec.rz = rz;
     rec.binaryPath = binaryPath;
     rec.appliedAnnotations = annotationFingerprint(live);
-    await previous?.(); // close the prior process now that the replacement is analyzed and live
+    // close the prior process now that the replacement is analyzed and live
+    await previous?.();
     return { replayFailures, rz };
   }
 
@@ -313,7 +314,8 @@ class RizinBackend {
     rec._disposeDbg = scope.effect(() => () => {
       if (!dbg.isClosed) {
         dbg.close();
-      } // closing the debug rizin also kills the launched debuggee
+        // closing the debug rizin also kills the launched debuggee
+      }
     });
     rec.dbg = dbg;
     return dbg;
@@ -361,7 +363,8 @@ class RizinBackend {
       const dispose = rec._disposeRz;
       rec._disposeRz = null;
       rec.rz = null;
-      void dispose?.(); // effect inverse closes the process
+      // effect inverse closes the process
+      void dispose?.();
     }
   }
 

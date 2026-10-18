@@ -147,7 +147,8 @@ function parseYaraPlainText(stdout: string): YaraMatch[] {
     const spaceIndex = line.indexOf(" ");
     if (spaceIndex === -1) {
       continue;
-    } // malformed line (e.g. a warning) — skip rather than misparse
+      // malformed line (e.g. a warning) — skip rather than misparse
+    }
     matches.push({
       file: line.slice(spaceIndex + 1).trim(),
       rule: line.slice(0, spaceIndex),
@@ -172,7 +173,8 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
   for (const [index, def] of PLAIN_TRIAGE_TOOLS.entries()) {
     if (!plainAvailability[index]) {
       continue;
-    } // absent binary — skip silently, never register a tool that always fails
+      // absent binary — skip silently, never register a tool that always fails
+    }
 
     pi.registerTool({
       name: `triage_${def.name}`,

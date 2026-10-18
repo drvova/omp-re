@@ -43,7 +43,8 @@ describe.skipIf(!canRunRizin)(
       outDir = mkdtempSync(join(tmpdir(), "omp-re-proj-test-"));
       process.env.OMPRE_OUTPUT_DIR = outDir;
       binaryPath = await resolveBinaryPath(TEST_BINARY);
-      rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa` on open
+      // spawn runs `aaa` on open
+      rz = await RzSession.spawn(rizinPath, binaryPath);
       const state = getState(ctx);
       state.binaryPath = binaryPath;
       state.rz = rz;
@@ -67,7 +68,8 @@ describe.skipIf(!canRunRizin)(
       // Apply an annotation into the live session, then export — the project must carry it.
       await rz.cmd("afn omp_re_exported_main @ main");
       const result = textOf(await run({ file: "analysis" }));
-      const path = join(outDir, "analysis.rzdb"); // `.rzdb` appended when missing
+      // `.rzdb` appended when missing
+      const path = join(outDir, "analysis.rzdb");
       expect(result).toContain(path);
       expect(existsSync(path)).toBe(true);
 

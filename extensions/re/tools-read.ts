@@ -480,7 +480,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
       const target = validateAddr(params.target);
       const fns =
         (await rz.cmdj<RzFunc[]>(`afij @ ${target}`, { signal })) ?? [];
-      const fn = fns[0];
+      const [fn] = fns;
       const addr = fn ? knownAddr(addrOf(fn)) : undefined;
       if (!fn || addr === undefined) {
         throw new Error(`omp-re: function not found: ${params.target}`);

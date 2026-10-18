@@ -142,7 +142,8 @@ export function registerDeobfuscateTools(pi: ExtensionAPI): void {
         );
       }
       const ea = eaFromOffset(await resolveNumericAddr(rz, p.addr, signal));
-      const command = deobfuscateCommand(p.op, ea, p); // throws on bad params before any state change
+      // throws on bad params before any state change
+      const command = deobfuscateCommand(p.op, ea, p);
 
       // Save the io-cache setting and block size, transform under the cache, read, then revert everything.
       const oldCache = (await rz.cmd("e io.cache", { signal })).trim();
@@ -166,7 +167,8 @@ export function registerDeobfuscateTools(pi: ExtensionAPI): void {
           { ctx, tool: "deobfuscate" }
         );
       } finally {
-        await rz.cmd("wc-", { signal }).catch(() => {}); // revert the cached transform — the file is never written
+        // revert the cached transform — the file is never written
+        await rz.cmd("wc-", { signal }).catch(() => {});
         await rz.cmd(`b ${oldBlock}`, { signal }).catch(() => {});
         await rz
           .cmd(`e io.cache=${oldCache || "false"}`, { signal })

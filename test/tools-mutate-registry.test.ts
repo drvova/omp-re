@@ -336,7 +336,8 @@ describe.skipIf(!canRunRizin)(
     let rz: RzSession;
     let binaryPath: string;
     let mainEa: string;
-    let freeEa: string; // an address with no flag, for set_flag
+    // an address with no flag, for set_flag
+    let freeEa: string;
 
     const fnStart = async (ea: string): Promise<string | undefined> => {
       const fn = (await rz.cmdj<{ offset: number }[]>(`afij @ ${ea}`))?.[0];
@@ -391,7 +392,8 @@ describe.skipIf(!canRunRizin)(
 
     test("set_calling_convention lands, independently verified, and /re undo restores the old one", async () => {
       const before = await ccOf(mainEa);
-      const target = before === "ms" ? "amd64" : "ms"; // any other listed cc
+      // any other listed cc
+      const target = before === "ms" ? "amd64" : "ms";
       const result = await run("set_calling_convention", {
         addr: "main",
         cc: target,
@@ -605,7 +607,8 @@ describe.skipIf(!canRunRizin)(
         })
       );
       expect(err.message).toContain("already exists");
-      await undoLastAnnotation(pi, ctx); // remove omp_re_dupe
+      // remove omp_re_dupe
+      await undoLastAnnotation(pi, ctx);
     });
 
     test("define_variable refuses a name that already exists", async () => {
@@ -681,7 +684,8 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("define_function refuses when a function already begins at the address", async () => {
-      await rz.cmd(`af @ ${mainEa}`); // ensure one exists
+      // ensure one exists
+      await rz.cmd(`af @ ${mainEa}`);
       const err = await captureError(run("define_function", { addr: mainEa }));
       expect(err.message).toContain("already begins at");
     });

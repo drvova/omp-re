@@ -69,8 +69,10 @@ export interface RzCliToolDef {
  */
 export const RZ_CLI_TOOLS: readonly RzCliToolDef[] = [
   {
-    deniedLetters: "OoCx", // -O/-o write/extract, -C creates a new binary, -x extracts sub-binaries to disk
-    deniedRepeatedLetters: "dP", // -dd downloads DWARF (debuginfod), -PP downloads the PDB; single -d/-P read locally and stay allowed
+    // -O/-o write/extract, -C creates a new binary, -x extracts sub-binaries to disk
+    deniedLetters: "OoCx",
+    // -dd downloads DWARF (debuginfod), -PP downloads the PDB; single -d/-P read locally and stay allowed
+    deniedRepeatedLetters: "dP",
     summary:
       "Binary info without loading the whole core: headers (-H), imports (-i), exports (-E), symbols (-s), sections (-S), libraries (-l), strings (-z), classes (-c), entrypoint (-e), main (-M), checksums (-K), demangling (-D). JSON with -j.",
     target: "open",
@@ -81,12 +83,14 @@ export const RZ_CLI_TOOLS: readonly RzCliToolDef[] = [
     summary:
       "Compare two files: edit distance (-d myers|leven|ssdeep) or structural diff (-t bytes|functions|imports|symbols|sections|strings|entries|fields|graphs). Pass both paths; -A compares addresses, -B runs full analysis first. JSON with -j.",
     target: "args",
-    deniedLetters: "HS", // -H/-S open an interactive visual view that would hang
+    // -H/-S open an interactive visual view that would hang
+    deniedLetters: "HS",
     // Not blocking -e (sets config): its value is arbitrary and would need
     // value-aware parsing, and a letter-ban on `e` false-positives on any
     // clustered flag whose value contains an 'e' (e.g. `-tbytes`). rz-diff
     // runs on a throwaway process with no persistence or demonstrated exec.
-    deniedFlagValues: [{ flag: "t", values: ["command", "commands"] }], // -t command runs a rizin command per file (→ shell via `!`); refused in every spelling
+    // -t command runs a rizin command per file (→ shell via `!`); refused in every spelling
+    deniedFlagValues: [{ flag: "t", values: ["command", "commands"] }],
   },
   {
     deniedLetters: "",
@@ -96,14 +100,16 @@ export const RZ_CLI_TOOLS: readonly RzCliToolDef[] = [
     tool: "rz-hash",
   },
   {
-    deniedLetters: "ER", // -E runs a shell command per hit; -R runs a rizin command per hit
+    // -E runs a shell command per hit; -R runs a rizin command per hit
+    deniedLetters: "ER",
     summary:
       "Search a file for bytes or strings: -x <hex>, -s <string>, -w <widestring>, -e <regex>, -S/-I for symbol/import names, -m magic carve, -i identify filetype. -X shows a hexdump of hits. JSON with -j.",
     target: "args",
     tool: "rz-find",
   },
   {
-    deniedLetters: "O", // -O writes an output file (note: -o here is 'start address', allowed)
+    // -O writes an output file (note: -o here is 'start address', allowed)
+    deniedLetters: "O",
     summary:
       "Assemble or disassemble: `rz-asm -a x86 -b 64 'mov eax, 1'` assembles, `rz-asm -a x86 -b 64 -d 'b801000000'` disassembles hexpairs, -A shows analysis, -E ESIL, -I RzIL. -L lists arch plugins.",
     target: "args",
@@ -133,7 +139,7 @@ function isShortCluster(token: string): boolean {
  */
 function flagValues(args: readonly string[], letter: string): string[] {
   const values: string[] = [];
-  for (let i = 0; i < args.length; i++) {
+  for (let i = 0; i < args.length; i += 1) {
     const token = args[i]!;
     if (!isShortCluster(token)) {
       continue;
@@ -227,7 +233,8 @@ export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
   const available = await availableRzCliTools();
   if (available.length === 0) {
     return;
-  } // no rz-* tools found — don't offer a tool that can't run
+    // no rz-* tools found — don't offer a tool that can't run
+  }
   const byName = new Map(available.map((def) => [def.tool, def]));
 
   // Named const schemas: see registerReadTools for why they stay outside registerTool({...}).

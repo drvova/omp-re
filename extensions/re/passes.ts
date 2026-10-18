@@ -15,19 +15,32 @@ import type { RzSession } from "./rizin.ts";
 
 /** Analysis passes exposed by the `analyze` tool, each a rizin analysis command. All are additive (they find functions/xrefs/names, match types, or recover classes); none deletes analysis. */
 export const ANALYSIS_PASSES = {
-  all_functions: "aaf", // analyze all functions
-  autoname: "aan", // name functions from the strings/calls they use
-  calls: "aac", // analyze function calls
-  data_refs: "aad", // analyze data references to code
-  emulate_functions: "aaef", // analyze references by emulating every function (slow)
-  golang: "aalg", // recover Go functions and strings
-  objc: "aalor", // recover Objective-C references from selector usage
-  pointers: "aav", // analyze values that reference a section/map (pointers)
-  preludes: "aap", // find functions by prologue byte patterns (recovers stripped code)
-  rtti_classes: "avrr", // recover C++ class info from all RTTI
-  struct_offsets: "aat", // convert immediates to linked structure-member offsets across functions
-  types: "aaft", // recursive type matching across all functions
-  xrefs: "aar", // analyze cross-references
+  // analyze all functions
+  all_functions: "aaf",
+  // name functions from the strings/calls they use
+  autoname: "aan",
+  // analyze function calls
+  calls: "aac",
+  // analyze data references to code
+  data_refs: "aad",
+  // analyze references by emulating every function (slow)
+  emulate_functions: "aaef",
+  // recover Go functions and strings
+  golang: "aalg",
+  // recover Objective-C references from selector usage
+  objc: "aalor",
+  // analyze values that reference a section/map (pointers)
+  pointers: "aav",
+  // find functions by prologue byte patterns (recovers stripped code)
+  preludes: "aap",
+  // recover C++ class info from all RTTI
+  rtti_classes: "avrr",
+  // convert immediates to linked structure-member offsets across functions
+  struct_offsets: "aat",
+  // recursive type matching across all functions
+  types: "aaft",
+  // analyze cross-references
+  xrefs: "aar",
 } as const;
 
 export type AnalysisPass = keyof typeof ANALYSIS_PASSES;

@@ -30,20 +30,33 @@ const FONT_STACK =
 // terminals render both classes at two cells. Combining marks are 0-width so
 // they compose onto the preceding cell instead of claiming one of their own.
 const WIDE_RANGES: [number, number][] = [
-  [0x11_00, 0x11_5f], // Hangul Jamo
-  [0x2e_80, 0x30_3e], // CJK Radicals .. CJK Symbols and Punctuation
-  [0x30_41, 0x33_ff], // Hiragana .. CJK Compatibility
-  [0x34_00, 0x4d_bf], // CJK Unified Ideographs Extension A
-  [0x4e_00, 0x9f_ff], // CJK Unified Ideographs
-  [0xa0_00, 0xa4_cf], // Yi Syllables/Radicals
-  [0xac_00, 0xd7_a3], // Hangul Syllables
-  [0xf9_00, 0xfa_ff], // CJK Compatibility Ideographs
-  [0xfe_30, 0xfe_4f], // CJK Compatibility Forms
-  [0xff_00, 0xff_60], // Fullwidth Forms
+  // Hangul Jamo
+  [0x11_00, 0x11_5f],
+  // CJK Radicals .. CJK Symbols and Punctuation
+  [0x2e_80, 0x30_3e],
+  // Hiragana .. CJK Compatibility
+  [0x30_41, 0x33_ff],
+  // CJK Unified Ideographs Extension A
+  [0x34_00, 0x4d_bf],
+  // CJK Unified Ideographs
+  [0x4e_00, 0x9f_ff],
+  // Yi Syllables/Radicals
+  [0xa0_00, 0xa4_cf],
+  // Hangul Syllables
+  [0xac_00, 0xd7_a3],
+  // CJK Compatibility Ideographs
+  [0xf9_00, 0xfa_ff],
+  // CJK Compatibility Forms
+  [0xfe_30, 0xfe_4f],
+  // Fullwidth Forms
+  [0xff_00, 0xff_60],
   [0xff_e0, 0xff_e6],
-  [0x1_f0_00, 0x1_f0_ff], // Mahjong / dominoes / playing cards
-  [0x1_f3_00, 0x1_fa_ff], // Misc symbols & pictographs .. Symbols and Pictographs Extended-A
-  [0x2_00_00, 0x3_ff_fd], // CJK Unified Ideographs Extension B+
+  // Mahjong / dominoes / playing cards
+  [0x1_f0_00, 0x1_f0_ff],
+  // Misc symbols & pictographs .. Symbols and Pictographs Extended-A
+  [0x1_f3_00, 0x1_fa_ff],
+  // CJK Unified Ideographs Extension B+
+  [0x2_00_00, 0x3_ff_fd],
 ];
 
 const COMBINING_RANGES: [number, number][] = [
@@ -116,7 +129,8 @@ function wrapTextRun(text: string): string {
   let out = "";
   for (const ch of decoded) {
     if (ch === "\n" || ch === "\r") {
-      out += ch; // real line breaks, never a cell
+      // real line breaks, never a cell
+      out += ch;
       continue;
     }
     const cp = ch.codePointAt(0) ?? 0;

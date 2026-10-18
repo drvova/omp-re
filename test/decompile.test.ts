@@ -6,7 +6,7 @@ import type { RzSession } from "../extensions/re/rizin.ts";
 /** Stub session whose cmd() replays canned replies; only what decompileAt needs. */
 function stubRz(replies: Record<string, string>): RzSession {
   const cmd = (command: string) => {
-    const key = command.trim().split(/\s+/u)[0];
+    const [key] = command.trim().split(/\s+/u);
     return Promise.resolve(replies[key] ?? "");
   };
   const cmdj = (command: string) => {

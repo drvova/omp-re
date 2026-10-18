@@ -327,10 +327,10 @@ export function lineDiff(
   const ka = a.map(key);
   const kb = b.map(key);
   const lcs: number[][] = Array.from({ length: a.length + 1 }, () =>
-    new Array<number>(b.length + 1).fill(0)
+    Array.from({ length: b.length + 1 }, () => 0)
   );
-  for (let i = a.length - 1; i >= 0; i--) {
-    for (let j = b.length - 1; j >= 0; j--) {
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
       lcs[i]![j] =
         ka[i] === kb[j]
           ? lcs[i + 1]![j + 1]! + 1
@@ -343,19 +343,21 @@ export function lineDiff(
   while (i < a.length && j < b.length) {
     if (ka[i] === kb[j]) {
       out.push(`  ${b[j]}`);
-      i++;
-      j++;
+      i += 1;
+      j += 1;
     } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
-      out.push(`- ${a[i++]}`);
+      out.push(`- ${a[i]}`);
+      i += 1;
     } else {
-      out.push(`+ ${b[j++]}`);
+      out.push(`+ ${b[j]}`);
+      j += 1;
     }
   }
-  while (i < a.length) {
-    out.push(`- ${a[i++]}`);
+  for (; i < a.length; i += 1) {
+    out.push(`- ${a[i]}`);
   }
-  while (j < b.length) {
-    out.push(`+ ${b[j++]}`);
+  for (; j < b.length; j += 1) {
+    out.push(`+ ${b[j]}`);
   }
   return out;
 }
@@ -367,13 +369,13 @@ export function compactDiff(diff: readonly string[], context = 2): string[] {
     changed.slice(Math.max(0, i - context), i + context + 1).some(Boolean)
   );
   const out: string[] = [];
-  diff.forEach((line, i) => {
+  for (const [i, line] of diff.entries()) {
     if (keep[i]) {
       out.push(line);
     } else if (out.at(-1) !== "  …") {
       out.push("  …");
     }
-  });
+  }
   return out;
 }
 
@@ -600,7 +602,7 @@ export async function buildCarry(
         });
         continue;
       }
-      line = check.line;
+      ({ line } = check);
     } catch (error) {
       evidence.push({
         ...base,
@@ -744,7 +746,7 @@ function counts(
     unchecked: 0,
   };
   for (const row of rows) {
-    c[row.status]++;
+    c[row.status] += 1;
   }
   return c;
 }
@@ -865,7 +867,7 @@ export async function inheritFindings(
 
   for (const finding of manifest.findings) {
     if (present.has(finding.claim)) {
-      outcome.alreadyPresent++;
+      outcome.alreadyPresent += 1;
       continue;
     }
     const status = statusByClaim.get(finding.claim) ?? "unchecked";
@@ -999,7 +1001,7 @@ export function formatAgendaPrompt(
     `These findings from the earlier report do not carry over unchanged to this build${toSha256 ? ` (\`${toSha256.slice(0, 12)}…\`)` : ""}. For each one, re-examine it with the RE tools, then record_finding a revised claim on fresh evidence, or leave it out if it no longer stands:`,
     "",
   ];
-  outcome.agenda.forEach((item, i) => {
+  for (const [i, item] of outcome.agenda.entries()) {
     lines.push(`${i + 1}. [${item.status}] ${item.claim}`);
     for (const row of item.rows) {
       lines.push(
@@ -1013,7 +1015,7 @@ export function formatAgendaPrompt(
         );
       }
     }
-  });
+  }
   return lines.join("\n");
 }
 

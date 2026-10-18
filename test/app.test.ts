@@ -36,8 +36,8 @@ describe("composeApp", () => {
     const subs: ReSubsystem[] = [
       {
         apply: async () => {
-          await new Promise((r) => {
-            setTimeout(r, 20);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
           });
           done = true;
         },
@@ -45,7 +45,8 @@ describe("composeApp", () => {
       },
     ];
     await composeApp(fakePi, subs);
-    expect(done).toBe(true); // composeApp awaited the async apply
+    // composeApp awaited the async apply
+    expect(done).toBe(true);
   });
 
   test("each call passes its own host — two compositions don't bleed into each other", async () => {

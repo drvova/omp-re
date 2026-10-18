@@ -134,7 +134,8 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
     outDir = mkdtempSync(join(tmpdir(), "omp-re-csig-"));
     process.env.OMPRE_OUTPUT_DIR = outDir;
     binaryPath = await resolveBinaryPath(TEST_BINARY);
-    rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa`, so there are functions to signature
+    // spawn runs `aaa`, so there are functions to signature
+    rz = await RzSession.spawn(rizinPath, binaryPath);
     getState(ctx).binaryPath = binaryPath;
     getState(ctx).rz = rz;
   });
@@ -145,7 +146,8 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
   });
 
   test("writes a non-empty FLIRT .pat the apply path can then consume", async () => {
-    const result = textOf(await run({ file: "fixture" })); // `.pat` appended
+    // `.pat` appended
+    const result = textOf(await run({ file: "fixture" }));
     const path = join(outDir, "fixture.pat");
     expect(result).toContain(path);
     expect(result).toMatch(/wrote \d+ function signature\(s\)/u);

@@ -369,7 +369,8 @@ describe.skipIf(!canRunLive)(
         data: { path: v1, sha256: v1Sha },
         id: "b",
         type: "custom",
-      }); // what /re open writes
+        // what /re open writes
+      });
       const evidenceFor = async (command: string, addr: string) => {
         const res = await runRizinCommand(a.ctx, command, addr);
         return recordEvidence(

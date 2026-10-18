@@ -123,7 +123,8 @@ describe("buildRunDirectives (no rizin needed)", () => {
   });
   test("refuses what the contract leaves out", () => {
     for (const run of [
-      { stdin: "!rm -rf /" }, // stdio=!cmd executes a shell command
+      // stdio=!cmd executes a shell command
+      { stdin: "!rm -rf /" },
       { stdout: "!cmd" },
       { args: ["line\nbreak"] },
       { env: { "BAD-NAME": "v" } },
@@ -616,7 +617,8 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
 
     beforeAll(() => {
       process.env.OMPRE_ENABLE_DEBUGGER = "1";
-      getState(ctx).binaryPath = TEST_BINARY; // the open binary is the symbol source
+      // the open binary is the symbol source
+      getState(ctx).binaryPath = TEST_BINARY;
       registerDebugTools(harness.pi);
       // A long-lived process of our own to attach to.
       victim = Bun.spawn(["sleep", "120"], {

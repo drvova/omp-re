@@ -172,7 +172,8 @@ describe("scopedSearch", () => {
     await expect(
       scopedSearch(rz, "/xj 90", "hits", { in_function: "main" })
     ).rejects.toThrow("boom");
-    expect(ran).toContain("e search.in=io.maps"); // restored in the finally
+    // restored in the finally
+    expect(ran).toContain("e search.in=io.maps");
   });
 
   test("without in_function, runs the bare search and touches no scope config", async () => {

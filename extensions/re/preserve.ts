@@ -42,11 +42,9 @@ export function preservedStateLines(ctx: ExtensionContext): string[] {
 
   const lines = [
     "omp-re reverse-engineering session (preserve — the model must not lose this):",
-  ];
-  lines.push(
     `- Open binary: ${state.binaryPath ? `${basename(state.binaryPath)} (${state.binaryPath})` : "none currently open — reopen with open_binary before using other RE tools"}`,
-    `- Recorded: ${evidence.length} evidence item(s), ${annotations} annotation(s) in effect. They persist on the session branch; list them with \`/re evidence\` and recall one with \`/re cite <id>\`.`
-  );
+    `- Recorded: ${evidence.length} evidence item(s), ${annotations} annotation(s) in effect. They persist on the session branch; list them with \`/re evidence\` and recall one with \`/re cite <id>\`.`,
+  ];
   if (evidence.length > 0) {
     lines.push(`- Most recent evidence (id · tool · where):`);
     for (const rec of evidence.slice(-PRESERVED_EVIDENCE)) {

@@ -74,7 +74,7 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
   });
 
   test("50 sequential commands in one session all return their own output", async () => {
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 50; i += 1) {
       const marker = `omp-re-seq-${i}`;
       expect((await session.cmd(`echo ${marker}`)).trim()).toBe(marker);
     }
@@ -256,7 +256,8 @@ describe.skipIf(!canRunRizin)(
         const check = checkRizinCommand(catalog, command);
         expect(check).toMatchObject({ ok: true });
         await session.cmd((check as { line: string }).line);
-        expect((await session.cmd("echo aligned")).trim()).toBe("aligned"); // no stream desync
+        // no stream desync
+        expect((await session.cmd("echo aligned")).trim()).toBe("aligned");
       }
       // interactive visual variants (`…v`) and a `=`-write form stay refused
       expect(checkRizinCommand(catalog, "p==ev")).toMatchObject({ ok: false });
@@ -321,7 +322,8 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
     });
     try {
       await spawnRizin(ctx, blob, { loadOptions: { arch: "x86", bits: 32 } });
-      getState(ctx).rz!.close(); // force a respawn with no options passed — it must reuse the stored ones
+      // force a respawn with no options passed — it must reuse the stored ones
+      getState(ctx).rz!.close();
       const rz = await ensureRizin(ctx);
       const op = (await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"))![0]!;
       expect(op.opcode.split(" ")[0]).toBe("mov");
@@ -406,7 +408,8 @@ describe.skipIf(!canRunRizin)(
     test("a file mapped into the session is recorded and re-mapped on respawn", async () => {
       const dir = mkdtempSync(join(tmpdir(), "omp-re-map-"));
       const blob = join(dir, "overlay.bin");
-      writeFileSync(blob, "OVERLAYMAPDATA42"); // 16 bytes
+      // 16 bytes
+      writeFileSync(blob, "OVERLAYMAPDATA42");
       const expected = Buffer.from("OVERLAYMAPDATA42").toString("hex");
       try {
         entries.push({
@@ -415,7 +418,8 @@ describe.skipIf(!canRunRizin)(
           id: "map-0",
           type: "custom",
         });
-        getState(ctx).rz!.close(); // force a respawn; replayMapFiles must re-apply the map
+        // force a respawn; replayMapFiles must re-apply the map
+        getState(ctx).rz!.close();
         const rz = await ensureRizin(ctx);
         expect((await rz.cmd("p8 16 @ 0x50000")).trim().toLowerCase()).toBe(
           expected

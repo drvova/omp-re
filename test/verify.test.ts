@@ -103,7 +103,8 @@ describe("verifyEvidence classification (no rizin needed)", () => {
   test("evidence bound to a different binary is unverifiable (not a false pass or fail)", async () => {
     const h = makeHarness("verify-mismatch");
     const state = getState(h.ctx);
-    state.binaryPath = "/does/not/matter"; // never read: binarySha256 is set, so no file hashing happens
+    // never read: binarySha256 is set, so no file hashing happens
+    state.binaryPath = "/does/not/matter";
     state.binarySha256 = HEX64("b");
     h.entries.push({
       customType: "re.evidence",

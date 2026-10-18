@@ -64,7 +64,8 @@ async function readLiveBytes(
     ).trim();
     if (!/^[0-9a-fA-F]*$/u.test(hex) || hex.length === 0) {
       break;
-    } // unmapped / end of readable memory
+      // unmapped / end of readable memory
+    }
     const chunk = Buffer.from(hex, "hex");
     if (chunk.length === 0) {
       break;
@@ -73,7 +74,8 @@ async function readLiveBytes(
     read += chunk.length;
     if (chunk.length < want) {
       break;
-    } // short read: hit an unmapped page
+      // short read: hit an unmapped page
+    }
   }
   return Buffer.concat(parts);
 }
@@ -351,7 +353,9 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
             "omp-re: debug: run.args supports at most 64 arguments"
           );
         }
-        raw.forEach((a, i) => directives.push(`arg${i}=${clean(key, a)}`));
+        for (const [i, a] of raw.entries()) {
+          directives.push(`arg${i}=${clean(key, a)}`);
+        }
         break;
       }
       case "env": {
@@ -434,7 +438,8 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
 export function registerDebugTools(pi: ExtensionAPI): void {
   if (!debuggerEnabled()) {
     return;
-  } // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
+    // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
+  }
 
   // Named const schema: see registerReadTools for why it stays outside registerTool({...}).
   const z = pi.zod;
@@ -641,7 +646,8 @@ export function registerDebugTools(pi: ExtensionAPI): void {
           return plainResult(`debug: already running\n${pc}`);
         }
         const binary = requireBinary(getState(ctx));
-        const debugTarget = buildDebugTarget(params.attach); // throws on a bad pid/URI, before anything starts
+        // throws on a bad pid/URI, before anything starts
+        const debugTarget = buildDebugTarget(params.attach);
         if (debugTarget !== undefined && params.run !== undefined) {
           throw new Error(
             "omp-re: debug: attach cannot be combined with run (there is no new process to configure)"
@@ -650,12 +656,14 @@ export function registerDebugTools(pi: ExtensionAPI): void {
         if (ctx.hasUI) {
           ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
         }
-        const runDirectives = buildRunDirectives(params.run); // throws on bad settings, before anything launches
+        // throws on bad settings, before anything launches
+        const runDirectives = buildRunDirectives(params.run);
         const dbg = await startDebug(ctx, {
           debugTarget,
           runDirectives,
           signal,
-        }); // the debug process is a revertible effect on the session scope
+          // the debug process is a revertible effect on the session scope
+        });
         const pc = await programCounter(dbg, signal);
         if (debugTarget !== undefined) {
           const how = /^\d+$/u.test(debugTarget)
@@ -781,7 +789,8 @@ export function registerDebugTools(pi: ExtensionAPI): void {
           // `dtst <dir>` writes the trace session (registers/memory/checkpoints/session sdbs) into a directory.
           const name =
             params.file === undefined ? `trace_${Date.now()}` : params.file;
-          const dir = await outputSubdir(name, true); // validates the basename and makes the dir, before touching rizin
+          // validates the basename and makes the dir, before touching rizin
+          const dir = await outputSubdir(name, true);
           // Quote the NATIVE path (not forward-slashed): `dtst` runs rizin's
           // rz_sys_mkdirp, which on Windows chokes on a forward-slash drive
           // prefix (`mkdirp fail 'C:'` on `C:/...`) but handles the native
@@ -910,7 +919,8 @@ export function registerDebugTools(pi: ExtensionAPI): void {
             params.file === undefined
               ? `dump_${base.replace(/^0x/u, "")}_${size}.bin`
               : params.file;
-          const path = await prepareOutputPath(name); // validates the basename; throws before any read on a bad name
+          // validates the basename; throws before any read on a bad name
+          const path = await prepareOutputPath(name);
           const bytes = await readLiveBytes(dbg, ea, size, signal);
           if (bytes.length === 0) {
             throw new Error(

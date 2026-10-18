@@ -254,9 +254,12 @@ async function extractCapabilities(
   sourceByAttack: Map<string, string>;
   labelByAttack: Map<string, string>;
 }> {
-  const capSet = new Map<string, string>(); // capability name -> evidence id
-  const attackSet = new Map<string, string>(); // attack id -> evidence id
-  const labelSet = new Map<string, string>(); // attack id -> capa's own technique/subtechnique label
+  // capability name -> evidence id
+  const capSet = new Map<string, string>();
+  // attack id -> evidence id
+  const attackSet = new Map<string, string>();
+  // attack id -> capa's own technique/subtechnique label
+  const labelSet = new Map<string, string>();
 
   for (const ev of capaEvidence) {
     const raw = await readEvidenceOutput(ctx, ev);
@@ -268,7 +271,8 @@ async function extractCapabilities(
       const parsed: unknown = parseEvidenceJson(raw);
       findings = Array.isArray(parsed) ? (parsed as CapaFinding[]) : [];
     } catch {
-      continue; // truncated or malformed blob (e.g. output-size cap) — degrade to no capabilities, never crash
+      // truncated or malformed blob (e.g. output-size cap) — degrade to no capabilities, never crash
+      continue;
     }
     for (const rule of findings) {
       const name = rule.meta?.name?.trim() || rule.name?.trim();
@@ -527,7 +531,7 @@ function formatMarkdown(report: BuiltReport, outcome?: AuditOutcome): string {
         ) {
           lines.push(`  _⚠ Support audit: ${audit.verdict} — ${audit.reason}_`);
         }
-        claimIndex++;
+        claimIndex += 1;
       }
       lines.push("");
     }
@@ -682,7 +686,7 @@ async function buildAuditInputs(
       if (evidence.length > 0) {
         items.push({ claimText: claim.text, evidence, index });
       }
-      index++;
+      index += 1;
     }
   }
   return items;

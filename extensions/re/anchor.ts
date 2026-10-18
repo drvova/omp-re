@@ -122,10 +122,10 @@ export function sequenceSimilarity(
   if (a.length === 0 && b.length === 0) {
     return 1;
   }
-  let prev = new Array<number>(b.length + 1).fill(0);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = new Array<number>(b.length + 1).fill(0);
-    for (let j = 1; j <= b.length; j++) {
+  let prev = Array.from({ length: b.length + 1 }, () => 0);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = Array.from({ length: b.length + 1 }, () => 0);
+    for (let j = 1; j <= b.length; j += 1) {
       cur[j] =
         a[i - 1] === b[j - 1]
           ? prev[j - 1]! + 1

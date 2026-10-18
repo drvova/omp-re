@@ -499,7 +499,8 @@ describe("annotationCommands", () => {
 describe("analysis passes", () => {
   test("every pass maps to an analysis command and isAnalysisPass recognizes exactly those names", () => {
     for (const [name, command] of Object.entries(ANALYSIS_PASSES)) {
-      expect(command).toMatch(/^(aa[a-z]+|avrr)$/u); // aa* passes, plus avrr (RTTI class recovery)
+      // aa* passes, plus avrr (RTTI class recovery)
+      expect(command).toMatch(/^(aa[a-z]+|avrr)$/u);
       expect(isAnalysisPass(name)).toBe(true);
     }
     expect(isAnalysisPass("not_a_pass")).toBe(false);
@@ -552,7 +553,8 @@ describe("signatures", () => {
         data: { pass: "preludes" },
         id: "a3",
         type: "custom",
-      }, // dup
+        // dup
+      },
       {
         customType: "re.binary",
         data: { path: "/bin/b" },
@@ -634,7 +636,8 @@ describe("signatures", () => {
         data: { addr: "0x50000", path: "/dumps/x.bin" },
         id: "m2",
         type: "custom",
-      }, // dup
+        // dup
+      },
       {
         customType: "re.mapfile",
         data: { addr: "0x60000", path: "/dumps/y.bin", perm: "rx" },
@@ -781,7 +784,8 @@ describe("isExecutable", () => {
       return;
     }
     expect(await isExecutable("C:/Windows/System32/where.exe")).toBe(true);
-    expect(await isExecutable("C:/Windows/System32/where")).toBe(true); // extensionless form
+    // extensionless form
+    expect(await isExecutable("C:/Windows/System32/where")).toBe(true);
     expect(await isExecutable("C:/Windows/System32/no-such-tool-here")).toBe(
       false
     );
@@ -812,10 +816,13 @@ describe("readBinaryBits", () => {
   const pe = (machine: number): number[] => {
     const b = Array.from({ length: 0x48 }, () => 0);
     b[0] = 0x4d;
-    b[1] = 0x5a; // MZ
-    b[0x3c] = 0x40; // e_lfanew = 0x40
+    // MZ
+    b[1] = 0x5a;
+    // e_lfanew = 0x40
+    b[0x3c] = 0x40;
     b[0x40] = 0x50;
-    b[0x41] = 0x45; // PE\0\0
+    // PE\0\0
+    b[0x41] = 0x45;
     b[0x44] = machine & 0xff;
     b[0x45] = machine >> 8;
     return b;

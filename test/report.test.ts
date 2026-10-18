@@ -267,7 +267,8 @@ describe("writeReport — claim↔evidence support audit", () => {
 
   test("no model / no judge: audit degrades to 'unaudited', report still written, exit 0", async () => {
     const outputPath = join(tempDir, "audit-degrade.md");
-    await writeReport(makeCtx(groundedEntries(), []), outputPath); // default advisory; makeCtx has no runEphemeralTurn/model
+    // default advisory; makeCtx has no runEphemeralTurn/model
+    await writeReport(makeCtx(groundedEntries(), []), outputPath);
     expect(process.exitCode).not.toBe(1);
     const md = await readFile(outputPath, "utf-8");
     expect(md).toContain("support unaudited");
@@ -331,7 +332,8 @@ describe("writeReport — claim↔evidence support audit", () => {
       audit: "strict",
       judge,
     });
-    expect(process.exitCode).not.toBe(1); // infra failure must not fail closed
+    // infra failure must not fail closed
+    expect(process.exitCode).not.toBe(1);
     expect(await fileExists(strictPath)).toBe(true);
   });
 
@@ -402,7 +404,7 @@ describe("writeReport — claim↔evidence support audit", () => {
     (ctx as unknown as { model: unknown }).model = { id: "test-model" };
     (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn =
       async () => {
-        calls++;
+        calls += 1;
         throw new Error("provider overloaded");
       };
     const outputPath = join(tempDir, "audit-noretry.md");
@@ -429,7 +431,7 @@ describe("writeReport — claim↔evidence support audit", () => {
   test("the existence gate runs before the audit: an ungrounded claim withholds and the judge is never called", async () => {
     let calls = 0;
     const judge: ClaimJudge = async (items) => {
-      calls++;
+      calls += 1;
       return items.map((it): ClaimAudit => ({
         index: it.index,
         reason: "",
