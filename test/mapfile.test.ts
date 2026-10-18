@@ -75,7 +75,8 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
     const result = textOf(await run({ addr: "0x50000", path: blob }));
     expect(result).toContain(`@ 0x50000`);
     // independently verified: the blob's bytes are readable at the mapped address
-    expect((await rz.cmd("p8 16 @ 0x50000")).trim().toLowerCase()).toBe(
+    const p8Output = await rz.cmd("p8 16 @ 0x50000");
+    expect(p8Output.trim().toLowerCase()).toBe(
       Buffer.from("MAPFILETOOLDATA7").toString("hex")
     );
     // recorded (by realpath) so a respawn re-maps it
@@ -88,16 +89,13 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
   }, 30_000);
 
   test("a nonexistent path is rejected with omp-re's own error, and a bad permission before rizin", async () => {
-    expect(
-      (
-        await captureError(
-          run({ addr: "0x60000", path: nodePath.join(dir, "nope.bin") })
-        )
-      ).message
-    ).toContain("no such binary");
-    expect(
-      (await captureError(run({ addr: "0x60000", path: blob, perm: "bad" })))
-        .message
-    ).toContain("invalid permission");
+    const captureErrorResult = await captureError(
+      run({ addr: "0x60000", path: nodePath.join(dir, "nope.bin") })
+    );
+    expect(captureErrorResult.message).toContain("no such binary");
+    const captureErrorResult2 = await captureError(
+      run({ addr: "0x60000", path: blob, perm: "bad" })
+    );
+    expect(captureErrorResult2.message).toContain("invalid permission");
   });
 });

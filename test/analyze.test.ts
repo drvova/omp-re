@@ -86,6 +86,7 @@ describe.skipIf(!canRunRizin)("analyze (chapter H)", () => {
     getState(ctx).rz?.close();
     const { rz, replayFailures } = await spawnRizin(ctx, binaryPath);
     expect(replayFailures).toEqual([]);
-    expect(Number((await rz.cmd("aflc")).trim())).toBeGreaterThan(0);
+    const aflcOutput = await rz.cmd("aflc");
+    expect(Number(aflcOutput.trim())).toBeGreaterThan(0);
   }, 30_000);
 });

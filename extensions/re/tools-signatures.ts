@@ -79,9 +79,11 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
       const binary = requireBinary(getState(ctx));
 
       if (params.source === "sigdb") {
-        const before = Number((await rz.cmd("aflc", { signal })).trim()) || 0;
+        const rawBefore = await rz.cmd("aflc", { signal });
+        const before = Number(rawBefore.trim()) || 0;
         await rz.cmd("Fa", { signal });
-        const after = Number((await rz.cmd("aflc", { signal })).trim()) || 0;
+        const rawAfter = await rz.cmd("aflc", { signal });
+        const after = Number(rawAfter.trim()) || 0;
         return textResult(
           "apply_signatures: sigdb",
           `Re-applied the built-in signature database. Functions: ${before} before, ${after} after.`
@@ -92,9 +94,8 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
         throw new Error("omp-re: apply_signatures: source 'file' needs a path");
       }
       const path = validateSignaturePath(params.path);
-      const out = (
-        await rz.cmd(signatureApplyCommand(path), { signal })
-      ).trim();
+      const rawOut = await rz.cmd(signatureApplyCommand(path), { signal });
+      const out = rawOut.trim();
       const count = parseAppliedCount(out);
       // Record it for replay only when it actually applied signatures: a
       // zero-match or error application has nothing to reproduce on resume.
@@ -168,9 +169,10 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
         );
       }
       // Read it back (Fd dumps the file's signatures) to confirm it is a valid FLIRT file and count what it holds.
-      const dumped = (
-        await rz.cmdWithStderr(`Fd ${rizinPathArg(path)}`, { signal })
-      ).output.trim();
+      const rawDumped = await rz.cmdWithStderr(`Fd ${rizinPathArg(path)}`, {
+        signal,
+      });
+      const dumped = rawDumped.output.trim();
       const sigCount = dumped
         ? dumped.split("\n").filter((l) => l.trim() !== "").length
         : 0;

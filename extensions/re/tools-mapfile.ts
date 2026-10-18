@@ -100,7 +100,8 @@ export const registerMapFileTools = (pi: ExtensionAPI): void => {
         pi.appendEntry("re.mapfile", { addr, path, ...(perm ? { perm } : {}) });
       }
 
-      const sample = (await rz.cmd(`p8 16 @ ${addr}`, { signal })).trim();
+      const rawSample = await rz.cmd(`p8 16 @ ${addr}`, { signal });
+      const sample = rawSample.trim();
       return textResult(
         `map_file: ${path} @ ${addr}`,
         `mapped ${path} at ${addr}${perm ? ` (${perm})` : ""}; first bytes: ${sample || "(unreadable)"}\nRe-applied automatically on resume/respawn; reopen the binary to drop it.`,

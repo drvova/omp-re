@@ -50,8 +50,10 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
   let pat: string;
   let mainEa: string;
 
-  const flirtFlagExists = async (): Promise<boolean> =>
-    (await rz.cmd("fl~omp_re_sig_main")).trim() !== "";
+  const flirtFlagExists = async (): Promise<boolean> => {
+    const flompresigmainOutput = await rz.cmd("fl~omp_re_sig_main");
+    return flompresigmainOutput.trim() !== "";
+  };
 
   registerSignatureTools(pi);
 
@@ -73,7 +75,8 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
     );
 
     // A minimal FLIRT .pat matching main's first 16 bytes: <32 nibbles> <crc-len> <crc16> <len> :<off> <name>.
-    const bytes = (await rz.cmd(`p8 32 @ ${mainEa}`)).trim().toUpperCase();
+    const rawBytes = await rz.cmd(`p8 32 @ ${mainEa}`);
+    const bytes = rawBytes.trim().toUpperCase();
     dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-sig-"));
     pat = nodePath.join(dir, "fixture.pat");
     writeFileSync(
@@ -103,9 +106,8 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
   });
 
   test("source 'file' without a path is rejected", async () => {
-    expect((await captureError(run({ source: "file" }))).message).toContain(
-      "needs a path"
-    );
+    const captureErrorResult = await captureError(run({ source: "file" }));
+    expect(captureErrorResult.message).toContain("needs a path");
   });
 
   test("the applied custom signature survives the rizin process dying: the respawn re-applies it", async () => {
@@ -154,15 +156,15 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
     const made = readFileSync(path, "utf-8");
     expect(made.length).toBeGreaterThan(0);
     // The created file is a real FLIRT signature: applying it to the same binary matches (rizin loads it without error).
-    expect(
-      (await rz.cmdWithStderr(`Fs ${rizinPathArg(path)}`)).stderr.trim()
-    ).toBe("");
+    const FsOutput = await rz.cmdWithStderr(`Fs ${rizinPathArg(path)}`);
+    expect(FsOutput.stderr.trim()).toBe("");
   }, 30_000);
 
   test("derives a .pat name from the binary when no file is given, and refuses a traversing name", async () => {
     expect(textOf(await run({}))).toMatch(/\.pat \(\d+ bytes\)/u);
-    expect(
-      (await captureError(run({ file: "../escape.pat" }))).message
-    ).toContain("invalid output filename");
+    const captureErrorResult2 = await captureError(
+      run({ file: "../escape.pat" })
+    );
+    expect(captureErrorResult2.message).toContain("invalid output filename");
   }, 30_000);
 });

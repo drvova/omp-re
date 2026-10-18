@@ -340,9 +340,8 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     });
 
     test("an action before start is refused (nothing is launched implicitly)", async () => {
-      expect((await captureError(run("continue"))).message).toContain(
-        "no debug session"
-      );
+      const captureErrorResult = await captureError(run("continue"));
+      expect(captureErrorResult.message).toContain("no debug session");
     });
 
     test("start launches the process with a loud warning and a stopped PC", async () => {
@@ -389,17 +388,14 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     }, 20_000);
 
     test("dump_memory rejects a non-positive size and a traversing filename before writing", async () => {
-      expect(
-        (await captureError(run("dump_memory", { addr: "rip", size: 0 })))
-          .message
-      ).toContain("positive size");
-      expect(
-        (
-          await captureError(
-            run("dump_memory", { addr: "rip", file: "../escape.bin", size: 16 })
-          )
-        ).message
-      ).toContain("invalid output filename");
+      const captureErrorResult2 = await captureError(
+        run("dump_memory", { addr: "rip", size: 0 })
+      );
+      expect(captureErrorResult2.message).toContain("positive size");
+      const captureErrorResult3 = await captureError(
+        run("dump_memory", { addr: "rip", file: "../escape.bin", size: 16 })
+      );
+      expect(captureErrorResult3.message).toContain("invalid output filename");
     });
 
     test("write_register sets a register and reads the new value back", async () => {
@@ -434,31 +430,25 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     });
 
     test("write_register rejects a bad register name and value before touching rizin", async () => {
-      expect(
-        (
-          await captureError(
-            run("write_register", { reg: "rax;id", value: "1" })
-          )
-        ).message
-      ).toContain("bad register name");
-      expect(
-        (
-          await captureError(
-            run("write_register", { reg: "rax", value: "0xzz" })
-          )
-        ).message
-      ).toContain("bad register value");
+      const captureErrorResult4 = await captureError(
+        run("write_register", { reg: "rax;id", value: "1" })
+      );
+      expect(captureErrorResult4.message).toContain("bad register name");
+      const captureErrorResult5 = await captureError(
+        run("write_register", { reg: "rax", value: "0xzz" })
+      );
+      expect(captureErrorResult5.message).toContain("bad register value");
     });
 
     test("write_memory rejects non-hex or odd-length bytes", async () => {
-      expect(
-        (await captureError(run("write_memory", { addr: "rsp", bytes: "zz" })))
-          .message
-      ).toContain("bad hex bytes");
-      expect(
-        (await captureError(run("write_memory", { addr: "rsp", bytes: "9" })))
-          .message
-      ).toContain("bad hex bytes");
+      const captureErrorResult6 = await captureError(
+        run("write_memory", { addr: "rsp", bytes: "zz" })
+      );
+      expect(captureErrorResult6.message).toContain("bad hex bytes");
+      const captureErrorResult7 = await captureError(
+        run("write_memory", { addr: "rsp", bytes: "9" })
+      );
+      expect(captureErrorResult7.message).toContain("bad hex bytes");
     });
 
     test("continue_to_syscall resumes the process to the next syscall", async () => {
@@ -504,36 +494,30 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     test("break_command refuses shell/write/control on-hit commands but allows a debugger-state read", async () => {
       await run("break_add", { addr: "main" });
       // shell escape, memory write, and a static write are all refused
-      expect(
-        (
-          await captureError(
-            run("break_command", { addr: "main", command: "!id" })
-          )
-        ).message
-      ).toMatch(/not a read-only on-hit command|not allowed/u);
-      expect(
-        (
-          await captureError(
-            run("break_command", { addr: "main", command: "w hello" })
-          )
-        ).message
-      ).toMatch(/not a read-only on-hit command|not allowed/u);
+      const captureErrorResult8 = await captureError(
+        run("break_command", { addr: "main", command: "!id" })
+      );
+      expect(captureErrorResult8.message).toMatch(
+        /not a read-only on-hit command|not allowed/u
+      );
+      const captureErrorResult9 = await captureError(
+        run("break_command", { addr: "main", command: "w hello" })
+      );
+      expect(captureErrorResult9.message).toMatch(
+        /not a read-only on-hit command|not allowed/u
+      );
       // debugger control (continue) is refused — on-hit commands log state, they never drive the process
-      expect(
-        (
-          await captureError(
-            run("break_command", { addr: "main", command: "dc" })
-          )
-        ).message
-      ).toMatch(/not a read-only on-hit command/u);
+      const captureErrorResult10 = await captureError(
+        run("break_command", { addr: "main", command: "dc" })
+      );
+      expect(captureErrorResult10.message).toMatch(
+        /not a read-only on-hit command/u
+      );
       // the register-assign dual (`dr reg=val`) is caught by the `=` guard, not allowed as a bare read
-      expect(
-        (
-          await captureError(
-            run("break_command", { addr: "main", command: "dr rax=0" })
-          )
-        ).message
-      ).toMatch(/would assign\/select/u);
+      const captureErrorResult11 = await captureError(
+        run("break_command", { addr: "main", command: "dr rax=0" })
+      );
+      expect(captureErrorResult11.message).toMatch(/would assign\/select/u);
       // but a vetted debugger-state read the static policy forbids (maps) is allowed here
       expect(
         textOf(await run("break_command", { addr: "main", command: "dmj" }))
@@ -571,16 +555,16 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     }, 25_000);
 
     test("trace_load requires a file and refuses a traversing or missing name", async () => {
-      expect((await captureError(run("trace_load"))).message).toContain(
-        "needs file"
+      const captureErrorResult12 = await captureError(run("trace_load"));
+      expect(captureErrorResult12.message).toContain("needs file");
+      const captureErrorResult13 = await captureError(
+        run("trace_load", { file: "../escape" })
       );
-      expect(
-        (await captureError(run("trace_load", { file: "../escape" }))).message
-      ).toContain("invalid output filename");
-      expect(
-        (await captureError(run("trace_load", { file: "nope_not_saved" })))
-          .message
-      ).toContain("no saved trace");
+      expect(captureErrorResult13.message).toContain("invalid output filename");
+      const captureErrorResult14 = await captureError(
+        run("trace_load", { file: "nope_not_saved" })
+      );
+      expect(captureErrorResult14.message).toContain("no saved trace");
     });
 
     test("the glibc heap actions return a result without desyncing (even with no heap mapped yet)", async () => {
@@ -593,9 +577,10 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     }, 20_000);
 
     test("addr is validated like every other tool", async () => {
-      expect(
-        (await captureError(run("read_memory", { addr: "rip;id" }))).message
-      ).toContain("invalid address");
+      const captureErrorResult15 = await captureError(
+        run("read_memory", { addr: "rip;id" })
+      );
+      expect(captureErrorResult15.message).toContain("invalid address");
     });
 
     test("stop kills the debuggee and closes the session", async () => {
@@ -648,23 +633,19 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
 
     test("attach cannot be combined with run", async () => {
       await run("stop");
-      expect(
-        (
-          await captureError(
-            run("start", { attach: { pid: victim!.pid }, run: { args: ["x"] } })
-          )
-        ).message
-      ).toContain("cannot be combined with run");
+      const captureErrorResult16 = await captureError(
+        run("start", { attach: { pid: victim!.pid }, run: { args: ["x"] } })
+      );
+      expect(captureErrorResult16.message).toContain(
+        "cannot be combined with run"
+      );
     });
 
     test("a malformed remote target is refused before anything starts", async () => {
-      expect(
-        (
-          await captureError(
-            run("start", { attach: { remote: "http://nope" } })
-          )
-        ).message
-      ).toContain("gdb:// or windbg://");
+      const captureErrorResult17 = await captureError(
+        run("start", { attach: { remote: "http://nope" } })
+      );
+      expect(captureErrorResult17.message).toContain("gdb:// or windbg://");
     });
   }
 );

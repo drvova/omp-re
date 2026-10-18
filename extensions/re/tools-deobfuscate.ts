@@ -146,8 +146,10 @@ export const registerDeobfuscateTools = (pi: ExtensionAPI): void => {
       const command = deobfuscateCommand(p.op, ea, p);
 
       // Save the io-cache setting and block size, transform under the cache, read, then revert everything.
-      const oldCache = (await rz.cmd("e io.cache", { signal })).trim();
-      const oldBlock = (await rz.cmd("%v $b", { signal })).trim();
+      const rawOldCache = await rz.cmd("e io.cache", { signal });
+      const oldCache = rawOldCache.trim();
+      const rawOldBlock = await rz.cmd("%v $b", { signal });
+      const oldBlock = rawOldBlock.trim();
       try {
         await rz.cmd("e io.cache=true", { signal });
         await rz.cmd(`b ${p.size}`, { signal });
@@ -159,8 +161,10 @@ export const registerDeobfuscateTools = (pi: ExtensionAPI): void => {
             isError: true,
           };
         }
-        const hex = (await rz.cmd(`p8 ${p.size} @ ${ea}`, { signal })).trim();
-        const str = (await rz.cmd(`ps @ ${ea}`, { signal })).trim();
+        const rawHex = await rz.cmd(`p8 ${p.size} @ ${ea}`, { signal });
+        const hex = rawHex.trim();
+        const rawStr = await rz.cmd(`ps @ ${ea}`, { signal });
+        const str = rawStr.trim();
         return textResult(
           `deobfuscate: ${p.op} ${p.size} bytes @ ${ea}`,
           `hex: ${hex}\nstring: ${str}`,

@@ -65,7 +65,8 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
   });
 
   test("spawn + ij returns parseable JSON describing the binary", async () => {
-    const parsed = JSON.parse((await session.cmd("ij")).trim()) as {
+    const rawParsed = await session.cmd("ij");
+    const parsed = JSON.parse(rawParsed.trim()) as {
       core?: { format?: string; file?: string };
       bin?: { arch?: string };
     };
@@ -76,25 +77,25 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
   test("50 sequential commands in one session all return their own output", async () => {
     for (let i = 0; i < 50; i += 1) {
       const marker = `omp-re-seq-${i}`;
-      expect((await session.cmd(`echo ${marker}`)).trim()).toBe(marker);
+      const echoOutput = await session.cmd(`echo ${marker}`);
+      expect(echoOutput.trim()).toBe(marker);
     }
   });
 
   test("an invalid address returns empty output and keeps the stream aligned", async () => {
-    expect((await session.cmd("afij @ no_such_symbol_anywhere")).trim()).toBe(
-      ""
-    );
+    const afijOutput = await session.cmd("afij @ no_such_symbol_anywhere");
+    expect(afijOutput.trim()).toBe("");
     expect(await session.cmdj("afij @ no_such_symbol_anywhere")).toBeNull();
-    expect((await session.cmd("echo still-aligned")).trim()).toBe(
-      "still-aligned"
-    );
+    const echoOutput2 = await session.cmd("echo still-aligned");
+    expect(echoOutput2.trim()).toBe("still-aligned");
   });
 
   test("a quoted comment containing a command separator is stored literally and runs nothing", async () => {
     await session.cmd("CC- @ entry0");
     const echoed = await session.cmd("CC 'x; echo INJECTED' @ entry0");
     expect(echoed).not.toContain("INJECTED");
-    expect((await session.cmd("CC. @ entry0")).trim()).toBe("x; echo INJECTED");
+    const CCOutput = await session.cmd("CC. @ entry0");
+    expect(CCOutput.trim()).toBe("x; echo INJECTED");
     await session.cmd("CC- @ entry0");
   });
 
@@ -104,7 +105,8 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
     controller.abort();
     await expect(pending).rejects.toBeInstanceOf(RzAbortError);
     expect(session.isClosed).toBe(false);
-    expect((await session.cmd("echo after-abort")).trim()).toBe("after-abort");
+    const echoOutput3 = await session.cmd("echo after-abort");
+    expect(echoOutput3.trim()).toBe("after-abort");
   });
 
   test("a tiny-timeout command rejects with RzProtocolError and closes the session", async () => {
@@ -148,7 +150,8 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
 
   test("scopedSearch narrows a byte search to one function and leaves the global scope untouched", async () => {
     await session.cmd("aaa");
-    const before = (await session.cmd("e search.in")).trim();
+    const rawBefore = await session.cmd("e search.in");
+    const before = rawBefore.trim();
     const whole = hitTotal(
       await searchCommand(session, "/xj ff", "hits", { limit: 1 })
     );
@@ -163,7 +166,8 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
     expect(scoped).toBeGreaterThanOrEqual(0);
     expect(scoped).toBeLessThanOrEqual(whole);
     // the search scope is restored, so a later unscoped search is unaffected
-    expect((await session.cmd("e search.in")).trim()).toBe(before);
+    const eOutput = await session.cmd("e search.in");
+    expect(eOutput.trim()).toBe(before);
     expect(
       hitTotal(await searchCommand(session, "/xj ff", "hits", { limit: 1 }))
     ).toBe(whole);
@@ -210,7 +214,8 @@ describe.skipIf(!canRunRizin)(
         expect(check.ok).toBe(true);
         // A read-only command returns output or an empty frame — never a stream-desyncing error.
         const out = await session.cmd(command);
-        expect((await session.cmd("echo aligned")).trim()).toBe("aligned");
+        const echoOutput4 = await session.cmd("echo aligned");
+        expect(echoOutput4.trim()).toBe("aligned");
         expect(out).not.toMatch(/Wrong number of arguments/u);
       }
     });
@@ -218,9 +223,8 @@ describe.skipIf(!canRunRizin)(
     test("`e asm.arch` reads the value through the host, `e asm.bits=32` is refused before rizin", async () => {
       const check = checkRizinCommand(catalog, "e asm.arch");
       expect(check.ok).toBe(true);
-      expect((await session.cmd((check as { line: string }).line)).trim()).toBe(
-        "x86"
-      );
+      const cmdResult8 = await session.cmd((check as { line: string }).line);
+      expect(cmdResult8.trim()).toBe("x86");
       expect(checkRizinCommand(catalog, "e asm.bits=32")).toMatchObject({
         ok: false,
       });
@@ -257,7 +261,8 @@ describe.skipIf(!canRunRizin)(
         expect(check).toMatchObject({ ok: true });
         await session.cmd((check as { line: string }).line);
         // no stream desync
-        expect((await session.cmd("echo aligned")).trim()).toBe("aligned");
+        const echoOutput5 = await session.cmd("echo aligned");
+        expect(echoOutput5.trim()).toBe("aligned");
       }
       // interactive visual variants (`…v`) and a `=`-write form stay refused
       expect(checkRizinCommand(catalog, "p==ev")).toMatchObject({ ok: false });
@@ -421,9 +426,8 @@ describe.skipIf(!canRunRizin)(
         // force a respawn; replayMapFiles must re-apply the map
         getState(ctx).rz!.close();
         const rz = await ensureRizin(ctx);
-        expect((await rz.cmd("p8 16 @ 0x50000")).trim().toLowerCase()).toBe(
-          expected
-        );
+        const p8Output = await rz.cmd("p8 16 @ 0x50000");
+        expect(p8Output.trim().toLowerCase()).toBe(expected);
       } finally {
         entries.splice(
           entries.findIndex((e) => e.id === "map-0"),

@@ -95,12 +95,14 @@ describe.skipIf(!canRunRizin)(
     }, 30_000);
 
     test("refuses a traversing or separator-bearing filename before touching rizin", async () => {
-      expect(
-        (await captureError(run({ file: "../escape.rzdb" }))).message
-      ).toContain("invalid output filename");
-      expect(
-        (await captureError(run({ file: "sub/proj.rzdb" }))).message
-      ).toContain("invalid output filename");
+      const captureErrorResult = await captureError(
+        run({ file: "../escape.rzdb" })
+      );
+      expect(captureErrorResult.message).toContain("invalid output filename");
+      const captureErrorResult2 = await captureError(
+        run({ file: "sub/proj.rzdb" })
+      );
+      expect(captureErrorResult2.message).toContain("invalid output filename");
     });
   }
 );

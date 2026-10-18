@@ -133,7 +133,8 @@ describe.skipIf(!canRunRizin)(
       state.binaryPath = binaryPath;
       registerReadTools(harness.pi);
 
-      groundFns = JSON.parse((await session.cmd("aflj")).trim()) as GroundFn[];
+      const afljOutput = await session.cmd("aflj");
+      groundFns = JSON.parse(afljOutput.trim()) as GroundFn[];
       mainFn = mustFind(
         groundFns,
         (f) => f.name === "main",
@@ -141,9 +142,8 @@ describe.skipIf(!canRunRizin)(
       );
       mainEa = eaFromOffset(addrOf(mainFn)!);
 
-      groundPdf = JSON.parse(
-        (await session.cmd(`pdfj @ ${mainEa}`)).trim()
-      ) as GroundPdf;
+      const pdfjOutput = await session.cmd(`pdfj @ ${mainEa}`);
+      groundPdf = JSON.parse(pdfjOutput.trim()) as GroundPdf;
       callSite = addrOf(
         mustFind(
           groundPdf.ops,
@@ -152,24 +152,20 @@ describe.skipIf(!canRunRizin)(
         )
       )!;
 
-      groundImports = JSON.parse(
-        (await session.cmd("iij")).trim()
-      ) as GroundImport[];
+      const iijOutput = await session.cmd("iij");
+      groundImports = JSON.parse(iijOutput.trim()) as GroundImport[];
       pltImport = mustFind(
         groundImports,
         (i) => typeof i.plt === "number" && i.plt > 0,
         "an import with a PLT stub"
       );
-      groundExports = JSON.parse(
-        (await session.cmd("iEj")).trim()
-      ) as unknown[];
-      groundSymbols = JSON.parse(
-        (await session.cmd("isj")).trim()
-      ) as unknown[];
+      const iEjOutput = await session.cmd("iEj");
+      groundExports = JSON.parse(iEjOutput.trim()) as unknown[];
+      const isjOutput = await session.cmd("isj");
+      groundSymbols = JSON.parse(isjOutput.trim()) as unknown[];
 
-      groundStrings = JSON.parse(
-        (await session.cmd("izj")).trim()
-      ) as GroundString[];
+      const izjOutput = await session.cmd("izj");
+      groundStrings = JSON.parse(izjOutput.trim()) as GroundString[];
       probeString = mustFind(
         groundStrings,
         (s) =>
@@ -178,29 +174,28 @@ describe.skipIf(!canRunRizin)(
         "a unique string of at least 12 characters"
       );
 
-      groundSegments = JSON.parse(
-        (await session.cmd("iSj")).trim()
-      ) as GroundSegment[];
+      const iSjOutput = await session.cmd("iSj");
+      groundSegments = JSON.parse(iSjOutput.trim()) as GroundSegment[];
       execSegment = mustFind(
         groundSegments,
         (s) => s.perm.includes("x") && s.name.length > 0,
         "an executable section"
       );
 
-      groundAxt = JSON.parse(
-        (await session.cmd(`axtj @ ${mainEa}`)).trim()
-      ) as GroundXref[];
-      groundAxf = JSON.parse(
-        (await session.cmd(`axfj @ ${callSite}`)).trim()
-      ) as GroundXref[];
+      const axtjOutput = await session.cmd(`axtj @ ${mainEa}`);
+      groundAxt = JSON.parse(axtjOutput.trim()) as GroundXref[];
+      const axfjOutput = await session.cmd(`axfj @ ${callSite}`);
+      groundAxf = JSON.parse(axfjOutput.trim()) as GroundXref[];
       if (groundAxf.length === 0) {
         throw new Error(
           "tools-registry.test setup: expected an outgoing xref from main's first call"
         );
       }
 
-      const pdgHelp = (await session.cmd("pdg?")).trim();
-      const pddHelp = (await session.cmd("pdd?")).trim();
+      const rawPdgHelp = await session.cmd("pdg?");
+      const pdgHelp = rawPdgHelp.trim();
+      const rawPddHelp = await session.cmd("pdd?");
+      const pddHelp = rawPddHelp.trim();
       expectedDecompiler =
         pdgHelp.length > 0 ? "pdg" : pddHelp.length > 0 ? "pdd" : null;
     });
@@ -373,20 +368,19 @@ describe.skipIf(!canRunRizin)(
       });
 
       test("invalid: a target containing forbidden characters throws validateAddr's exact message", async () => {
-        expect(
-          (await captureError(run("get_function", { target: BAD_ADDR })))
-            .message
-        ).toBe(invalidAddrMessage(BAD_ADDR));
+        const captureErrorResult = await captureError(
+          run("get_function", { target: BAD_ADDR })
+        );
+        expect(captureErrorResult.message).toBe(invalidAddrMessage(BAD_ADDR));
       });
 
       test("an unknown name is a clear error, not an empty result", async () => {
-        expect(
-          (
-            await captureError(
-              run("get_function", { target: "no_such_function_xyz" })
-            )
-          ).message
-        ).toBe("omp-re: function not found: no_such_function_xyz");
+        const captureErrorResult2 = await captureError(
+          run("get_function", { target: "no_such_function_xyz" })
+        );
+        expect(captureErrorResult2.message).toBe(
+          "omp-re: function not found: no_such_function_xyz"
+        );
       });
     });
 
@@ -411,20 +405,19 @@ describe.skipIf(!canRunRizin)(
       });
 
       test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-        expect(
-          (await captureError(run("decompile_function", { addr: BAD_ADDR })))
-            .message
-        ).toBe(invalidAddrMessage(BAD_ADDR));
+        const captureErrorResult3 = await captureError(
+          run("decompile_function", { addr: BAD_ADDR })
+        );
+        expect(captureErrorResult3.message).toBe(invalidAddrMessage(BAD_ADDR));
       });
 
       test("an unresolvable name fails fast with a clear error", async () => {
-        expect(
-          (
-            await captureError(
-              run("decompile_function", { addr: "no_such_function_xyz" })
-            )
-          ).message
-        ).toBe("omp-re: could not resolve address: no_such_function_xyz");
+        const captureErrorResult4 = await captureError(
+          run("decompile_function", { addr: "no_such_function_xyz" })
+        );
+        expect(captureErrorResult4.message).toBe(
+          "omp-re: could not resolve address: no_such_function_xyz"
+        );
       });
     });
 
@@ -443,10 +436,10 @@ describe.skipIf(!canRunRizin)(
       });
 
       test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-        expect(
-          (await captureError(run("disassemble_function", { addr: BAD_ADDR })))
-            .message
-        ).toBe(invalidAddrMessage(BAD_ADDR));
+        const captureErrorResult5 = await captureError(
+          run("disassemble_function", { addr: BAD_ADDR })
+        );
+        expect(captureErrorResult5.message).toBe(invalidAddrMessage(BAD_ADDR));
       });
     });
 
@@ -471,9 +464,10 @@ describe.skipIf(!canRunRizin)(
       });
 
       test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
-        expect(
-          (await captureError(run("get_xrefs_to", { addr: BAD_ADDR }))).message
-        ).toBe(invalidAddrMessage(BAD_ADDR));
+        const captureErrorResult6 = await captureError(
+          run("get_xrefs_to", { addr: BAD_ADDR })
+        );
+        expect(captureErrorResult6.message).toBe(invalidAddrMessage(BAD_ADDR));
       });
     });
 
@@ -630,9 +624,10 @@ describe.skipIf(!canRunRizin)(
 
     describe("get_graph", () => {
       test("function_cfg returns basic-block nodes with addresses and resolved edges matching rizin's own graph", async () => {
-        const ground = JSON.parse(
-          (await session.cmd(`agf json @ ${mainEa}`)).trim()
-        ) as { nodes: { id: number; offset: number; out_nodes?: number[] }[] };
+        const rawGround = await session.cmd(`agf json @ ${mainEa}`);
+        const ground = JSON.parse(rawGround.trim()) as {
+          nodes: { id: number; offset: number; out_nodes?: number[] }[];
+        };
         const { body } = splitHeaderBody(
           textOf(
             await run("get_graph", {
@@ -663,10 +658,10 @@ describe.skipIf(!canRunRizin)(
         expect(
           textOf(await run("get_graph", { addr: "main", kind: "callgraph" }))
         ).toContain("graph: callgraph @ main");
-        expect(
-          (await captureError(run("get_graph", { kind: "function_cfg" })))
-            .message
-        ).toContain("needs addr");
+        const captureErrorResult7 = await captureError(
+          run("get_graph", { kind: "function_cfg" })
+        );
+        expect(captureErrorResult7.message).toContain("needs addr");
       });
     });
 

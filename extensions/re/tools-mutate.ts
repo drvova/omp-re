@@ -58,7 +58,8 @@ const functionAt = async (
   signal?: AbortSignal
 ): Promise<{ ea: string; name: string }> => {
   const numeric = eaFromOffset(await resolveNumericAddr(rz, addr, signal));
-  const fn = (await rz.cmdj<AfijRow[]>(`afij @ ${numeric}`, { signal }))?.[0];
+  const rawFn = await rz.cmdj<AfijRow[]>(`afij @ ${numeric}`, { signal });
+  const fn = rawFn?.[0];
   const start = fn ? addrOf(fn) : undefined;
   if (!fn || start === undefined || typeof fn.name !== "string") {
     throw new Error(`omp-re: no function at ${addr}`);
@@ -93,8 +94,10 @@ const signatureAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<string> =>
-  (await rz.cmd(`afs @ ${ea}`, { signal })).trim().replace(/;\s*$/u, "");
+): Promise<string> => {
+  const afsOutput = await rz.cmd(`afs @ ${ea}`, { signal });
+  return afsOutput.trim().replace(/;\s*$/u, "");
+};
 
 /** The function whose start address is exactly `ea`, or undefined when none begins there (`afij` returns the function *containing* ea, which may start earlier). */
 const functionStartingAt = async (
@@ -102,7 +105,8 @@ const functionStartingAt = async (
   ea: string,
   signal?: AbortSignal
 ): Promise<AfijRow | undefined> => {
-  const fn = (await rz.cmdj<AfijRow[]>(`afij @ ${ea}`, { signal }))?.[0];
+  const rawFn2 = await rz.cmdj<AfijRow[]>(`afij @ ${ea}`, { signal });
+  const fn = rawFn2?.[0];
   return fn && eaFromOffset(addrOf(fn) ?? -1) === ea ? fn : undefined;
 };
 
@@ -111,7 +115,10 @@ const callingConventionAt = async (
   rz: RzSession,
   ea: string,
   signal?: AbortSignal
-): Promise<string> => (await rz.cmd(`afc @ ${ea}`, { signal })).trim();
+): Promise<string> => {
+  const afcOutput = await rz.cmd(`afc @ ${ea}`, { signal });
+  return afcOutput.trim();
+};
 
 /** The name of the flag at `ea`, or "" when none (`fdj` prints `{offset,name,realname}` for the flag there). */
 const flagAt = async (
@@ -429,9 +436,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
         signal
       );
 
-      const landed = (
-        await rz.cmdj<AfijRow[]>(`afij @ ${fn.ea}`, { signal })
-      )?.[0]?.name;
+      const rawLanded = await rz.cmdj<AfijRow[]>(`afij @ ${fn.ea}`, { signal });
+      const landed = rawLanded?.[0]?.name;
       if (landed !== newName) {
         throw new Error(
           `omp-re: rename_function: mutation did not land: expected ${JSON.stringify(newName)}, rizin has ${JSON.stringify(landed ?? null)}`
@@ -516,7 +522,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
       const ea = eaFromOffset(
         await resolveNumericAddr(rz, params.addr, signal)
       );
-      const oldValue = (await rz.cmd(`CC. @ ${ea}`, { signal })).trim();
+      const rawOldValue = await rz.cmd(`CC. @ ${ea}`, { signal });
+      const oldValue = rawOldValue.trim();
 
       await apply(
         rz,
@@ -524,7 +531,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
         signal
       );
 
-      const readBack = (await rz.cmd(`CC. @ ${ea}`, { signal })).trim();
+      const rawReadBack = await rz.cmd(`CC. @ ${ea}`, { signal });
+      const readBack = rawReadBack.trim();
       if (readBack !== text) {
         throw new Error(
           `omp-re: set_comment: mutation did not land: expected ${JSON.stringify(text)}, rizin has ${JSON.stringify(readBack)}`
@@ -594,9 +602,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
       const varName = validateIdent("var", params.var);
       const type = validateTypeLike("type", params.type.trim());
       const fn = await functionAt(rz, params.addr, signal);
-      const old = (await variablesAt(rz, fn.ea, signal)).find(
-        (v) => v.name === varName
-      );
+      const rawOld = await variablesAt(rz, fn.ea, signal);
+      const old = rawOld.find((v) => v.name === varName);
       if (!old) {
         throw new Error(
           `omp-re: set_variable_type: ${fn.name} has no variable ${JSON.stringify(varName)}`
@@ -609,9 +616,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
         signal
       );
 
-      const landed = (await variablesAt(rz, fn.ea, signal)).find(
-        (v) => v.name === varName
-      );
+      const rawLanded2 = await variablesAt(rz, fn.ea, signal);
+      const landed = rawLanded2.find((v) => v.name === varName);
       if (!landed || normalizeCType(landed.type) !== normalizeCType(type)) {
         throw new Error(
           `omp-re: set_variable_type: mutation did not land: expected ${JSON.stringify(type)}, rizin has ${JSON.stringify(landed?.type ?? null)}`
@@ -645,7 +651,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
       const rz = await ensureRizin(ctx, { signal });
       const name = validateIdent("name", params.name);
       const fn = await functionAt(rz, params.addr, signal);
-      if ((await variablesAt(rz, fn.ea, signal)).some((v) => v.name === name)) {
+      const variablesAtResult = await variablesAt(rz, fn.ea, signal);
+      if (variablesAtResult.some((v) => v.name === name)) {
         throw new Error(
           `omp-re: define_variable: ${fn.name} already has a variable ${JSON.stringify(name)}`
         );
@@ -662,9 +669,8 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
         signal
       );
 
-      const landed = (await variablesAt(rz, fn.ea, signal)).find(
-        (v) => v.name === name
-      );
+      const rawLanded3 = await variablesAt(rz, fn.ea, signal);
+      const landed = rawLanded3.find((v) => v.name === name);
       if (!landed) {
         throw new Error(
           `omp-re: define_variable: mutation did not land: no variable ${JSON.stringify(name)} in ${fn.name} after defining it`

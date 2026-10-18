@@ -63,13 +63,15 @@ export const registerAnalyzeTools = (pi: ExtensionAPI): void => {
       const rz = await ensureRizin(ctx, { signal });
       const binary = requireBinary(getState(ctx));
       const command = ANALYSIS_PASSES[params.pass];
-      const before = Number((await rz.cmd("aflc", { signal })).trim()) || 0;
+      const rawBefore = await rz.cmd("aflc", { signal });
+      const before = Number(rawBefore.trim()) || 0;
       // Use cmdWithStderr: passes like `golang` report "cannot recover …" on stderr, which plain cmd() drops.
       const { output, stderr } = await rz.cmdWithStderr(command, {
         signal,
         timeoutMs: analysisTimeoutMs(),
       });
-      const after = Number((await rz.cmd("aflc", { signal })).trim()) || 0;
+      const rawAfter = await rz.cmd("aflc", { signal });
+      const after = Number(rawAfter.trim()) || 0;
       const out = output.trim();
       const err = stderr.trim();
 

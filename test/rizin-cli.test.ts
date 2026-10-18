@@ -1215,7 +1215,8 @@ describe.skipIf(!canRunRizin)(
       state.rz = session;
       state.binaryPath = binaryPath;
       registerRizinTools(harness.pi);
-      const fns = JSON.parse((await session.cmd("aflj")).trim()) as {
+      const rawFns = await session.cmd("aflj");
+      const fns = JSON.parse(rawFns.trim()) as {
         name: string;
         offset?: number;
         addr?: number;
@@ -1254,10 +1255,8 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("rizin_command output matches rizin's own, at the given address", async () => {
-      const expected = (await session.cmd(`px 32 @ ${mainEa}`)).replace(
-        /\n+$/u,
-        ""
-      );
+      const rawExpected = await session.cmd(`px 32 @ ${mainEa}`);
+      const expected = rawExpected.replace(/\n+$/u, "");
       const result = await run("rizin_command", {
         addr: mainEa,
         command: "px 32",
@@ -1305,7 +1304,8 @@ describe.skipIf(!canRunRizin)(
         run("rizin_command", { command: "pr 64" })
       );
       expect(err.message).toContain('"pr" is not available here');
-      expect((await session.cmd("echo alive")).trim()).toBe("alive");
+      const echoOutput = await session.cmd("echo alive");
+      expect(echoOutput.trim()).toBe("alive");
       expect(session.isClosed).toBe(false);
     });
   }

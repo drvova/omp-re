@@ -134,8 +134,8 @@ export const binaryFacts = async (
     return facts;
   }
 
-  facts.fnCount =
-    Number.parseInt((await rz.cmd("aflc").catch(() => "0")).trim(), 10) || 0;
+  const catchResult = await rz.cmd("aflc").catch(() => "0");
+  facts.fnCount = Number.parseInt(catchResult.trim(), 10) || 0;
   const { info, entry } = await loadBinInfo(rz);
   if (info?.bin) {
     const { bin } = info;
@@ -450,9 +450,10 @@ const labelXrefs = async (
     const ea = eaFromOffset(row.from);
     let label = ea;
     if (index < LABEL_CAP) {
-      const fn = (
-        await rz.cmdj<{ name?: string }[]>(`afij @ ${ea}`).catch(() => null)
-      )?.[0];
+      const rawFn = await rz
+        .cmdj<{ name?: string }[]>(`afij @ ${ea}`)
+        .catch(() => null);
+      const fn = rawFn?.[0];
       if (fn?.name) {
         label = `${fn.name} (${ea})`;
       }

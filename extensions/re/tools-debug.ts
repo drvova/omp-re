@@ -59,9 +59,8 @@ const readLiveBytes = async (
   let read = 0;
   while (read < size) {
     const want = Math.min(DUMP_CHUNK, size - read);
-    const hex = (
-      await dbg.cmd(`p8 ${want} @ ${ea}+${read}`, { signal })
-    ).trim();
+    const rawHex = await dbg.cmd(`p8 ${want} @ ${ea}+${read}`, { signal });
+    const hex = rawHex.trim();
     if (!/^[0-9a-fA-F]*$/u.test(hex) || hex.length === 0) {
       break;
       // unmapped / end of readable memory
@@ -310,11 +309,13 @@ const programCounter = async (
   dbg: RzSession,
   signal?: AbortSignal
 ): Promise<string> => {
-  const rip = (await dbg.cmd("dr rip", { signal })).trim();
+  const rawRip = await dbg.cmd("dr rip", { signal });
+  const rip = rawRip.trim();
   if (rip) {
     return rip;
   }
-  return (await dbg.cmd("dr PC", { signal })).trim();
+  const drOutput = await dbg.cmd("dr PC", { signal });
+  return drOutput.trim();
 };
 const clean = (key: string, value: string): string => {
   if (/[\r\n]/u.test(value)) {
@@ -705,9 +706,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
 
       switch (params.action) {
         case "continue": {
-          const out = (
-            await dbg.cmd("dc", { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut = await dbg.cmd("dc", { signal, timeoutMs: dbgTimeout });
+          const out = rawOut.trim();
           const pc = await programCounter(dbg, signal);
           return textResult("debug: continue", `${out || "(resumed)"}\n${pc}`);
         }
@@ -715,9 +715,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           if (!ea) {
             throw new Error("omp-re: debug continue_until needs addr");
           }
-          const out = (
-            await dbg.cmd(`dcu ${ea}`, { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut2 = await dbg.cmd(`dcu ${ea}`, {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut2.trim();
           const pc = await programCounter(dbg, signal);
           return textResult(
             `debug: continue_until ${ea}`,
@@ -725,9 +727,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "continue_to_syscall": {
-          const out = (
-            await dbg.cmd("dcs", { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut3 = await dbg.cmd("dcs", {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut3.trim();
           const pc = await programCounter(dbg, signal);
           return textResult(
             "debug: continue_to_syscall",
@@ -735,9 +739,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "continue_to_call": {
-          const out = (
-            await dbg.cmd("dcc", { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut4 = await dbg.cmd("dcc", {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut4.trim();
           const pc = await programCounter(dbg, signal);
           return textResult(
             "debug: continue_to_call",
@@ -745,9 +751,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "continue_to_ret": {
-          const out = (
-            await dbg.cmd("dcr", { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut5 = await dbg.cmd("dcr", {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut5.trim();
           const pc = await programCounter(dbg, signal);
           return textResult(
             "debug: continue_to_ret",
@@ -770,9 +778,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         // trace_start, then step/continue backward through it. The reverse
         // actions error until a trace session exists — rizin's own message surfaces.
         case "trace_start": {
-          const out = (
-            await dbg.cmd("dts+", { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut6 = await dbg.cmd("dts+", {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut6.trim();
           return textResult(
             "debug: trace_start",
             `${out || "trace session started"}\nStep backward with step_back / continue_back; stop recording with trace_stop.`
@@ -830,9 +840,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         }
         case "step_back": {
           const n = clampInt(params.count, 1, 100_000);
-          const out = (
-            await dbg.cmd(`dsb ${n}`, { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut7 = await dbg.cmd(`dsb ${n}`, {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut7.trim();
           const pc = await programCounter(dbg, signal);
           return textResult(
             `debug: step_back ${n}`,
@@ -840,9 +852,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "continue_back": {
-          const out = (
-            await dbg.cmd("dcb", { signal, timeoutMs: dbgTimeout })
-          ).trim();
+          const rawOut8 = await dbg.cmd("dcb", {
+            signal,
+            timeoutMs: dbgTimeout,
+          });
+          const out = rawOut8.trim();
           const pc = await programCounter(dbg, signal);
           return textResult(
             "debug: continue_back",
@@ -850,7 +864,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "registers": {
-          const out = (await dbg.cmd("drj", { signal })).trim();
+          const rawOut9 = await dbg.cmd("drj", { signal });
+          const out = rawOut9.trim();
           return textResult("debug: registers", out || "(no registers)", {
             ctx,
             tool: "rizin_debug",
@@ -858,7 +873,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         }
         case "registers_telescope": {
           // `drr` resolves each register to what it points at (string/symbol/pointer chain) — far more informative than raw values.
-          const out = (await dbg.cmd("drr", { signal })).trim();
+          const rawOut10 = await dbg.cmd("drr", { signal });
+          const out = rawOut10.trim();
           return textResult(
             "debug: registers_telescope",
             out || "(no registers)",
@@ -872,7 +888,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           const reg = validateRegName(params.reg);
           const value = validateRegValue(params.value);
           await dbg.cmd(`dr ${reg}=${value}`, { signal });
-          const readBack = (await dbg.cmd(`dr ${reg}`, { signal })).trim();
+          const rawReadBack = await dbg.cmd(`dr ${reg}`, { signal });
+          const readBack = rawReadBack.trim();
           return textResult(
             `debug: write_register ${reg}=${value}`,
             readBack || "(set)",
@@ -884,7 +901,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             throw new Error("omp-re: debug read_memory needs addr");
           }
           const n = clampInt(params.size, 64, 4096);
-          const out = (await dbg.cmd(`pxj ${n} @ ${ea}`, { signal })).trim();
+          const rawOut11 = await dbg.cmd(`pxj ${n} @ ${ea}`, { signal });
+          const out = rawOut11.trim();
           return textResult(
             `debug: read_memory ${n} @ ${ea}`,
             out || "(no output)",
@@ -911,7 +929,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             );
           }
           // Resolve a concrete numeric base so the generated filename and the reads agree even for a symbol/expression addr.
-          const base = (await dbg.cmd(`?v ${ea}`, { signal })).trim() || ea;
+          const rawBase = await dbg.cmd(`?v ${ea}`, { signal });
+          const base = rawBase.trim() || ea;
           const name =
             params.file === undefined
               ? `dump_${base.replace(/^0x/u, "")}_${size}.bin`
@@ -946,9 +965,10 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           }
           const hex = validateHexBytes(params.bytes);
           await dbg.cmd(`wx ${hex} @ ${ea}`, { signal });
-          const readBack = (
-            await dbg.cmd(`p8 ${hex.length / 2} @ ${ea}`, { signal })
-          ).trim();
+          const rawReadBack2 = await dbg.cmd(`p8 ${hex.length / 2} @ ${ea}`, {
+            signal,
+          });
+          const readBack = rawReadBack2.trim();
           return textResult(
             `debug: write_memory ${hex.length / 2} bytes @ ${ea}`,
             `wrote ${hex}; now reads ${readBack}`,
@@ -958,13 +978,16 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         case "disassemble": {
           // Live memory: shows self-modified / unpacked code that the static view can't.
           const n = clampInt(params.count, 16, 1024);
-          const at =
-            ea ??
-            (await programCounter(dbg, signal)).split("=")[1]?.trim() ??
-            undefined;
-          const out = (
-            await dbg.cmd(`pdj ${n}${at ? ` @ ${at}` : ""}`, { signal })
-          ).trim();
+          // Only ask for the program counter when no address was given.
+          let at = ea;
+          if (at === undefined) {
+            const pc = await programCounter(dbg, signal);
+            at = pc.split("=")[1]?.trim();
+          }
+          const rawOut12 = await dbg.cmd(`pdj ${n}${at ? ` @ ${at}` : ""}`, {
+            signal,
+          });
+          const out = rawOut12.trim();
           return textResult(
             `debug: disassemble ${n}${at ? ` @ ${at}` : " @ pc"}`,
             out || "(no output)",
@@ -981,9 +1004,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           const parts = [params.lib, params.name]
             .filter((p): p is string => p !== undefined)
             .map(validateSymbolQuery);
-          const out = (
-            await dbg.cmd(`dmi ${parts.join(" ")}`, { signal })
-          ).trim();
+          const rawOut13 = await dbg.cmd(`dmi ${parts.join(" ")}`, { signal });
+          const out = rawOut13.trim();
           return textResult(
             `debug: resolve_symbol ${parts.join(" ")}`,
             out ||
@@ -996,7 +1018,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             throw new Error("omp-re: debug break_add needs addr");
           }
           await dbg.cmd(`db @ ${ea}`, { signal });
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList = await dbg.cmd("dblj", { signal });
+          const list = rawList.trim();
           return textResult(
             `debug: break_add ${ea}`,
             list || "(no breakpoints)",
@@ -1008,7 +1031,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             throw new Error("omp-re: debug break_remove needs addr");
           }
           await dbg.cmd(`db- @ ${ea}`, { signal });
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList2 = await dbg.cmd("dblj", { signal });
+          const list = rawList2.trim();
           return textResult(
             `debug: break_remove ${ea}`,
             list || "(no breakpoints)",
@@ -1016,7 +1040,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "break_list": {
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList3 = await dbg.cmd("dblj", { signal });
+          const list = rawList3.trim();
           return textResult("debug: break_list", list || "(no breakpoints)", {
             ctx,
             tool: "rizin_debug",
@@ -1028,7 +1053,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             throw new Error("omp-re: debug break_add_hw needs addr");
           }
           await dbg.cmd(`dbH @ ${ea}`, { signal });
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList4 = await dbg.cmd("dblj", { signal });
+          const list = rawList4.trim();
           return textResult(
             `debug: break_add_hw ${ea}`,
             list || "(no breakpoints)",
@@ -1044,7 +1070,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             `${params.action === "break_enable" ? "dbe" : "dbd"} @ ${ea}`,
             { signal }
           );
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList5 = await dbg.cmd("dblj", { signal });
+          const list = rawList5.trim();
           return textResult(
             `debug: ${params.action} ${ea}`,
             list || "(no breakpoints)",
@@ -1060,7 +1087,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             throw new Error("omp-re: debug break_condition needs condition");
           }
           await dbg.cmd(`dbC ${rzQuote(params.condition)} @ ${ea}`, { signal });
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList6 = await dbg.cmd("dblj", { signal });
+          const list = rawList6.trim();
           return textResult(
             `debug: break_condition ${ea}`,
             list || "(no breakpoints)",
@@ -1083,7 +1111,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             throw new Error(`omp-re: debug break_command: ${check.reason}`);
           }
           await dbg.cmd(`dbc ${check.line} @ ${ea}`, { signal });
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList7 = await dbg.cmd("dblj", { signal });
+          const list = rawList7.trim();
           return textResult(
             `debug: break_command ${ea}`,
             list || "(no breakpoints)",
@@ -1099,7 +1128,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           const sizeArg =
             params.size === undefined ? "" : ` ${clampInt(params.size, 4, 8)}`;
           await dbg.cmd(`dbw ${perm}${sizeArg} @ ${ea}`, { signal });
-          const list = (await dbg.cmd("dblj", { signal })).trim();
+          const rawList8 = await dbg.cmd("dblj", { signal });
+          const list = rawList8.trim();
           return textResult(
             `debug: watch_add ${perm} @ ${ea}`,
             list || "(no watchpoints)",
@@ -1107,7 +1137,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "backtrace": {
-          const bt = (await dbg.cmd("dbtj", { signal })).trim();
+          const rawBt = await dbg.cmd("dbtj", { signal });
+          const bt = rawBt.trim();
           return textResult("debug: backtrace", bt || "(no backtrace)", {
             ctx,
             tool: "rizin_debug",
@@ -1116,14 +1147,16 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         // Inspection actions from the book's debugger chapters — each one
         // read-only command, no parameters, JSON where rizin offers it.
         case "maps": {
-          const out = (await dbg.cmd("dmj", { signal })).trim();
+          const rawOut14 = await dbg.cmd("dmj", { signal });
+          const out = rawOut14.trim();
           return textResult("debug: maps", out || "(no maps)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "modules": {
-          const out = (await dbg.cmd("dmmj", { signal })).trim();
+          const rawOut15 = await dbg.cmd("dmmj", { signal });
+          const out = rawOut15.trim();
           return textResult(
             "debug: modules",
             out || "(no modules — continue past the loader to see them)",
@@ -1131,49 +1164,56 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "libraries": {
-          const out = (await dbg.cmd("dmij", { signal })).trim();
+          const rawOut16 = await dbg.cmd("dmij", { signal });
+          const out = rawOut16.trim();
           return textResult("debug: libraries", out || "(no libraries)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "sections": {
-          const out = (await dbg.cmd("dmSj", { signal })).trim();
+          const rawOut17 = await dbg.cmd("dmSj", { signal });
+          const out = rawOut17.trim();
           return textResult("debug: sections", out || "(no sections)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "processes": {
-          const out = (await dbg.cmd("dpj", { signal })).trim();
+          const rawOut18 = await dbg.cmd("dpj", { signal });
+          const out = rawOut18.trim();
           return textResult("debug: processes", out || "(no processes)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "threads": {
-          const out = (await dbg.cmd("dpTj", { signal })).trim();
+          const rawOut19 = await dbg.cmd("dpTj", { signal });
+          const out = rawOut19.trim();
           return textResult("debug: threads", out || "(no threads)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "fds": {
-          const out = (await dbg.cmd("ddlj", { signal })).trim();
+          const rawOut20 = await dbg.cmd("ddlj", { signal });
+          const out = rawOut20.trim();
           return textResult("debug: fds", out || "(no file descriptors)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "signals": {
-          const out = (await dbg.cmd("dklj", { signal })).trim();
+          const rawOut21 = await dbg.cmd("dklj", { signal });
+          const out = rawOut21.trim();
           return textResult("debug: signals", out || "(no signal info)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "windows": {
-          const out = (await dbg.cmd("dW", { signal })).trim();
+          const rawOut22 = await dbg.cmd("dW", { signal });
+          const out = rawOut22.trim();
           return textResult("debug: windows", out || "(no windows)", {
             ctx,
             tool: "rizin_debug",
@@ -1183,16 +1223,18 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         // commands, no mutation subcommand). heaps lists the process heaps;
         // heap_blocks lists allocated blocks in a heap (optional addr).
         case "heaps": {
-          const out = (await dbg.cmd("dmhwj", { signal })).trim();
+          const rawOut23 = await dbg.cmd("dmhwj", { signal });
+          const out = rawOut23.trim();
           return textResult("debug: heaps", out || "(no heap info)", {
             ctx,
             tool: "rizin_debug",
           });
         }
         case "heap_blocks": {
-          const out = (
-            await dbg.cmd(`dmhwbj${ea ? ` @ ${ea}` : ""}`, { signal })
-          ).trim();
+          const rawOut24 = await dbg.cmd(`dmhwbj${ea ? ` @ ${ea}` : ""}`, {
+            signal,
+          });
+          const out = rawOut24.trim();
           return textResult(
             `debug: heap_blocks${ea ? ` @ ${ea}` : ""}`,
             out || "(no blocks)",
@@ -1203,7 +1245,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         // commands). These report "Can't find glibc mapped in memory" until
         // the loader has run and something has allocated; continue first.
         case "heap_arenas": {
-          const out = (await dbg.cmd("dmhga", { signal })).trim();
+          const rawOut25 = await dbg.cmd("dmhga", { signal });
+          const out = rawOut25.trim();
           return textResult(
             "debug: heap_arenas",
             out ||
@@ -1212,9 +1255,10 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           );
         }
         case "heap_chunks": {
-          const out = (
-            await dbg.cmd(`dmhgj${ea ? ` @ ${ea}` : ""}`, { signal })
-          ).trim();
+          const rawOut26 = await dbg.cmd(`dmhgj${ea ? ` @ ${ea}` : ""}`, {
+            signal,
+          });
+          const out = rawOut26.trim();
           return textResult(
             `debug: heap_chunks${ea ? ` @ ${ea}` : ""}`,
             out ||
@@ -1229,7 +1273,8 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
             /^(tcache|fast|unsorted|small|large)$/u.test(params.addr)
               ? ` ${params.addr}`
               : "";
-          const out = (await dbg.cmd(`dmhgd${bin}`, { signal })).trim();
+          const rawOut27 = await dbg.cmd(`dmhgd${bin}`, { signal });
+          const out = rawOut27.trim();
           return textResult(
             `debug: heap_bins${bin}`,
             out ||

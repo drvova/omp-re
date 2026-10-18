@@ -109,7 +109,8 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
 
   test("xor reveals the hidden string, and the buffer is restored afterward", async () => {
     const rz = getState(ctx).rz!;
-    const before = (await rz.cmd("p8 24 @ 0x10")).trim();
+    const rawBefore = await rz.cmd("p8 24 @ 0x10");
+    const before = rawBefore.trim();
 
     const out = textOf(
       await run({ addr: "0x10", key: "5a", op: "xor", size: 24 })
@@ -117,28 +118,28 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
     expect(out).toContain(PLAINTEXT);
 
     // The write cache was reset: the raw (still-xored) bytes are back.
-    expect((await rz.cmd("p8 24 @ 0x10")).trim()).toBe(before);
+    const p8Output = await rz.cmd("p8 24 @ 0x10");
+    expect(p8Output.trim()).toBe(before);
     // And nothing was committed to the write cache.
-    expect((await rz.cmd("wcj")).trim()).toMatch(/^\[\]$|^$/u);
+    const wcjOutput = await rz.cmd("wcj");
+    expect(wcjOutput.trim()).toMatch(/^\[\]$|^$/u);
   });
 
   test("a bad size is rejected before any transform", async () => {
-    expect(
-      (await captureError(run({ addr: "0x10", key: "5a", op: "xor", size: 0 })))
-        .message
-    ).toContain("size must be an integer");
-    expect(
-      (
-        await captureError(
-          run({ addr: "0x10", key: "5a", op: "xor", size: 99_999_999 })
-        )
-      ).message
-    ).toContain("size must be an integer");
+    const captureErrorResult = await captureError(
+      run({ addr: "0x10", key: "5a", op: "xor", size: 0 })
+    );
+    expect(captureErrorResult.message).toContain("size must be an integer");
+    const captureErrorResult2 = await captureError(
+      run({ addr: "0x10", key: "5a", op: "xor", size: 99_999_999 })
+    );
+    expect(captureErrorResult2.message).toContain("size must be an integer");
   });
 
   test("an unknown cipher surfaces rizin's error and still restores the buffer", async () => {
     const rz = getState(ctx).rz!;
-    const before = (await rz.cmd("p8 24 @ 0x10")).trim();
+    const rawBefore2 = await rz.cmd("p8 24 @ 0x10");
+    const before = rawBefore2.trim();
     const res = await run({
       addr: "0x10",
       algo: "nosuchcipher",
@@ -147,6 +148,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
       size: 16,
     });
     expect(res.isError).toBe(true);
-    expect((await rz.cmd("p8 24 @ 0x10")).trim()).toBe(before);
+    const p8Output2 = await rz.cmd("p8 24 @ 0x10");
+    expect(p8Output2.trim()).toBe(before);
   });
 });

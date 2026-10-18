@@ -148,7 +148,8 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
           }
           const ea = validateAddr(params.addr);
           await rz.cmd(`aezi @ ${ea}`, { signal });
-          const vars = (await rz.cmd("aezvj", { signal })).trim();
+          const rawVars = await rz.cmd("aezvj", { signal });
+          const vars = rawVars.trim();
           // The VM inherits the rizin build's addressing: a mismatched build
           // emulates at a file-relative base with the build-width register
           // names. Say so in the result the agent will read.
@@ -162,9 +163,11 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
         }
         case "step": {
           const n = clampCount(params.count);
-          const out = (
-            await rz.cmd(`aezsej ${n}`, { signal, timeoutMs: emuTimeout })
-          ).trim();
+          const rawOut = await rz.cmd(`aezsej ${n}`, {
+            signal,
+            timeoutMs: emuTimeout,
+          });
+          const out = rawOut.trim();
           return textResult(
             `emulate: step ${n}`,
             out || "(no changes — init the VM first)",
@@ -177,7 +180,8 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
           }
           const ea = validateAddr(params.addr);
           await rz.cmd(`aezsu ${ea}`, { signal, timeoutMs: emuTimeout });
-          const vars = (await rz.cmd("aezvj", { signal })).trim();
+          const rawVars2 = await rz.cmd("aezvj", { signal });
+          const vars = rawVars2.trim();
           return textResult(
             `emulate: step_until ${ea}`,
             vars || "(no VM state — the run may have stalled)",
@@ -185,7 +189,8 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
           );
         }
         case "vars": {
-          const vars = (await rz.cmd("aezvj", { signal })).trim();
+          const rawVars3 = await rz.cmd("aezvj", { signal });
+          const vars = rawVars3.trim();
           return textResult(
             "emulate: vars",
             vars || "(no VM state — init first)",
@@ -200,9 +205,8 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
           const value = validateVarValue(params.value);
           // The set form echoes the assignment ("rsp = 0x7ff000"); the bare
           // print form (`aezv rsp`) is empty in practice — use the echo.
-          const out = (
-            await rz.cmd(`aezv ${name} ${value}`, { signal })
-          ).trim();
+          const rawOut2 = await rz.cmd(`aezv ${name} ${value}`, { signal });
+          const out = rawOut2.trim();
           return textResult(`emulate: set_var ${name}`, out || `${name} set`, {
             ctx,
             tool: "rizin_emulate",

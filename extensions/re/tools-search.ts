@@ -45,11 +45,13 @@ const functionRange = async (
   nameOrAddr: string,
   signal?: AbortSignal
 ): Promise<{ from: number; to: number; name: string }> => {
-  const fn = (
-    await rz.cmdj<AfijBounds[]>(`afij @ ${validateAddr(nameOrAddr)}`, {
+  const rawFn = await rz.cmdj<AfijBounds[]>(
+    `afij @ ${validateAddr(nameOrAddr)}`,
+    {
       signal,
-    })
-  )?.[0];
+    }
+  );
+  const fn = rawFn?.[0];
   if (!fn) {
     throw new Error(
       `omp-re: no function at ${JSON.stringify(nameOrAddr)} to scope the search to`
@@ -83,9 +85,12 @@ const withSearchScope = async <T>(
   signal: AbortSignal | undefined,
   fn: () => Promise<T>
 ): Promise<T> => {
-  const savedIn = (await rz.cmd("e search.in", { signal })).trim() || "io.maps";
-  const savedFrom = (await rz.cmd("e search.from", { signal })).trim() || "0";
-  const savedTo = (await rz.cmd("e search.to", { signal })).trim() || "0";
+  const rawSavedIn = await rz.cmd("e search.in", { signal });
+  const savedIn = rawSavedIn.trim() || "io.maps";
+  const rawSavedFrom = await rz.cmd("e search.from", { signal });
+  const savedFrom = rawSavedFrom.trim() || "0";
+  const rawSavedTo = await rz.cmd("e search.to", { signal });
+  const savedTo = rawSavedTo.trim() || "0";
   try {
     await rz.cmd(`e search.in=range`, { signal });
     await rz.cmd(`e search.from=${from}`, { signal });

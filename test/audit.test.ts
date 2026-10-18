@@ -269,10 +269,9 @@ describe("audit log", () => {
       },
       ctx
     );
+    const readAuditLinesResult = await readAuditLines(sessionId);
     expect(
-      (await readAuditLines(sessionId)).map(
-        (l) => (JSON.parse(l) as { tool: string }).tool
-      )
+      readAuditLinesResult.map((l) => (JSON.parse(l) as { tool: string }).tool)
     ).toEqual(["hash_binary"]);
   });
 
@@ -301,9 +300,8 @@ describe("audit log", () => {
       },
       ctx
     );
-    const lines = (await readAuditLines(sessionId)).map(
-      (l) => JSON.parse(l) as Record<string, unknown>
-    );
+    const rawLines = await readAuditLines(sessionId);
+    const lines = rawLines.map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({
       approved: false,

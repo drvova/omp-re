@@ -139,14 +139,11 @@ export const decompileAt = async (
 ): Promise<DecompileOutcome | null> => {
   const kind = await resolveDecompiler(rz, signal);
   if (kind) {
-    const code = (
-      await rz.cmd(`${kind} @ ${ea}`, {
-        signal,
-        timeoutMs: DECOMPILE_TIMEOUT_MS,
-      })
-    )
-      .replaceAll("\r\n", "\n")
-      .replace(/^\n+/u, "");
+    const rawCode = await rz.cmd(`${kind} @ ${ea}`, {
+      signal,
+      timeoutMs: DECOMPILE_TIMEOUT_MS,
+    });
+    const code = rawCode.replaceAll("\r\n", "\n").replace(/^\n+/u, "");
     if (code.trim().length > 0) {
       return { code, kind };
     }

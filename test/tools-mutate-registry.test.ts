@@ -61,8 +61,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
       (await rz.cmdj<Record<string, AfvlVar[]>>(`afvlj @ ${mainEa}`)) ?? {};
     return Object.values(grouped).flat();
   };
-  const fnName = async (): Promise<string | undefined> =>
-    (await rz.cmdj<{ name: string }[]>(`afij @ ${mainEa}`))?.[0]?.name;
+  const fnName = async (): Promise<string | undefined> => {
+    const afijJson = await rz.cmdj<{ name: string }[]>(`afij @ ${mainEa}`);
+    return afijJson?.[0]?.name;
+  };
 
   registerMutateTools(pi);
 
@@ -139,13 +141,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 
   describe("rename_function", () => {
     test("an invalid name throws the validateIdent literal before touching rizin", async () => {
-      expect(
-        (
-          await captureError(
-            run("rename_function", { addr: "main", new: "1bad" })
-          )
-        ).message
-      ).toBe('omp-re: invalid new: "1bad"');
+      const captureErrorResult = await captureError(
+        run("rename_function", { addr: "main", new: "1bad" })
+      );
+      expect(captureErrorResult.message).toBe('omp-re: invalid new: "1bad"');
     });
 
     test("lands, is keyed on the function's start ea, records an annotation, and /re undo reverts it", async () => {
@@ -177,17 +176,14 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 
   describe("rename_variable", () => {
     test("a malformed new name throws the validateIdent literal before touching rizin", async () => {
-      expect(
-        (
-          await captureError(
-            run("rename_variable", {
-              addr: "main",
-              new: "1bad",
-              old: firstVar.name,
-            })
-          )
-        ).message
-      ).toBe('omp-re: invalid new: "1bad"');
+      const captureErrorResult2 = await captureError(
+        run("rename_variable", {
+          addr: "main",
+          new: "1bad",
+          old: firstVar.name,
+        })
+      );
+      expect(captureErrorResult2.message).toBe('omp-re: invalid new: "1bad"');
     });
 
     test("an unknown variable is reported with the variables that do exist", async () => {
@@ -207,12 +203,14 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
       expect(textOf(result)).toBe(
         `rename_variable: ${JSON.stringify(firstVar.name)} -> "omp_re_var" @ ${mainEa}`
       );
-      const after = (await vars()).map((v) => v.name);
+      const rawAfter = await vars();
+      const after = rawAfter.map((v) => v.name);
       expect(after).toContain("omp_re_var");
       expect(after).not.toContain(firstVar.name);
 
       await undoLastAnnotation(pi, ctx);
-      const reverted = (await vars()).map((v) => v.name);
+      const rawReverted = await vars();
+      const reverted = rawReverted.map((v) => v.name);
       expect(reverted).toContain(firstVar.name);
       expect(reverted).not.toContain("omp_re_var");
     });
@@ -228,59 +226,69 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
     // no pre-existing comment, so this is unchanged there).
     let baselineComment: string;
     beforeAll(async () => {
-      baselineComment = (await rz.cmd(`CC. @ ${mainEa}`)).trim();
+      const CCOutput = await rz.cmd(`CC. @ ${mainEa}`);
+      baselineComment = CCOutput.trim();
     });
 
     test("replaces rather than appends, independently verified via CC.", async () => {
       await run("set_comment", { addr: mainEa, text: "first" });
       await run("set_comment", { addr: mainEa, text: "second" });
-      expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("second");
+      const CCOutput2 = await rz.cmd(`CC. @ ${mainEa}`);
+      expect(CCOutput2.trim()).toBe("second");
     });
 
     test("rizin metacharacters in the text are stored literally and execute nothing", async () => {
       const text = "x; echo INJECTED @ 0x0 ~ | > out `y` $(z) #";
       const result = await run("set_comment", { addr: mainEa, text });
       expect(textOf(result)).not.toContain("INJECTED\n");
-      expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe(text);
+      const CCOutput3 = await rz.cmd(`CC. @ ${mainEa}`);
+      expect(CCOutput3.trim()).toBe(text);
     });
 
     test("multi-line text is rejected", async () => {
-      expect(
-        (await captureError(run("set_comment", { addr: mainEa, text: "a\nb" })))
-          .message
-      ).toBe("omp-re: invalid text: contains forbidden character");
+      const captureErrorResult3 = await captureError(
+        run("set_comment", { addr: mainEa, text: "a\nb" })
+      );
+      expect(captureErrorResult3.message).toBe(
+        "omp-re: invalid text: contains forbidden character"
+      );
     });
 
     test("/re undo steps back through comment history, then clears", async () => {
       await undoLastAnnotation(pi, ctx);
-      expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("second");
+      const CCOutput4 = await rz.cmd(`CC. @ ${mainEa}`);
+      expect(CCOutput4.trim()).toBe("second");
       await undoLastAnnotation(pi, ctx);
-      expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe("first");
+      const CCOutput5 = await rz.cmd(`CC. @ ${mainEa}`);
+      expect(CCOutput5.trim()).toBe("first");
       await undoLastAnnotation(pi, ctx);
-      expect((await rz.cmd(`CC. @ ${mainEa}`)).trim()).toBe(baselineComment);
+      const CCOutput6 = await rz.cmd(`CC. @ ${mainEa}`);
+      expect(CCOutput6.trim()).toBe(baselineComment);
     });
   });
 
   describe("set_prototype", () => {
     test("lands (tolerating rizin's trailing ;), and /re undo restores the old signature", async () => {
-      const before = (await rz.cmd(`afs @ ${mainEa}`)).trim();
+      const rawBefore = await rz.cmd(`afs @ ${mainEa}`);
+      const before = rawBefore.trim();
       const sig = `int ${mainName}(int argc, char **argv)`;
       const result = await run("set_prototype", { addr: mainEa, sig });
       expect(textOf(result)).toContain(`-> ${JSON.stringify(sig)} @ ${mainEa}`);
-      expect((await rz.cmd(`afs @ ${mainEa}`)).trim()).toBe(`${sig};`);
+      const afsOutput = await rz.cmd(`afs @ ${mainEa}`);
+      expect(afsOutput.trim()).toBe(`${sig};`);
 
       await undoLastAnnotation(pi, ctx);
-      expect((await rz.cmd(`afs @ ${mainEa}`)).trim()).toBe(before);
+      const afsOutput2 = await rz.cmd(`afs @ ${mainEa}`);
+      expect(afsOutput2.trim()).toBe(before);
     });
 
     test("a forbidden character is rejected before touching rizin", async () => {
-      expect(
-        (
-          await captureError(
-            run("set_prototype", { addr: mainEa, sig: "int f(void); !id" })
-          )
-        ).message
-      ).toBe('omp-re: invalid sig: forbidden character ";"');
+      const captureErrorResult4 = await captureError(
+        run("set_prototype", { addr: mainEa, sig: "int f(void); !id" })
+      );
+      expect(captureErrorResult4.message).toBe(
+        'omp-re: invalid sig: forbidden character ";"'
+      );
     });
   });
 
@@ -294,12 +302,14 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
       expect(textOf(result)).toBe(
         `set_variable_type: ${firstVar.name}: ${JSON.stringify(firstVar.type)} -> "char *" @ ${mainEa}`
       );
-      expect((await vars()).find((v) => v.name === firstVar.name)?.type).toBe(
+      const varsResult = await vars();
+      expect(varsResult.find((v) => v.name === firstVar.name)?.type).toBe(
         "char *"
       );
 
       await undoLastAnnotation(pi, ctx);
-      expect((await vars()).find((v) => v.name === firstVar.name)?.type).toBe(
+      const varsResult2 = await vars();
+      expect(varsResult2.find((v) => v.name === firstVar.name)?.type).toBe(
         firstVar.type
       );
     });
@@ -317,7 +327,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
     });
 
     test("nothing is left to undo once every annotation is reverted", async () => {
-      expect((await captureError(undoLastAnnotation(pi, ctx))).message).toBe(
+      const captureErrorResult5 = await captureError(
+        undoLastAnnotation(pi, ctx)
+      );
+      expect(captureErrorResult5.message).toBe(
         "omp-re: no annotation left to undo"
       );
     });
@@ -340,13 +353,18 @@ describe.skipIf(!canRunRizin)(
     let freeEa: string;
 
     const fnStart = async (ea: string): Promise<string | undefined> => {
-      const fn = (await rz.cmdj<{ offset: number }[]>(`afij @ ${ea}`))?.[0];
+      const rawFn = await rz.cmdj<{ offset: number }[]>(`afij @ ${ea}`);
+      const fn = rawFn?.[0];
       return fn ? eaFromOffset(addrOf(fn as never)!) : undefined;
     };
-    const flagName = async (ea: string): Promise<string> =>
-      (await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`))?.name ?? "";
-    const ccOf = async (ea: string): Promise<string> =>
-      (await rz.cmd(`afc @ ${ea}`)).trim();
+    const flagName = async (ea: string): Promise<string> => {
+      const fdjJson = await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`);
+      return fdjJson?.name ?? "";
+    };
+    const ccOf = async (ea: string): Promise<string> => {
+      const afcOutput = await rz.cmd(`afc @ ${ea}`);
+      return afcOutput.trim();
+    };
 
     registerMutateTools(pi);
 
@@ -440,8 +458,12 @@ describe.skipIf(!canRunRizin)(
     });
     const hintAt = async (
       ea: string
-    ): Promise<{ arch?: string; bits?: number } | undefined> =>
-      (await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`))?.[0];
+    ): Promise<{ arch?: string; bits?: number } | undefined> => {
+      const ahljJson = await rz.cmdj<{ arch?: string; bits?: number }[]>(
+        `ahl.j @ ${ea}`
+      );
+      return ahljJson?.[0];
+    };
 
     test("set_arch_hint sets an arch/bits hint (Thumb), independently verified, and /re undo removes it", async () => {
       expect(await hintAt(mainEa)).toBeUndefined();
@@ -458,8 +480,12 @@ describe.skipIf(!canRunRizin)(
       await undoLastAnnotation(pi, ctx);
       expect(await hintAt(mainEa)).toBeUndefined();
     });
-    const hintKey = async (ea: string, key: string): Promise<unknown> =>
-      (await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`))?.[0]?.[key];
+    const hintKey = async (ea: string, key: string): Promise<unknown> => {
+      const ahljJson2 = await rz.cmdj<Record<string, unknown>[]>(
+        `ahl.j @ ${ea}`
+      );
+      return ahljJson2?.[0]?.[key];
+    };
 
     test("set_hint sets analysis hints (immediate base, opcode type), records the read-back value, and /re undo removes each", async () => {
       // immediate_base: input `h` is stored as the numeric code 16; the tool records the read-back, not the request
@@ -498,24 +524,18 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("set_hint rejects a malformed value for the chosen hint before touching rizin", async () => {
-      expect(
-        (
-          await captureError(
-            run("set_hint", { addr: "main", hint: "opcode_size", value: "0" })
-          )
-        ).message
-      ).toContain("invalid opcode_size");
-      expect(
-        (
-          await captureError(
-            run("set_hint", {
-              addr: "main",
-              hint: "immediate_base",
-              value: "bogus",
-            })
-          )
-        ).message
-      ).toContain("invalid immediate_base");
+      const captureErrorResult6 = await captureError(
+        run("set_hint", { addr: "main", hint: "opcode_size", value: "0" })
+      );
+      expect(captureErrorResult6.message).toContain("invalid opcode_size");
+      const captureErrorResult7 = await captureError(
+        run("set_hint", {
+          addr: "main",
+          hint: "immediate_base",
+          value: "bogus",
+        })
+      );
+      expect(captureErrorResult7.message).toContain("invalid immediate_base");
     });
 
     test("define_variable adds a stack local, independently verified via afvlj, and /re undo removes it", async () => {
@@ -660,9 +680,10 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("set_data rejects a non-positive size before touching rizin", async () => {
-      expect(
-        (await captureError(run("set_data", { addr: "main", size: 0 }))).message
-      ).toContain("positive integer");
+      const captureErrorResult8 = await captureError(
+        run("set_data", { addr: "main", size: 0 })
+      );
+      expect(captureErrorResult8.message).toContain("positive integer");
     });
 
     test("define_function creates a function where rizin missed one, and /re undo removes it", async () => {

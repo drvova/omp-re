@@ -94,7 +94,8 @@ export const resolveNumericAddr = async (
   addr: string,
   signal?: AbortSignal
 ): Promise<number> => {
-  const raw = (await rz.cmd(`%v ${validateAddr(addr)}`, { signal })).trim();
+  const rawRaw = await rz.cmd(`%v ${validateAddr(addr)}`, { signal });
+  const raw = rawRaw.trim();
   const value = Number.parseInt(raw, 16);
   if (!Number.isFinite(value) || value === 0) {
     throw new Error(`omp-re: could not resolve address: ${addr}`);
@@ -485,7 +486,8 @@ export class RzSession {
 
   /** Run a command expecting a JSON frame. Returns null for empty output (rizin's reply to an invalid address or an unknown command) or anything that isn't JSON. */
   async cmdj<T>(command: string, options: CmdOptions = {}): Promise<T | null> {
-    const raw = (await this.cmd(command, options)).trim();
+    const rawRaw2 = await this.cmd(command, options);
+    const raw = rawRaw2.trim();
     if (!raw.startsWith("{") && !raw.startsWith("[")) {
       return null;
     }
