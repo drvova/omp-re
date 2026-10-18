@@ -688,6 +688,11 @@ describe.skipIf(!canRunRizin)(
     });
   }
 );
+const render = (component: { render: (width: number) => readonly string[] }) =>
+  component
+    .render(200)
+    .map((line) => line.trimEnd())
+    .join("\n");
 
 describe("reRenderers", () => {
   const theme = {
@@ -697,14 +702,6 @@ describe("reRenderers", () => {
     styledSymbol: (key: string) =>
       key === "status.error" ? "x" : key === "status.success" ? "ok" : "*",
   } as never;
-  const render = (component: {
-    render: (width: number) => readonly string[];
-  }) =>
-    component
-      .render(200)
-      .map((line) => line.trimEnd())
-      .join("\n");
-
   test("renderCall shows the title and the call's subject", () => {
     const { renderCall } = reRenderers({
       body: "code",

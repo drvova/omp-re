@@ -80,6 +80,7 @@ export interface Harness {
   notifications: { message: string; type?: string }[];
   tool: (name: string) => ToolDefinition<any, any>;
 }
+const noop = () => {};
 
 export const makeHarness = (sessionId: string): Harness => {
   const entries: StubEntry[] = [];
@@ -87,8 +88,6 @@ export const makeHarness = (sessionId: string): Harness => {
   const notifications: { message: string; type?: string }[] = [];
   const tools = new Map<string, ToolDefinition<any, any>>();
   let counter = 0;
-
-  const noop = () => {};
   const pi = {
     zod,
     logger: { debug: noop, error: noop, info: noop, warn: noop },

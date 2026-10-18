@@ -269,10 +269,13 @@ describe.skipIf(!canRunLive)(
         [v1, "v1.c"],
         [v2, "v2.c"],
       ] as const) {
-        const proc = Bun.spawn([CC!, "-O0", "-o", out, nodePath.join(dir, file)], {
-          stderr: "pipe",
-          stdout: "pipe",
-        });
+        const proc = Bun.spawn(
+          [CC!, "-O0", "-o", out, nodePath.join(dir, file)],
+          {
+            stderr: "pipe",
+            stdout: "pipe",
+          }
+        );
         if ((await proc.exited) !== 0) {
           throw new Error(`inherit test: compiling ${file} failed`);
         }

@@ -560,7 +560,9 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       const dir = nodePath.join(outDir, "t_session");
       expect(saved).toContain(dir);
       // rizin writes the session's sdbs into the directory
-      expect(readFileSync(nodePath.join(dir, "session.sdb")).length).toBeGreaterThan(0);
+      expect(
+        readFileSync(nodePath.join(dir, "session.sdb")).length
+      ).toBeGreaterThan(0);
       // load it back without error
       expect(textOf(await run("trace_load", { file: "t_session" }))).toContain(
         "loaded the trace session"

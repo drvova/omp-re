@@ -438,14 +438,12 @@ describe.skipIf(!canRunRizin)(
       await undoLastAnnotation(pi, ctx);
       expect(await flagName(freeEa)).toBe(old);
     });
+    const hintAt = async (
+      ea: string
+    ): Promise<{ arch?: string; bits?: number } | undefined> =>
+      (await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`))?.[0];
 
     test("set_arch_hint sets an arch/bits hint (Thumb), independently verified, and /re undo removes it", async () => {
-      const hintAt = async (
-        ea: string
-      ): Promise<{ arch?: string; bits?: number } | undefined> =>
-        (
-          await rz.cmdj<{ arch?: string; bits?: number }[]>(`ahl.j @ ${ea}`)
-        )?.[0];
       expect(await hintAt(mainEa)).toBeUndefined();
       const result = await run("set_arch_hint", {
         addr: "main",
@@ -460,10 +458,10 @@ describe.skipIf(!canRunRizin)(
       await undoLastAnnotation(pi, ctx);
       expect(await hintAt(mainEa)).toBeUndefined();
     });
+    const hintKey = async (ea: string, key: string): Promise<unknown> =>
+      (await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`))?.[0]?.[key];
 
     test("set_hint sets analysis hints (immediate base, opcode type), records the read-back value, and /re undo removes each", async () => {
-      const hintKey = async (ea: string, key: string): Promise<unknown> =>
-        (await rz.cmdj<Record<string, unknown>[]>(`ahl.j @ ${ea}`))?.[0]?.[key];
       // immediate_base: input `h` is stored as the numeric code 16; the tool records the read-back, not the request
       expect(await hintKey(mainEa, "immbase")).toBeUndefined();
       const r1 = await run("set_hint", {
@@ -555,16 +553,16 @@ describe.skipIf(!canRunRizin)(
       await undoLastAnnotation(pi, ctx);
       expect(await varNames()).not.toContain("omp_re_local");
     });
+    const globalNamed = async (
+      name: string
+    ): Promise<{ type?: string; addr?: string } | undefined> =>
+      (
+        (await rz.cmdj<{ name?: string; type?: string; addr?: string }[]>(
+          "avglj"
+        )) ?? []
+      ).find((g) => g.name === name);
 
     test("define_global defines a named, typed global, independently verified via avglj, and /re undo removes it", async () => {
-      const globalNamed = async (
-        name: string
-      ): Promise<{ type?: string; addr?: string } | undefined> =>
-        (
-          (await rz.cmdj<{ name?: string; type?: string; addr?: string }[]>(
-            "avglj"
-          )) ?? []
-        ).find((g) => g.name === name);
       // a data address at/after main's end — somewhere ordinary to anchor a global
       const dataEa = eaFromOffset(Number.parseInt(mainEa, 16) + 0x4_00);
       expect(await globalNamed("omp_re_glob")).toBeUndefined();

@@ -55,15 +55,14 @@ describe("canonicalizeRizinOutput / canonicalHash (no rizin needed)", () => {
     expect(canonicalHash("imports: 3")).not.toBe(canonicalHash("imports: 4"));
   });
 });
+const rec = (over: Partial<EvidenceRecord>): EvidenceRecord => ({
+  id: "x",
+  summary: "",
+  tool: "rizin_command",
+  ...over,
+});
 
 describe("recordedStatus (no rizin needed)", () => {
-  const rec = (over: Partial<EvidenceRecord>): EvidenceRecord => ({
-    id: "x",
-    summary: "",
-    tool: "rizin_command",
-    ...over,
-  });
-
   test("reproHash + binarySha256 => reproducible", () => {
     expect(
       recordedStatus(rec({ binarySha256: HEX64("b"), reproHash: HEX64("a") }))

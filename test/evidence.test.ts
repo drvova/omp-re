@@ -97,39 +97,38 @@ describe("rebuildEvidenceIndex", () => {
     expect(state.evidenceByAddr.get("0x4da0")).toBe("ev-a");
   });
 });
+/** A harness whose pi.on captures the tool_result handler, so it can be driven exactly as omp would. */
+const hooked = (sessionId: string) => {
+  const h = makeHarness(sessionId);
+  let handler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+  (h.pi as unknown as { on: (name: string, fn: typeof handler) => void }).on = (
+    name,
+    fn
+  ) => {
+    if (name === "tool_result") {
+      handler = fn;
+    }
+  };
+  registerEvidenceStore(h.pi as ExtensionAPI);
+  const fire = (toolName: string, isError = false) =>
+    handler!(
+      {
+        content: [
+          { text: "rizin> pdf @ sym.f\nimul eax, eax, 0x21", type: "text" },
+        ],
+        details: { ea: "0x10" },
+        input: { addr: "sym.f", command: "pdf" },
+        isError,
+        toolCallId: "t",
+        toolName,
+        type: "tool_result",
+      },
+      h.ctx
+    ) as Promise<{ content?: { type: string; text?: string }[] } | undefined>;
+  return { fire, h };
+};
 
 describe("the tool_result evidence hook", () => {
-  /** A harness whose pi.on captures the tool_result handler, so it can be driven exactly as omp would. */
-  const hooked = (sessionId: string) => {
-    const h = makeHarness(sessionId);
-    let handler:
-      | ((event: unknown, ctx: unknown) => Promise<unknown>)
-      | undefined;
-    (h.pi as unknown as { on: (name: string, fn: typeof handler) => void }).on =
-      (name, fn) => {
-        if (name === "tool_result") {
-          handler = fn;
-        }
-      };
-    registerEvidenceStore(h.pi as ExtensionAPI);
-    const fire = (toolName: string, isError = false) =>
-      handler!(
-        {
-          content: [
-            { text: "rizin> pdf @ sym.f\nimul eax, eax, 0x21", type: "text" },
-          ],
-          details: { ea: "0x10" },
-          input: { addr: "sym.f", command: "pdf" },
-          isError,
-          toolCallId: "t",
-          toolName,
-          type: "tool_result",
-        },
-        h.ctx
-      ) as Promise<{ content?: { type: string; text?: string }[] } | undefined>;
-    return { fire, h };
-  };
-
   test("records an evidence-tier result and tags what the model sees with its id", async () => {
     const { h, fire } = hooked("hook-tag");
     const result = await fire("rizin_command");

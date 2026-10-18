@@ -60,10 +60,10 @@ const gitLog = (...revArgs) => {
       return { hash: e.slice(0, sep), message: e.slice(sep + 1) };
     });
 };
+const isZero = (s) => !s || /^0+$/u.test(s);
 
 /** Resolve the commit range to inspect, tolerating a missing/zero/invalid base. */
 const resolveCommits = () => {
-  const isZero = (s) => !s || /^0+$/u.test(s);
   if (!isZero(base)) {
     try {
       return gitLog(`${base}..${head}`);

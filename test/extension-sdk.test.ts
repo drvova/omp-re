@@ -50,39 +50,37 @@ interface Harness {
   editor: () => string;
   shutdown: () => Promise<void>;
 }
+const noop = () => {};
 
 /** A minimal ExtensionUIContext: records what the extension tells the user, renders nothing. */
-const makeUi = (notes: string[], editor: { text: string }) => {
-  const noop = () => {};
-  return {
-    addAutocompleteProvider: noop,
-    confirm: async () => true,
-    custom: async () => {},
-    editor: async () => {},
-    getAllThemes: async () => [],
-    getEditorText: () => editor.text,
-    getTheme: async () => {},
-    getToolsExpanded: () => false,
-    input: async () => {},
-    notify: (message: string, type?: string) =>
-      notes.push(`[${type ?? "info"}] ${message}`),
-    onTerminalInput: () => noop,
-    pasteToEditor: noop,
-    select: async () => {},
-    setEditorComponent: noop,
-    setEditorText: (text: string) => {
-      editor.text = text;
-    },
-    setFooter: noop,
-    setHeader: noop,
-    setStatus: noop,
-    setTheme: async () => ({ success: true }),
-    setTitle: noop,
-    setToolsExpanded: noop,
-    setWidget: noop,
-    setWorkingMessage: noop,
-  };
-};
+const makeUi = (notes: string[], editor: { text: string }) => ({
+  addAutocompleteProvider: noop,
+  confirm: async () => true,
+  custom: async () => {},
+  editor: async () => {},
+  getAllThemes: async () => [],
+  getEditorText: () => editor.text,
+  getTheme: async () => {},
+  getToolsExpanded: () => false,
+  input: async () => {},
+  notify: (message: string, type?: string) =>
+    notes.push(`[${type ?? "info"}] ${message}`),
+  onTerminalInput: () => noop,
+  pasteToEditor: noop,
+  select: async () => {},
+  setEditorComponent: noop,
+  setEditorText: (text: string) => {
+    editor.text = text;
+  },
+  setFooter: noop,
+  setHeader: noop,
+  setStatus: noop,
+  setTheme: async () => ({ success: true }),
+  setTitle: noop,
+  setToolsExpanded: noop,
+  setWidget: noop,
+  setWorkingMessage: noop,
+});
 
 const boot = async (sessionManager: unknown): Promise<Harness> => {
   const sdk = await import("@oh-my-pi/pi-coding-agent");
@@ -189,6 +187,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
     ).rejects.toThrow("omp-re: no binary open");
   });
 });
+const run = (h: Harness, name: string, params: Record<string, unknown>) =>
+  h.session.getToolByName(name)!.execute(`t-${name}`, params);
 
 describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
   // Opens the binary (full `aaa`) once, then replays into a freshly reopened
@@ -199,9 +199,6 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
     const sessionDir = nodePath.join(agentDir, "sessions");
     const first = await boot(SessionManager.create(tmpdir(), sessionDir));
     await first.session.sessionManager.ensureOnDisk();
-    const run = (h: Harness, name: string, params: Record<string, unknown>) =>
-      h.session.getToolByName(name)!.execute(`t-${name}`, params);
-
     await run(first, "open_binary", { path: TEST_BINARY });
     await run(first, "rename_function", {
       addr: "main",

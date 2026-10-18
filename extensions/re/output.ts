@@ -54,7 +54,9 @@ const assertRizinSafePath = (path: string): void => {
 /** The directory omp-re writes output artifacts to (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`). */
 export const outputDir = (): string => {
   const configured = (process.env.OMPRE_OUTPUT_DIR ?? "").trim();
-  return configured === "" ? nodePath.join(tmpdir(), "omp-re-out") : nodePath.resolve(configured);
+  return configured === ""
+    ? nodePath.join(tmpdir(), "omp-re-out")
+    : nodePath.resolve(configured);
 };
 
 /**
@@ -86,7 +88,10 @@ export const prepareOutputPath = async (basename: string): Promise<string> => {
   // Defense in depth: safeBasename already forbids separators, but confirm the
   // join stayed inside the directory. `sep` (not a literal `/`) so the
   // containment check holds on Windows, where resolve/join use `\`.
-  if (full !== nodePath.join(dir, basename) || !full.startsWith(`${dir}${nodePath.sep}`)) {
+  if (
+    full !== nodePath.join(dir, basename) ||
+    !full.startsWith(`${dir}${nodePath.sep}`)
+  ) {
     throw new Error(
       `omp-re: refusing to write outside the output directory: ${JSON.stringify(basename)}`
     );
@@ -119,7 +124,10 @@ export const outputSubdir = async (
 ): Promise<string> => {
   const dir = outputDir();
   const full = nodePath.resolve(dir, safeBasename(basename));
-  if (full !== nodePath.join(dir, basename) || !full.startsWith(`${dir}${nodePath.sep}`)) {
+  if (
+    full !== nodePath.join(dir, basename) ||
+    !full.startsWith(`${dir}${nodePath.sep}`)
+  ) {
     throw new Error(
       `omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`
     );

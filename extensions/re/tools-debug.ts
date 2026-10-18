@@ -316,6 +316,12 @@ const programCounter = async (
   }
   return (await dbg.cmd("dr PC", { signal })).trim();
 };
+const clean = (key: string, value: string): string => {
+  if (/[\r\n]/u.test(value)) {
+    throw new Error(`omp-re: debug: run.${key} must not contain line breaks`);
+  }
+  return value;
+};
 
 /**
  * Build rz-run directives for the debug launch (book: tools/rz-run — rizin
@@ -331,12 +337,6 @@ export const buildRunDirectives = (run?: unknown): string[] | undefined => {
   if (typeof run !== "object" || run === null || Array.isArray(run)) {
     throw new Error("omp-re: debug: run must be an object of rz-run settings");
   }
-  const clean = (key: string, value: string): string => {
-    if (/[\r\n]/u.test(value)) {
-      throw new Error(`omp-re: debug: run.${key} must not contain line breaks`);
-    }
-    return value;
-  };
   const directives: string[] = [];
   const r = run as Record<string, unknown>;
   for (const [key, raw] of Object.entries(r)) {

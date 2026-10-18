@@ -692,21 +692,16 @@ describe("mapFileCommand", () => {
     expect(() => validateMapPerm("rwz")).toThrow("invalid permission");
   });
 });
+const custom = (id: string, customType: string, data: unknown): SessionEntry =>
+  ({ customType, data, id, type: "custom" }) as unknown as SessionEntry;
+const ann = (ea: string, newValue: string) => ({
+  ea,
+  kind: "rename_function",
+  newValue,
+  oldValue: "old",
+});
 
 describe("liveAnnotations", () => {
-  const custom = (
-    id: string,
-    customType: string,
-    data: unknown
-  ): SessionEntry =>
-    ({ customType, data, id, type: "custom" }) as unknown as SessionEntry;
-  const ann = (ea: string, newValue: string) => ({
-    ea,
-    kind: "rename_function",
-    newValue,
-    oldValue: "old",
-  });
-
   test("attributes each annotation to the binary opened before it", () => {
     const entries = [
       custom("b1", "re.binary", { path: "/bin/a" }),
@@ -808,6 +803,21 @@ describe("parseRizinVersionArch", () => {
     ).toBeUndefined();
   });
 });
+const pe = (machine: number): number[] => {
+  const b = Array.from({ length: 0x48 }, () => 0);
+  b[0] = 0x4d;
+  // MZ
+  b[1] = 0x5a;
+  // e_lfanew = 0x40
+  b[0x3c] = 0x40;
+  b[0x40] = 0x50;
+  // PE\0\0
+  b[0x41] = 0x45;
+  b[0x44] = machine & 0xff;
+  b[0x45] = machine >> 8;
+  return b;
+};
+const elf = (cls: number): number[] => [0x7f, 0x45, 0x4c, 0x46, cls, 0, 0, 0];
 
 describe("readBinaryBits", () => {
   let dir: string;
@@ -816,22 +826,6 @@ describe("readBinaryBits", () => {
     writeFileSync(p, Buffer.from(bytes));
     return p;
   };
-  const pe = (machine: number): number[] => {
-    const b = Array.from({ length: 0x48 }, () => 0);
-    b[0] = 0x4d;
-    // MZ
-    b[1] = 0x5a;
-    // e_lfanew = 0x40
-    b[0x3c] = 0x40;
-    b[0x40] = 0x50;
-    // PE\0\0
-    b[0x41] = 0x45;
-    b[0x44] = machine & 0xff;
-    b[0x45] = machine >> 8;
-    return b;
-  };
-  const elf = (cls: number): number[] => [0x7f, 0x45, 0x4c, 0x46, cls, 0, 0, 0];
-
   beforeAll(() => {
     dir = mkdtempSync(`${tmpdir()}/omp-re-bits-`);
   });
@@ -891,22 +885,11 @@ describe("resolveRizinPath bits-aware precedence", () => {
     });
     expect(resolveRizinPath()).toBe("C:/base/rizin.exe");
     // A 64-bit PE picks the 64 build; a 32-bit PE with only the 64 override set falls back.
-    const pe = (machine: number) => {
-      const b = Array.from({ length: 0x48 }, () => 0);
-      b[0] = 0x4d;
-      b[1] = 0x5a;
-      b[0x3c] = 0x40;
-      b[0x40] = 0x50;
-      b[0x41] = 0x45;
-      b[0x44] = machine & 0xff;
-      b[0x45] = machine >> 8;
-      return Buffer.from(b);
-    };
     const dir = mkdtempSync(`${tmpdir()}/omp-re-rz-`);
     const p64 = `${dir}/t64.exe`;
-    writeFileSync(p64, pe(0x86_64));
+    writeFileSync(p64, Buffer.from(pe(0x86_64)));
     const p32 = `${dir}/t32.exe`;
-    writeFileSync(p32, pe(0x01_4c));
+    writeFileSync(p32, Buffer.from(pe(0x01_4c)));
     expect(resolveRizinPath(p64)).toBe("C:/rz64/rizin.exe");
     expect(resolveRizinPath(p32)).toBe("C:/base/rizin.exe");
     setEnv({ OMPRE_RIZIN_PATH_32: "C:/rz32/rizin.exe" });

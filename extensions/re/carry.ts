@@ -156,6 +156,8 @@ export interface InheritOutcome {
   /** Findings skipped because this branch already has a live finding with the same claim. */
   alreadyPresent: number;
 }
+const okNum = (v: unknown, max: number) =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
 
 /**
  * Shape-check a manifest entry's anchor fingerprint. Untrusted input: the name and
@@ -171,8 +173,6 @@ const parseAnchor = (raw: unknown): AnchorFingerprint | null => {
   if (!a || typeof a !== "object") {
     return null;
   }
-  const okNum = (v: unknown, max: number) =>
-    typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
   if (
     typeof a.anchor !== "string" ||
     typeof a.function !== "string" ||
@@ -204,6 +204,7 @@ const parseAnchor = (raw: unknown): AnchorFingerprint | null => {
     size: a.size as number,
   };
 };
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
 /** Parse and shape-check a manifest's JSON text. Throws a clear error on anything that isn't a manifest; tolerates missing optional fields per entry. */
 export const parseManifest = (text: string): CarryManifest => {
@@ -222,7 +223,6 @@ export const parseManifest = (text: string): CarryManifest => {
       "omp-re: carry: not a verification manifest (no `entries` array) — pass the <report>.manifest.json written by /re report <path>"
     );
   }
-  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
   const entries: ManifestEntry[] = [];
   for (const e of obj.entries as unknown[]) {
     const row = e as Record<string, unknown> | null;
@@ -436,6 +436,11 @@ const compareOutput = (
   }
   return undefined;
 };
+// An excerpt that hit its byte cap ends mid-line, at a different column on each side; drop that partial line so it never shows as a change.
+const whole = (excerpt: string) =>
+  excerpt.length >= EXCERPT_MAX_BYTES
+    ? excerpt.slice(0, Math.max(0, excerpt.lastIndexOf("\n")))
+    : excerpt;
 
 /** Line diff of the recorded canonical excerpt against the new output's, capped; undefined when the excerpts are equal (the change lies further down). */
 const excerptDiff = (
@@ -447,11 +452,6 @@ const excerptDiff = (
   if (recordedExcerpt === newExcerpt) {
     return undefined;
   }
-  // An excerpt that hit its byte cap ends mid-line, at a different column on each side; drop that partial line so it never shows as a change.
-  const whole = (excerpt: string) =>
-    excerpt.length >= EXCERPT_MAX_BYTES
-      ? excerpt.slice(0, Math.max(0, excerpt.lastIndexOf("\n")))
-      : excerpt;
   const diff = lineDiff(
     whole(recordedExcerpt),
     whole(newExcerpt),
@@ -779,6 +779,7 @@ export const formatCarrySummary = (result: CarryResult): string => {
   }
   return lines.join("\n");
 };
+const cell = (s: string) => s.replaceAll("|", "\\|").replaceAll("\n", " ");
 
 /** The full carry report as Markdown: claim matrix, then per-evidence detail with diffs for drifted records. */
 export const formatCarryMarkdown = (
@@ -789,7 +790,6 @@ export const formatCarryMarkdown = (
   const evidenceById = new Map(
     result.evidence.map((row) => [row.evidenceId, row])
   );
-  const cell = (s: string) => s.replaceAll("|", "\\|").replaceAll("\n", " ");
   const out = [
     "# Carry Report",
     "",

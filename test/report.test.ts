@@ -225,45 +225,47 @@ describe("writeReport", () => {
     });
   });
 });
-
-describe("writeReport — claim↔evidence support audit", () => {
-  // One grounded claim: the IOC in the summary produces a single grounded IOC claim (flat index 0).
-  const groundedEntries = (): StubEntry[] => [
-    {
-      customType: "re.binary",
-      data: { path: "/bin/sample", sha256: "a".repeat(64) },
-      type: "custom",
+// One grounded claim: the IOC in the summary produces a single grounded IOC claim (flat index 0).
+const groundedEntries = (): StubEntry[] => [
+  {
+    customType: "re.binary",
+    data: { path: "/bin/sample", sha256: "a".repeat(64) },
+    type: "custom",
+  },
+  {
+    customType: "re.evidence",
+    data: {
+      args: { command: "iz" },
+      binarySha256: "a".repeat(64),
+      canonicalExcerpt: "0x1 str http://185.220.101.99/beacon",
+      commands: ["iz"],
+      id: "ev-a",
+      reproHash: "b".repeat(64),
+      summary: "found string: http://185.220.101.99/beacon",
+      tool: "rizin_command",
     },
-    {
-      customType: "re.evidence",
-      data: {
-        args: { command: "iz" },
-        binarySha256: "a".repeat(64),
-        canonicalExcerpt: "0x1 str http://185.220.101.99/beacon",
-        commands: ["iz"],
-        id: "ev-a",
-        reproHash: "b".repeat(64),
-        summary: "found string: http://185.220.101.99/beacon",
-        tool: "rizin_command",
-      },
-      type: "custom",
-    },
-  ];
-  const supportedAll: ClaimJudge = async (items) =>
+    type: "custom",
+  },
+];
+const supportedAll: ClaimJudge = async (items) =>
+  items.map((it): ClaimAudit => ({
+    index: it.index,
+    reason: "ok",
+    verdict: "supported",
+  }));
+const unsupportedAll =
+  (reason: string): ClaimJudge =>
+  async (items) =>
     items.map((it): ClaimAudit => ({
       index: it.index,
-      reason: "ok",
-      verdict: "supported",
+      reason,
+      verdict: "unsupported",
     }));
-  const unsupportedAll =
-    (reason: string): ClaimJudge =>
-    async (items) =>
-      items.map((it): ClaimAudit => ({
-        index: it.index,
-        reason,
-        verdict: "unsupported",
-      }));
+const judge: ClaimJudge = async () => {
+  throw new Error("no active model");
+};
 
+describe("writeReport — claim↔evidence support audit", () => {
   test("no model / no judge: audit degrades to 'unaudited', report still written, exit 0", async () => {
     const outputPath = nodePath.join(tempDir, "audit-degrade.md");
     // default advisory; makeCtx has no runEphemeralTurn/model
@@ -311,11 +313,7 @@ describe("writeReport — claim↔evidence support audit", () => {
     expect(err).toContain("not supported by their cited evidence");
     expect(err).toContain("misattributed");
   });
-
   test("a throwing judge degrades to 'unaudited' and never blocks — even in strict (fails open)", async () => {
-    const judge: ClaimJudge = async () => {
-      throw new Error("no active model");
-    };
     const advisoryPath = nodePath.join(tempDir, "audit-throw-adv.md");
     await writeReport(makeCtx(groundedEntries(), []), advisoryPath, {
       audit: "advisory",

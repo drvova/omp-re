@@ -818,6 +818,8 @@ export const registerUI = (pi: ExtensionAPI): void => {
     },
   });
 };
+const detail = (f: FindingRecord) =>
+  `finding ${f.id.slice(0, 8)}: ${f.claim}\n${findingNote(f)}\nevidence: ${f.evidenceIds.map((e) => e.slice(0, 8)).join(", ")}`;
 
 /** `/re findings [id]`: the live findings on this branch. Enter pulls one into the editor (claim, provenance, evidence ids) to discuss or revise; with an id, show its detail. */
 export const showFindingsPanel = async (
@@ -825,8 +827,6 @@ export const showFindingsPanel = async (
   id?: string
 ): Promise<void> => {
   const all = liveFindings(ctx);
-  const detail = (f: FindingRecord) =>
-    `finding ${f.id.slice(0, 8)}: ${f.claim}\n${findingNote(f)}\nevidence: ${f.evidenceIds.map((e) => e.slice(0, 8)).join(", ")}`;
   if (id) {
     const match =
       all.find((f) => f.id === id) ?? all.find((f) => f.id.startsWith(id));
