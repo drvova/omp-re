@@ -146,14 +146,26 @@ export function ephemeralJudge(ctx: ExtensionContext): ClaimJudge | null {
 	const run = ctx.runEphemeralTurn;
 	if (typeof run !== "function" || !ctx.model) return null;
 	return async (items) => {
-		try {
-			const result = await run.call(ctx, {
+		const signal = AbortSignal.timeout(AUDIT_TIMEOUT_MS);
+		const turn = (toolsOff: boolean) =>
+			run.call(ctx, {
 				promptText: buildAuditPrompt(items),
-				tools: false,
+				...(toolsOff ? { tools: false } : {}),
 				dedupeReply: false, // keep multi-claim JSON intact (default collapses repeated lines)
 				replyMaxBytes: Number.POSITIVE_INFINITY, // defeat the 4 KiB reply cap
-				signal: AbortSignal.timeout(AUDIT_TIMEOUT_MS),
+				signal,
 			});
+		try {
+			let result: Awaited<ReturnType<typeof turn>>;
+			try {
+				result = await turn(true);
+			} catch (err) {
+				// Some transports refuse `tools: false` (native-tools models, or tool-call history — the
+				// normal state mid-analysis, when record_finding asks). The side turn discards any tool
+				// call anyway, so retry once with the catalog sent; anything else still degrades.
+				if (!(err instanceof Error) || !err.message.includes("tools: false")) throw err;
+				result = await turn(false);
+			}
 			return parseAuditReply(result.replyText);
 		} catch {
 			return null;

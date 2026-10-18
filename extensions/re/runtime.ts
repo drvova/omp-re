@@ -41,7 +41,6 @@ export interface ReSessionState {
 	appliedAnnotations: string;
 	auditHmacWarned: boolean;
 	evidenceCount: number;
-	findingCount: number;
 	/** normalized addr -> most recent evidence id observed at that address (used by mutate tools to ground annotations, and by report anchors) */
 	evidenceByAddr: Map<string, string>;
 	/** Internals: the session's teardown scope and the live disposers that own each process's teardown. Not read outside the backend. */
@@ -101,7 +100,6 @@ function newState(sessionId: string): ReSessionState {
 		appliedAnnotations: "",
 		auditHmacWarned: false,
 		evidenceCount: 0,
-		findingCount: 0,
 		evidenceByAddr: new Map(),
 		_scope: null,
 		_disposeRz: null,

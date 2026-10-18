@@ -22,6 +22,7 @@ import { RE_ALL_TOOL_NAMES } from "./audit.ts";
 import { decompileAt } from "./decompile.ts";
 import { disassembleAt } from "./disasm.ts";
 import { branchEntries, customEntries } from "./entries.ts";
+import { type FindingRecord, findingNote, liveFindings } from "./findings.ts";
 import { addrOf, eaFromOffset, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
 
@@ -95,7 +96,7 @@ export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
 		entry: null,
 		prot: [],
 		fnCount: 0,
-		findings: state.findingCount,
+		findings: liveFindings(ctx).length,
 		evidence: state.evidenceCount,
 	};
 
@@ -636,5 +637,32 @@ export function registerUI(pi: ExtensionAPI): void {
 		handler: async (ctx) => {
 			await showImportsPanel(ctx);
 		},
+	});
+}
+
+/** `/re findings [id]`: the live findings on this branch. Enter pulls one into the editor (claim, provenance, evidence ids) to discuss or revise; with an id, show its detail. */
+export async function showFindingsPanel(ctx: ExtensionContext, id?: string): Promise<void> {
+	const all = liveFindings(ctx);
+	const detail = (f: FindingRecord) => `finding ${f.id.slice(0, 8)}: ${f.claim}\n${findingNote(f)}\nevidence: ${f.evidenceIds.map((e) => e.slice(0, 8)).join(", ")}`;
+	if (id) {
+		const match = all.find((f) => f.id === id) ?? all.find((f) => f.id.startsWith(id));
+		if (match) ctx.ui.notify(detail(match), "info");
+		else ctx.ui.notify(`omp-re: no live finding with id ${id}`, "error");
+		return;
+	}
+	if (all.length === 0) {
+		ctx.ui.notify("omp-re: no findings on this branch yet — the model records them with record_finding", "info");
+		return;
+	}
+	await showPanel(ctx, {
+		title: "omp-re: findings",
+		items: all.map((f) => ({ value: f.id, label: `[${f.id.slice(0, 8)}] ${f.claim}`, description: `${f.confidence}${f.inherited ? " · inherited" : ""}${f.addr ? ` · ${f.addr}` : ""}` })),
+		onChoose: (item) => {
+			const match = all.find((f) => f.id === item.value);
+			if (!match) return "keep" as const;
+			ctx.ui.setEditorText(`Re: ${detail(match)}\n\n`);
+			return "close" as const;
+		},
+		hint: "enter discuss · type to filter · esc close",
 	});
 }

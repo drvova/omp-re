@@ -12,6 +12,7 @@ import {
 	RE_ANALYZE_TOOL_NAMES,
 	RE_EMULATE_TOOL_NAMES,
 	RE_EVIDENCE_TOOL_NAMES,
+	RE_FINDING_TOOL_NAMES,
 	RE_SIGNATURE_TOOL_NAMES,
 	RE_READ_TOOL_NAMES,
 	RE_RIZIN_TOOL_NAMES,
@@ -22,7 +23,7 @@ import {
 } from "../extensions/re/audit.ts";
 
 describe("RE_ALL_TOOL_NAMES", () => {
-	test("contains exactly 61 names and is the union of read (31), mutate (15), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (2), analyze (1), and session (3)", () => {
+	test("contains exactly 64 names and is the union of read (31), mutate (15), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (2), analyze (1), session (3), and finding (3)", () => {
 		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(31);
 		expect(Object.keys(RE_MUTATE_TOOL_NAMES)).toHaveLength(15);
 		expect(Object.keys(RE_RIZIN_TOOL_NAMES)).toHaveLength(2);
@@ -33,9 +34,10 @@ describe("RE_ALL_TOOL_NAMES", () => {
 		expect(Object.keys(RE_SIGNATURE_TOOL_NAMES)).toHaveLength(2);
 		expect(Object.keys(RE_ANALYZE_TOOL_NAMES)).toHaveLength(1);
 		expect(Object.keys(RE_SESSION_TOOL_NAMES)).toHaveLength(3);
+		expect(Object.keys(RE_FINDING_TOOL_NAMES)).toHaveLength(3);
 
 		const allNames = Object.keys(RE_ALL_TOOL_NAMES);
-		expect(allNames).toHaveLength(61);
+		expect(allNames).toHaveLength(64);
 
 		const expectedUnion = new Set([
 			...Object.keys(RE_READ_TOOL_NAMES),
@@ -48,6 +50,7 @@ describe("RE_ALL_TOOL_NAMES", () => {
 			...Object.keys(RE_SIGNATURE_TOOL_NAMES),
 			...Object.keys(RE_ANALYZE_TOOL_NAMES),
 			...Object.keys(RE_SESSION_TOOL_NAMES),
+			...Object.keys(RE_FINDING_TOOL_NAMES),
 		]);
 		expect(new Set(allNames)).toEqual(expectedUnion);
 	});

@@ -92,7 +92,10 @@ no host-level hot-unload — the host does not offer one.
 | `tools-triage.ts` | capa / floss / die / yara |
 | `output.ts` | The one confined directory omp-re writes artifacts to (dumps, traces, projects) |
 | `decompile.ts` | Extensible decompiler probe (`OMPRE_DECOMPILER`) |
-| `evidence.ts` | Content-addressed evidence store + `tool_result` hook |
+| `evidence.ts` | Content-addressed evidence store, `recordEvidence`, and the `tool_result` hook |
+| `verify.ts` / `audit-claims.ts` | `/re verify` (reproducibility) and the side-turn claim-support auditor |
+| `findings.ts` | `record_finding` / `retract_finding`: the model's conclusions as gated `re.finding` claims |
+| `carry.ts` / `anchor.ts` | `/re carry` (replay a manifest on another build, `--inherit`) and anchor fingerprints/relocation |
 | `audit.ts` | The RE tool-name sets (the audit gate) + signed audit log |
 | `preserve.ts` | Compaction preservation (`session.compacting`) |
 | `ui.ts` | Status band, overlay panels, evidence helpers |

@@ -6,6 +6,125 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **First-class findings: the model's conclusions as gated, carried claims.**
+  Report claims came only from capa lines and IOC strings mined from evidence
+  summaries. Analytical conclusions ("checksum is djb2", "this is the C2 beacon
+  loop") had no way in.
+  - **`record_finding`** takes a claim, the evidence ids it rests on
+    (exact or a ≥6-character prefix), an optional address and a confidence.
+    It is gated when recorded: ids must resolve on this branch (existence),
+    the evidence must have been taken against the open binary (binding), and
+    the claim goes to the same side-turn support audit `/re report` uses. An
+    unsupported or overreaching claim is refused with the auditor's reason
+    unless `override_audit` supplies a justification, which is recorded and
+    shown. The audit fails open to `unaudited`.
+  - **`retract_finding`** withdraws a finding, and **`supersedes`** revises one.
+  - **Findings section.** Live findings become the report's **Findings**
+    section, with confidence and provenance, and pass the report's own gates.
+    The manifest gains a `findings` block.
+  - **Tool count.** Tools go from 61 to 63. Both new tools are audited and
+    toggled by `/re off`, and neither records evidence.
+- **`/re carry --inherit`: re-prove surviving findings on the new build.**
+  - **Re-proving.** For each manifest finding that holds or relocated, its
+    reproduced commands are re-run through `rizin_command`'s own code path
+    (`runRizinCommand`, now exported) and recorded through the same evidence
+    path as a live tool call (`recordEvidence`, now shared by the
+    `tool_result` hook), bound to the new binary. They are never copied from
+    the manifest.
+  - **Re-recording.** The finding is re-recorded citing only that fresh
+    evidence, with its address following any relocation and its provenance
+    (source binary, source finding, carry status).
+  - **Agenda.** Drifted, broken or unre-checkable findings form an agenda
+    prompt, each with a compact diff (changed lines plus two lines of
+    context). It goes into the editor interactively and is printed headless.
+    Inheriting is idempotent.
+  - **Diffs.** Carry-report diffs are compacted the same way.
+- **`adopt_finding`: bring subagent findings in by re-proving them.** The
+  `re-analyst` subagent runs in its own session, so its evidence ids can't be
+  cited by the parent.
+  - **Subagent output.** Its output schema gains `reproduce`: the read-only
+    rizin line(s) behind each finding.
+  - **Re-proving.** `adopt_finding` checks the subagent's binary hash against
+    the open binary, re-runs each line through `rizin_command`'s own gate,
+    and records the results as evidence in this session. The claim then
+    passes the same gate as `record_finding`, which now shares the core with
+    it (`gateAndRecord`).
+  - **Provenance.** The finding is marked "adopted from <source>, re-proven in
+    this session". If the auditor refuses the claim, the re-run evidence stays
+    recorded so a narrower claim can cite it.
+  - **Tool count.** Tools go from 63 to 64.
+- **`/re carry --resolve`** implies `--inherit` and sends the agenda to the
+  model as a user turn instead of placing it in the editor, so one command
+  takes a report from v1 to a v2 analysis that is already re-proven, with the
+  model working through what changed.
+- **`/re findings [id]`** lists live findings (Enter pulls one into the
+  editor), and `/re status` counts them, including how many are inherited.
+- **Findings survive compaction.** The compaction snapshot restates every live
+  finding verbatim (id, confidence, inherited, claim, address), so the model
+  doesn't re-derive or contradict conclusions it already recorded.
+- **`test/tui-carry.sh` (`bun run test:tui:carry`).** A self-contained tmux
+  e2e that runs `/re carry --inherit` in a real omp TUI against two compiled
+  builds of the fixture. It needs no model.
+- **`test/live-model.sh` (`bun run test:live`).** A live-model tier for the
+  findings loop: record and audit on v1, carry `--resolve` onto v2, and write
+  the v2 report. It asserts on recorded state only.
+- **Support-audit fallback.** The side-turn auditor retries once without
+  `tools: false` when a transport refuses that option (native-tools models, or
+  tool-call history, which is the normal state when `record_finding` asks).
+
+- **`/re carry`: a report becomes a regression test for the next build.**
+  `/re carry <report>.manifest.json [--against <binary>] [--strict] [--out
+  <path>]` replays a finished report's cited commands against a *different*
+  binary (a new malware variant, a firmware update, a patched build) and
+  classifies every claim. **holds**: the canonical output hash is identical.
+  **drifted**: the command runs but the output changed, shown as a line diff
+  of the recorded excerpt against the new one. **broken**: the symbolic anchor
+  no longer resolves, or the command now produces nothing. **unchecked**: the
+  evidence was provenance-only or legacy. A claim takes the worst status among
+  its evidence. Headless, any broken claim sets a non-zero exit code;
+  `--strict` also fails on drifted or unchecked claims. `--out` writes a
+  Markdown carry report plus a `.json` sidecar. Deterministic and read-only
+  like `/re verify`: the manifest is treated as untrusted input, so every
+  command passes back through the `rizin_command` read-only gate and address
+  validation, and carrying records no evidence. The report manifest now also
+  records each `rizin_command`'s structured `args` (`{ command, addr }`).
+  Older manifests still work, because the recorded line is split on its
+  trailing `@ addr`.
+- **Shift-tolerant comparison and relocation for `/re carry`.** Every
+  `rizin_command` evidence record now also stores a `shiftHash`: the canonical
+  output with positional addresses masked (line-leading addresses, `@ 0x…`,
+  branch and call targets, RIP-relative displacements, `fcn.…`/`loc.…`
+  auto-names), while immediates are kept. A rebuild that only moved code now
+  **holds** instead of drifting, and drift diffs show only lines that really
+  changed. `/re report` also writes an **anchor fingerprint** for each
+  address-pinned manifest entry: the containing function's name, offset, size,
+  block count, anchor offset and mnemonic sequence, taken while the report's
+  binary is open. When an anchor was renamed away, or a numeric anchor's code
+  moved, carry finds the function again by fingerprint (prefiltered by size and
+  block count, scored by mnemonic-sequence similarity, threshold 0.8) and
+  re-runs the command there. The result is a new **relocated** status. If the
+  output still changed, the claim is drifted, with the relocation noted. The
+  manifest's fingerprint is shape-checked as untrusted input. `--strict` also
+  fails on relocated claims.
+
+### Fixed
+
+- **Evidence ids are visible to the model.** Evidence records go to the session
+  through `appendEntry`, which never reaches the model, so `record_finding`
+  asked for ids the model had no way to learn. The only listing was
+  `/re evidence`, a slash command. The `tool_result` evidence hook now appends
+  a trailing `[evidence xxxxxxxx — cite it in record_finding]` block to every
+  evidence-tier result. The tool's own text, and the hashes and summary taken
+  over it, are unchanged. The hook now has direct tests, including the tag
+  round-tripping into `record_finding`.
+
+- **Status band findings count.** The band's "N findings" counter was never
+  incremented, so it always read 0. It now counts live findings, and it
+  refreshes after `/re carry`, since `--inherit` records findings outside any
+  tool call.
+
 ## [0.5.0] - 2026-10-17
 
 ### Added

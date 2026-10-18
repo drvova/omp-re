@@ -37,6 +37,22 @@ describe("preservedStateLines", () => {
 		shutdownState("preserve-active");
 	});
 
+	test("restates live findings verbatim (not superseded or retracted ones) so the model doesn't re-derive them", () => {
+		const h = makeHarness("preserve-findings");
+		getState(h.ctx).binaryPath = "/bin/ls";
+		withEvidence(h, [{ id: "dddddddd-4444", tool: "rizin_command" }]);
+		h.pi.appendEntry("re.finding", { id: "f1111111-x", claim: "checksum is djb2.", evidenceIds: ["dddddddd-4444"], addr: "sym.checksum", confidence: "confirmed" });
+		h.pi.appendEntry("re.finding", { id: "f2222222-x", claim: "old claim", evidenceIds: ["dddddddd-4444"], confidence: "likely" });
+		h.pi.appendEntry("re.finding.retract", { id: "f2222222-x", reason: "wrong" });
+		h.pi.appendEntry("re.finding", { id: "f3333333-x", claim: "fib is iterative.", evidenceIds: ["dddddddd-4444"], confidence: "likely", inherited: { fromBinarySha256: null, fromFindingId: "z", carryStatus: "holds" } });
+		const text = preservedStateLines(h.ctx).join("\n");
+		expect(text).toContain("Recorded findings (2;");
+		expect(text).toContain("f1111111 [confirmed] checksum is djb2. (at sym.checksum)");
+		expect(text).toContain("f3333333 [likely, inherited] fib is iterative.");
+		expect(text).not.toContain("old claim");
+		shutdownState("preserve-findings");
+	});
+
 	test("caps the named evidence but still reports the full count", () => {
 		const h = makeHarness("preserve-cap");
 		getState(h.ctx).binaryPath = "/bin/ls";
