@@ -41,6 +41,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     context). It goes into the editor interactively and is printed headless.
     Inheriting is idempotent.
   - **Diffs.** Carry-report diffs are compacted the same way.
+- **`/re carry --resolve`** implies `--inherit` and sends the agenda to the
+  model as a user turn instead of placing it in the editor, so one command
+  takes a report from v1 to a v2 analysis that is already re-proven, with the
+  model working through what changed.
+- **`/re findings [id]`** lists live findings (Enter pulls one into the
+  editor), and `/re status` counts them, including how many are inherited.
+- **Findings survive compaction.** The compaction snapshot restates every live
+  finding verbatim (id, confidence, inherited, claim, address), so the model
+  doesn't re-derive or contradict conclusions it already recorded.
 - **Support-audit fallback.** The side-turn auditor retries once without
   `tools: false` when a transport refuses that option (native-tools models, or
   tool-call history, which is the normal state when `record_finding` asks).

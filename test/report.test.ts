@@ -288,6 +288,35 @@ describe("writeReport — claim↔evidence support audit", () => {
 		expect(await readFile(outputPath, "utf8")).toContain("⚠ Support audit: overreach");
 	});
 
+	test("default judge: a transport that refuses `tools: false` is retried once with the catalog sent", async () => {
+		const ctx = makeCtx(groundedEntries(), []);
+		const calls: unknown[] = [];
+		(ctx as unknown as { model: unknown }).model = { id: "test-model" };
+		(ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = async (opts: { tools?: unknown }) => {
+			calls.push(opts.tools);
+			if (opts.tools === false) throw new Error("Model x cannot support tools: false with historical tool calls.");
+			return { replyText: '[{"index":0,"verdict":"overreach","reason":"too strong"}]', assistantMessage: {} };
+		};
+		const outputPath = join(tempDir, "audit-retry.md");
+		await writeReport(ctx, outputPath, { audit: "advisory" });
+		expect(calls).toEqual([false, undefined]);
+		expect(await readFile(outputPath, "utf8")).toContain("⚠ Support audit: overreach");
+	});
+
+	test("default judge: any other side-turn error is not retried and degrades to unaudited", async () => {
+		const ctx = makeCtx(groundedEntries(), []);
+		let calls = 0;
+		(ctx as unknown as { model: unknown }).model = { id: "test-model" };
+		(ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = async () => {
+			calls++;
+			throw new Error("provider overloaded");
+		};
+		const outputPath = join(tempDir, "audit-noretry.md");
+		await writeReport(ctx, outputPath, { audit: "advisory" });
+		expect(calls).toBe(1);
+		expect(await readFile(outputPath, "utf8")).toContain("support unaudited");
+	});
+
 	test("default judge: an unparseable reply degrades to 'unaudited' and fails open even in strict", async () => {
 		const ctx = makeCtx(groundedEntries(), []);
 		(ctx as unknown as { model: unknown }).model = { id: "test-model" };

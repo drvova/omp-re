@@ -230,6 +230,15 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		expect(md).toContain("re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd)");
 		expect(md).not.toContain("checksum is a djb2");
 
+		// --resolve hands the agenda to the model as a user turn instead of printing it.
+		const sent: string[] = [];
+		(b.pi as unknown as { sendUserMessage: (m: string) => void }).sendUserMessage = (m) => sent.push(m);
+		const resolved = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi, resolve: true });
+		expect(resolved.inheritance?.agenda.map((i) => i.claim)).toEqual(["checksum is a djb2 hash (h * 33 + c)."]);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toContain("[drifted] checksum is a djb2 hash");
+		expect(sent[0]).toContain("+ |      :|   0x0000126c      sub   eax, edx");
+
 		// Idempotent: inheriting again adds nothing.
 		const again = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi });
 		expect(again.inheritance?.inherited).toHaveLength(0);

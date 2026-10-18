@@ -29,7 +29,7 @@ open: its first call must be `open_binary`.
 
 There is no `/re triage`. The subcommands are: `open <path>`, `functions`,
 `strings`, `imports`, `evidence [id]`, `cite <id>`, `undo`, `report [path]`,
-`verify`, `carry <manifest>`, `status`, `on`, `off`, `help`.
+`findings [id]`, `verify`, `carry <manifest>`, `status`, `on`, `off`, `help`.
 
 For a self-contained analysis, delegate to the `re-analyst` agent with the
 binary path and the question; it returns findings tied to tool output.

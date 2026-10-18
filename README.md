@@ -294,7 +294,12 @@ re-recorded with its provenance, e.g. "inherited from `646243…`, re-verified o
 this build (relocated: sym.fib → sym.fibonacci)". Findings that drifted or broke
 become an agenda that is placed in the editor, each with a compact diff of
 exactly what changed, ready to hand to the model: "this no longer holds as
-written; here is the change; revise or retract". Every command still goes through the read-only
+written; here is the change; revise or retract". `--resolve` goes further: it
+sends that agenda to the model as a turn, so a single command takes v1's report
+to a v2 analysis that is already re-proven, plus the model working through
+exactly what changed. `/re findings` lists the findings on the branch, and they
+are restated in the context summary when the conversation is compacted, so the
+model doesn't re-derive or contradict what it already recorded. Every command still goes through the read-only
 `rizin_command` gate, because a manifest is untrusted input, and carrying
 records no evidence.
 
@@ -317,10 +322,11 @@ records no evidence.
 /re imports          import list             d  toggle decompile
 /re evidence [id]    evidence log            x  follow xrefs
 /re cite <id>        cite evidence in chat   a  ask the model
+/re findings [id]    recorded findings
 /re undo             revert annotation
 /re report [path]    write report (--audit=strict gates claim support)
 /re verify [--strict] re-verify report evidence is reproducible
-/re carry <manifest>  replay a report on another build (--against <bin>, --inherit, --strict, --out)
+/re carry <manifest>  replay a report on another build (--against, --inherit, --resolve, --strict, --out)
 /re status           rizin, decompiler, and session status
 /re on               enable RE tools
 /re off              disable RE tools (quick toggle, no restart)

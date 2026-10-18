@@ -41,11 +41,12 @@ import { registerTypeTools } from "./tools-types.ts";
 import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
-import { registerFindingTools } from "./findings.ts";
+import { liveFindings, registerFindingTools } from "./findings.ts";
 import {
 	citeEvidence,
 	evidenceRecords,
 	findEvidence,
+	showFindingsPanel,
 	refreshStatusBand,
 	registerUI,
 	showEvidencePanel,
@@ -144,10 +145,11 @@ const SUBCOMMANDS: readonly { name: string; usage?: string; description: string 
 	{ name: "imports", description: "import list (alt+i)" },
 	{ name: "evidence", usage: "[id]", description: "evidence recorded on this branch" },
 	{ name: "cite", usage: "<id>", description: "cite an evidence entry in your next message" },
+	{ name: "findings", usage: "[id]", description: "findings the model recorded on this branch" },
 	{ name: "undo", description: "revert the last annotation" },
 	{ name: "report", usage: "[path] [--audit=strict]", description: "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)" },
 	{ name: "verify", usage: "[--strict]", description: "re-run cited rizin commands and check recorded output hashes" },
-	{ name: "carry", usage: "<manifest.json> [--against <binary>] [--inherit] [--strict] [--out <path>]", description: "replay a report on another build: which claims hold, relocated, drifted, or broke; --inherit re-proves its findings here" },
+	{ name: "carry", usage: "<manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]", description: "replay a report on another build: which claims hold, relocated, drifted, or broke; --inherit re-proves its findings here, --resolve also sends the model what changed" },
 	{ name: "status", description: "rizin, decompiler, binary, and evidence status" },
 	{ name: "on", description: "enable the RE tools for this session" },
 	{ name: "off", description: "disable the RE tools for this session" },
@@ -161,10 +163,11 @@ const HELP_TEXT = [
 	"/re imports          import list             d  toggle decompile",
 	"/re evidence [id]    evidence log            x  follow xrefs",
 	"/re cite <id>        cite evidence in chat   a  ask the model",
+	"/re findings [id]    recorded findings",
 	"/re undo             revert annotation",
 	"/re report [path]    write report (--audit=strict gates claim support)",
 	"/re verify [--strict] re-verify evidence is reproducible",
-	"/re carry <manifest>  replay a report on another build (--against <bin>, --inherit, --strict, --out)",
+	"/re carry <manifest>  replay a report on another build (--against, --inherit, --resolve, --strict, --out)",
 	"/re status           rizin, decompiler, and session status",
 	"/re on               enable RE tools",
 	"/re off              disable RE tools (quick toggle, no restart)",
@@ -200,6 +203,9 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 			: "debugger: off (set OMPRE_ENABLE_DEBUGGER to enable dynamic analysis — it executes the sample)",
 	);
 	lines.push(`evidence on this branch: ${evidenceRecords(ctx).length}`);
+	const findings = liveFindings(ctx);
+	const inherited = findings.filter((f) => f.inherited).length;
+	lines.push(`findings on this branch: ${findings.length}${inherited ? ` (${inherited} inherited)` : ""}`);
 	lines.push(`audit log signing: ${process.env.OMPRE_AUDIT_HMAC_KEY ? "HMAC-SHA256" : "unsigned (set OMPRE_AUDIT_HMAC_KEY)"}`);
 	return lines.join("\n");
 }
@@ -361,7 +367,7 @@ function registerShell(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("re", {
-		description: "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | undo | report [path] | verify [--strict] | carry <manifest> | status | on | off | help",
+		description: "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | findings [id] | undo | report [path] | verify [--strict] | carry <manifest> | status | on | off | help",
 		getArgumentCompletions: completeArguments,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
@@ -382,6 +388,8 @@ function registerShell(pi: ExtensionAPI): void {
 						return await showImportsPanel(ctx);
 					case "evidence":
 						return await showEvidencePanel(ctx, rest[0]);
+					case "findings":
+						return await showFindingsPanel(ctx, rest[0]);
 					case "cite": {
 						const id = rest[0];
 						if (!id) {
@@ -420,22 +428,25 @@ function registerShell(pi: ExtensionAPI): void {
 						let out: string | undefined;
 						let strict = false;
 						let inherit = false;
+						let resolve = false;
 						const pathTokens: string[] = [];
 						for (let i = 0; i < rest.length; i++) {
 							const tok = rest[i]!;
 							if (tok === "--strict") strict = true;
 							else if (tok === "--inherit") inherit = true;
+							else if (tok === "--resolve") resolve = true;
 							else if (tok === "--against") against = rest[++i];
 							else if (tok === "--out") out = rest[++i];
 							else pathTokens.push(tok);
 						}
 						const manifestPath = pathTokens.join(" ");
 						if (!manifestPath) {
-							ctx.ui.notify("Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit] [--strict] [--out <path>]", "error");
+							ctx.ui.notify("Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]", "error");
 							return;
 						}
 						if (against) await runOpen(ctx, against);
-						await carryManifest(ctx, manifestPath, { strict, out, ...(inherit ? { inherit: pi } : {}) });
+						// --resolve implies --inherit: re-prove what holds, then hand the agenda to the model as a turn.
+						await carryManifest(ctx, manifestPath, { strict, out, ...(inherit || resolve ? { inherit: pi } : {}), resolve });
 						return;
 					}
 					case "status":

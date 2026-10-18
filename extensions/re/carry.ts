@@ -594,7 +594,7 @@ export function formatAgendaPrompt(outcome: InheritOutcome, toSha256: string | n
 export async function carryManifest(
 	ctx: ExtensionContext,
 	manifestPath: string,
-	opts: { strict?: boolean; out?: string; inherit?: ExtensionAPI } = {},
+	opts: { strict?: boolean; out?: string; inherit?: ExtensionAPI; resolve?: boolean } = {},
 ): Promise<CarryResult> {
 	let text: string;
 	try {
@@ -625,19 +625,26 @@ export async function carryManifest(
 		}
 	}
 
+	// --resolve: hand the agenda straight to the model as a user turn (it has the RE tools and
+	// record_finding in this session, where the fresh evidence lives). Otherwise it goes into the editor,
+	// like /re cite, for the analyst to send or edit.
+	const resolving = opts.resolve === true && agendaPrompt !== undefined && opts.inherit !== undefined;
+	if (resolving) {
+		opts.inherit!.sendUserMessage(agendaPrompt!);
+		summary += `\nresolve: sent ${result.inheritance!.agenda.length} finding(s) to the model to re-examine`;
+	}
 	if (ctx.hasUI) {
 		ctx.ui.notify(summary, failed ? "error" : c.drifted > 0 ? "warning" : "info");
-		// The agenda goes into the editor, like /re cite: the analyst sends it to the model (or edits it first).
-		if (agendaPrompt) ctx.ui.setEditorText(agendaPrompt);
+		if (agendaPrompt && !resolving) ctx.ui.setEditorText(agendaPrompt);
 	} else if (failed) {
 		console.error(summary);
 		// Same deliberate headless signal as /re verify and the report gate: a finding that no
 		// longer holds on the new build must fail the pipeline. process.exitCode, never process.exit.
 		process.exitCode = 1;
-		if (agendaPrompt) console.error(agendaPrompt);
+		if (agendaPrompt && !resolving) console.error(agendaPrompt);
 	} else {
 		console.log(summary);
-		if (agendaPrompt) console.log(agendaPrompt);
+		if (agendaPrompt && !resolving) console.log(agendaPrompt);
 	}
 	return result;
 }

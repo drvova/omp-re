@@ -233,6 +233,16 @@ records the source binary, the source finding and the carry status. Findings
 that **drifted**, **broke**, or couldn't be re-checked form the agenda: a prompt
 listing each claim with its evidence status and a compact diff (changed lines
 plus two lines of context, matched with addresses masked). Interactively it goes
-into the editor, like `/re cite`; headless it is printed. Inheriting is
-idempotent: a claim already live on the branch is skipped.
+into the editor, like `/re cite`; headless it is printed. With `--resolve` it is
+instead sent to the model as a user turn (`pi.sendUserMessage`). That works
+because the model is in the session where the fresh evidence was just recorded,
+so it can re-examine each item and `record_finding` a revision citing evidence
+on this build. Inheriting is idempotent: a claim already live on the branch is
+skipped.
+
+Findings also survive compaction. The `session.compacting` hook (preserve.ts)
+restates every live finding (id, confidence, inherited or not, claim, address)
+in the summary, telling the model they are already recorded. They are revised
+with `supersedes`, not re-recorded. `/re findings` lists them, and Enter pulls
+one into the editor to discuss.
 
