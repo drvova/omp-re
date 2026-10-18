@@ -35,6 +35,11 @@ output:
             metadata:
               description: "The tool call and the output fragment that support the claim, e.g. `list_imports: InternetOpenUrlA @ 0x40a1c4`"
             type: string
+          reproduce:
+            metadata:
+              description: "The read-only rizin command line(s) that reproduce this evidence, as run through rizin_command, e.g. `pdf @ sym.decrypt_config` or `px 64 @ 0x4012a0` — the parent re-runs these to adopt the finding. Empty only when no single command shows it."
+            elements:
+              type: string
           confidence:
             metadata:
               description: confirmed = directly shown by tool output; likely = strongly implied by decompiled logic; possible = a hypothesis worth checking
@@ -72,4 +77,5 @@ When output says `[Output truncated … Full output: artifact://N]`, `read` that
 - Output that starts `(disassembly only — …)` is not decompiled code: say so before drawing behavioural conclusions from it.
 - Hedge hypotheses ("possibly", "consistent with") and mark them `possible`. Absence of evidence is a finding: "no network imports" is `confirmed` once `list_imports` showed none.
 - Prefer fewer well-supported findings over many thin ones.
+- Your evidence ids exist only in your own session, so the parent cannot cite them. It adopts a finding by re-running its `reproduce` commands on its own copy of the binary. For every finding that matters, confirm the key evidence with a `rizin_command` (`pdf @ <fn>`, `px <n> @ <addr>`, `iz`, `axt @ <addr>`) and put that exact line in `reproduce`. Use a symbol rather than a raw address where one exists, because a symbol survives a rebuild.
 </grounding>

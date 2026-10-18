@@ -218,6 +218,17 @@ address and a confidence. It is gated when it is recorded:
    anyway, with the justification kept beside it in the report. A missing
    auditor fails open (`unaudited`).
 
+A finding made elsewhere, typically by the `re-analyst` subagent (its own rizin
+process and its own session, so its evidence ids mean nothing here), comes in
+through `adopt_finding`. The subagent's output now carries, per finding, the
+read-only `rizin_command` lines that reproduce its evidence (`reproduce`).
+`adopt_finding` checks the subagent's binary hash against the open binary,
+re-runs each line through `runRizinCommand`, records the results with
+`recordEvidence` as this session's evidence, and then goes through the same
+`gateAndRecord` path as `record_finding`. A subagent's claim therefore reaches
+the report only on evidence the reporting session observed itself, and it is
+marked "adopted from re-analyst, re-proven in this session".
+
 Live findings (not superseded or retracted) form the report's **Findings**
 section. There they go through the report's own gates again, and they are listed
 in the manifest's `findings` block next to the evidence entries and anchor

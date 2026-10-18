@@ -96,7 +96,7 @@ export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
 		entry: null,
 		prot: [],
 		fnCount: 0,
-		findings: state.findingCount,
+		findings: liveFindings(ctx).length,
 		evidence: state.evidenceCount,
 	};
 

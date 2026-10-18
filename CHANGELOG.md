@@ -41,6 +41,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     context). It goes into the editor interactively and is printed headless.
     Inheriting is idempotent.
   - **Diffs.** Carry-report diffs are compacted the same way.
+- **`adopt_finding`: bring subagent findings in by re-proving them.** The
+  `re-analyst` subagent runs in its own session, so its evidence ids can't be
+  cited by the parent.
+  - **Subagent output.** Its output schema gains `reproduce`: the read-only
+    rizin line(s) behind each finding.
+  - **Re-proving.** `adopt_finding` checks the subagent's binary hash against
+    the open binary, re-runs each line through `rizin_command`'s own gate,
+    and records the results as evidence in this session. The claim then
+    passes the same gate as `record_finding`, which now shares the core with
+    it (`gateAndRecord`).
+  - **Provenance.** The finding is marked "adopted from <source>, re-proven in
+    this session". If the auditor refuses the claim, the re-run evidence stays
+    recorded so a narrower claim can cite it.
+  - **Tool count.** Tools go from 63 to 64.
 - **`/re carry --resolve`** implies `--inherit` and sends the agenda to the
   model as a user turn instead of placing it in the editor, so one command
   takes a report from v1 to a v2 analysis that is already re-proven, with the
@@ -50,6 +64,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Findings survive compaction.** The compaction snapshot restates every live
   finding verbatim (id, confidence, inherited, claim, address), so the model
   doesn't re-derive or contradict conclusions it already recorded.
+- **`test/tui-carry.sh` (`bun run test:tui:carry`).** A self-contained tmux
+  e2e that runs `/re carry --inherit` in a real omp TUI against two compiled
+  builds of the fixture. It needs no model.
 - **Support-audit fallback.** The side-turn auditor retries once without
   `tools: false` when a transport refuses that option (native-tools models, or
   tool-call history, which is the normal state when `record_finding` asks).
@@ -88,6 +105,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   output still changed, the claim is drifted, with the relocation noted. The
   manifest's fingerprint is shape-checked as untrusted input. `--strict` also
   fails on relocated claims.
+
+### Fixed
+
+- **Status band findings count.** The band's "N findings" counter was never
+  incremented, so it always read 0. It now counts live findings, and it
+  refreshes after `/re carry`, since `--inherit` records findings outside any
+  tool call.
 
 ## [0.5.0] - 2026-10-17
 

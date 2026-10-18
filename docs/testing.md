@@ -1,7 +1,8 @@
 # Testing
 
 Three tiers: `bun test` (unit + rizin integration), `bash test/tui.sh` (fast
-TUI smoke), `bash test/tui-qa.sh` (full tmux QA). Run from the repo root after
+TUI smoke), `bash test/tui-qa.sh` (full tmux QA), plus `bash test/tui-carry.sh`
+(the carry and findings loop end to end). Run from the repo root after
 `bun install --ignore-scripts`.
 
 ## Unit and integration tests — `bun test`
@@ -84,6 +85,24 @@ bash test/tui.sh
 A short tmux-driven smoke test against the real TUI. ~30s, 7 PASS, exit 0.
 Requires tmux, `omp`, rizin, and a fixture (`OMPRE_TEST_BINARY`; its band
 assertions expect a 32-bit PE); not run in CI (see below).
+
+## Carry / findings e2e — `bash test/tui-carry.sh` (`bun run test:tui:carry`)
+
+```bash
+bun run test:tui:carry
+```
+
+Drives `/re carry --inherit` in a real omp TUI. It is self-contained: it
+compiles two builds of `test/fixtures/sample.c`, records three findings on v1
+with `test/e2e/make-carry-manifest.ts` (real rizin evidence and the real
+`record_finding` tool, with a stand-in auditor so no model is needed), then
+starts `omp -e extensions/re --binary v2` and types the slash commands. It
+checks the carry statuses (hold, relocated, drifted), the agenda placed in the
+editor with the checksum diff, the status band and `/re status` counting the
+inherited findings, and the v2 report. It also skips omp's first-run setup
+wizard on a fresh profile. ~40s, 9 PASS. It requires tmux, `omp`, rizin, `bun`
+and a C compiler, and skips (exit 0) without them. Like the other tmux tiers,
+it is not run in CI.
 
 ## Full QA tier — `bash test/tui-qa.sh` (`bun run qa:tui`)
 

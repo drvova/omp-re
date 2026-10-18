@@ -447,6 +447,8 @@ function registerShell(pi: ExtensionAPI): void {
 						if (against) await runOpen(ctx, against);
 						// --resolve implies --inherit: re-prove what holds, then hand the agenda to the model as a turn.
 						await carryManifest(ctx, manifestPath, { strict, out, ...(inherit || resolve ? { inherit: pi } : {}), resolve });
+						// --inherit records evidence and findings outside any tool call, so no tool_result refreshes the band.
+						await refreshStatusBand(ctx);
 						return;
 					}
 					case "status":

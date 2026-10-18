@@ -26,6 +26,7 @@
     "check:tsc": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
     "test:tui": "bash test/tui.sh",
+    "test:tui:carry": "bash test/tui-carry.sh",
     "qa:tui": "bash test/tui-qa.sh"
   },
   "devDependencies": {

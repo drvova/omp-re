@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![63 tools](https://img.shields.io/badge/tools-63-informational)
+![64 tools](https://img.shields.io/badge/tools-64-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 63 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 64 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -268,6 +268,11 @@ still analysing. Overriding the auditor takes a written justification, which is
 kept and shown. Findings appear in the report's **Findings** section with their
 confidence and provenance, go into the manifest, and carry like any other
 claim. `retract_finding` withdraws one, and `supersedes` revises one.
+`adopt_finding` brings in a finding from the `re-analyst` subagent, whose
+evidence lives in its own session. It re-runs the finding's reproducing
+commands in this session, records them as evidence here, and gates the claim
+the same way. A subagent's conclusion only reaches the report after it has been
+re-proven where the report is written.
 
 ### Carried to the next build
 
@@ -336,10 +341,10 @@ records no evidence.
 
 ## Tool reference
 
-All 63 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 64 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
-may legitimately show fewer than 63.
+may legitimately show fewer than 64.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
@@ -431,7 +436,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 63 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 64 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

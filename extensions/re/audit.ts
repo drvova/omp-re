@@ -127,6 +127,7 @@ export const RE_ANALYZE_TOOL_NAMES: Record<string, true> = {
 /** Findings (findings.ts): the model's conclusions recorded as gated report claims. Audited and toggled; not evidence (a finding cites evidence, it isn't an observation of the binary). */
 export const RE_FINDING_TOOL_NAMES: Record<string, true> = {
 	record_finding: true,
+	adopt_finding: true,
 	retract_finding: true,
 };
 

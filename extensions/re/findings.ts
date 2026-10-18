@@ -28,7 +28,9 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { type AuditClaimInput, auditClaims, type ClaimJudge, ephemeralJudge } from "./audit-claims.ts";
 import { branchEntries, collectEvidence, type EvidenceRecord } from "./entries.ts";
-import { plainResult } from "./format.ts";
+import { plainResult, type ReToolResult } from "./format.ts";
+import { recordEvidence } from "./evidence.ts";
+import { runRizinCommand } from "./tools-rizin.ts";
 import { reRenderers } from "./render.ts";
 import { getState } from "./state.ts";
 import { recordedStatus } from "./verify.ts";
@@ -54,6 +56,8 @@ export interface FindingRecord {
 	audit?: { verdict: string; reason: string; override?: string };
 	binarySha256?: string;
 	inherited?: FindingInheritance;
+	/** adopt_finding: who made the claim before it was re-proven here (e.g. "re-analyst"). */
+	adoptedFrom?: string;
 }
 
 const CONFIDENCES: readonly FindingConfidence[] = ["confirmed", "likely", "speculative"];
@@ -87,6 +91,7 @@ export function collectFindings(entries: readonly { type: string; customType?: s
 			...(d.audit && typeof d.audit === "object" ? { audit: d.audit } : {}),
 			...(typeof d.binarySha256 === "string" ? { binarySha256: d.binarySha256 } : {}),
 			...(d.inherited && typeof d.inherited === "object" ? { inherited: d.inherited } : {}),
+			...(typeof d.adoptedFrom === "string" ? { adoptedFrom: d.adoptedFrom } : {}),
 		});
 	}
 	return [...live.values()];
@@ -110,8 +115,84 @@ export function findingNote(f: FindingRecord): string {
 		const from = f.inherited.fromBinarySha256 ? `\`${f.inherited.fromBinarySha256.slice(0, 12)}…\`` : "an earlier build";
 		parts.push(`inherited from ${from}, re-verified on this build (${f.inherited.carryStatus}${f.inherited.relocation ? `: ${f.inherited.relocation.from} → ${f.inherited.relocation.to}` : ""})`);
 	}
+	if (f.adoptedFrom) parts.push(`adopted from ${f.adoptedFrom}, re-proven in this session`);
 	if (f.audit?.override) parts.push(`recorded over a support-audit "${f.audit.verdict}" verdict — justification: ${f.audit.override}`);
 	return parts.join(" · ");
+}
+
+interface FindingInput {
+	claim: string;
+	addr?: string;
+	confidence?: FindingConfidence;
+	supersedes?: string;
+	override_audit?: string;
+	/** adopt_finding only: who made the claim originally (e.g. "re-analyst"). */
+	adoptedFrom?: string;
+}
+
+/**
+ * The gate every recorded finding passes after its evidence is resolved: the
+ * side-turn support audit (refused on unsupported/overreach unless overridden
+ * with a justification; fails open to "unaudited"), then the `re.finding` entry
+ * and a result that says whether the finding can carry. Shared by
+ * `record_finding` and `adopt_finding`, so the two can never gate differently.
+ */
+async function gateAndRecord(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	options: FindingToolOptions,
+	tool: string,
+	input: FindingInput,
+	resolved: readonly EvidenceRecord[],
+): Promise<ReToolResult> {
+	const item: AuditClaimInput = {
+		index: 0,
+		claimText: input.claim,
+		evidence: resolved.map((ev) => ({ id: ev.id, tool: ev.tool, summary: ev.summary, canonicalExcerpt: ev.canonicalExcerpt })),
+	};
+	const judge = (options.judge ?? ephemeralJudge)(ctx);
+	const outcome = await auditClaims([item], judge, "advisory");
+	const verdict = outcome.byIndex.get(0);
+	const refused = verdict && (verdict.verdict === "unsupported" || verdict.verdict === "overreach");
+	const evidenceList = resolved.map((ev) => ev.id.slice(0, 8)).join(", ");
+	if (refused && !input.override_audit) {
+		return {
+			...plainResult(
+				`${tool}: NOT recorded — the support auditor judged this claim ${verdict.verdict}: ${verdict.reason}\nNarrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.${tool === "adopt_finding" ? `\nThe re-run evidence was recorded (${evidenceList}); cite it in record_finding to record a narrower claim.` : ""}`,
+			),
+			isError: true,
+		};
+	}
+
+	const id = randomUUID();
+	const openSha = getState(ctx).binarySha256 ?? undefined;
+	const audit = verdict
+		? { verdict: verdict.verdict, reason: verdict.reason, ...(refused ? { override: input.override_audit! } : {}) }
+		: { verdict: "unaudited", reason: outcome.unauditedReason ?? "side turn unavailable" };
+	const record: FindingRecord = {
+		id,
+		claim: input.claim,
+		evidenceIds: resolved.map((ev) => ev.id),
+		...(input.addr ? { addr: input.addr } : {}),
+		confidence: input.confidence ?? "likely",
+		...(input.supersedes ? { supersedes: input.supersedes } : {}),
+		audit,
+		...(openSha ? { binarySha256: openSha } : {}),
+		...(input.adoptedFrom ? { adoptedFrom: input.adoptedFrom } : {}),
+	};
+	pi.appendEntry("re.finding", record);
+
+	const reproducible = resolved.filter((ev) => recordedStatus(ev) === "reproducible").length;
+	const lines = [
+		`${tool}: recorded ${id.slice(0, 8)}${input.supersedes ? ` (supersedes ${input.supersedes.slice(0, 8)})` : ""}`,
+		`claim: ${input.claim}`,
+		...(input.adoptedFrom ? [`adopted from ${input.adoptedFrom}: re-proven in this session on evidence ${evidenceList}`] : []),
+		`support audit: ${audit.verdict}${audit.reason ? ` — ${audit.reason}` : ""}${refused ? " (overridden)" : ""}`,
+		reproducible > 0
+			? `evidence: ${reproducible} of ${resolved.length} machine-reproducible — this finding will carry to the next build (/re carry)`
+			: `evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable`,
+	];
+	return plainResult(lines.join("\n"), input.addr);
 }
 
 export interface FindingToolOptions {
@@ -131,6 +212,19 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 			.string()
 			.optional()
 			.describe("Only if the support auditor refused this claim and you are confident it is wrong: a one-line justification, recorded and shown beside the finding."),
+	});
+	const adoptFindingParams = z.object({
+		claim: z.string().min(1).max(600).describe("The finding's claim, as narrowly as its evidence supports."),
+		commands: z
+			.array(z.object({ command: z.string().describe("A read-only rizin command, e.g. `pdf` or `px 64`."), addr: z.string().optional().describe("Where to run it (address or name).") }))
+			.min(1)
+			.max(8)
+			.describe("The rizin command(s) that reproduce the finding's evidence — re-run here and recorded as this session's evidence."),
+		addr: z.string().optional().describe("The address or function the finding is about."),
+		confidence: z.enum(["confirmed", "likely", "speculative", "possible"]).optional().describe("How sure the claim is (default likely); the re-analyst's `possible` is taken as speculative."),
+		source: z.string().max(80).optional().describe('Who made the finding originally, e.g. "re-analyst".'),
+		expect_sha256: z.string().optional().describe("SHA-256 of the binary the finding was made on (the subagent's sha256); refused if a different binary is open."),
+		override_audit: z.string().optional().describe("Only if the support auditor refused the claim and you are confident it is wrong: a one-line justification."),
 	});
 	const retractFindingParams = z.object({
 		id: z.string().describe("Id (or ≥6-char prefix) of the finding to withdraw."),
@@ -172,50 +266,36 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 				supersedes = r.item.id;
 			}
 
-			const item: AuditClaimInput = {
-				index: 0,
-				claimText: params.claim,
-				evidence: resolved.map((ev) => ({ id: ev.id, tool: ev.tool, summary: ev.summary, canonicalExcerpt: ev.canonicalExcerpt })),
-			};
-			const judge = (options.judge ?? ephemeralJudge)(ctx);
-			const outcome = await auditClaims([item], judge, "advisory");
-			const verdict = outcome.byIndex.get(0);
-			const refused = verdict && (verdict.verdict === "unsupported" || verdict.verdict === "overreach");
-			if (refused && !params.override_audit) {
-				return {
-					...plainResult(
-						`record_finding: NOT recorded — the support auditor judged this claim ${verdict.verdict}: ${verdict.reason}\nNarrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.`,
-					),
-					isError: true,
-				};
+			return gateAndRecord(pi, ctx, options, "record_finding", { ...params, supersedes }, resolved);
+		},
+	});
+
+	pi.registerTool({
+		name: "adopt_finding",
+		label: "Adopt Finding",
+		description:
+			"Adopt a finding made elsewhere — typically one returned by the re-analyst subagent, whose evidence lives in its own session — by re-proving it here: each given rizin command is re-run read-only on the open binary and recorded as evidence in THIS session, then the claim passes the same gates as record_finding (support audit included). Refused if expect_sha256 doesn't match the open binary or a command fails. Use the subagent's `reproduce` lines as the commands.",
+		approval: "read",
+		loadMode: "essential",
+		parameters: adoptFindingParams,
+		...reRenderers({ title: "adopt_finding", subject: "claim", body: "text" }),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const openSha = getState(ctx).binarySha256 ?? undefined;
+			if (params.expect_sha256 && openSha && params.expect_sha256.toLowerCase() !== openSha) {
+				throw new Error(`omp-re: adopt_finding: the finding was made on binary ${params.expect_sha256.slice(0, 12)}… but ${openSha.slice(0, 12)}… is open — open the same binary first.`);
 			}
-
-			const id = randomUUID();
-			const audit = verdict
-				? { verdict: verdict.verdict, reason: verdict.reason, ...(refused ? { override: params.override_audit! } : {}) }
-				: { verdict: "unaudited", reason: outcome.unauditedReason ?? "side turn unavailable" };
-			const record: FindingRecord = {
-				id,
-				claim: params.claim,
-				evidenceIds: resolved.map((ev) => ev.id),
-				...(params.addr ? { addr: params.addr } : {}),
-				confidence: params.confidence ?? "likely",
-				...(supersedes ? { supersedes } : {}),
-				audit,
-				...(openSha ? { binarySha256: openSha } : {}),
-			};
-			pi.appendEntry("re.finding", record);
-
-			const reproducible = resolved.filter((ev) => recordedStatus(ev) === "reproducible").length;
-			const lines = [
-				`record_finding: recorded ${id.slice(0, 8)}${supersedes ? ` (supersedes ${supersedes.slice(0, 8)})` : ""}`,
-				`claim: ${params.claim}`,
-				`support audit: ${audit.verdict}${audit.reason ? ` — ${audit.reason}` : ""}${refused ? " (overridden)" : ""}`,
-				reproducible > 0
-					? `evidence: ${reproducible} of ${resolved.length} machine-reproducible — this finding will carry to the next build (/re carry)`
-					: `evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable`,
-			];
-			return plainResult(lines.join("\n"), params.addr);
+			// Re-prove: every command runs through rizin_command's own read-only gate and is recorded
+			// exactly as a live rizin_command result, bound to the open binary. A claim is adopted only
+			// on evidence this session observed itself.
+			const resolved: EvidenceRecord[] = [];
+			for (const { command, addr } of params.commands) {
+				const res = await runRizinCommand(ctx, command, addr, signal);
+				if (res.isError) throw new Error(`omp-re: adopt_finding: \`${command}${addr ? ` @ ${addr}` : ""}\` failed here: ${res.content.map((c) => ("text" in c ? c.text : "")).join(" ").slice(0, 300)}`);
+				const evidenceId = await recordEvidence(pi, ctx, "rizin_command", addr ? { command, addr } : { command }, res.content, res.details);
+				const record = collectEvidence(branchEntries(ctx)).find((ev) => ev.id === evidenceId);
+				if (record) resolved.push(record);
+			}
+			return gateAndRecord(pi, ctx, options, "adopt_finding", { ...params, confidence: params.confidence === "possible" ? "speculative" : params.confidence, adoptedFrom: params.source ?? "an external analysis" }, resolved);
 		},
 	});
 

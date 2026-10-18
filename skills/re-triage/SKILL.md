@@ -32,7 +32,13 @@ There is no `/re triage`. The subcommands are: `open <path>`, `functions`,
 `findings [id]`, `verify`, `carry <manifest>`, `status`, `on`, `off`, `help`.
 
 For a self-contained analysis, delegate to the `re-analyst` agent with the
-binary path and the question; it returns findings tied to tool output.
+binary path and the question; it returns findings tied to tool output. Its
+evidence lives in its own session, so to put a subagent finding in this
+session's report, `adopt_finding` it: pass the claim, its `reproduce` lines as
+`commands` (split `cmd @ addr` into `command` + `addr`), `source: "re-analyst"`
+and its `sha256` as `expect_sha256`. The commands are re-run here and the claim
+is gated like any finding. Don't hand-copy a subagent claim into
+`record_finding`.
 
 ## Order of work
 

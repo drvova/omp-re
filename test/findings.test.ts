@@ -172,6 +172,43 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 	}, 60_000);
 	afterAll(() => rmDirSafe(dir));
 
+	test("adopt_finding re-proves a subagent finding in this session: re-runs its commands, records evidence here, gates the claim", async () => {
+		const h = makeHarness("adopt-live");
+		let verdict: ClaimAudit["verdict"] = "supported";
+		registerFindingTools(h.pi, { judge: () => async (items) => items.map((i) => ({ index: i.index, verdict, reason: verdict === "supported" ? "shown" : "a loop, not a hash" })) });
+		const v1Sha = await sha256File(v1);
+		getState(h.ctx).binaryPath = v1;
+		getState(h.ctx).binarySha256 = v1Sha;
+		const adopt = (params: Record<string, unknown>) => h.tool("adopt_finding").execute("c", params, undefined, undefined, h.ctx);
+		// What re-analyst hands back: claim + reproduce lines + its sha256 + confidence "possible".
+		const subagentFinding = { claim: "fib computes Fibonacci numbers iteratively.", commands: [{ command: "pdf", addr: "sym.fib" }], addr: "sym.fib", confidence: "possible", source: "re-analyst", expect_sha256: v1Sha };
+
+		// A different binary open → refused before anything runs.
+		await expect(adopt({ ...subagentFinding, expect_sha256: "e".repeat(64) })).rejects.toThrow("open the same binary first");
+		// A command that doesn't reproduce here → refused.
+		await expect(adopt({ ...subagentFinding, commands: [{ command: "pdf", addr: "sym.no_such_function" }] })).rejects.toThrow("failed here");
+		expect(collectFindings(h.entries)).toHaveLength(0);
+
+		const result = await adopt(subagentFinding);
+		expect(result.isError).toBeFalsy();
+		expect(textOf(result)).toContain("adopted from re-analyst: re-proven in this session");
+		const [finding] = collectFindings(h.entries);
+		expect(finding).toMatchObject({ adoptedFrom: "re-analyst", confidence: "speculative", addr: "sym.fib", binarySha256: v1Sha });
+		const ev = collectEvidence(h.entries).find((e) => e.id === finding!.evidenceIds[0]);
+		expect(ev).toMatchObject({ tool: "rizin_command", binarySha256: v1Sha, args: { command: "pdf", addr: "sym.fib" } });
+		expect(ev?.reproHash).toBeDefined();
+
+		// The auditor still gates adopted claims; the re-run evidence stays recorded for a narrower claim.
+		verdict = "overreach";
+		const before = collectEvidence(h.entries).length;
+		const refused = await adopt({ ...subagentFinding, claim: "fib is the C2 key derivation." });
+		expect(refused.isError).toBe(true);
+		expect(textOf(refused)).toContain("cite it in record_finding");
+		expect(collectEvidence(h.entries).length).toBe(before + 1);
+		expect(collectFindings(h.entries)).toHaveLength(1);
+		shutdownState("adopt-live");
+	}, 60_000);
+
 	test("findings that hold are re-proven on v2 with fresh evidence; the one that drifted becomes the agenda", async () => {
 		// ── Session A: analyse v1 and record findings on real rizin_command evidence.
 		const a = makeHarness("inherit-v1");
