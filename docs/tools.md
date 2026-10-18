@@ -1,8 +1,8 @@
 # Tool reference
 
-All 61 `omp-re` tools, grouped by tier. Triage tools register only when their
+All 63 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 61 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+show fewer than 63 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
@@ -99,6 +99,20 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_data` | `write` | `addr, size, count?` | Mark bytes as a data element/array (`Cd`) so they stop rendering as code. `/re undo` removes the mark. |
 | `set_string` | `write` | `addr, size?` | Mark bytes as a string (`Cs`); omit `size` to autodetect. Correctly no-ops on non-string bytes. `/re undo` removes it. |
 | `set_format` | `write` | `addr, size, format` | Overlay a pf struct format (with field names) on a region (`Cf`) so disassembly shows named fields. Display-only. `/re undo` removes it. |
+
+## Findings (2 tools)
+
+The model's own conclusions, recorded as report claims (`re.finding` entries).
+A finding is gated when it is recorded, while the model can still act on the
+result, and again at `/re report`. It lands in the report's **Findings**
+section and in the verification manifest, and `/re carry --inherit` re-proves
+it on the next build. Neither tool reads the binary, and neither records
+evidence.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `record_finding` | `read` | `claim, evidence[], addr?, confidence?, supersedes?, override_audit?` | Records a conclusion backed by evidence ids (exact or a ≥6-character prefix). It is refused when an id doesn't resolve on this branch or was taken against a different binary than the one open. The claim then goes to the same side-turn support audit `/re report` uses. An `unsupported` or `overreach` verdict refuses the finding with the auditor's reason, unless `override_audit` gives a justification, which is kept and shown beside the finding. With no model available the finding is recorded as `unaudited` (fails open). The result says how much of its evidence is machine-reproducible: only `rizin_command` evidence carries to the next build. `supersedes` revises an earlier finding. `confidence` is `confirmed`, `likely` (the default) or `speculative`. |
+| `retract_finding` | `read` | `id, reason` | Withdraws a finding, which then leaves the report. The reason is kept in the session log. |
 
 ## rizin REPL (2 tools)
 

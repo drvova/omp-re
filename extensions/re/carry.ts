@@ -36,14 +36,18 @@
  * `process.exitCode = 1` (`--strict` also fails on relocated, drifted, or unchecked), so a
  * report doubles as a CI regression test for the next build.
  */
+import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { type AnchorFingerprint, relocateAnchor } from "./anchor.ts";
+import { branchEntries } from "./entries.ts";
+import { recordEvidence } from "./evidence.ts";
+import { collectFindings, type FindingConfidence, type FindingRecord } from "./findings.ts";
 import { checkRizinCommand, loadCatalog, type RzCatalog } from "./catalog.ts";
 import { canonicalExcerpt, canonicalHash, maskAddresses, shiftHash } from "./format.ts";
 import { normalizeAddr, resolveNumericAddr, type RzSession, validateAddr } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
-import { cleanStderr } from "./tools-rizin.ts";
+import { cleanStderr, runRizinCommand } from "./tools-rizin.ts";
 import { sha256File } from "./verify.ts";
 
 const CARRY_COMMAND_TIMEOUT_MS = 120_000;
@@ -67,9 +71,20 @@ export interface ManifestEntry {
 	claims: string[];
 }
 
+/** One finding from the manifest's `findings` block (report.ts) — what `--inherit` re-proves. */
+export interface ManifestFinding {
+	id: string;
+	claim: string;
+	evidenceIds: string[];
+	addr: string | null;
+	confidence: FindingConfidence;
+}
+
 export interface CarryManifest {
 	binarySha256: string | null;
 	entries: ManifestEntry[];
+	/** Absent (empty) on manifests written before findings shipped. */
+	findings: ManifestFinding[];
 }
 
 export type CarryStatus = "holds" | "relocated" | "drifted" | "broken" | "unchecked";
@@ -85,6 +100,8 @@ export interface CarryEvidenceRow {
 	diff?: string[];
 	/** Set when the anchor was found again elsewhere by fingerprint (relocated, or drifted after relocating). */
 	relocation?: { from: string; to: string; addr: string; similarity: number };
+	/** holds/relocated only: the `{ command, addr }` that reproduced it on this build — what `--inherit` re-runs to record fresh evidence. */
+	rerun?: { command: string; addr?: string };
 }
 
 export interface CarryClaimRow {
@@ -101,6 +118,17 @@ export interface CarryResult {
 	toPath: string | null;
 	evidence: CarryEvidenceRow[];
 	claims: CarryClaimRow[];
+	/** Set by `--inherit`: which findings were re-proven on this build, and which need another look. */
+	inheritance?: InheritOutcome;
+}
+
+export interface InheritOutcome {
+	/** Findings re-recorded on this build: old finding id → new finding id. */
+	inherited: { fromId: string; toId: string; claim: string; status: "holds" | "relocated" }[];
+	/** Findings that no longer hold as written (drifted/broken) or couldn't be re-checked — the analysis agenda. */
+	agenda: { fromId: string; claim: string; status: CarryStatus; rows: CarryEvidenceRow[] }[];
+	/** Findings skipped because this branch already has a live finding with the same claim. */
+	alreadyPresent: number;
 }
 
 /** Parse and shape-check a manifest's JSON text. Throws a clear error on anything that isn't a manifest; tolerates missing optional fields per entry. */
@@ -140,7 +168,20 @@ export function parseManifest(text: string): CarryManifest {
 			claims: Array.isArray(row.claims) ? row.claims.filter((c): c is string => typeof c === "string") : [],
 		});
 	}
-	return { binarySha256: str(obj.binarySha256), entries };
+	const findings: ManifestFinding[] = [];
+	const rawFindings = (raw as { findings?: unknown }).findings;
+	for (const f of Array.isArray(rawFindings) ? rawFindings : []) {
+		const row = f as Record<string, unknown> | null;
+		if (!row || typeof row.id !== "string" || typeof row.claim !== "string" || !Array.isArray(row.evidenceIds)) continue;
+		findings.push({
+			id: row.id,
+			claim: row.claim,
+			evidenceIds: row.evidenceIds.filter((x): x is string => typeof x === "string"),
+			addr: str(row.addr),
+			confidence: row.confidence === "confirmed" || row.confidence === "speculative" ? row.confidence : "likely",
+		});
+	}
+	return { binarySha256: str(obj.binarySha256), entries, findings };
 }
 
 /**
@@ -208,6 +249,18 @@ export function lineDiff(before: string, after: string, key: (line: string) => s
 	}
 	while (i < a.length) out.push(`- ${a[i++]}`);
 	while (j < b.length) out.push(`+ ${b[j++]}`);
+	return out;
+}
+
+/** Keep only changed lines and `context` unchanged lines around each, eliding the rest as `  …` — a hunk view of a {@link lineDiff}. */
+export function compactDiff(diff: readonly string[], context = 2): string[] {
+	const changed = diff.map((line) => !line.startsWith("  "));
+	const keep = diff.map((_, i) => changed.slice(Math.max(0, i - context), i + context + 1).some(Boolean));
+	const out: string[] = [];
+	diff.forEach((line, i) => {
+		if (keep[i]) out.push(line);
+		else if (out[out.length - 1] !== "  …") out.push("  …");
+	});
 	return out;
 }
 
@@ -285,7 +338,7 @@ async function tryRelocated(
 	const how = renamed && moved ? `moved to ${found.function} @ ${found.offset}` : renamed ? `renamed to ${found.function}` : moved ? `moved from ${fp.offset} to ${found.offset}` : `found at ${found.offset}`;
 	const where = `${fp.function} ${how} (code similarity ${found.similarity})`;
 	const same = compareOutput(entry, folded, binaryPath);
-	if (same) return { command: check.line, status: "relocated", detail: `${where}; ${same}`, relocation };
+	if (same) return { command: check.line, status: "relocated", detail: `${where}; ${same}`, relocation, rerun: { command: request.command, addr: found.addr } };
 	const diff = excerptDiff(entry.canonicalExcerpt ?? "", folded, binaryPath);
 	return { command: check.line, status: "drifted", detail: `${where}; output changed${diff ? "" : " beyond the recorded 20-line excerpt"}`, relocation, ...(diff ? { diff } : {}) };
 }
@@ -363,7 +416,7 @@ export async function buildCarry(ctx: ExtensionContext, manifest: CarryManifest)
 			}
 			const same = compareOutput(entry, output, binaryPath);
 			if (same) {
-				evidence.push({ ...base, command: line, status: "holds", detail: same });
+				evidence.push({ ...base, command: line, status: "holds", detail: same, rerun: request });
 				continue;
 			}
 			// Drifted at a numeric anchor: the code it named may simply have moved. Relocate by
@@ -437,7 +490,7 @@ export function formatCarryMarkdown(result: CarryResult, manifestPath: string): 
 		if (row.command) out.push(`- **Command:** \`${row.command}\``);
 		if (row.relocation) out.push(`- **Relocated:** ${row.relocation.from} → ${row.relocation.to} (similarity ${row.relocation.similarity})`);
 		out.push(`- **Detail:** ${row.detail}`, "");
-		if (row.diff && row.diff.length > 0) out.push("```diff", ...row.diff, "```", "");
+		if (row.diff && row.diff.length > 0) out.push("```diff", ...compactDiff(row.diff), "```", "");
 	}
 	return out.join("\n");
 }
@@ -449,18 +502,119 @@ export function formatCarryMarkdown(result: CarryResult, manifestPath: string): 
  * `--strict`, any drifted or unchecked one). `--out` also writes the Markdown
  * carry report and a `<out>.json` sidecar of the full result.
  */
-export async function carryManifest(ctx: ExtensionContext, manifestPath: string, opts: { strict?: boolean; out?: string } = {}): Promise<CarryResult> {
+/**
+ * `--inherit`: turn the carry into this build's starting point. For each manifest
+ * finding whose claim holds or relocated, every evidence row that reproduced is
+ * re-run through `rizin_command`'s own code path and recorded as fresh evidence
+ * bound to THIS binary (never copied from the manifest), and the finding is
+ * re-recorded citing only that evidence, with its provenance. A finding with no
+ * reproduced evidence, or one that drifted or broke, goes on the agenda instead.
+ * Idempotent: a claim already live on this branch is not inherited twice.
+ */
+export async function inheritFindings(pi: ExtensionAPI, ctx: ExtensionContext, manifest: CarryManifest, result: CarryResult): Promise<InheritOutcome> {
+	const statusByClaim = new Map(result.claims.map((c) => [c.text, c.status]));
+	const rowById = new Map(result.evidence.map((r) => [r.evidenceId, r]));
+	const present = new Set(collectFindings(branchEntries(ctx)).map((f) => f.claim));
+	const outcome: InheritOutcome = { inherited: [], agenda: [], alreadyPresent: 0 };
+
+	for (const finding of manifest.findings) {
+		if (present.has(finding.claim)) {
+			outcome.alreadyPresent++;
+			continue;
+		}
+		const status = statusByClaim.get(finding.claim) ?? "unchecked";
+		const rows = finding.evidenceIds.map((id) => rowById.get(id)).filter((r): r is CarryEvidenceRow => r !== undefined);
+		const reproduced = rows.filter((r) => (r.status === "holds" || r.status === "relocated") && r.rerun);
+		if ((status !== "holds" && status !== "relocated") || reproduced.length === 0) {
+			outcome.agenda.push({ fromId: finding.id, claim: finding.claim, status, rows });
+			continue;
+		}
+
+		const newEvidence: string[] = [];
+		for (const row of reproduced) {
+			const res = await runRizinCommand(ctx, row.rerun!.command, row.rerun!.addr);
+			if (res.isError) continue;
+			newEvidence.push(await recordEvidence(pi, ctx, "rizin_command", row.rerun, res.content, res.details));
+		}
+		if (newEvidence.length === 0) {
+			outcome.agenda.push({ fromId: finding.id, claim: finding.claim, status: "unchecked", rows });
+			continue;
+		}
+		// An address the finding was about follows its evidence's anchor when that anchor relocated.
+		const relocationOf = reproduced.find((r) => r.relocation)?.relocation;
+		const anchorMoved = relocationOf && finding.addr ? followRelocation(finding.addr, relocationOf) : undefined;
+		const id = randomUUID();
+		const record: FindingRecord = {
+			id,
+			claim: finding.claim,
+			evidenceIds: newEvidence,
+			...(anchorMoved ? { addr: anchorMoved } : finding.addr ? { addr: finding.addr } : {}),
+			confidence: finding.confidence,
+			audit: { verdict: "inherited", reason: "re-verified by /re carry; the report's support audit re-checks it" },
+			...(getState(ctx).binarySha256 ? { binarySha256: getState(ctx).binarySha256! } : {}),
+			inherited: {
+				fromBinarySha256: manifest.binarySha256,
+				fromFindingId: finding.id,
+				carryStatus: status,
+				...(relocationOf ? { relocation: { from: relocationOf.from, to: relocationOf.to, similarity: relocationOf.similarity } } : {}),
+			},
+		};
+		pi.appendEntry("re.finding", record);
+		present.add(finding.claim);
+		outcome.inherited.push({ fromId: finding.id, toId: id, claim: finding.claim, status });
+	}
+	return outcome;
+}
+
+/** Map a finding's address through a relocation: its old function name → the new name, its old start offset → the new one; anything else stays as is (undefined). */
+function followRelocation(addr: string, relocation: { from: string; to: string; addr: string }): string | undefined {
+	const [fromName, fromOffset] = relocation.from.split(" @ ");
+	const [toName, toOffset] = relocation.to.split(" @ ");
+	if (addr === fromName && toName) return toName;
+	if (fromOffset && toOffset && normalizeAddr(addr) === normalizeAddr(fromOffset)) return toOffset;
+	return undefined;
+}
+
+/** The agenda as a prompt for the model: each finding that no longer holds as written, with the evidence change under it. */
+export function formatAgendaPrompt(outcome: InheritOutcome, toSha256: string | null): string {
+	const lines = [
+		`These findings from the earlier report do not carry over unchanged to this build${toSha256 ? ` (\`${toSha256.slice(0, 12)}…\`)` : ""}. For each one, re-examine it with the RE tools, then record_finding a revised claim on fresh evidence, or leave it out if it no longer stands:`,
+		"",
+	];
+	outcome.agenda.forEach((item, i) => {
+		lines.push(`${i + 1}. [${item.status}] ${item.claim}`);
+		for (const row of item.rows) {
+			lines.push(`   - evidence ${row.evidenceId.slice(0, 8)}${row.command ? ` \`${row.command}\`` : ""}: ${row.status} — ${row.detail}`);
+			if (row.diff?.length) lines.push("     ```diff", ...compactDiff(row.diff).map((d) => `     ${d}`), "     ```");
+		}
+	});
+	return lines.join("\n");
+}
+
+export async function carryManifest(
+	ctx: ExtensionContext,
+	manifestPath: string,
+	opts: { strict?: boolean; out?: string; inherit?: ExtensionAPI } = {},
+): Promise<CarryResult> {
 	let text: string;
 	try {
 		text = await readFile(manifestPath, "utf8");
 	} catch (err) {
 		throw new Error(`omp-re: carry: could not read manifest ${manifestPath}: ${err instanceof Error ? err.message : String(err)}`);
 	}
-	const result = await buildCarry(ctx, parseManifest(text));
+	const manifest = parseManifest(text);
+	const result = await buildCarry(ctx, manifest);
 	const c = counts(result.claims);
 	const failed = c.broken > 0 || (opts.strict === true && (c.relocated > 0 || c.drifted > 0 || c.unchecked > 0));
 
 	let summary = formatCarrySummary(result);
+	let agendaPrompt: string | undefined;
+	if (opts.inherit) {
+		const inheritance = await inheritFindings(opts.inherit, ctx, manifest, result);
+		result.inheritance = inheritance;
+		summary += `\ninherit: ${inheritance.inherited.length} finding(s) re-proven on this build and recorded, ${inheritance.agenda.length} need another look${inheritance.alreadyPresent ? `, ${inheritance.alreadyPresent} already present` : ""}${manifest.findings.length === 0 ? " (this manifest has no findings — record them with record_finding before /re report)" : ""}`;
+		if (inheritance.agenda.length > 0) agendaPrompt = formatAgendaPrompt(inheritance, result.toSha256);
+	}
 	if (opts.out) {
 		try {
 			await writeFile(opts.out, formatCarryMarkdown(result, manifestPath), "utf8");
@@ -473,13 +627,17 @@ export async function carryManifest(ctx: ExtensionContext, manifestPath: string,
 
 	if (ctx.hasUI) {
 		ctx.ui.notify(summary, failed ? "error" : c.drifted > 0 ? "warning" : "info");
+		// The agenda goes into the editor, like /re cite: the analyst sends it to the model (or edits it first).
+		if (agendaPrompt) ctx.ui.setEditorText(agendaPrompt);
 	} else if (failed) {
 		console.error(summary);
 		// Same deliberate headless signal as /re verify and the report gate: a finding that no
 		// longer holds on the new build must fail the pipeline. process.exitCode, never process.exit.
 		process.exitCode = 1;
+		if (agendaPrompt) console.error(agendaPrompt);
 	} else {
 		console.log(summary);
+		if (agendaPrompt) console.log(agendaPrompt);
 	}
 	return result;
 }

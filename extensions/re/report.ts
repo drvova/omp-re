@@ -18,6 +18,7 @@ import { branchEntries, collectEvidence, type EvidenceRecord, lastRecordedBinary
 import { recordedCommand, recordedStatus } from "./verify.ts";
 import { type AnchorFingerprint, fingerprintAnchor } from "./anchor.ts";
 import { ensureRizin, getState } from "./state.ts";
+import { collectFindings, type FindingRecord, findingNote } from "./findings.ts";
 import { type AuditClaimInput, type AuditMode, type AuditOutcome, auditClaims, type ClaimJudge, ephemeralJudge, flaggedVerdicts } from "./audit-claims.ts";
 
 /**
@@ -49,6 +50,8 @@ interface Claim {
 	text: string;
 	/** Evidence/annotation ids backing this claim. Empty means ungrounded — the write gate blocks on this. */
 	evidenceIds: string[];
+	/** Provenance line rendered under the claim (findings: confidence, inheritance, audit override). Display only — never part of the claim text, which is what carry matches on. */
+	note?: string;
 }
 
 interface ReportSection {
@@ -297,6 +300,8 @@ interface BuiltReport {
 	evidenceById: Map<string, EvidenceRecord>;
 	/** SHA-256 of the binary this branch last opened, bound into the manifest. */
 	binarySha256?: string;
+	/** Live findings, for the manifest's `findings` block (what `/re carry --inherit` re-proves). */
+	findings: FindingRecord[];
 }
 
 async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
@@ -330,6 +335,13 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 		}
 	}
 
+	// The model's own conclusions, recorded with record_finding: already gated at record time, and
+	// gated again here like every other claim (existence, support audit, manifest).
+	const findings = collectFindings(entries);
+	if (findings.length > 0) {
+		sections.push({ title: "Findings", claims: findings.map((f) => ({ text: f.claim, evidenceIds: [...f.evidenceIds], note: findingNote(f) })) });
+	}
+
 	const iocClaims = await buildIOCClaims(ctx, evidence, annotations);
 	if (iocClaims.length > 0) {
 		sections.push({ title: "Indicators of Compromise", claims: iocClaims });
@@ -347,6 +359,7 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
 		toolById,
 		evidenceById: new Map(evidence.map((ev) => [ev.id, ev])),
 		binarySha256: lastRecordedBinarySha256(entries),
+		findings,
 	};
 }
 
@@ -359,6 +372,7 @@ function formatMarkdown(report: BuiltReport, outcome?: AuditOutcome): string {
 		if (section.claims.length > 0) {
 			for (const claim of section.claims) {
 				lines.push(`- ${claim.text}`);
+				if (claim.note) lines.push(`  _${claim.note}_`);
 				const anchors = claim.evidenceIds.map((id) => `[${report.toolById.get(id) ?? "unknown"}:${id}]`).join(" ");
 				if (anchors) lines.push(`  **Evidence:** ${anchors}`);
 				const audit = outcome?.byIndex.get(claimIndex);
@@ -580,6 +594,8 @@ function buildManifestJson(
 	anchors: ReadonlyMap<string, AnchorFingerprint> = new Map(),
 ): {
 	binarySha256: string | null;
+	/** The report's findings — what `/re carry --inherit` re-proves on another build. */
+	findings: Array<{ id: string; claim: string; evidenceIds: string[]; addr: string | null; confidence: string }>;
 	entries: Array<{
 		evidenceId: string;
 		tool: string;
@@ -609,6 +625,7 @@ function buildManifestJson(
 	}
 	return {
 		binarySha256: report.binarySha256 ?? null,
+		findings: report.findings.map((f) => ({ id: f.id, claim: f.claim, evidenceIds: f.evidenceIds, addr: f.addr ?? null, confidence: f.confidence })),
 		entries: [...claimsById.keys()].map((id) => {
 			const ev = report.evidenceById.get(id);
 			return {

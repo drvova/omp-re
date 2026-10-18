@@ -6,9 +6,9 @@
  * (`/x`, `/R`), ESIL (`aoe`), headers (`iH`), and the rest of rizin's ~700
  * read-only commands. See catalog.ts for the policy and its reasons.
  */
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { checkRizinCommand, loadCatalog, searchCatalog } from "./catalog.ts";
-import { canonicalExcerpt, canonicalHash, plainResult, shiftHash, textResult } from "./format.ts";
+import { canonicalExcerpt, canonicalHash, plainResult, type ReToolResult, shiftHash, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { eaFromOffset, resolveNumericAddr } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
@@ -78,32 +78,42 @@ export function registerRizinTools(pi: ExtensionAPI): void {
 		parameters: commandParams,
 		...reRenderers({ title: "rizin", subject: "command", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
-			const catalog = await loadCatalog();
-			const check = checkRizinCommand(catalog, params.command, params.addr);
-			if (!check.ok) throw new Error(check.reason);
-			const rz = await ensureRizin(ctx, { signal });
-			const ea = params.addr ? await resolveNumericAddr(rz, params.addr, signal).then(eaFromOffset, () => undefined) : undefined;
-			const { output, stderr } = await rz.cmdWithStderr(check.line, { timeoutMs: RIZIN_COMMAND_TIMEOUT_MS, signal });
-			const header = `rizin> ${check.line}`;
-			if (output.trim() === "") {
-				const errors = cleanStderr(stderr);
-				return errors
-					? { ...plainResult(`${header}\n(no output; rizin said:)\n${errors}`, ea), isError: true }
-					: plainResult(`${header}\n(no output)`, ea);
-			}
-			// reproHash is over the RAW output (pre-trim/pre-truncation), canonicalized and bound to the
-			// open binary's path, so `/re verify` can re-run this exact line and hash-compare. The body
-			// sent to the model is still the trimmed/truncated text; only the verification key sees raw.
-			const binaryPath = getState(ctx).binaryPath ?? undefined;
-			return textResult(header, output.replace(/\n+$/, ""), {
-				ea,
-				ctx,
-				tool: "rizin_command",
-				commands: [check.line],
-				reproHash: canonicalHash(output, binaryPath),
-				canonicalExcerpt: canonicalExcerpt(output, binaryPath),
-				shiftHash: shiftHash(output, binaryPath),
-			});
+			return runRizinCommand(ctx, params.command, params.addr, signal);
 		},
+	});
+}
+
+/**
+ * The body of `rizin_command`: gate the line through the read-only catalog check,
+ * run it, and build the result with its reproducibility fields (commands,
+ * reproHash, canonicalExcerpt, shiftHash). Exported so `/re carry --inherit` can
+ * re-run a carried command and record it exactly as the tool would.
+ */
+export async function runRizinCommand(ctx: ExtensionContext, command: string, addr: string | undefined, signal?: AbortSignal): Promise<ReToolResult> {
+	const catalog = await loadCatalog();
+	const check = checkRizinCommand(catalog, command, addr);
+	if (!check.ok) throw new Error(check.reason);
+	const rz = await ensureRizin(ctx, { signal });
+	const ea = addr ? await resolveNumericAddr(rz, addr, signal).then(eaFromOffset, () => undefined) : undefined;
+	const { output, stderr } = await rz.cmdWithStderr(check.line, { timeoutMs: RIZIN_COMMAND_TIMEOUT_MS, signal });
+	const header = `rizin> ${check.line}`;
+	if (output.trim() === "") {
+		const errors = cleanStderr(stderr);
+		return errors
+			? { ...plainResult(`${header}\n(no output; rizin said:)\n${errors}`, ea), isError: true }
+			: plainResult(`${header}\n(no output)`, ea);
+	}
+	// reproHash is over the RAW output (pre-trim/pre-truncation), canonicalized and bound to the
+	// open binary's path, so `/re verify` can re-run this exact line and hash-compare. The body
+	// sent to the model is still the trimmed/truncated text; only the verification key sees raw.
+	const binaryPath = getState(ctx).binaryPath ?? undefined;
+	return textResult(header, output.replace(/\n+$/, ""), {
+		ea,
+		ctx,
+		tool: "rizin_command",
+		commands: [check.line],
+		reproHash: canonicalHash(output, binaryPath),
+		canonicalExcerpt: canonicalExcerpt(output, binaryPath),
+		shiftHash: shiftHash(output, binaryPath),
 	});
 }

@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CarryEvidenceRow, type CarryManifest, carryManifest, entryRequest, lineDiff, type ManifestEntry, parseManifest, rollUpClaims } from "../extensions/re/carry.ts";
+import { type CarryEvidenceRow, type CarryManifest, carryManifest, compactDiff, entryRequest, lineDiff, type ManifestEntry, parseManifest, rollUpClaims } from "../extensions/re/carry.ts";
 import { fingerprintAnchor, sequenceSimilarity } from "../extensions/re/anchor.ts";
 import { canonicalExcerpt, canonicalHash, maskAddresses, shiftHash } from "../extensions/re/format.ts";
 import { RzSession, resolveRizinPath } from "../extensions/re/rizin.ts";
@@ -92,6 +92,10 @@ describe("lineDiff (no rizin needed)", () => {
 		expect(lineDiff("", "x")).toEqual(["+ x"]);
 		expect(lineDiff("x", "")).toEqual(["- x"]);
 	});
+	test("compactDiff keeps changes with their context and elides the rest", () => {
+		const diff = ["  a", "  b", "  c", "- d", "+ D", "  e", "  f", "  g", "  h"];
+		expect(compactDiff(diff, 1)).toEqual(["  …", "  c", "- d", "+ D", "  e", "  …"]);
+	});
 	test("with an address mask, a line that only moved is unchanged (shown in its new form)", () => {
 		expect(lineDiff("0x10 jmp 0x20\n0x12 add", "0x14 jmp 0x24\n0x16 sub", maskAddresses)).toEqual(["  0x14 jmp 0x24", "- 0x12 add", "+ 0x16 sub"]);
 	});
@@ -101,6 +105,7 @@ describe("rollUpClaims (no rizin needed)", () => {
 	test("a claim takes its worst checked evidence status; all-unchecked stays unchecked", () => {
 		const manifest: CarryManifest = {
 			binarySha256: null,
+			findings: [],
 			entries: [entry({ evidenceId: "e1", claims: ["A", "B"] }), entry({ evidenceId: "e2", claims: ["A"] }), entry({ evidenceId: "e3", claims: ["C"] })],
 		};
 		const rows: CarryEvidenceRow[] = [

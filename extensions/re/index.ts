@@ -41,6 +41,7 @@ import { registerTypeTools } from "./tools-types.ts";
 import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
+import { registerFindingTools } from "./findings.ts";
 import {
 	citeEvidence,
 	evidenceRecords,
@@ -146,7 +147,7 @@ const SUBCOMMANDS: readonly { name: string; usage?: string; description: string 
 	{ name: "undo", description: "revert the last annotation" },
 	{ name: "report", usage: "[path] [--audit=strict]", description: "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)" },
 	{ name: "verify", usage: "[--strict]", description: "re-run cited rizin commands and check recorded output hashes" },
-	{ name: "carry", usage: "<manifest.json> [--against <binary>] [--strict] [--out <path>]", description: "replay a report's findings against another build: which claims hold, drifted, or broke" },
+	{ name: "carry", usage: "<manifest.json> [--against <binary>] [--inherit] [--strict] [--out <path>]", description: "replay a report on another build: which claims hold, relocated, drifted, or broke; --inherit re-proves its findings here" },
 	{ name: "status", description: "rizin, decompiler, binary, and evidence status" },
 	{ name: "on", description: "enable the RE tools for this session" },
 	{ name: "off", description: "disable the RE tools for this session" },
@@ -163,7 +164,7 @@ const HELP_TEXT = [
 	"/re undo             revert annotation",
 	"/re report [path]    write report (--audit=strict gates claim support)",
 	"/re verify [--strict] re-verify evidence is reproducible",
-	"/re carry <manifest>  replay a report on another build (--against <bin>, --strict, --out <path>)",
+	"/re carry <manifest>  replay a report on another build (--against <bin>, --inherit, --strict, --out)",
 	"/re status           rizin, decompiler, and session status",
 	"/re on               enable RE tools",
 	"/re off              disable RE tools (quick toggle, no restart)",
@@ -418,21 +419,23 @@ function registerShell(pi: ExtensionAPI): void {
 						let against: string | undefined;
 						let out: string | undefined;
 						let strict = false;
+						let inherit = false;
 						const pathTokens: string[] = [];
 						for (let i = 0; i < rest.length; i++) {
 							const tok = rest[i]!;
 							if (tok === "--strict") strict = true;
+							else if (tok === "--inherit") inherit = true;
 							else if (tok === "--against") against = rest[++i];
 							else if (tok === "--out") out = rest[++i];
 							else pathTokens.push(tok);
 						}
 						const manifestPath = pathTokens.join(" ");
 						if (!manifestPath) {
-							ctx.ui.notify("Usage: /re carry <report.md.manifest.json> [--against <binary>] [--strict] [--out <path>]", "error");
+							ctx.ui.notify("Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit] [--strict] [--out <path>]", "error");
 							return;
 						}
 						if (against) await runOpen(ctx, against);
-						await carryManifest(ctx, manifestPath, { strict, out });
+						await carryManifest(ctx, manifestPath, { strict, out, ...(inherit ? { inherit: pi } : {}) });
 						return;
 					}
 					case "status":
@@ -486,6 +489,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:signature-tools", apply: registerSignatureTools },
 		{ name: "re:analyze-tools", apply: registerAnalyzeTools },
 		{ name: "re:project-tools", apply: registerProjectTools },
+		{ name: "re:finding-tools", apply: registerFindingTools },
 		{ name: "re:mapfile-tools", apply: registerMapFileTools },
 		{ name: "re:rizin-repl", apply: registerRizinTools },
 		{ name: "re:rizin-cli", apply: registerRzCliTools },

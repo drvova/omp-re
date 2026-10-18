@@ -91,54 +91,73 @@ export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
 	}
 }
 
+/**
+ * Append one `re.evidence` record for a successful evidence-tier tool result and
+ * return its id. Shared by the `tool_result` hook and by `/re carry --inherit`,
+ * which re-runs a carried command and must record it exactly as `rizin_command`
+ * would — same blob store, same reproducibility fields, same binary binding.
+ * Throws on a blob-store failure; the caller decides how loud that is.
+ */
+export async function recordEvidence(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	toolName: string,
+	input: unknown,
+	content: readonly { type: string; text?: string }[],
+	rawDetails: unknown,
+): Promise<string> {
+	const state = getState(ctx);
+	const rawText = extractText(content);
+	const outputHash = await writeBlob(rawText);
+	const summary = truncateUtf8Safe(rawText, EVIDENCE_SUMMARY_MAX_BYTES);
+
+	const details = (rawDetails ?? {}) as {
+		ea?: unknown;
+		artifactId?: unknown;
+		commands?: unknown;
+		reproHash?: unknown;
+		canonicalExcerpt?: unknown;
+		shiftHash?: unknown;
+	};
+	const ea = typeof details.ea === "string" ? details.ea : undefined;
+	const artifactId = typeof details.artifactId === "string" ? details.artifactId : undefined;
+	const commands = Array.isArray(details.commands) && details.commands.every((c) => typeof c === "string") ? (details.commands as string[]) : undefined;
+	const reproHash = typeof details.reproHash === "string" ? details.reproHash : undefined;
+	const canonicalExcerpt = typeof details.canonicalExcerpt === "string" ? details.canonicalExcerpt : undefined;
+	const shiftHash = typeof details.shiftHash === "string" ? details.shiftHash : undefined;
+	// Stamped at open time (index.ts): binds this evidence to the exact binary bytes it was taken
+	// against, so `/re verify` re-runs against the right binary. Absent on a resume whose re.binary
+	// entry predates the field — such evidence is then "unverifiable (legacy)", never a failure.
+	const binarySha256 = typeof state.binarySha256 === "string" ? state.binarySha256 : undefined;
+
+	const id = randomUUID();
+	state.evidenceCount++;
+	if (ea) state.evidenceByAddr.set(normalizeAddr(ea), id);
+
+	pi.appendEntry("re.evidence", {
+		id,
+		tool: toolName,
+		args: input,
+		ea,
+		outputHash,
+		...(artifactId ? { artifactId } : {}),
+		...(commands ? { commands } : {}),
+		...(reproHash ? { reproHash } : {}),
+		...(canonicalExcerpt ? { canonicalExcerpt } : {}),
+		...(shiftHash ? { shiftHash } : {}),
+		...(binarySha256 ? { binarySha256 } : {}),
+		summary,
+	});
+	return id;
+}
+
 export function registerEvidenceStore(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.isError) return undefined;
 		if (RE_EVIDENCE_TOOL_NAMES[event.toolName] !== true) return undefined;
 
 		try {
-			const state = getState(ctx);
-			const rawText = extractText(event.content);
-			const outputHash = await writeBlob(rawText);
-			const summary = truncateUtf8Safe(rawText, EVIDENCE_SUMMARY_MAX_BYTES);
-
-			const details = (event.details ?? {}) as {
-				ea?: unknown;
-				artifactId?: unknown;
-				commands?: unknown;
-				reproHash?: unknown;
-				canonicalExcerpt?: unknown;
-				shiftHash?: unknown;
-			};
-			const ea = typeof details.ea === "string" ? details.ea : undefined;
-			const artifactId = typeof details.artifactId === "string" ? details.artifactId : undefined;
-			const commands = Array.isArray(details.commands) && details.commands.every((c) => typeof c === "string") ? (details.commands as string[]) : undefined;
-			const reproHash = typeof details.reproHash === "string" ? details.reproHash : undefined;
-			const canonicalExcerpt = typeof details.canonicalExcerpt === "string" ? details.canonicalExcerpt : undefined;
-			const shiftHash = typeof details.shiftHash === "string" ? details.shiftHash : undefined;
-			// Stamped at open time (index.ts): binds this evidence to the exact binary bytes it was taken
-			// against, so `/re verify` re-runs against the right binary. Absent on a resume whose re.binary
-			// entry predates the field — such evidence is then "unverifiable (legacy)", never a failure.
-			const binarySha256 = typeof state.binarySha256 === "string" ? state.binarySha256 : undefined;
-
-			const id = randomUUID();
-			state.evidenceCount++;
-			if (ea) state.evidenceByAddr.set(normalizeAddr(ea), id);
-
-			pi.appendEntry("re.evidence", {
-				id,
-				tool: event.toolName,
-				args: event.input,
-				ea,
-				outputHash,
-				...(artifactId ? { artifactId } : {}),
-				...(commands ? { commands } : {}),
-				...(reproHash ? { reproHash } : {}),
-				...(canonicalExcerpt ? { canonicalExcerpt } : {}),
-				...(shiftHash ? { shiftHash } : {}),
-				...(binarySha256 ? { binarySha256 } : {}),
-				summary,
-			});
+			await recordEvidence(pi, ctx, event.toolName, event.input, event.content, event.details);
 		} catch (err) {
 			// A blob-store failure (disk full, EACCES, ...) must degrade to "no evidence
 			// recorded" for this call, not crash the tool_result pipeline.

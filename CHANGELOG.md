@@ -8,6 +8,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **First-class findings: the model's conclusions as gated, carried claims.**
+  Report claims came only from capa lines and IOC strings mined from evidence
+  summaries. Analytical conclusions ("checksum is djb2", "this is the C2 beacon
+  loop") had no way in.
+  - **`record_finding`** takes a claim, the evidence ids it rests on
+    (exact or a ≥6-character prefix), an optional address and a confidence.
+    It is gated when recorded: ids must resolve on this branch (existence),
+    the evidence must have been taken against the open binary (binding), and
+    the claim goes to the same side-turn support audit `/re report` uses. An
+    unsupported or overreaching claim is refused with the auditor's reason
+    unless `override_audit` supplies a justification, which is recorded and
+    shown. The audit fails open to `unaudited`.
+  - **`retract_finding`** withdraws a finding, and **`supersedes`** revises one.
+  - **Findings section.** Live findings become the report's **Findings**
+    section, with confidence and provenance, and pass the report's own gates.
+    The manifest gains a `findings` block.
+  - **Tool count.** Tools go from 61 to 63. Both new tools are audited and
+    toggled by `/re off`, and neither records evidence.
+- **`/re carry --inherit`: re-prove surviving findings on the new build.**
+  - **Re-proving.** For each manifest finding that holds or relocated, its
+    reproduced commands are re-run through `rizin_command`'s own code path
+    (`runRizinCommand`, now exported) and recorded through the same evidence
+    path as a live tool call (`recordEvidence`, now shared by the
+    `tool_result` hook), bound to the new binary. They are never copied from
+    the manifest.
+  - **Re-recording.** The finding is re-recorded citing only that fresh
+    evidence, with its address following any relocation and its provenance
+    (source binary, source finding, carry status).
+  - **Agenda.** Drifted, broken or unre-checkable findings form an agenda
+    prompt, each with a compact diff (changed lines plus two lines of
+    context). It goes into the editor interactively and is printed headless.
+    Inheriting is idempotent.
+  - **Diffs.** Carry-report diffs are compacted the same way.
+- **Support-audit fallback.** The side-turn auditor retries once without
+  `tools: false` when a transport refuses that option (native-tools models, or
+  tool-call history, which is the normal state when `record_finding` asks).
+
 - **`/re carry`: a report becomes a regression test for the next build.**
   `/re carry <report>.manifest.json [--against <binary>] [--strict] [--out
   <path>]` replays a finished report's cited commands against a *different*

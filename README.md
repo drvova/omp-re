@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![61 tools](https://img.shields.io/badge/tools-61-informational)
+![63 tools](https://img.shields.io/badge/tools-63-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 61 agent tools, a `/re` slash
+it drives [rizin](https://rizin.re) behind 63 agent tools, a `/re` slash
 command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -63,7 +63,7 @@ x                # follow the selected xref
 a                # hand the function off to the model with a grounding prompt
 /re report       # write a Markdown report from what was gathered
 /re verify       # re-run the cited commands and prove the report reproducible
-/re carry report.md.manifest.json --against ./v2   # which findings survive the next build?
+/re carry report.md.manifest.json --against ./v2 --inherit   # re-prove what survives on the next build
 ```
 
 Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a
@@ -255,6 +255,20 @@ on any unsupported/overreach (and `--no-audit` skips it). It fails open: with no
 model or side-turn host it degrades to an "unaudited" note and never blocks, so
 the two deterministic gates stay authoritative.
 
+### Findings: the model's own conclusions, gated
+
+capa lines and IOC strings get into a report on their own. The model's actual
+conclusions, such as "checksum is a djb2 hash" or "the config is RC4-decrypted
+with a key from the volume serial", get in through `record_finding`. Each
+finding cites evidence ids and is checked when it is recorded. Every id must
+resolve on this branch and must have been taken against the open binary, and
+the claim goes to the same support audit `/re report` uses. An overreaching
+claim is refused with the auditor's reason, so the model narrows it while it is
+still analysing. Overriding the auditor takes a written justification, which is
+kept and shown. Findings appear in the report's **Findings** section with their
+confidence and provenance, go into the manifest, and carry like any other
+claim. `retract_finding` withdraws one, and `supersedes` revises one.
+
 ### Carried to the next build
 
 A report's manifest is also a regression test. `/re carry <manifest.json>
@@ -270,7 +284,17 @@ changed; the claim arrives with a diff limited to what really changed, not every
 shifted address. **broken** means the anchor is gone and nothing matches its
 fingerprint, or the command now produces nothing. **unchecked** means the
 evidence was provenance-only. Headless, a broken claim exits non-zero, and
-`--strict` also fails on relocation or drift. Every command still goes through the read-only
+`--strict` also fails on relocation or drift.
+
+`--inherit` turns the carry into the new build's starting point. Every finding
+that holds or relocated is re-proven: its commands are re-run through
+`rizin_command`'s own code path, the output is recorded as fresh evidence bound
+to the new binary (never copied from the manifest), and the finding is
+re-recorded with its provenance, e.g. "inherited from `646243…`, re-verified on
+this build (relocated: sym.fib → sym.fibonacci)". Findings that drifted or broke
+become an agenda that is placed in the editor, each with a compact diff of
+exactly what changed, ready to hand to the model: "this no longer holds as
+written; here is the change; revise or retract". Every command still goes through the read-only
 `rizin_command` gate, because a manifest is untrusted input, and carrying
 records no evidence.
 
@@ -296,7 +320,7 @@ records no evidence.
 /re undo             revert annotation
 /re report [path]    write report (--audit=strict gates claim support)
 /re verify [--strict] re-verify report evidence is reproducible
-/re carry <manifest>  replay a report on another build (--against <bin>, --strict, --out <path>)
+/re carry <manifest>  replay a report on another build (--against <bin>, --inherit, --strict, --out)
 /re status           rizin, decompiler, and session status
 /re on               enable RE tools
 /re off              disable RE tools (quick toggle, no restart)
@@ -306,10 +330,10 @@ records no evidence.
 
 ## Tool reference
 
-All 61 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
+All 63 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
 tables. Triage tools appear only when their backing binary is on PATH, and
 `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
-may legitimately show fewer than 61.
+may legitimately show fewer than 63.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
@@ -401,7 +425,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 61 tools.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 63 tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

@@ -10,6 +10,16 @@ learned another way — `bash`, `cat`, a pasted dump, prior knowledge — has no
 evidence id behind it, and `/re report` withholds the **entire** report if any
 claim in it is unbacked. Get findings through the tools.
 
+When you reach a conclusion, record it with `record_finding`: the claim, stated
+as narrowly as the evidence supports, plus the evidence ids behind it (shown in
+`/re evidence` and accepted as 6+ character prefixes). That is how a conclusion
+gets into the report. A finding is refused if an id doesn't resolve or the
+support auditor judges the claim more than the evidence shows. Read the reason,
+then narrow the claim or gather better evidence. Prefer `rizin_command` evidence
+(`pdf @ sym.x`, `px 64 @ addr`) for findings that matter: only reproducible
+evidence carries to the next build with `/re carry`. Revise a finding with
+`supersedes`, and withdraw one with `retract_finding`.
+
 ## Start here
 
 `open_binary` (or `/re open <path>`) spawns rizin, runs full analysis, and
@@ -19,7 +29,7 @@ open: its first call must be `open_binary`.
 
 There is no `/re triage`. The subcommands are: `open <path>`, `functions`,
 `strings`, `imports`, `evidence [id]`, `cite <id>`, `undo`, `report [path]`,
-`status`, `on`, `off`, `help`.
+`verify`, `carry <manifest>`, `status`, `on`, `off`, `help`.
 
 For a self-contained analysis, delegate to the `re-analyst` agent with the
 binary path and the question; it returns findings tied to tool output.
