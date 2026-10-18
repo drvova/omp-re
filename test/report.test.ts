@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
@@ -40,7 +40,7 @@ let originalConsoleError: typeof console.error;
 let originalConsoleLog: typeof console.log;
 
 beforeEach(async () => {
-  tempDir = await mkdtemp(join(tmpdir(), "omp-re-report-test-"));
+  tempDir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-report-test-"));
   process.exitCode = 0;
   consoleErrorCalls = [];
   consoleLogCalls = [];
@@ -87,7 +87,7 @@ describe("writeReport", () => {
     ];
     const notifications: { message: string; type?: string }[] = [];
     const ctx = makeCtx(entries, notifications);
-    const outputPath = join(tempDir, "withheld.md");
+    const outputPath = nodePath.join(tempDir, "withheld.md");
 
     await writeReport(ctx, outputPath);
 
@@ -116,7 +116,7 @@ describe("writeReport", () => {
     ];
     const notifications: { message: string; type?: string }[] = [];
     const ctx = makeCtx(entries, notifications);
-    const outputPath = join(tempDir, "grounded.md");
+    const outputPath = nodePath.join(tempDir, "grounded.md");
 
     await writeReport(ctx, outputPath);
 
@@ -149,7 +149,7 @@ describe("writeReport", () => {
         type: "custom",
       },
     ];
-    const outputPath = join(tempDir, "undone.md");
+    const outputPath = nodePath.join(tempDir, "undone.md");
 
     await writeReport(makeCtx(entries, []), outputPath);
 
@@ -160,7 +160,7 @@ describe("writeReport", () => {
   test("empty: no entries writes a trivial report without tripping the gate", async () => {
     const notifications: { message: string; type?: string }[] = [];
     const ctx = makeCtx([], notifications);
-    const outputPath = join(tempDir, "empty.md");
+    const outputPath = nodePath.join(tempDir, "empty.md");
 
     await writeReport(ctx, outputPath);
 
@@ -192,7 +192,7 @@ describe("writeReport", () => {
         type: "custom",
       },
     ];
-    const outputPath = join(tempDir, "manifest.md");
+    const outputPath = nodePath.join(tempDir, "manifest.md");
 
     await writeReport(makeCtx(entries, []), outputPath);
 
@@ -265,7 +265,7 @@ describe("writeReport — claim↔evidence support audit", () => {
       }));
 
   test("no model / no judge: audit degrades to 'unaudited', report still written, exit 0", async () => {
-    const outputPath = join(tempDir, "audit-degrade.md");
+    const outputPath = nodePath.join(tempDir, "audit-degrade.md");
     // default advisory; makeCtx has no runEphemeralTurn/model
     await writeReport(makeCtx(groundedEntries(), []), outputPath);
     expect(process.exitCode).not.toBe(1);
@@ -275,7 +275,7 @@ describe("writeReport — claim↔evidence support audit", () => {
   });
 
   test("advisory: all supported -> no inline flag, a summary note, exit 0", async () => {
-    const outputPath = join(tempDir, "audit-ok.md");
+    const outputPath = nodePath.join(tempDir, "audit-ok.md");
     await writeReport(makeCtx(groundedEntries(), []), outputPath, {
       audit: "advisory",
       judge: supportedAll,
@@ -288,7 +288,7 @@ describe("writeReport — claim↔evidence support audit", () => {
   });
 
   test("advisory: an unsupported claim is flagged inline, report still written, exit 0", async () => {
-    const outputPath = join(tempDir, "audit-flag.md");
+    const outputPath = nodePath.join(tempDir, "audit-flag.md");
     await writeReport(makeCtx(groundedEntries(), []), outputPath, {
       audit: "advisory",
       judge: unsupportedAll("evidence shows only an import"),
@@ -300,7 +300,7 @@ describe("writeReport — claim↔evidence support audit", () => {
   });
 
   test("strict: an unsupported claim withholds the whole report, exit 1", async () => {
-    const outputPath = join(tempDir, "audit-strict.md");
+    const outputPath = nodePath.join(tempDir, "audit-strict.md");
     await writeReport(makeCtx(groundedEntries(), []), outputPath, {
       audit: "strict",
       judge: unsupportedAll("misattributed"),
@@ -316,7 +316,7 @@ describe("writeReport — claim↔evidence support audit", () => {
     const judge: ClaimJudge = async () => {
       throw new Error("no active model");
     };
-    const advisoryPath = join(tempDir, "audit-throw-adv.md");
+    const advisoryPath = nodePath.join(tempDir, "audit-throw-adv.md");
     await writeReport(makeCtx(groundedEntries(), []), advisoryPath, {
       audit: "advisory",
       judge,
@@ -326,7 +326,7 @@ describe("writeReport — claim↔evidence support audit", () => {
       "support unaudited"
     );
 
-    const strictPath = join(tempDir, "audit-throw-strict.md");
+    const strictPath = nodePath.join(tempDir, "audit-throw-strict.md");
     await writeReport(makeCtx(groundedEntries(), []), strictPath, {
       audit: "strict",
       judge,
@@ -357,7 +357,7 @@ describe("writeReport — claim↔evidence support audit", () => {
           '```json\n[{"index":0,"verdict":"overreach","reason":"too strong"}]\n```',
       };
     };
-    const outputPath = join(tempDir, "audit-eph.md");
+    const outputPath = nodePath.join(tempDir, "audit-eph.md");
     await writeReport(ctx, outputPath, { audit: "advisory" });
     expect(captured?.tools).toBe(false);
     expect(captured?.dedupeReply).toBe(false);
@@ -389,7 +389,7 @@ describe("writeReport — claim↔evidence support audit", () => {
             '[{"index":0,"verdict":"overreach","reason":"too strong"}]',
         };
       };
-    const outputPath = join(tempDir, "audit-retry.md");
+    const outputPath = nodePath.join(tempDir, "audit-retry.md");
     await writeReport(ctx, outputPath, { audit: "advisory" });
     expect(calls).toEqual([false, undefined]);
     expect(await readFile(outputPath, "utf-8")).toContain(
@@ -406,7 +406,7 @@ describe("writeReport — claim↔evidence support audit", () => {
         calls += 1;
         throw new Error("provider overloaded");
       };
-    const outputPath = join(tempDir, "audit-noretry.md");
+    const outputPath = nodePath.join(tempDir, "audit-noretry.md");
     await writeReport(ctx, outputPath, { audit: "advisory" });
     expect(calls).toBe(1);
     expect(await readFile(outputPath, "utf-8")).toContain("support unaudited");
@@ -420,7 +420,7 @@ describe("writeReport — claim↔evidence support audit", () => {
         assistantMessage: {},
         replyText: "I cannot produce JSON, sorry.",
       });
-    const outputPath = join(tempDir, "audit-badjson.md");
+    const outputPath = nodePath.join(tempDir, "audit-badjson.md");
     await writeReport(ctx, outputPath, { audit: "strict" });
     expect(process.exitCode).not.toBe(1);
     expect(await fileExists(outputPath)).toBe(true);
@@ -450,7 +450,7 @@ describe("writeReport — claim↔evidence support audit", () => {
         type: "custom",
       },
     ];
-    const outputPath = join(tempDir, "audit-order.md");
+    const outputPath = nodePath.join(tempDir, "audit-order.md");
     await writeReport(makeCtx(entries, []), outputPath, {
       audit: "strict",
       judge,

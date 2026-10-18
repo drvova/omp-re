@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
@@ -135,7 +135,7 @@ const makeCtx = (
   }) as unknown as ExtensionContext;
 
 const readAuditLines = async (sessionId: string): Promise<string[]> => {
-  const path = join(getAgentDir(), "re", "audit", `${sessionId}.log`);
+  const path = nodePath.join(getAgentDir(), "re", "audit", `${sessionId}.log`);
   const raw = await readFile(path, "utf-8");
   return raw
     .split("\n")
@@ -150,7 +150,7 @@ describe("audit log", () => {
 
   beforeEach(async () => {
     originalAgentDir = getAgentDir();
-    tempDir = await mkdtemp(join(tmpdir(), "omp-re-audit-test-"));
+    tempDir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-audit-test-"));
     setAgentDir(tempDir);
   });
 

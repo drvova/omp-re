@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 /**
  * Report generation with two hard properties: IOCs are defanged, and the
@@ -64,7 +64,7 @@ const readEvidenceOutput = async (
   if (!ev.outputHash) {
     return null;
   }
-  const target = join(
+  const target = nodePath.join(
     getAgentDir(),
     "re",
     "blobs",

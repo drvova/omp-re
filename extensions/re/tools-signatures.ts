@@ -16,7 +16,7 @@
  * start clean.
  */
 import { statSync } from "node:fs";
-import { basename } from "node:path";
+import nodePath from "node:path";
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
@@ -142,7 +142,7 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
     async execute(_id, params, signal, _onUpdate, ctx) {
       const rz = await ensureRizin(ctx, { signal });
       const binaryPath = requireBinary(getState(ctx));
-      const requested = params.file ?? `${basename(binaryPath)}.pat`;
+      const requested = params.file ?? `${nodePath.basename(binaryPath)}.pat`;
       const name = /\.(pat|sig)$/iu.test(requested)
         ? requested
         : `${requested}.pat`;

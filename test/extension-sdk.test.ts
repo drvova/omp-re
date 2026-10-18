@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import nodePath from "node:path";
 
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
@@ -32,7 +32,7 @@ import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
-const EXTENSION = resolve(import.meta.dir, "../extensions/re");
+const EXTENSION = nodePath.resolve(import.meta.dir, "../extensions/re");
 /** The tools registered unconditionally in every session. Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
 const ALWAYS_REGISTERED = [
   ...Object.keys(RE_READ_TOOL_NAMES),
@@ -122,7 +122,7 @@ let originalAgentDir: string;
 
 beforeAll(async () => {
   originalAgentDir = getAgentDir();
-  agentDir = await mkdtemp(join(tmpdir(), "omp-re-sdk-test-"));
+  agentDir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-sdk-test-"));
   setAgentDir(agentDir);
 });
 
@@ -196,7 +196,7 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
   // few seconds, so the default 5s budget is too tight.
   test("open, annotate, and resume: the reopened session replays the annotation into a fresh rizin", async () => {
     const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-    const sessionDir = join(agentDir, "sessions");
+    const sessionDir = nodePath.join(agentDir, "sessions");
     const first = await boot(SessionManager.create(tmpdir(), sessionDir));
     await first.session.sessionManager.ensureOnDisk();
     const run = (h: Harness, name: string, params: Record<string, unknown>) =>

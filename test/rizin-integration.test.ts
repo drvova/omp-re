@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import {
   checkRizinCommand,
@@ -272,8 +272,8 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
   let blob: string;
 
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "omp-re-raw-"));
-    blob = join(dir, "blob.bin");
+    dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-raw-"));
+    blob = nodePath.join(dir, "blob.bin");
     writeFileSync(blob, FLAT_X86_32);
   });
 
@@ -406,8 +406,8 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("a file mapped into the session is recorded and re-mapped on respawn", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "omp-re-map-"));
-      const blob = join(dir, "overlay.bin");
+      const dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-map-"));
+      const blob = nodePath.join(dir, "overlay.bin");
       // 16 bytes
       writeFileSync(blob, "OVERLAYMAPDATA42");
       const expected = Buffer.from("OVERLAYMAPDATA42").toString("hex");

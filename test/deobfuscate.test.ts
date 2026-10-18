@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import { RzSession } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
@@ -83,8 +83,8 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
   registerDeobfuscateTools(harness.pi);
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "omp-re-deob-"));
-    blob = join(dir, "xorblob.bin");
+    dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-deob-"));
+    blob = nodePath.join(dir, "xorblob.bin");
     // 16 bytes of padding, then "http://evil.example/cfg\0" each byte xored
     // with 0x5a at offset 0x10 (a raw blob maps at base 0, and address 0x0
     // is rejected by the shared addr guard, so target a non-zero offset).

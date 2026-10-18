@@ -6,7 +6,7 @@
  * The factory runs once per omp session — the main session and each task
  * subagent get their own ExtensionAPI — so closure state below is per-session.
  */
-import { basename } from "node:path";
+import nodePath from "node:path";
 
 import type {
   ExtensionAPI,
@@ -414,7 +414,7 @@ const registerShell = (pi: ExtensionAPI): void => {
     parameters: openBinaryParams,
     ...reRenderers({ body: "text", subject: "path", title: "Open binary" }),
     execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
-      const name = basename(params.path);
+      const name = nodePath.basename(params.path);
       const progress = (elapsedMs: number) =>
         onUpdate?.(
           plainResult(
@@ -457,7 +457,7 @@ const registerShell = (pi: ExtensionAPI): void => {
     state.binarySha256 = lastRecordedBinarySha256(branchEntries(ctx)) ?? null;
 
     if (opts.flag && opts.flag !== recorded) {
-      const onProgress = analysisStatus(ctx, basename(opts.flag));
+      const onProgress = analysisStatus(ctx, nodePath.basename(opts.flag));
       void openBinary(pi, ctx, opts.flag, { onProgress })
         .then((result) => {
           if (result.replayFailures.length > 0 && ctx.hasUI) {
@@ -489,7 +489,7 @@ const registerShell = (pi: ExtensionAPI): void => {
       void refreshStatusBand(ctx);
       return;
     }
-    const onProgress = analysisStatus(ctx, basename(state.binaryPath));
+    const onProgress = analysisStatus(ctx, nodePath.basename(state.binaryPath));
     void ensureRizin(ctx, { onProgress })
       .then(() => refreshStatusBand(ctx))
       .catch((error) =>
@@ -566,7 +566,7 @@ const registerShell = (pi: ExtensionAPI): void => {
     ctx: ExtensionCommandContext,
     path: string
   ): Promise<void> => {
-    const onProgress = analysisStatus(ctx, basename(path));
+    const onProgress = analysisStatus(ctx, nodePath.basename(path));
     try {
       const result = await openBinary(pi, ctx, path, { onProgress });
       if (result.replayed > 0) {

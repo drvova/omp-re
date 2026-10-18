@@ -5,7 +5,7 @@
  * reverser-relevant state (format, arch, entry, protections, counts);
  * `refreshStatusBand` mounts it via `ctx.ui.setWidget` above the editor.
  */
-import { basename } from "node:path";
+import nodePath from "node:path";
 
 import { getSymbolTheme, highlightCode } from "@oh-my-pi/pi-coding-agent";
 import type {
@@ -121,7 +121,7 @@ export const binaryFacts = async (
     findings: liveFindings(ctx).length,
     fnCount: 0,
     format: null,
-    name: state.binaryPath ? basename(state.binaryPath) : "no binary",
+    name: state.binaryPath ? nodePath.basename(state.binaryPath) : "no binary",
     os: null,
     path: state.binaryPath,
     prot: [],

@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import { recordedMapFiles } from "../extensions/re/entries.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
@@ -40,8 +40,8 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
   registerMapFileTools(pi);
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "omp-re-mapfile-"));
-    blob = join(dir, "overlay.bin");
+    dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-mapfile-"));
+    blob = nodePath.join(dir, "overlay.bin");
     // 16 bytes
     writeFileSync(blob, "MAPFILETOOLDATA7");
     binaryPath = await resolveBinaryPath(TEST_BINARY);
@@ -91,7 +91,7 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
     expect(
       (
         await captureError(
-          run({ addr: "0x60000", path: join(dir, "nope.bin") })
+          run({ addr: "0x60000", path: nodePath.join(dir, "nope.bin") })
         )
       ).message
     ).toContain("no such binary");

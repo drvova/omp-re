@@ -12,7 +12,7 @@
  */
 import { createHmac } from "node:crypto";
 import { mkdir, open } from "node:fs/promises";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
@@ -190,8 +190,8 @@ const appendAuditLine = async (
 ): Promise<void> => {
   try {
     const state = getState(ctx);
-    const dir = join(getAgentDir(), "re", "audit");
-    const path = join(dir, `${state.sessionId}.log`);
+    const dir = nodePath.join(getAgentDir(), "re", "audit");
+    const path = nodePath.join(dir, `${state.sessionId}.log`);
     const base: Omit<AuditLine, "hmac"> = {
       sessionId: state.sessionId,
       ts: new Date().toISOString(),

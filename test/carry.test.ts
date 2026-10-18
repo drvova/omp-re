@@ -21,7 +21,7 @@ import {
 } from "bun:test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import {
   fingerprintAnchor,
@@ -274,23 +274,23 @@ describe.skipIf(!canCarryLive)(
     let originalError: typeof console.error;
 
     beforeAll(async () => {
-      dir = await mkdtemp(join(tmpdir(), "omp-re-carry-"));
+      dir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-carry-"));
       const src = await readFile(
-        join(import.meta.dir, "fixtures", "sample.c"),
+        nodePath.join(import.meta.dir, "fixtures", "sample.c"),
         "utf-8"
       );
       const v2src = src
         .replace("h * 33u", "h * 31u")
         .replaceAll(/\bfib\b/gu, "fibonacci");
-      await writeFile(join(dir, "v1.c"), src);
-      await writeFile(join(dir, "v2.c"), v2src);
-      v1 = join(dir, "v1");
-      v2 = join(dir, "v2");
+      await writeFile(nodePath.join(dir, "v1.c"), src);
+      await writeFile(nodePath.join(dir, "v2.c"), v2src);
+      v1 = nodePath.join(dir, "v1");
+      v2 = nodePath.join(dir, "v2");
       for (const [out, file] of [
         [v1, "v1.c"],
         [v2, "v2.c"],
       ] as const) {
-        const proc = Bun.spawn([CC!, "-O0", "-o", out, join(dir, file)], {
+        const proc = Bun.spawn([CC!, "-O0", "-o", out, nodePath.join(dir, file)], {
           stderr: "pipe",
           stdout: "pipe",
         });
@@ -396,7 +396,7 @@ describe.skipIf(!canCarryLive)(
         status: "provenance-only",
         tool: "get_function",
       } as never);
-      manifestPath = join(dir, "report.md.manifest.json");
+      manifestPath = nodePath.join(dir, "report.md.manifest.json");
       await writeFile(
         manifestPath,
         JSON.stringify({ binarySha256: v1Sha, entries }, null, 2)
@@ -442,7 +442,7 @@ describe.skipIf(!canCarryLive)(
     test("on the rebuilt binary: unchanged code holds, shifted code holds, edited code drifts, renamed code relocates (or breaks without a fingerprint)", async () => {
       const h = makeHarness("carry-v2");
       getState(h.ctx).binaryPath = v2;
-      const out = join(dir, "carry.md");
+      const out = nodePath.join(dir, "carry.md");
       const result = await carryManifest(h.ctx, manifestPath, { out });
       const row = (id: string) =>
         result.evidence.find((r) => r.evidenceId === id)!;
@@ -523,7 +523,7 @@ describe.skipIf(!canCarryLive)(
           type: "custom",
         }
       );
-      const out = join(dir, "anchored.md");
+      const out = nodePath.join(dir, "anchored.md");
       await writeReport(h.ctx, out, { audit: "off" });
       const manifest = JSON.parse(
         await readFile(`${out}.manifest.json`, "utf-8")
@@ -553,7 +553,7 @@ describe.skipIf(!canCarryLive)(
       driftOnly.entries = driftOnly.entries.filter(
         (e) => e.evidenceId === "ev-arch" || e.evidenceId === "ev-checksum"
       );
-      const path = join(dir, "drift.manifest.json");
+      const path = nodePath.join(dir, "drift.manifest.json");
       await writeFile(path, JSON.stringify(driftOnly));
 
       const h = makeHarness("carry-strict");

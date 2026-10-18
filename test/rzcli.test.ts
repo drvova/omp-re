@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { access, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import {
@@ -212,7 +212,7 @@ describe.skipIf(!canRunRizin || !isRzToolAvailable("rz-bin"))(
     });
 
     test("a refused flag never spawns the tool", async () => {
-      const marker = join(
+      const marker = nodePath.join(
         tmpdir(),
         `ompre-rzcli-should-not-exist-${process.pid}`
       );

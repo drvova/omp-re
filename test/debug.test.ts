@@ -15,7 +15,7 @@ import {
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import {
@@ -272,7 +272,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
 
     beforeAll(() => {
       process.env.OMPRE_ENABLE_DEBUGGER = "1";
-      outDir = mkdtempSync(join(tmpdir(), "omp-re-dump-test-"));
+      outDir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-dump-test-"));
       process.env.OMPRE_OUTPUT_DIR = outDir;
       getState(ctx).binaryPath = TEST_BINARY;
       registerDebugTools(harness.pi);
@@ -378,7 +378,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
         await run("dump_memory", { addr: "rip", file: "entry.bin", size: 64 })
       );
       expect(result).toContain("wrote 64 bytes");
-      const path = join(outDir, "entry.bin");
+      const path = nodePath.join(outDir, "entry.bin");
       expect(result).toContain(path);
       const bytes = readFileSync(path);
       expect(bytes.length).toBe(64);
@@ -557,10 +557,10 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       await run("trace_start");
       await run("step", { count: 3 });
       const saved = textOf(await run("trace_save", { file: "t_session" }));
-      const dir = join(outDir, "t_session");
+      const dir = nodePath.join(outDir, "t_session");
       expect(saved).toContain(dir);
       // rizin writes the session's sdbs into the directory
-      expect(readFileSync(join(dir, "session.sdb")).length).toBeGreaterThan(0);
+      expect(readFileSync(nodePath.join(dir, "session.sdb")).length).toBeGreaterThan(0);
       // load it back without error
       expect(textOf(await run("trace_load", { file: "t_session" }))).toContain(
         "loaded the trace session"

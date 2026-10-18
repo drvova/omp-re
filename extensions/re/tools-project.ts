@@ -1,5 +1,5 @@
 import { statSync } from "node:fs";
-import { basename } from "node:path";
+import nodePath from "node:path";
 
 /**
  * Export the current analysis as a rizin project (book: projects).
@@ -50,7 +50,7 @@ export const registerProjectTools = (pi: ExtensionAPI): void => {
     async execute(_id, params, signal, _onUpdate, ctx) {
       const rz = await ensureRizin(ctx, { signal });
       const binaryPath = requireBinary(getState(ctx));
-      const requested = params.file ?? `${basename(binaryPath)}.rzdb`;
+      const requested = params.file ?? `${nodePath.basename(binaryPath)}.rzdb`;
       const name = /\.rzdb$/iu.test(requested)
         ? requested
         : `${requested}.rzdb`;

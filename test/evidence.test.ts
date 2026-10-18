@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
@@ -25,7 +25,7 @@ let originalAgentDir: string;
 
 beforeEach(async () => {
   originalAgentDir = getAgentDir();
-  tempDir = await mkdtemp(join(tmpdir(), "omp-re-evidence-test-"));
+  tempDir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-evidence-test-"));
   setAgentDir(tempDir);
 });
 

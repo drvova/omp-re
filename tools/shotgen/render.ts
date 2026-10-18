@@ -13,12 +13,12 @@
 // Not part of the plugin: standalone dev tool under tools/shotgen/, isolated
 // from the root package.json.
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import Convert from "ansi-to-html";
 
 const SHOTGEN_DIR = import.meta.dirname;
-const OUT_DIR = join(SHOTGEN_DIR, "out");
+const OUT_DIR = nodePath.join(SHOTGEN_DIR, "out");
 
 const FONT_STACK =
   "'Hack','DejaVu Sans Mono','Noto Sans Symbols2','Noto Color Emoji',monospace";
@@ -191,7 +191,7 @@ const main = async (): Promise<void> => {
   }
   for (const name of ansiFiles) {
     const scene = name.slice(0, -".ansi".length);
-    const raw = await Bun.file(join(OUT_DIR, name)).text();
+    const raw = await Bun.file(nodePath.join(OUT_DIR, name)).text();
     const convert = new Convert({
       bg: "#0f1216",
       escapeXML: true,
@@ -201,7 +201,7 @@ const main = async (): Promise<void> => {
     const colored = convert.toHtml(raw) as string;
     const gridded = applyCellGrid(colored);
     const page = renderPage(gridded);
-    const outPath = join(OUT_DIR, `${scene}.html`);
+    const outPath = nodePath.join(OUT_DIR, `${scene}.html`);
     await Bun.write(outPath, page);
     console.log(`render.ts: wrote ${outPath}`);
   }

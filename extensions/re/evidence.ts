@@ -13,7 +13,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
@@ -26,14 +26,14 @@ import { getState } from "./state.ts";
 /** Write content to the content-addressed blob store, returning its SHA-256 hex hash. Idempotent: skips the write if the target already exists. Atomic: writes to a temp file in the same directory, then renames. */
 export const writeBlob = async (content: string): Promise<string> => {
   const hash = createHash("sha256").update(content, "utf-8").digest("hex");
-  const dir = join(
+  const dir = nodePath.join(
     getAgentDir(),
     "re",
     "blobs",
     hash.slice(0, 2),
     hash.slice(2, 4)
   );
-  const target = join(dir, hash);
+  const target = nodePath.join(dir, hash);
 
   try {
     await stat(target);
@@ -44,7 +44,7 @@ export const writeBlob = async (content: string): Promise<string> => {
   }
 
   await mkdir(dir, { mode: 0o700, recursive: true });
-  const tmp = join(dir, `.${hash}.${process.pid}.${randomUUID()}.tmp`);
+  const tmp = nodePath.join(dir, `.${hash}.${process.pid}.${randomUUID()}.tmp`);
   await writeFile(tmp, content, { mode: 0o600 });
   await rename(tmp, target);
   return hash;
@@ -52,7 +52,7 @@ export const writeBlob = async (content: string): Promise<string> => {
 
 /** Read a previously written blob by its SHA-256 hash. Returns null when the blob is missing (never throws) — a missing blob must degrade to "no evidence" for the adviser, not crash it. */
 export const readBlob = async (hash: string): Promise<string | null> => {
-  const target = join(
+  const target = nodePath.join(
     getAgentDir(),
     "re",
     "blobs",

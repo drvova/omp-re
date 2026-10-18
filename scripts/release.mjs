@@ -27,12 +27,12 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import nodePath from "node:path";
 
-const ROOT = join(import.meta.dirname, "..");
-const PKG = join(ROOT, "package.json");
-const MARKET = join(ROOT, ".omp-plugin", "marketplace.json");
-const CHANGELOG = join(ROOT, "CHANGELOG.md");
+const ROOT = nodePath.join(import.meta.dirname, "..");
+const PKG = nodePath.join(ROOT, "package.json");
+const MARKET = nodePath.join(ROOT, ".omp-plugin", "marketplace.json");
+const CHANGELOG = nodePath.join(ROOT, "CHANGELOG.md");
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");

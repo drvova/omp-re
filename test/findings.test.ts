@@ -21,7 +21,7 @@ import {
 } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import type { ClaimAudit, ClaimJudge } from "../extensions/re/audit-claims.ts";
 import { carryManifest } from "../extensions/re/carry.ts";
@@ -203,7 +203,7 @@ describe("record_finding gates (no rizin needed)", () => {
 describe("findings in the report (no rizin needed)", () => {
   let dir: string;
   beforeAll(async () => {
-    dir = await mkdtemp(join(tmpdir(), "omp-re-findings-report-"));
+    dir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-findings-report-"));
   });
   afterAll(async () => {
     await rm(dir, { force: true, recursive: true });
@@ -217,7 +217,7 @@ describe("findings in the report (no rizin needed)", () => {
       confidence: "confirmed",
       evidence: ["11111111"],
     });
-    const out = join(dir, "r.md");
+    const out = nodePath.join(dir, "r.md");
     await writeReport(h.ctx, out, { audit: "off" });
     expect(process.exitCode).not.toBe(1);
     const md = await readFile(out, "utf-8");
@@ -253,23 +253,23 @@ describe.skipIf(!canRunLive)(
     let v2: string;
 
     beforeAll(async () => {
-      dir = await mkdtemp(join(tmpdir(), "omp-re-inherit-"));
+      dir = await mkdtemp(nodePath.join(tmpdir(), "omp-re-inherit-"));
       const src = await readFile(
-        join(import.meta.dir, "fixtures", "sample.c"),
+        nodePath.join(import.meta.dir, "fixtures", "sample.c"),
         "utf-8"
       );
-      await writeFile(join(dir, "v1.c"), src);
+      await writeFile(nodePath.join(dir, "v1.c"), src);
       await writeFile(
-        join(dir, "v2.c"),
+        nodePath.join(dir, "v2.c"),
         src.replace("h * 33u", "h * 31u").replaceAll(/\bfib\b/gu, "fibonacci")
       );
-      v1 = join(dir, "v1");
-      v2 = join(dir, "v2");
+      v1 = nodePath.join(dir, "v1");
+      v2 = nodePath.join(dir, "v2");
       for (const [out, file] of [
         [v1, "v1.c"],
         [v2, "v2.c"],
       ] as const) {
-        const proc = Bun.spawn([CC!, "-O0", "-o", out, join(dir, file)], {
+        const proc = Bun.spawn([CC!, "-O0", "-o", out, nodePath.join(dir, file)], {
           stderr: "pipe",
           stdout: "pipe",
         });
@@ -406,7 +406,7 @@ describe.skipIf(!canRunLive)(
         evChecksum,
         "sym.checksum"
       );
-      const reportPath = join(dir, "v1.md");
+      const reportPath = nodePath.join(dir, "v1.md");
       await writeReport(a.ctx, reportPath, { audit: "off" });
       shutdownState("inherit-v1");
 
@@ -454,7 +454,7 @@ describe.skipIf(!canRunLive)(
       }
 
       // The v2 report carries the inherited findings with their provenance.
-      const v2Report = join(dir, "v2.md");
+      const v2Report = nodePath.join(dir, "v2.md");
       await writeReport(b.ctx, v2Report, { audit: "off" });
       const md = await readFile(v2Report, "utf-8");
       expect(md).toContain("## Findings");

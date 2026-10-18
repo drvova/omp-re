@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
@@ -40,7 +40,7 @@ describe.skipIf(!canRunRizin)(
     registerProjectTools(pi);
 
     beforeAll(async () => {
-      outDir = mkdtempSync(join(tmpdir(), "omp-re-proj-test-"));
+      outDir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-proj-test-"));
       process.env.OMPRE_OUTPUT_DIR = outDir;
       binaryPath = await resolveBinaryPath(TEST_BINARY);
       // spawn runs `aaa` on open
@@ -69,7 +69,7 @@ describe.skipIf(!canRunRizin)(
       await rz.cmd("afn omp_re_exported_main @ main");
       const result = textOf(await run({ file: "analysis" }));
       // `.rzdb` appended when missing
-      const path = join(outDir, "analysis.rzdb");
+      const path = nodePath.join(outDir, "analysis.rzdb");
       expect(result).toContain(path);
       expect(existsSync(path)).toBe(true);
 

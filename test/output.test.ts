@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import {
   outputDir,
@@ -71,7 +71,7 @@ describe("rizinPathArg", () => {
 describe("prepareOutputPath", () => {
   let dir: string;
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "omp-re-out-test-"));
+    dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-out-test-"));
     process.env.OMPRE_OUTPUT_DIR = dir;
   });
   afterAll(() => {
@@ -82,7 +82,7 @@ describe("prepareOutputPath", () => {
   test("honors OMPRE_OUTPUT_DIR and returns a path inside it, creating the dir", async () => {
     expect(outputDir()).toBe(dir);
     const path = await prepareOutputPath("dump.bin");
-    expect(path).toBe(join(dir, "dump.bin"));
+    expect(path).toBe(nodePath.join(dir, "dump.bin"));
     expect(existsSync(dir)).toBe(true);
   });
 

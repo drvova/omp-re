@@ -15,7 +15,7 @@
  */
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import nodePath from "node:path";
 
 import { rzQuote } from "./rizin.ts";
 
@@ -54,7 +54,7 @@ const assertRizinSafePath = (path: string): void => {
 /** The directory omp-re writes output artifacts to (`OMPRE_OUTPUT_DIR`, else `<tmpdir>/omp-re-out`). */
 export const outputDir = (): string => {
   const configured = (process.env.OMPRE_OUTPUT_DIR ?? "").trim();
-  return configured === "" ? join(tmpdir(), "omp-re-out") : resolve(configured);
+  return configured === "" ? nodePath.join(tmpdir(), "omp-re-out") : nodePath.resolve(configured);
 };
 
 /**
@@ -70,7 +70,7 @@ export const safeBasename = (name: string): string => {
   if (
     !/^[A-Za-z0-9._-]+$/u.test(trimmed) ||
     trimmed.includes("..") ||
-    isAbsolute(trimmed)
+    nodePath.isAbsolute(trimmed)
   ) {
     throw new Error(
       `omp-re: invalid output filename ${JSON.stringify(name)} — use a bare name of letters, digits, '.', '_' or '-' (no path separators)`
@@ -82,11 +82,11 @@ export const safeBasename = (name: string): string => {
 /** Ensure {@link outputDir} exists and return the absolute path for `basename` inside it. The returned path is always within the output directory (verified after resolve). */
 export const prepareOutputPath = async (basename: string): Promise<string> => {
   const dir = outputDir();
-  const full = resolve(dir, safeBasename(basename));
+  const full = nodePath.resolve(dir, safeBasename(basename));
   // Defense in depth: safeBasename already forbids separators, but confirm the
   // join stayed inside the directory. `sep` (not a literal `/`) so the
   // containment check holds on Windows, where resolve/join use `\`.
-  if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
+  if (full !== nodePath.join(dir, basename) || !full.startsWith(`${dir}${nodePath.sep}`)) {
     throw new Error(
       `omp-re: refusing to write outside the output directory: ${JSON.stringify(basename)}`
     );
@@ -118,8 +118,8 @@ export const outputSubdir = async (
   create: boolean
 ): Promise<string> => {
   const dir = outputDir();
-  const full = resolve(dir, safeBasename(basename));
-  if (full !== join(dir, basename) || !full.startsWith(`${dir}${sep}`)) {
+  const full = nodePath.resolve(dir, safeBasename(basename));
+  if (full !== nodePath.join(dir, basename) || !full.startsWith(`${dir}${nodePath.sep}`)) {
     throw new Error(
       `omp-re: refusing to use a path outside the output directory: ${JSON.stringify(basename)}`
     );

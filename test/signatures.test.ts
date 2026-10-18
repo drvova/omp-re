@@ -9,7 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import nodePath from "node:path";
 
 import { recordedSignatures } from "../extensions/re/entries.ts";
 import { rizinPathArg } from "../extensions/re/output.ts";
@@ -74,8 +74,8 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
 
     // A minimal FLIRT .pat matching main's first 16 bytes: <32 nibbles> <crc-len> <crc16> <len> :<off> <name>.
     const bytes = (await rz.cmd(`p8 32 @ ${mainEa}`)).trim().toUpperCase();
-    dir = mkdtempSync(join(tmpdir(), "omp-re-sig-"));
-    pat = join(dir, "fixture.pat");
+    dir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-sig-"));
+    pat = nodePath.join(dir, "fixture.pat");
     writeFileSync(
       pat,
       `${bytes.slice(0, 32)} 00 0000 0020 :0000 omp_re_sig_main\n---\n`
@@ -131,7 +131,7 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
   registerSignatureTools(pi);
 
   beforeAll(async () => {
-    outDir = mkdtempSync(join(tmpdir(), "omp-re-csig-"));
+    outDir = mkdtempSync(nodePath.join(tmpdir(), "omp-re-csig-"));
     process.env.OMPRE_OUTPUT_DIR = outDir;
     binaryPath = await resolveBinaryPath(TEST_BINARY);
     // spawn runs `aaa`, so there are functions to signature
@@ -148,7 +148,7 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
   test("writes a non-empty FLIRT .pat the apply path can then consume", async () => {
     // `.pat` appended
     const result = textOf(await run({ file: "fixture" }));
-    const path = join(outDir, "fixture.pat");
+    const path = nodePath.join(outDir, "fixture.pat");
     expect(result).toContain(path);
     expect(result).toMatch(/wrote \d+ function signature\(s\)/u);
     const made = readFileSync(path, "utf-8");
