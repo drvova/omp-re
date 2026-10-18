@@ -33,6 +33,7 @@ import {
   makeHarness,
   TEST_BINARY,
   textOf,
+  must,
 } from "./helpers.ts";
 
 logSkip("debugger tests");
@@ -625,8 +626,10 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     });
 
     test("start with attach.pid controls the running process and reads its registers", async () => {
-      const out = textOf(await run("start", { attach: { pid: victim!.pid } }));
-      expect(out).toContain(`attached to PID ${victim!.pid}`);
+      const out = textOf(
+        await run("start", { attach: { pid: must(victim).pid } })
+      );
+      expect(out).toContain(`attached to PID ${must(victim).pid}`);
       expect(out).toContain(DEBUG_LAUNCH_WARNING);
       expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/u);
     }, 25_000);
@@ -634,7 +637,10 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     test("attach cannot be combined with run", async () => {
       await run("stop");
       const captureErrorResult16 = await captureError(
-        run("start", { attach: { pid: victim!.pid }, run: { args: ["x"] } })
+        run("start", {
+          attach: { pid: must(victim).pid },
+          run: { args: ["x"] },
+        })
       );
       expect(captureErrorResult16.message).toContain(
         "cannot be combined with run"

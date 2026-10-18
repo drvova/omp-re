@@ -11,7 +11,7 @@ import {
   registerPreservation,
 } from "../extensions/re/preserve.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
-import { makeHarness } from "./helpers.ts";
+import { makeHarness, must } from "./helpers.ts";
 
 const withEvidence = (
   h: ReturnType<typeof makeHarness>,
@@ -142,7 +142,7 @@ describe("registerPreservation", () => {
       summary: "s",
       tool: "list_strings",
     });
-    const result = (await handler!(
+    const result = (await must(handler)(
       { type: "session.compacting" },
       active.ctx
     )) as { context?: string[] } | undefined;
@@ -151,7 +151,7 @@ describe("registerPreservation", () => {
 
     const idle = makeHarness("preserve-handler-idle");
     expect(
-      await handler!({ type: "session.compacting" }, idle.ctx)
+      await must(handler)({ type: "session.compacting" }, idle.ctx)
     ).toBeUndefined();
     shutdownState("preserve-handler-idle");
   });

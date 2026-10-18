@@ -478,7 +478,7 @@ export const checkRizinCommand = (
       reason: `omp-re: rizin_command: ${forbidden} is not allowed in a command`,
     };
   }
-  const name = trimmed.split(/\s+/u, 1)[0]!;
+  const name = trimmed.split(/\s+/u, 1)[0];
   // Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
   // sorts/filters/paginates/reformats the command's table. Only the head must
   // be runnable and known; every spec part must be table-grammar-shaped
@@ -691,7 +691,7 @@ export const checkDebugOnHitCommand = (
       };
     }
   }
-  const name = trimmed.split(/\s+/u, 1)[0]!;
+  const name = trimmed.split(/\s+/u, 1)[0];
   if (DEBUG_READ_COMMANDS.has(name)) {
     // `=` is the only way these turn into a write (register assignment) or a stateful select (`dm=`/`dp=`); refuse it.
     if (trimmed.includes("=")) {

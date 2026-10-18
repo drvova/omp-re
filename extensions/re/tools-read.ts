@@ -791,12 +791,15 @@ export const registerReadTools = (pi: ExtensionAPI): void => {
     parameters: graphParams,
     ...reRenderers({ body: "json", subject: "kind", title: "Graph" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const spec = GRAPH_COMMAND[params.kind]!;
+      const spec = GRAPH_COMMAND[params.kind];
       if (spec.needsAddr && params.addr === undefined) {
         throw new Error(`omp-re: get_graph: ${params.kind} needs addr`);
       }
       const rz = await ensureRizin(ctx, { signal });
-      const at = spec.needsAddr ? ` @ ${validateAddr(params.addr!)}` : "";
+      const at =
+        spec.needsAddr && params.addr !== undefined
+          ? ` @ ${validateAddr(params.addr)}`
+          : "";
       const graph = await rz.cmdj<{ nodes?: RzGraphNode[] }>(
         `${spec.cmd} json${at}`,
         { signal }

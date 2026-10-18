@@ -34,6 +34,7 @@ import {
   rizinPath,
   TEST_BINARY,
   textOf,
+  must,
 } from "./helpers.ts";
 
 logSkip("tools-mutate-registry tests");
@@ -80,10 +81,10 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
     const state = getState(ctx);
     state.binaryPath = binaryPath;
     state.rz = rz;
-    const main = (await rz.cmdj<{ offset: number; name: string }[]>(
-      "afij @ main"
-    ))![0]!;
-    mainEa = eaFromOffset(addrOf(main)!);
+    const main = must(
+      await rz.cmdj<{ offset: number; name: string }[]>("afij @ main")
+    )[0];
+    mainEa = eaFromOffset(must(addrOf(main)));
     mainName = main.name;
     const all = await vars();
     if (all.length === 0) {
@@ -91,7 +92,7 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
         `fixture ${TEST_BINARY}: main has no variables to rename`
       );
     }
-    firstVar = all[0]!;
+    firstVar = all[0];
   });
 
   afterAll(() => {
@@ -355,7 +356,7 @@ describe.skipIf(!canRunRizin)(
     const fnStart = async (ea: string): Promise<string | undefined> => {
       const rawFn = await rz.cmdj<{ offset: number }[]>(`afij @ ${ea}`);
       const fn = rawFn?.[0];
-      return fn ? eaFromOffset(addrOf(fn as never)!) : undefined;
+      return fn ? eaFromOffset(must(addrOf(fn as never))) : undefined;
     };
     const flagName = async (ea: string): Promise<string> => {
       const fdjJson = await rz.cmdj<{ name?: string }>(`fdj @ ${ea}`);
@@ -381,9 +382,11 @@ describe.skipIf(!canRunRizin)(
       state.binaryPath = binaryPath;
       state.rz = rz;
       mainEa = eaFromOffset(
-        addrOf(
-          (await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never
-        )!
+        must(
+          addrOf(
+            must(await rz.cmdj<{ offset: number }[]>("afij @ main"))[0] as never
+          )
+        )
       );
       // set_flag replaces the single flag at an address, so its clean target is a
       // function start that has exactly one flag. `main` qualifies on a stripped-ish
@@ -658,9 +661,11 @@ describe.skipIf(!canRunRizin)(
       await undoLastAnnotation(pi, ctx);
       expect(await metaType(dataEa)).not.toContain("Cd");
       // set_string at a real string's address (Cs on non-string bytes correctly no-ops)
-      const aString = (await rz.cmdj<{ vaddr: number; size: number }[]>(
-        "izj"
-      ))!.find((s) => s.size >= 4)!;
+      const aString = must(
+        must(await rz.cmdj<{ vaddr: number; size: number }[]>("izj")).find(
+          (s) => s.size >= 4
+        )
+      );
       const strEa = eaFromOffset(aString.vaddr);
       await run("set_string", { addr: strEa });
       expect(await metaType(strEa)).toContain("Cs");
@@ -711,9 +716,9 @@ describe.skipIf(!canRunRizin)(
 
     test("a defined function survives the rizin process dying: the respawn replays it", async () => {
       // Pick a second function, undefine it, define through the tool, then crash+respawn.
-      const fns = (await rz.cmdj<{ offset: number }[]>("aflj"))!;
+      const fns = must(await rz.cmdj<{ offset: number }[]>("aflj"));
       const victim = eaFromOffset(
-        fns.map((f) => f.offset).find((o) => eaFromOffset(o) !== mainEa)!
+        must(fns.map((f) => f.offset).find((o) => eaFromOffset(o) !== mainEa))
       );
       await rz.cmd(`af- @ ${victim}`);
       await run("define_function", { addr: victim });

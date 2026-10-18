@@ -305,7 +305,7 @@ export const entryRequest = (
   }
   const match = /^(.*\S)\s+@\s+([^!\s]\S*)$/u.exec(line.trim());
   if (match) {
-    return { addr: match[2]!, command: match[1]! };
+    return { addr: match[2], command: match[1] };
   }
   return { command: line.trim() };
 };
@@ -331,10 +331,10 @@ export const lineDiff = (
   );
   for (let i = a.length - 1; i >= 0; i -= 1) {
     for (let j = b.length - 1; j >= 0; j -= 1) {
-      lcs[i]![j] =
+      lcs[i][j] =
         ka[i] === kb[j]
-          ? lcs[i + 1]![j + 1]! + 1
-          : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+          ? lcs[i + 1][j + 1] + 1
+          : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
     }
   }
   const out: string[] = [];
@@ -345,7 +345,7 @@ export const lineDiff = (
       out.push(`  ${b[j]}`);
       i += 1;
       j += 1;
-    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
       out.push(`- ${a[i]}`);
       i += 1;
     } else {
@@ -630,7 +630,7 @@ export const buildCarry = async (
         );
         if (!resolves) {
           const moved = fp
-            ? await tryRelocated(rz, catalog!, entry, request, fp, binaryPath)
+            ? await tryRelocated(rz, catalog, entry, request, fp, binaryPath)
             : undefined;
           evidence.push(
             moved
@@ -654,7 +654,7 @@ export const buildCarry = async (
         if (errors || recordedExcerpt.trim() !== "") {
           const moved =
             numericAnchor && fp
-              ? await tryRelocated(rz, catalog!, entry, request, fp, binaryPath)
+              ? await tryRelocated(rz, catalog, entry, request, fp, binaryPath)
               : undefined;
           const said = errors ? `: ${errors.split("\n").at(-1)}` : "";
           evidence.push(
@@ -686,13 +686,17 @@ export const buildCarry = async (
       if (numericAnchor && fp) {
         const moved = await tryRelocated(
           rz,
-          catalog!,
+          catalog,
           entry,
           request,
           fp,
           binaryPath
         );
-        if (moved && moved.relocation?.addr !== normalizeAddr(request.addr!)) {
+        if (
+          moved &&
+          request.addr !== undefined &&
+          moved.relocation?.addr !== normalizeAddr(request.addr)
+        ) {
           evidence.push({ ...base, ...moved });
           continue;
         }
@@ -895,7 +899,13 @@ export const inheritFindings = async (
       .map((id) => rowById.get(id))
       .filter((r): r is CarryEvidenceRow => r !== undefined);
     const reproduced = rows.filter(
-      (r) => (r.status === "holds" || r.status === "relocated") && r.rerun
+      (
+        r
+      ): r is CarryEvidenceRow & {
+        rerun: NonNullable<CarryEvidenceRow["rerun"]>;
+      } =>
+        (r.status === "holds" || r.status === "relocated") &&
+        r.rerun !== undefined
     );
     if (
       (status !== "holds" && status !== "relocated") ||
@@ -912,11 +922,7 @@ export const inheritFindings = async (
 
     const newEvidence: string[] = [];
     for (const row of reproduced) {
-      const res = await runRizinCommand(
-        ctx,
-        row.rerun!.command,
-        row.rerun!.addr
-      );
+      const res = await runRizinCommand(ctx, row.rerun.command, row.rerun.addr);
       if (res.isError) {
         continue;
       }
@@ -947,6 +953,7 @@ export const inheritFindings = async (
         ? followRelocation(finding.addr, relocationOf)
         : undefined;
     const id = randomUUID();
+    const openSha = getState(ctx).binarySha256;
     const record: FindingRecord = {
       id,
       claim: finding.claim,
@@ -962,9 +969,7 @@ export const inheritFindings = async (
           "re-verified by /re carry; the report's support audit re-checks it",
         verdict: "inherited",
       },
-      ...(getState(ctx).binarySha256
-        ? { binarySha256: getState(ctx).binarySha256! }
-        : {}),
+      ...(openSha ? { binarySha256: openSha } : {}),
       inherited: {
         carryStatus: status,
         fromBinarySha256: manifest.binarySha256,
@@ -1082,13 +1087,15 @@ export const carryManifest = async (
   // --resolve: hand the agenda straight to the model as a user turn (it has the RE tools and
   // record_finding in this session, where the fresh evidence lives). Otherwise it goes into the editor,
   // like /re cite, for the analyst to send or edit.
-  const resolving =
+  let resolving = false;
+  if (
     opts.resolve === true &&
     agendaPrompt !== undefined &&
-    opts.inherit !== undefined;
-  if (resolving) {
-    opts.inherit!.sendUserMessage(agendaPrompt!);
-    summary += `\nresolve: sent ${result.inheritance!.agenda.length} finding(s) to the model to re-examine`;
+    opts.inherit !== undefined
+  ) {
+    resolving = true;
+    opts.inherit.sendUserMessage(agendaPrompt);
+    summary += `\nresolve: sent ${result.inheritance?.agenda.length ?? 0} finding(s) to the model to re-examine`;
   }
   if (ctx.hasUI) {
     ctx.ui.notify(

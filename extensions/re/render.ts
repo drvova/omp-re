@@ -196,7 +196,7 @@ export const reRenderers = (spec: RenderSpec) => ({
     }
     if (result.isError) {
       const full = textContent.trim() || "failed";
-      const first = full.split("\n", 1)[0]!.trim();
+      const first = full.split("\n", 1)[0].trim();
       const gist =
         first.length > ERROR_GIST_CHARS
           ? `${first.slice(0, ERROR_GIST_CHARS - 1)}…`

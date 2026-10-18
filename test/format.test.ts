@@ -5,7 +5,7 @@ import {
   prefixedTextResult,
   textResult,
 } from "../extensions/re/format.ts";
-import { makeHarness, textOf } from "./helpers.ts";
+import { makeHarness, textOf, must } from "./helpers.ts";
 
 const MAX_LINES = 2000;
 const MAX_BYTES = 50 * 1024;
@@ -42,7 +42,7 @@ describe("textResult", () => {
   test("details.summary never exceeds 512 bytes even for a far larger body", async () => {
     const result = await textResult("header", "y".repeat(MAX_BYTES * 2));
     expect(
-      Buffer.byteLength(result.details!.summary, "utf-8")
+      Buffer.byteLength(must(result.details).summary, "utf-8")
     ).toBeLessThanOrEqual(512);
   });
 
@@ -57,7 +57,7 @@ describe("textResult", () => {
     expect(result.details?.artifactId).toBe("0");
     expect(text).toContain("Full output: artifact://0");
     // The artifact holds the untruncated text, header included.
-    const saved = harness.artifacts.get("0")!;
+    const saved = must(harness.artifacts.get("0"));
     expect(saved.startsWith("big\nrow0\n")).toBe(true);
     expect(saved).toContain(`row${MAX_LINES + 9}`);
   });
@@ -100,11 +100,11 @@ describe("jsonResult", () => {
     const text = textOf(result);
     expect(text).toContain('"foo": "bar"');
     expect(text).toContain('"n": 42');
-    expect(result.details!.ea).toBe("0x401d80");
+    expect(must(result.details).ea).toBe("0x401d80");
   });
 
   test("omits ea when not supplied", async () => {
     const result = await jsonResult("header", { a: 1 });
-    expect(result.details!.ea).toBeUndefined();
+    expect(must(result.details).ea).toBeUndefined();
   });
 });

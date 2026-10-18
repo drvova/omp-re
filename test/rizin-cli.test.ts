@@ -36,6 +36,7 @@ import {
   rizinPath,
   TEST_BINARY,
   textOf,
+  must,
 } from "./helpers.ts";
 
 logSkip("rizin CLI integration tests");
@@ -1227,7 +1228,7 @@ describe.skipIf(!canRunRizin)(
           `rizin-cli.test setup: fixture ${TEST_BINARY} has no function named 'main'`
         );
       }
-      mainEa = eaFromOffset(addrOf(main)!);
+      mainEa = eaFromOffset(must(addrOf(main)));
     });
 
     afterAll(() => {

@@ -666,7 +666,7 @@ const registerShell = (pi: ExtensionAPI): void => {
             let resolve = false;
             const pathTokens: string[] = [];
             for (let i = 0; i < rest.length; i += 1) {
-              const tok = rest[i]!;
+              const tok = rest[i];
               if (tok === "--strict") {
                 strict = true;
               } else if (tok === "--inherit") {

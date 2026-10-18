@@ -34,6 +34,7 @@ import {
   splitHeaderBody,
   TEST_BINARY,
   textOf,
+  must,
 } from "./helpers.ts";
 
 logSkip("tools-registry tests");
@@ -140,17 +141,19 @@ describe.skipIf(!canRunRizin)(
         (f) => f.name === "main",
         "a function named 'main'"
       );
-      mainEa = eaFromOffset(addrOf(mainFn)!);
+      mainEa = eaFromOffset(must(addrOf(mainFn)));
 
       const pdfjOutput = await session.cmd(`pdfj @ ${mainEa}`);
       groundPdf = JSON.parse(pdfjOutput.trim()) as GroundPdf;
-      callSite = addrOf(
-        mustFind(
-          groundPdf.ops,
-          (op) => op.type === "call",
-          "a call instruction in main"
+      callSite = must(
+        addrOf(
+          mustFind(
+            groundPdf.ops,
+            (op) => op.type === "call",
+            "a call instruction in main"
+          )
         )
-      )!;
+      );
 
       const iijOutput = await session.cmd("iij");
       groundImports = JSON.parse(iijOutput.trim()) as GroundImport[];
@@ -244,9 +247,9 @@ describe.skipIf(!canRunRizin)(
           callrefs?: unknown;
         }[];
         expect(parsed).toHaveLength(1);
-        expect(parsed[0]?.name).toBe(groundFns[0]!.name);
-        expect(parsed[0]?.ea).toBe(eaFromOffset(addrOf(groundFns[0]!)!));
-        expect(parsed[0]?.size).toBe(groundFns[0]!.size);
+        expect(parsed[0]?.name).toBe(groundFns[0].name);
+        expect(parsed[0]?.ea).toBe(eaFromOffset(must(addrOf(groundFns[0]))));
+        expect(parsed[0]?.size).toBe(groundFns[0].size);
         // Rows are slimmed: no decimal offset, no per-function reference arrays.
         expect(parsed[0]?.offset).toBeUndefined();
         expect(parsed[0]?.callrefs).toBeUndefined();
@@ -267,8 +270,8 @@ describe.skipIf(!canRunRizin)(
         );
         expect(parsed[0]?.callers).toBe(most);
         for (let i = 1; i < parsed.length; i += 1) {
-          expect(parsed[i - 1]!.callers).toBeGreaterThanOrEqual(
-            parsed[i]!.callers
+          expect(parsed[i - 1].callers).toBeGreaterThanOrEqual(
+            parsed[i].callers
           );
         }
       });
@@ -426,12 +429,12 @@ describe.skipIf(!canRunRizin)(
         const text = textOf(
           await run("disassemble_function", { addr: "main" })
         );
-        const firstOp = groundPdf.ops[0]!;
+        const firstOp = groundPdf.ops[0];
         expect(
           text.startsWith(`${groundPdf.ops.length} instructions at ${mainEa}\n`)
         ).toBe(true);
         expect(text).toContain(
-          `${eaFromOffset(addrOf(firstOp)!)}  ${firstOp.disasm}`
+          `${eaFromOffset(must(addrOf(firstOp)))}  ${firstOp.disasm}`
         );
       });
 
@@ -458,8 +461,8 @@ describe.skipIf(!canRunRizin)(
         const parsed = JSON.parse(body) as (GroundXref & { fromEa?: string })[];
         expect(parsed.length).toBe(groundAxt.length);
         for (const [i, row] of parsed.entries()) {
-          expect(row.from).toBe(groundAxt[i]!.from);
-          expect(row.fromEa).toBe(eaFromOffset(groundAxt[i]!.from!));
+          expect(row.from).toBe(groundAxt[i].from);
+          expect(row.fromEa).toBe(eaFromOffset(must(groundAxt[i].from)));
         }
       });
 
@@ -485,8 +488,8 @@ describe.skipIf(!canRunRizin)(
           )
         );
         const parsed = JSON.parse(body) as (GroundXref & { toEa?: string })[];
-        expect(parsed[0]?.to).toBe(groundAxf[0]!.to);
-        expect(parsed[0]?.toEa).toBe(eaFromOffset(groundAxf[0]!.to!));
+        expect(parsed[0]?.to).toBe(groundAxf[0].to);
+        expect(parsed[0]?.toEa).toBe(eaFromOffset(must(groundAxf[0].to)));
       });
     });
 
@@ -505,7 +508,7 @@ describe.skipIf(!canRunRizin)(
           (i) => i.name === pltImport.name,
           `${pltImport.name} in tool output`
         );
-        expect(found.ea).toBe(eaFromOffset(pltImport.plt!));
+        expect(found.ea).toBe(eaFromOffset(must(pltImport.plt)));
       });
 
       test("invalid: non-numeric offset is rejected by the parameter schema", () => {
@@ -552,7 +555,7 @@ describe.skipIf(!canRunRizin)(
         const first = (groundSymbols as { name?: string }[]).find(
           (s) => typeof s.name === "string" && s.name.length >= 4
         );
-        const needle = first!.name!.slice(0, 4);
+        const needle = must(must(first).name).slice(0, 4);
         const { body } = splitHeaderBody(
           textOf(await run("list_symbols", { filter: needle }))
         );
@@ -583,7 +586,7 @@ describe.skipIf(!canRunRizin)(
         const parsed = JSON.parse(body) as { string: string; ea?: string }[];
         expect(parsed).toHaveLength(1);
         expect(parsed[0]?.string).toBe(probeString.string);
-        expect(parsed[0]?.ea).toBe(eaFromOffset(probeString.vaddr!));
+        expect(parsed[0]?.ea).toBe(eaFromOffset(must(probeString.vaddr)));
       });
 
       test("invalid: non-string filter is rejected by the parameter schema", () => {
@@ -605,14 +608,16 @@ describe.skipIf(!canRunRizin)(
           (s) => s.name === execSegment.name,
           `${execSegment.name} in tool output`
         );
-        expect(found.ea).toBe(eaFromOffset(execSegment.vaddr!));
+        expect(found.ea).toBe(eaFromOffset(must(execSegment.vaddr)));
         expect(text).not.toContain("0x10000000000000000");
       });
     });
 
     describe("hash_binary", () => {
       test("returns the same digests as an independent hash of the file", async () => {
-        const bytes = await Bun.file(getState(ctx).binaryPath!).arrayBuffer();
+        const bytes = await Bun.file(
+          must(getState(ctx).binaryPath)
+        ).arrayBuffer();
         const sha256 = new Bun.CryptoHasher("sha256")
           .update(bytes)
           .digest("hex");
@@ -645,9 +650,9 @@ describe.skipIf(!canRunRizin)(
         );
         expect(rows.every((r) => groundEas.has(r.ea))).toBe(true);
         // edges resolve to addresses (not raw ids): the entry block's successors match ground truth
-        const entry = ground.nodes[0]!;
+        const entry = ground.nodes[0];
         const expectedTo = (entry.out_nodes ?? []).map((id) =>
-          eaFromOffset(ground.nodes.find((n) => n.id === id)!.offset)
+          eaFromOffset(must(ground.nodes.find((n) => n.id === id)).offset)
         );
         expect(
           rows.find((r) => r.ea === eaFromOffset(entry.offset))?.to.toSorted()
@@ -667,9 +672,9 @@ describe.skipIf(!canRunRizin)(
 
     describe("long output", () => {
       test("get_function on a large function spills to a session artifact when truncated", async () => {
-        const biggest = [...groundFns].toSorted((a, b) => b.size - a.size)[0]!;
+        const biggest = [...groundFns].toSorted((a, b) => b.size - a.size)[0];
         const result = await run("get_function", {
-          target: eaFromOffset(addrOf(biggest)!),
+          target: eaFromOffset(must(addrOf(biggest))),
         });
         if (result.details?.truncated) {
           expect(result.details.artifactId).toBeDefined();

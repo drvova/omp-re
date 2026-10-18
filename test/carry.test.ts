@@ -50,7 +50,7 @@ import { writeReport } from "../extensions/re/report.ts";
 import { RzSession, resolveRizinPath } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { sha256File } from "../extensions/re/verify.ts";
-import { makeHarness, rizinAvailable, rmDirSafe } from "./helpers.ts";
+import { makeHarness, rizinAvailable, rmDirSafe, must } from "./helpers.ts";
 
 const CC = Bun.which("cc") ?? Bun.which("gcc") ?? Bun.which("clang");
 const canCarryLive =
@@ -291,7 +291,7 @@ describe.skipIf(!canCarryLive)(
         [v2, "v2.c"],
       ] as const) {
         const proc = Bun.spawn(
-          [CC!, "-O0", "-o", out, nodePath.join(dir, file)],
+          [must(CC), "-O0", "-o", out, nodePath.join(dir, file)],
           {
             stderr: "pipe",
             stdout: "pipe",
@@ -358,8 +358,8 @@ describe.skipIf(!canCarryLive)(
           JSON.parse(await rz.cmd("afij @ sym.transform")) as {
             offset: number;
           }[]
-        )[0]!.offset;
-        requests.find((r) => r.id === "ev-transform")!.addr =
+        )[0].offset;
+        must(requests.find((r) => r.id === "ev-transform")).addr =
           `0x${transform.toString(16)}`;
         for (const r of requests) {
           const line = r.addr ? `${r.command} @ ${r.addr}` : r.command;
@@ -448,7 +448,7 @@ describe.skipIf(!canCarryLive)(
       const out = nodePath.join(dir, "carry.md");
       const result = await carryManifest(h.ctx, manifestPath, { out });
       const row = (id: string) =>
-        result.evidence.find((r) => r.evidenceId === id)!;
+        must(result.evidence.find((r) => r.evidenceId === id));
 
       expect(row("ev-arch").status).toBe("holds");
       expect(row("ev-clamp").status).toBe("holds");

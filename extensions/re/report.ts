@@ -444,11 +444,13 @@ const buildReport = async (ctx: ExtensionContext): Promise<BuiltReport> => {
       labelByAttack,
     } = await extractCapabilities(ctx, capaEvidence);
     const capClaims: Claim[] = capabilities.map((c) => ({
-      evidenceIds: [sourceByCapability.get(c)!],
+      evidenceIds: [sourceByCapability.get(c)].filter((id) => id !== undefined),
       text: c,
     }));
     const attackClaims: Claim[] = attackIds.map((id) => ({
-      evidenceIds: [sourceByAttack.get(id)!],
+      evidenceIds: [sourceByAttack.get(id)].filter(
+        (source) => source !== undefined
+      ),
       text: `${id} — ${labelByAttack.get(id) ?? MITRE_ATTACK[id] ?? "(unmapped technique)"}`,
     }));
     const attackNote =

@@ -77,9 +77,7 @@ const mnemonicsAt = async (
   }
   return pdf.ops
     .filter((op) => typeof op.disasm === "string" && op.type !== "invalid")
-    .map((op) =>
-      (op.disasm as string).trim().split(/\s+/u, 1)[0]!.toLowerCase()
-    )
+    .map((op) => (op.disasm as string).trim().split(/\s+/u, 1)[0].toLowerCase())
     .slice(0, MAX_MNEMONICS);
 };
 
@@ -127,13 +125,11 @@ export const sequenceSimilarity = (
     const cur = Array.from({ length: b.length + 1 }, () => 0);
     for (let j = 1; j <= b.length; j += 1) {
       cur[j] =
-        a[i - 1] === b[j - 1]
-          ? prev[j - 1]! + 1
-          : Math.max(prev[j]!, cur[j - 1]!);
+        a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
     }
     prev = cur;
   }
-  return (2 * prev[b.length]!) / (a.length + b.length);
+  return (2 * prev[b.length]) / (a.length + b.length);
 };
 
 /**

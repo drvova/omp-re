@@ -150,7 +150,7 @@ const resolveId = <T extends { id: string }>(
   }
   const matches = items.filter((i) => i.id.startsWith(id));
   if (matches.length === 1) {
-    return { item: matches[0]!, ok: true };
+    return { item: matches[0], ok: true };
   }
   return {
     ok: false,
@@ -243,7 +243,9 @@ const gateAndRecord = async (
     ? {
         reason: verdict.reason,
         verdict: verdict.verdict,
-        ...(refused ? { override: input.override_audit! } : {}),
+        ...(refused && input.override_audit
+          ? { override: input.override_audit }
+          : {}),
       }
     : {
         reason: outcome.unauditedReason ?? "side turn unavailable",

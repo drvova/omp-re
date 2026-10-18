@@ -139,7 +139,7 @@ const isShortCluster = (token: string): boolean =>
 const flagValues = (args: readonly string[], letter: string): string[] => {
   const values: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
-    const token = args[i]!;
+    const token = args[i];
     if (!isShortCluster(token)) {
       continue;
     }
@@ -151,7 +151,7 @@ const flagValues = (args: readonly string[], letter: string): string[] => {
     if (attached !== "") {
       values.push(attached);
     } else if (i + 1 < args.length) {
-      values.push(args[i + 1]!);
+      values.push(args[i + 1]);
     }
   }
   return values;
@@ -294,10 +294,10 @@ export const registerRzCliTools = async (pi: ExtensionAPI): Promise<void> => {
           ? requireBinary(getState(ctx))
           : null;
       const argv = params.args.map((a) =>
-        a === BINARY_PLACEHOLDER ? binary! : a
+        a === BINARY_PLACEHOLDER && binary !== null ? binary : a
       );
-      if (def.target === "open" && !usesPlaceholder) {
-        argv.push(binary!);
+      if (def.target === "open" && !usesPlaceholder && binary !== null) {
+        argv.push(binary);
       }
 
       const bin = resolveRizinTool(def.tool);

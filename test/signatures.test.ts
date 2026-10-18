@@ -33,6 +33,7 @@ import {
   rizinPath,
   TEST_BINARY,
   textOf,
+  must,
 } from "./helpers.ts";
 
 logSkip("signatures tests");
@@ -69,9 +70,11 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
     getState(ctx).binaryPath = binaryPath;
     getState(ctx).rz = rz;
     mainEa = eaFromOffset(
-      addrOf(
-        (await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never
-      )!
+      must(
+        addrOf(
+          must(await rz.cmdj<{ offset: number }[]>("afij @ main"))[0] as never
+        )
+      )
     );
 
     // A minimal FLIRT .pat matching main's first 16 bytes: <32 nibbles> <crc-len> <crc16> <len> :<off> <name>.

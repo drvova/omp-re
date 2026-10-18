@@ -35,7 +35,13 @@ import { writeReport } from "../extensions/re/report.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { runRizinCommand } from "../extensions/re/tools-rizin.ts";
 import { sha256File } from "../extensions/re/verify.ts";
-import { makeHarness, rizinAvailable, rmDirSafe, textOf } from "./helpers.ts";
+import {
+  makeHarness,
+  rizinAvailable,
+  rmDirSafe,
+  textOf,
+  must,
+} from "./helpers.ts";
 
 const CC = Bun.which("cc") ?? Bun.which("gcc") ?? Bun.which("clang");
 const canRunLive =
@@ -184,7 +190,7 @@ describe("record_finding gates (no rizin needed)", () => {
   test("supersedes replaces a finding; retract_finding withdraws one", async () => {
     const { h, run } = setup("find-revise", judgeSaying("supported"));
     await run("record_finding", { claim: "first", evidence: ["11111111"] });
-    const firstId = collectFindings(h.entries)[0]!.id;
+    const firstId = collectFindings(h.entries)[0].id;
     await run("record_finding", {
       claim: "second",
       evidence: ["11111111"],
@@ -192,7 +198,7 @@ describe("record_finding gates (no rizin needed)", () => {
     });
     expect(collectFindings(h.entries).map((f) => f.claim)).toEqual(["second"]);
     await run("retract_finding", {
-      id: collectFindings(h.entries)[0]!.id,
+      id: collectFindings(h.entries)[0].id,
       reason: "wrong function",
     });
     expect(collectFindings(h.entries)).toHaveLength(0);
@@ -270,7 +276,7 @@ describe.skipIf(!canRunLive)(
         [v2, "v2.c"],
       ] as const) {
         const proc = Bun.spawn(
-          [CC!, "-O0", "-o", out, nodePath.join(dir, file)],
+          [must(CC), "-O0", "-o", out, nodePath.join(dir, file)],
           {
             stderr: "pipe",
             stdout: "pipe",
@@ -337,7 +343,7 @@ describe.skipIf(!canRunLive)(
         confidence: "speculative",
       });
       const ev = collectEvidence(h.entries).find(
-        (e) => e.id === finding!.evidenceIds[0]
+        (e) => e.id === finding.evidenceIds[0]
       );
       expect(ev).toMatchObject({
         args: { addr: "sym.fib", command: "pdf" },
@@ -427,7 +433,7 @@ describe.skipIf(!canRunLive)(
       const result = await carryManifest(b.ctx, `${reportPath}.manifest.json`, {
         inherit: b.pi,
       });
-      const inh = result.inheritance!;
+      const inh = must(result.inheritance);
       expect(
         inh.inherited.map((i) => [i.claim.split(" ")[0], i.status]).toSorted()
       ).toEqual([
@@ -444,7 +450,7 @@ describe.skipIf(!canRunLive)(
       // Inherited findings cite NEW evidence, recorded on v2 — never the manifest's.
       const findings = collectFindings(b.entries);
       const evidenceB = collectEvidence(b.entries);
-      const fib = findings.find((f) => f.claim.startsWith("fib"))!;
+      const fib = must(findings.find((f) => f.claim.startsWith("fib")));
       expect(fib.addr).toBe("sym.fibonacci");
       expect(fib.inherited).toMatchObject({
         carryStatus: "relocated",

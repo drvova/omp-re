@@ -160,7 +160,7 @@ describe.skipIf(!canRunRizin)("verifyEvidence against real rizin", () => {
     expect(process.exitCode).not.toBe(1);
 
     // Tamper: a stored hash that no longer matches the real re-run must FAIL loudly (non-zero headless exit).
-    (h.entries[0]!.data as { reproHash: string }).reproHash = HEX64("0");
+    (h.entries[0].data as { reproHash: string }).reproHash = HEX64("0");
     const tampered = await verifyEvidence(h.ctx);
     const row = tampered.find((r) => r.id === "ev-live");
     expect(row?.status).toBe("tampered");

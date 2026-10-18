@@ -28,7 +28,13 @@ import {
   RE_SIGNATURE_TOOL_NAMES,
 } from "../extensions/re/audit.ts";
 import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
-import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
+import {
+  canRunRizin,
+  logSkip,
+  rmDirSafe,
+  TEST_BINARY,
+  must,
+} from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
@@ -163,8 +169,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
   });
 
   test("/re completes subcommands", () => {
-    const command = h.session.extensionRunner!.getCommand("re")!;
-    expect(command.getArgumentCompletions!("st")).toEqual([
+    const command = must(must(h.session.extensionRunner).getCommand("re"));
+    expect(must(command.getArgumentCompletions)("st")).toEqual([
       expect.objectContaining({ label: "strings", value: "strings " }),
       expect.objectContaining({ label: "status", value: "status " }),
     ]);
@@ -183,12 +189,12 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 
   test("a tool called with no binary open fails with omp-re's guidance", async () => {
     await expect(
-      h.session.getToolByName("list_functions")!.execute("t-nobin", {})
+      must(h.session.getToolByName("list_functions")).execute("t-nobin", {})
     ).rejects.toThrow("omp-re: no binary open");
   });
 });
 const run = (h: Harness, name: string, params: Record<string, unknown>) =>
-  h.session.getToolByName(name)!.execute(`t-${name}`, params);
+  must(h.session.getToolByName(name)).execute(`t-${name}`, params);
 
 describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
   // Opens the binary (full `aaa`) once, then replays into a freshly reopened
@@ -204,7 +210,7 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
       addr: "main",
       new: "omp_re_sdk_main",
     });
-    const file = first.session.sessionManager.getSessionFile()!;
+    const file = must(first.session.sessionManager.getSessionFile());
     await first.shutdown();
 
     const second = await boot(await SessionManager.open(file));
@@ -226,18 +232,18 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
     const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
     const h = await boot(SessionManager.inMemory());
     try {
-      await h.session
-        .getToolByName("open_binary")!
-        .execute("t-open", { path: TEST_BINARY });
+      await must(h.session.getToolByName("open_binary")).execute("t-open", {
+        path: TEST_BINARY,
+      });
       await h.session.prompt("/re status");
       // The count is REQUIRED_COMMANDS.length, which grows as tool families
       // are added; assert the shape, not a frozen number.
       expect(h.notes.at(-1)).toContain(
         `rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present`
       );
-      const result = await h.session
-        .getToolByName("rizin_command")!
-        .execute("t-rz", { addr: "main", command: "pdsf" });
+      const result = await must(
+        h.session.getToolByName("rizin_command")
+      ).execute("t-rz", { addr: "main", command: "pdsf" });
       expect(
         result.content[0]?.type === "text" &&
           result.content[0].text.startsWith("rizin> pdsf @ main\n")
@@ -263,18 +269,19 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
     const on = await boot(SessionManager.inMemory());
     try {
       expect(on.session.getToolByName("rizin_debug")).toBeDefined();
-      await on.session
-        .getToolByName("open_binary")!
-        .execute("t-open", { path: TEST_BINARY });
-      const started = await on.session
-        .getToolByName("rizin_debug")!
-        .execute("t-dbg", { action: "start" });
+      await must(on.session.getToolByName("open_binary")).execute("t-open", {
+        path: TEST_BINARY,
+      });
+      const started = await must(
+        on.session.getToolByName("rizin_debug")
+      ).execute("t-dbg", { action: "start" });
       expect(
         started.content[0]?.type === "text" && started.content[0].text
       ).toContain("RUNNING under a debugger");
-      await on.session
-        .getToolByName("rizin_debug")!
-        .execute("t-dbg-stop", { action: "stop" });
+      await must(on.session.getToolByName("rizin_debug")).execute(
+        "t-dbg-stop",
+        { action: "stop" }
+      );
     } finally {
       await on.shutdown();
       if (prev === undefined) {

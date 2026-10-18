@@ -75,7 +75,7 @@ const truncateUtf8Safe = (text: string, maxBytes: number): string => {
   }
   let end = maxBytes;
   // Back off while we're in the middle of a multi-byte UTF-8 sequence (continuation bytes are 10xxxxxx).
-  while (end > 0 && (buf[end]! & 0xc0) === 0x80) {
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
     end -= 1;
   }
   return buf.subarray(0, end).toString("utf-8");

@@ -23,6 +23,7 @@ import {
   RE_TRIAGE_TOOL_NAMES,
   registerAuditLog,
 } from "../extensions/re/audit.ts";
+import { must } from "./helpers.ts";
 
 describe("RE_ALL_TOOL_NAMES", () => {
   test("contains exactly 64 names and is the union of read (31), mutate (15), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (2), analyze (1), session (3), and finding (3)", () => {
@@ -183,12 +184,12 @@ describe("audit log", () => {
 
     const lines = await readAuditLines(sessionId);
     expect(lines).toHaveLength(1);
-    const parsed = JSON.parse(lines[0]!) as {
+    const parsed = JSON.parse(lines[0]) as {
       hmac?: string;
       [key: string]: unknown;
     };
     expect(typeof parsed.hmac).toBe("string");
-    expect(parsed.hmac!.length).toBeGreaterThan(0);
+    expect(must(parsed.hmac).length).toBeGreaterThan(0);
 
     const { hmac, ...rest } = parsed;
     const expectedHmac = createHmac("sha256", "test-hmac-key")

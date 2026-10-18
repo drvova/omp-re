@@ -34,6 +34,7 @@ import {
   rizinPath,
   rmDirSafe,
   TEST_BINARY,
+  must,
 } from "./helpers.ts";
 
 /** The hit total from a search result's header ("N hits" / "N of M hits" — M is the total). */
@@ -293,7 +294,7 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
       loadOptions: { arch: "x86", bits: 32 },
     });
     try {
-      const ops = (await s.cmdj<{ opcode: string }[]>("pdj 3 @ 0"))!;
+      const ops = must(await s.cmdj<{ opcode: string }[]>("pdj 3 @ 0"));
       expect(ops.map((o) => o.opcode.split(" ")[0])).toEqual([
         "mov",
         "add",
@@ -309,7 +310,9 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
       loadOptions: { arch: "x86", bits: 32, map: "0x400000" },
     });
     try {
-      const op = (await s.cmdj<{ opcode: string }[]>("pdj 1 @ 0x400000"))![0]!;
+      const op = must(
+        await s.cmdj<{ opcode: string }[]>("pdj 1 @ 0x400000")
+      )[0];
       expect(op.opcode).toContain("mov");
     } finally {
       s.close();
@@ -328,9 +331,9 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
     try {
       await spawnRizin(ctx, blob, { loadOptions: { arch: "x86", bits: 32 } });
       // force a respawn with no options passed — it must reuse the stored ones
-      getState(ctx).rz!.close();
+      must(getState(ctx).rz).close();
       const rz = await ensureRizin(ctx);
-      const op = (await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"))![0]!;
+      const op = must(await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"))[0];
       expect(op.opcode.split(" ")[0]).toBe("mov");
     } finally {
       shutdownState(ctx.sessionManager.getSessionId());
@@ -355,9 +358,9 @@ describe.skipIf(!canRunRizin)(
         type: "custom",
       });
       const { rz } = await spawnRizin(ctx, binaryPath);
-      const fn = (await rz.cmdj<{ offset: number; name: string }[]>(
-        "aflj"
-      ))![0]!;
+      const fn = must(
+        await rz.cmdj<{ offset: number; name: string }[]>("aflj")
+      )[0];
       fnEa = `0x${fn.offset.toString(16)}`;
       fnName = fn.name;
     });
@@ -379,17 +382,17 @@ describe.skipIf(!canRunRizin)(
         id: "ann-0",
         type: "custom",
       });
-      state.rz!.close();
+      must(state.rz).close();
 
       const respawned = await ensureRizin(ctx);
       expect(respawned.isClosed).toBe(false);
       expect(
-        (await respawned.cmdj<{ name: string }[]>(`afij @ ${fnEa}`))![0]!.name
+        must(await respawned.cmdj<{ name: string }[]>(`afij @ ${fnEa}`))[0].name
       ).toBe("omp_re_replayed");
     });
 
     test("concurrent callers after a crash share one respawn", async () => {
-      getState(ctx).rz!.close();
+      must(getState(ctx).rz).close();
       const [a, b] = await Promise.all([ensureRizin(ctx), ensureRizin(ctx)]);
       expect(a).toBe(b);
     });
@@ -406,7 +409,7 @@ describe.skipIf(!canRunRizin)(
 
       const rz = await ensureRizin(ctx);
       expect(
-        (await rz.cmdj<{ name: string }[]>(`afij @ ${fnEa}`))![0]!.name
+        must(await rz.cmdj<{ name: string }[]>(`afij @ ${fnEa}`))[0].name
       ).toBe(fnName);
     });
 
@@ -424,7 +427,7 @@ describe.skipIf(!canRunRizin)(
           type: "custom",
         });
         // force a respawn; replayMapFiles must re-apply the map
-        getState(ctx).rz!.close();
+        must(getState(ctx).rz).close();
         const rz = await ensureRizin(ctx);
         const p8Output = await rz.cmd("p8 16 @ 0x50000");
         expect(p8Output.trim().toLowerCase()).toBe(expected);

@@ -261,7 +261,7 @@ const unsupportedAll =
       reason,
       verdict: "unsupported",
     }));
-const judge: ClaimJudge = async () => {
+const throwingJudge: ClaimJudge = async () => {
   throw new Error("no active model");
 };
 
@@ -317,7 +317,7 @@ describe("writeReport — claim↔evidence support audit", () => {
     const advisoryPath = nodePath.join(tempDir, "audit-throw-adv.md");
     await writeReport(makeCtx(groundedEntries(), []), advisoryPath, {
       audit: "advisory",
-      judge,
+      judge: throwingJudge,
     });
     expect(process.exitCode).not.toBe(1);
     expect(await readFile(advisoryPath, "utf-8")).toContain(
@@ -327,7 +327,7 @@ describe("writeReport — claim↔evidence support audit", () => {
     const strictPath = nodePath.join(tempDir, "audit-throw-strict.md");
     await writeReport(makeCtx(groundedEntries(), []), strictPath, {
       audit: "strict",
-      judge,
+      judge: throwingJudge,
     });
     // infra failure must not fail closed
     expect(process.exitCode).not.toBe(1);

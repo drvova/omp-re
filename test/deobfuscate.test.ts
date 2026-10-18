@@ -22,6 +22,7 @@ import {
   rizinPath,
   rmDirSafe,
   textOf,
+  must,
 } from "./helpers.ts";
 
 logSkip("deobfuscate tests");
@@ -108,7 +109,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
   });
 
   test("xor reveals the hidden string, and the buffer is restored afterward", async () => {
-    const rz = getState(ctx).rz!;
+    const rz = must(getState(ctx).rz);
     const rawBefore = await rz.cmd("p8 24 @ 0x10");
     const before = rawBefore.trim();
 
@@ -137,7 +138,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
   });
 
   test("an unknown cipher surfaces rizin's error and still restores the buffer", async () => {
-    const rz = getState(ctx).rz!;
+    const rz = must(getState(ctx).rz);
     const rawBefore2 = await rz.cmd("p8 24 @ 0x10");
     const before = rawBefore2.trim();
     const res = await run({

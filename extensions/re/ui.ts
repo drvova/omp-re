@@ -701,11 +701,13 @@ export const showStringsPanel = async (
   }
   const strings = (
     (await rz.cmdj<RzString[]>("izj").catch(() => null)) ?? []
-  ).filter((s) => typeof s.vaddr === "number");
+  ).filter(
+    (s): s is RzString & { vaddr: number } => typeof s.vaddr === "number"
+  );
   const items: SelectItem[] = strings.map((s) => ({
-    description: eaFromOffset(s.vaddr!),
+    description: eaFromOffset(s.vaddr),
     label: s.string,
-    value: eaFromOffset(s.vaddr!),
+    value: eaFromOffset(s.vaddr),
   }));
   await showPanel(ctx, {
     hint: "enter open · type to filter · esc close",
@@ -715,14 +717,17 @@ export const showStringsPanel = async (
         (await rz
           .cmdj<RzXrefRow[]>(`axtj @ ${item.value}`)
           .catch(() => null)) ?? []
-      ).filter((row) => typeof row.from === "number");
+      ).filter(
+        (row): row is RzXrefRow & { from: number } =>
+          typeof row.from === "number"
+      );
       if (rows.length === 0) {
         // Close first: a notify raised under an open overlay can render underneath it.
         ctx.ui.notify("omp-re: no xrefs to that string", "info");
         return "close" as const;
       }
       if (rows.length === 1) {
-        const ea = eaFromOffset(rows[0]!.from!);
+        const ea = eaFromOffset(rows[0].from);
         await showCodeView(ctx, ea);
         return "keep" as const;
       }
@@ -771,7 +776,10 @@ export const showImportsPanel = async (
         (await rz
           .cmdj<RzXrefRow[]>(`axtj @ ${item.value}`)
           .catch(() => null)) ?? []
-      ).filter((row) => typeof row.from === "number");
+      ).filter(
+        (row): row is RzXrefRow & { from: number } =>
+          typeof row.from === "number"
+      );
       if (rows.length === 0) {
         await showCodeView(ctx, item.value, item.label);
         return "keep" as const;

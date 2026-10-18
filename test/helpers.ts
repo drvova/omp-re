@@ -158,6 +158,13 @@ export const makeHarness = (sessionId: string): Harness => {
   };
 };
 
+/** `value`, or a thrown assertion naming what was missing: for test steps that cannot go on without it (in place of a `!` that would only fail later, less clearly). */
+export const must = <T>(value: T | null | undefined, what = "value"): T => {
+  if (value === null || value === undefined) {
+    throw new Error(`test: expected ${what} to be present`);
+  }
+  return value;
+};
 export const textOf = (result: {
   content: { type: string; text?: string }[];
 }): string => {

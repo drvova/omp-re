@@ -18,7 +18,7 @@ import {
   registerFindingTools,
 } from "../extensions/re/findings.ts";
 import { getState } from "../extensions/re/state.ts";
-import { makeHarness, textOf } from "./helpers.ts";
+import { makeHarness, textOf, must } from "./helpers.ts";
 
 let tempDir: string;
 let originalAgentDir: string;
@@ -111,7 +111,7 @@ const hooked = (sessionId: string) => {
   };
   registerEvidenceStore(h.pi as ExtensionAPI);
   const fire = (toolName: string, isError = false) =>
-    handler!(
+    must(handler)(
       {
         content: [
           { text: "rizin> pdf @ sym.f\nimul eax, eax, 0x21", type: "text" },
@@ -139,7 +139,7 @@ describe("the tool_result evidence hook", () => {
       "rizin> pdf @ sym.f\nimul eax, eax, 0x21"
     );
     expect(result?.content?.[1]?.text).toBe(
-      `[evidence ${ev!.id.slice(0, 8)} — cite it in record_finding]`
+      `[evidence ${ev.id.slice(0, 8)} — cite it in record_finding]`
     );
     // and the summary/blob were taken over the untagged output
     expect(ev?.summary).not.toContain("[evidence");
