@@ -79,18 +79,18 @@ export const RZ_CLI_TOOLS: readonly RzCliToolDef[] = [
     tool: "rz-bin",
   },
   {
-    tool: "rz-diff",
-    summary:
-      "Compare two files: edit distance (-d myers|leven|ssdeep) or structural diff (-t bytes|functions|imports|symbols|sections|strings|entries|fields|graphs). Pass both paths; -A compares addresses, -B runs full analysis first. JSON with -j.",
-    target: "args",
-    // -H/-S open an interactive visual view that would hang
-    deniedLetters: "HS",
     // Not blocking -e (sets config): its value is arbitrary and would need
     // value-aware parsing, and a letter-ban on `e` false-positives on any
     // clustered flag whose value contains an 'e' (e.g. `-tbytes`). rz-diff
     // runs on a throwaway process with no persistence or demonstrated exec.
     // -t command runs a rizin command per file (→ shell via `!`); refused in every spelling
     deniedFlagValues: [{ flag: "t", values: ["command", "commands"] }],
+    // -H/-S open an interactive visual view that would hang
+    deniedLetters: "HS",
+    summary:
+      "Compare two files: edit distance (-d myers|leven|ssdeep) or structural diff (-t bytes|functions|imports|symbols|sections|strings|entries|fields|graphs). Pass both paths; -A compares addresses, -B runs full analysis first. JSON with -j.",
+    target: "args",
+    tool: "rz-diff",
   },
   {
     deniedLetters: "",
@@ -253,10 +253,6 @@ export const registerRzCliTools = async (pi: ExtensionAPI): Promise<void> => {
   });
 
   pi.registerTool({
-    name: "rizin_cli",
-    label: "rizin CLI",
-    description:
-      "Run one of rizin's standalone command-line tools (rz-bin, rz-diff, rz-hash, rz-find, rz-asm, rz-ax) with its own arguments, for analysis the in-core tools don't cover: quick binary info without full analysis, diffing two binaries, hashing and entropy, raw pattern search, standalone (dis)assembly, and base conversion. Argv only, no shell. Flags that write files, run code, fetch over the network, or open interactive views are refused. Pass `args: [\"-h\"]` for a tool's full help.",
     approval: (args) => {
       const record =
         args && typeof args === "object"
@@ -272,7 +268,11 @@ export const registerRzCliTools = async (pi: ExtensionAPI): Promise<void> => {
         tier: "exec",
       };
     },
+    description:
+      "Run one of rizin's standalone command-line tools (rz-bin, rz-diff, rz-hash, rz-find, rz-asm, rz-ax) with its own arguments, for analysis the in-core tools don't cover: quick binary info without full analysis, diffing two binaries, hashing and entropy, raw pattern search, standalone (dis)assembly, and base conversion. Argv only, no shell. Flags that write files, run code, fetch over the network, or open interactive views are refused. Pass `args: [\"-h\"]` for a tool's full help.",
+    label: "rizin CLI",
     loadMode: "essential",
+    name: "rizin_cli",
     parameters: cliParams,
     ...reRenderers({ body: "text", subject: "tool", title: "rizin CLI" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

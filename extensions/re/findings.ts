@@ -108,11 +108,11 @@ export const collectFindings = (
       live.delete(d.supersedes);
     }
     live.set(d.id, {
-      id: d.id,
       claim: d.claim,
       evidenceIds: d.evidenceIds.filter(
         (x): x is string => typeof x === "string"
       ),
+      id: d.id,
       ...(typeof d.addr === "string" ? { addr: d.addr } : {}),
       confidence: CONFIDENCES.has(d.confidence as FindingConfidence)
         ? (d.confidence as FindingConfidence)
@@ -252,9 +252,9 @@ const gateAndRecord = async (
         verdict: "unaudited",
       };
   const record: FindingRecord = {
-    id,
     claim: input.claim,
     evidenceIds: resolved.map((ev) => ev.id),
+    id,
     ...(input.addr ? { addr: input.addr } : {}),
     confidence: input.confidence ?? "likely",
     ...(input.supersedes ? { supersedes: input.supersedes } : {}),
@@ -390,12 +390,12 @@ export const registerFindingTools = (
   });
 
   pi.registerTool({
-    name: "record_finding",
-    label: "Record Finding",
+    approval: "read",
     description:
       "Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it — each RE tool result ends with an `[evidence xxxxxxxx]` tag; cite those ids. Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.",
-    approval: "read",
+    label: "Record Finding",
     loadMode: "essential",
+    name: "record_finding",
     parameters: recordFindingParams,
     ...reRenderers({ body: "text", subject: "claim", title: "record_finding" }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -453,12 +453,12 @@ export const registerFindingTools = (
   });
 
   pi.registerTool({
-    name: "adopt_finding",
-    label: "Adopt Finding",
+    approval: "read",
     description:
       "Adopt a finding made elsewhere — typically one returned by the re-analyst subagent, whose evidence lives in its own session — by re-proving it here: each given rizin command is re-run read-only on the open binary and recorded as evidence in THIS session, then the claim passes the same gates as record_finding (support audit included). Refused if expect_sha256 doesn't match the open binary or a command fails. Use the subagent's `reproduce` lines as the commands.",
-    approval: "read",
+    label: "Adopt Finding",
     loadMode: "essential",
+    name: "adopt_finding",
     parameters: adoptFindingParams,
     ...reRenderers({ body: "text", subject: "claim", title: "adopt_finding" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -521,12 +521,12 @@ export const registerFindingTools = (
   });
 
   pi.registerTool({
-    name: "retract_finding",
-    label: "Retract Finding",
+    approval: "read",
     description:
       "Withdraw a finding recorded earlier with record_finding (it leaves the report). Give the reason; to revise rather than withdraw, call record_finding with supersedes instead.",
-    approval: "read",
+    label: "Retract Finding",
     loadMode: "essential",
+    name: "retract_finding",
     parameters: retractFindingParams,
     ...reRenderers({ body: "text", subject: "id", title: "retract_finding" }),
     async execute(_id, params, _signal, _onUpdate, ctx) {

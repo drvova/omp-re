@@ -89,17 +89,11 @@ export const makeHarness = (sessionId: string): Harness => {
   const tools = new Map<string, ToolDefinition<any, any>>();
   let counter = 0;
   const pi = {
-    zod,
-    logger: { debug: noop, error: noop, info: noop, warn: noop },
-    registerTool: (def: ToolDefinition<any, any>) => {
-      tools.set(def.name, def);
-    },
     appendEntry: (customType: string, data?: unknown) => {
       const id = `entry-${counter}`;
       counter += 1;
       entries.push({ customType, data, id, type: "custom" });
     },
-    on: noop,
     // A real argv exec (no shell), matching omp's pi.exec shape, so the rz-* CLI tools run against the actual binaries in tests.
     exec: async (
       bin: string,
@@ -118,6 +112,12 @@ export const makeHarness = (sessionId: string): Harness => {
       const code = await proc.exited;
       return { code, stderr, stdout };
     },
+    logger: { debug: noop, error: noop, info: noop, warn: noop },
+    on: noop,
+    registerTool: (def: ToolDefinition<any, any>) => {
+      tools.set(def.name, def);
+    },
+    zod,
   } as unknown as ExtensionAPI;
 
   const ctx = {

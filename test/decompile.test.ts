@@ -19,10 +19,10 @@ const stubRz = (replies: Record<string, string>): RzSession => {
 describe("decompileAt", () => {
   test("normalizes CRLF from a Windows rizin before handing code to the renderer", async () => {
     const rz = stubRz({
-      // probe reply (non-empty = plugin available)...
-      "pdg?": "Usage: pdg",
       // ...and a decompile reply with Windows line endings and leading blanks.
       pdg: "\r\n\r\n// WARNING: overlap\r\n\r\nundefined8 sym.main(void)\r\n{\r\n    return;\r\n}\r\n",
+      // probe reply (non-empty = plugin available)...
+      "pdg?": "Usage: pdg",
     });
     const outcome = await decompileAt(rz, "0x1400014c9");
     expect(outcome?.kind).toBe("pdg");

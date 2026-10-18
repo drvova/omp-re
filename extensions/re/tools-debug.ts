@@ -594,10 +594,6 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "rizin_debug",
-    label: "debugger",
-    description:
-      "Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, reverse-step (record a trace with trace_start, then step_back / continue_back), read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected.",
     approval: (args) => {
       const record =
         args && typeof args === "object"
@@ -631,7 +627,11 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
         tier: "exec",
       };
     },
+    description:
+      "Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, reverse-step (record a trace with trace_start, then step_back / continue_back), read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected.",
+    label: "debugger",
     loadMode: "essential",
+    name: "rizin_debug",
     parameters: debugParams,
     ...reRenderers({ body: "text", subject: "action", title: "debugger" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

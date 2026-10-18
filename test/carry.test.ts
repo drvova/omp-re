@@ -513,14 +513,14 @@ describe.skipIf(!canCarryLive)(
         {
           customType: "re.evidence",
           data: {
-            id: "ev-anchored",
-            tool: "rizin_command",
             args: { addr: "sym.fib", command: "pdf" },
-            commands: ["pdf @ sym.fib"],
-            reproHash: "b".repeat(64),
             binarySha256: sha,
+            commands: ["pdf @ sym.fib"],
+            id: "ev-anchored",
+            reproHash: "b".repeat(64),
             // an IOC in the summary makes this a grounded claim that cites ev-anchored
             summary: "found string: http://185.220.101.99/beacon",
+            tool: "rizin_command",
           },
           id: "e1",
           type: "custom",

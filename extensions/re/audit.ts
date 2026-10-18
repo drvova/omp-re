@@ -19,6 +19,61 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 
 import { getState } from "./state.ts";
 
+// tools-read.ts
+const READ_TS_TOOLS: Record<string, true> = {
+  decompile_function: true,
+  disassemble_function: true,
+  get_function: true,
+  get_graph: true,
+  get_xrefs_from: true,
+  get_xrefs_to: true,
+  hash_binary: true,
+  list_exports: true,
+  list_functions: true,
+  list_imports: true,
+  list_segments: true,
+  list_strings: true,
+  list_symbols: true,
+  search_functions: true,
+};
+
+// tools-search.ts
+const SEARCH_TS_TOOLS: Record<string, true> = {
+  search_asm: true,
+  search_bytes: true,
+  search_gadgets: true,
+  search_regex_bytes: true,
+  search_string: true,
+  search_value: true,
+};
+
+// tools-types.ts
+const TYPES_TS_TOOLS: Record<string, true> = {
+  cast_memory: true,
+  define_types: true,
+  list_types: true,
+};
+
+// tools-syscalls.ts
+const SYSCALLS_TS_TOOLS: Record<string, true> = {
+  list_syscalls: true,
+  syscall_lookup: true,
+};
+
+// tools-info.ts
+const INFO_TS_TOOLS: Record<string, true> = {
+  get_binary_info: true,
+  list_classes: true,
+  list_entrypoints: true,
+  list_flags: true,
+  list_relocations: true,
+};
+
+// tools-deobfuscate.ts
+const DEOBFUSCATE_TS_TOOLS: Record<string, true> = {
+  deobfuscate: true,
+};
+
 /**
  * Every read-tier RE tool — the ones registered with `approval: "read"`,
  * across tools-read.ts, tools-search.ts, tools-types.ts, tools-syscalls.ts,
@@ -28,43 +83,12 @@ import { getState } from "./state.ts";
  * isn't disabled by `/re off`. Keep it in sync as read tools are added.
  */
 export const RE_READ_TOOL_NAMES: Record<string, true> = {
-  // tools-read.ts
-  list_functions: true,
-  search_functions: true,
-  get_function: true,
-  decompile_function: true,
-  disassemble_function: true,
-  get_xrefs_to: true,
-  get_xrefs_from: true,
-  list_imports: true,
-  list_exports: true,
-  list_symbols: true,
-  list_strings: true,
-  list_segments: true,
-  hash_binary: true,
-  get_graph: true,
-  // tools-search.ts
-  search_bytes: true,
-  search_string: true,
-  search_regex_bytes: true,
-  search_asm: true,
-  search_value: true,
-  search_gadgets: true,
-  // tools-types.ts
-  list_types: true,
-  define_types: true,
-  cast_memory: true,
-  // tools-syscalls.ts
-  list_syscalls: true,
-  syscall_lookup: true,
-  // tools-info.ts
-  get_binary_info: true,
-  list_entrypoints: true,
-  list_relocations: true,
-  list_flags: true,
-  list_classes: true,
-  // tools-deobfuscate.ts
-  deobfuscate: true,
+  ...READ_TS_TOOLS,
+  ...SEARCH_TS_TOOLS,
+  ...TYPES_TS_TOOLS,
+  ...SYSCALLS_TS_TOOLS,
+  ...INFO_TS_TOOLS,
+  ...DEOBFUSCATE_TS_TOOLS,
 };
 
 /** The 15 write-tier annotation tools (tools-mutate.ts). */

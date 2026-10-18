@@ -405,12 +405,12 @@ const registerShell = (pi: ExtensionAPI): void => {
     path: pi.zod.string().describe("Path to the binary file to open."),
   });
   pi.registerTool({
-    name: "open_binary",
-    label: "Open binary",
+    approval: "read",
     description:
       "Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (hash_binary, list_functions, decompile_function, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open. For a raw/headerless target (flat shellcode, firmware, a ROM dump) pass arch/bits/base/format so rizin loads it correctly instead of autodetecting from a header it doesn't have.",
-    approval: "read",
+    label: "Open binary",
     loadMode: "essential",
+    name: "open_binary",
     parameters: openBinaryParams,
     ...reRenderers({ body: "text", subject: "path", title: "Open binary" }),
     execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
@@ -696,8 +696,8 @@ const registerShell = (pi: ExtensionAPI): void => {
             }
             // --resolve implies --inherit: re-prove what holds, then hand the agenda to the model as a turn.
             await carryManifest(ctx, manifestPath, {
-              strict,
               out,
+              strict,
               ...(inherit || resolve ? { inherit: pi } : {}),
               resolve,
             });

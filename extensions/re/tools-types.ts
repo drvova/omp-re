@@ -184,12 +184,12 @@ export const registerTypeTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "list_types",
-    label: "List Types",
+    approval: "read",
     description:
       "List types loaded in rizin's type database (structs via tsj, enums via tej, typedefs via ttj, function definitions via tfj). Includes rizin's built-in Windows type base plus debug-info and user-defined types. Filter by name substring; page through large lists.",
-    approval: "read",
+    label: "List Types",
     loadMode: "essential",
+    name: "list_types",
     parameters: listTypesParams,
     ...reRenderers({ body: "json", subject: "kind", title: "List types" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -199,12 +199,12 @@ export const registerTypeTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "define_types",
-    label: "Define Types",
+    approval: "read",
     description:
       "Define types from C definitions (rizin td). Each statement is one C declaration ending in ';' — structs, unions, enums, typedefs. Type names used but not yet defined must be defined first (td processes statements in order).",
-    approval: "read",
+    label: "Define Types",
     loadMode: "essential",
+    name: "define_types",
     parameters: defineTypesParams,
     ...reRenderers({ body: "text", subject: "count", title: "Define types" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -214,12 +214,12 @@ export const registerTypeTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "cast_memory",
-    label: "Cast Memory",
+    approval: "read",
     description:
       "Print memory at an address interpreted as a named type (rizin tp). The type must exist — define it with define_types first, or list existing ones with list_types.",
-    approval: "read",
+    label: "Cast Memory",
     loadMode: "essential",
+    name: "cast_memory",
     parameters: castMemoryParams,
     ...reRenderers({ body: "text", subject: "addr", title: "Cast memory" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {

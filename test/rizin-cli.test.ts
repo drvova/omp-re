@@ -41,185 +41,46 @@ import {
 
 logSkip("rizin CLI integration tests");
 
-const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
-  pd: {
-    args: [{ name: "n", type: "number" }],
-    args_str: " [<n>]",
-    summary: "Disassemble N instructions",
-  },
-  pdf: { args_str: "", summary: "Disassemble a function" },
-  pdsf: { args_str: "", summary: "Summarize the current function" },
-  px: {
-    args: [{ name: "n", type: "number" }],
-    args_str: " [<n>]",
-    summary: "Show hexdump",
-  },
-  pr: { args_str: " [<n>]", summary: "Print raw bytes" },
-  prx: { args_str: " [<n>]", summary: "Printable chars with real offset" },
-  p6d: { args_str: " [<n>]", summary: "Base64 decoding" },
-  ph: {
-    args: [
-      {
-        choices: ["md5", "entropy"],
-        name: "algo",
-        required: true,
-        type: "choice",
-      },
-    ],
-    args_str: " <algo>",
+const CORE_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
+  "%$": { summary: "Print Rizin variables and their values" },
+  "%B": {
     summary:
-      "Prints a hash/message digest or entropy (use @! to change the block size)",
+      "There are multiple search modes in Rizin that can be listed using the command `e search.in=?`. This command can be used to get boundaries of those search modes.",
   },
-  pfw: { summary: "Write a format" },
-  "/x": {
-    args: [{ name: "hex", required: true, type: "string" }],
-    args_str: " <hex>",
-    summary: "Search hex string",
-  },
-  "/F": {
-    args: [{ name: "file", required: true, type: "string" }],
-    args_str: " <file>",
-    summary: "Search the content of a file.",
-  },
-  "/m": {
-    args: [{ name: "magic-file", type: "string" }],
-    args_str: " [<magic-file>]",
-    summary: "Magic constants search.",
-  },
-  axl: { summary: "List all xrefs" },
-  axlj: { summary: "List all xrefs (JSON mode)" },
-  axlq: { summary: "List all xrefs (quiet mode)" },
-  axg: { summary: "Show xrefs graph to reach function at current seek" },
-  axgj: {
-    summary: "Show xrefs graph to reach function at current seek (JSON mode)",
-  },
-  aai: { summary: "Print preformed analysis details" },
-  aaij: { summary: "Print preformed analysis details (JSON mode)" },
-  aau: { summary: "Print memory areas not covered by functions" },
-  afbr: { summary: "Show addresses of instructions which leave the function" },
-  afns: {
-    summary: "Print all strings referenced by the function in current seek",
-  },
-  afnsj: {
+  "%Bj": {
     summary:
-      "Print all strings referenced by the function in current seek (JSON mode)",
+      "There are multiple search modes in Rizin that can be listed using the command `e search.in=?`. This command can be used to get boundaries of those search modes.",
   },
-  afsb: {
+  "%Bt": {
     summary:
-      "Outputs the function signature bytes, mask and search mask at current address",
+      "There are multiple search modes in Rizin that can be listed using the command `e search.in=?`. This command can be used to get boundaries of those search modes.",
   },
-  afsbj: {
+  "%P": { summary: "Convert physical to virtual address" },
+  "%X": { summary: "Show evaluated expression <expr> in hex" },
+  "%b": { summary: "Print <expr> in binary format" },
+  "%b64": { summary: "Encode <str> in Base64" },
+  "%btw": { summary: "Check if <middle> number is between <first> and <last>" },
+  "%f": {
     summary:
-      "Outputs the function signature bytes, mask and search mask at current address (JSON mode)",
+      "Treat given string as bitstring and get selected characters from bitstring using given value. Bits that are flagged in value are used to get characters from given string. Bitstring is treated in big-endian format",
   },
-  afcl: { summary: "List all available calling conventions" },
-  afclj: { summary: "List all available calling conventions (JSON mode)" },
-  afcr: { summary: "Show register usage for the current function" },
-  afcrj: {
-    summary: "Show register usage for the current function (JSON mode)",
-  },
-  afx: { summary: "Info all fcn variables/args" },
-  afd: { summary: "Show function + delta for given offset" },
-  afvf: { summary: "Show BP relative stackframe variables" },
-  afvc: {
-    summary: "List value constraints of all variables / of the given one",
-  },
-  afvcj: {
+  "%h": { summary: "Print hash value of string <str>" },
+  "%j": { summary: "Evaluate numerical expression <expr> (JSON mode)" },
+  "%l": {
     summary:
-      "List value constraints of all variables / of the given one (JSON mode)",
+      "Calculate length of string <str>. Quiet mode stores value in `$?` register.",
   },
-  idj: { summary: "Show DWARF source lines information (JSON mode)" },
-  idq: { summary: "Show DWARF source lines information (quiet mode)" },
-  id: { summary: "Show DWARF source lines information" },
-  idp: { summary: "Load PDB file information" },
-  fl: { summary: "List all flags" },
-  "fl.": { summary: "List all flags at the current offset" },
-  "fd.": { summary: "Describe flags for the current offset" },
-  fi: { summary: "Show the flags in the block or custom range" },
-  fg: { summary: "Show the flag graph" },
-  fsl: { summary: "Display flagspaces" },
-  fssl: { summary: "Display flagspace stack" },
-  ftl: { summary: "List all flag tags" },
-  "fz.": { summary: "Show around flag zone context" },
-  afclk: { summary: "List all available calling conventions (sdb mode)" },
-  afcll: { summary: "List all available calling conventions (verbose mode)" },
-  flj: { summary: "List all flags (JSON mode)" },
-  flq: { summary: "List all flags (quiet mode)" },
-  flt: { summary: "List all flags (table mode)" },
-  "f.l": { summary: "List the local flags for the function" },
-  "f.lj": { summary: "List the local flags for the function (JSON mode)" },
-  "f.lq": { summary: "List the local flags for the function (quiet mode)" },
-  fij: { summary: "Show the flags in the block or custom range (JSON mode)" },
-  fiq: { summary: "Show the flags in the block or custom range (quiet mode)" },
-  fit: { summary: "Show the flags in the block or custom range (table mode)" },
-  fslj: { summary: "Display flagspaces (JSON mode)" },
-  fslq: { summary: "Display flagspaces (quiet mode)" },
-  fsslj: { summary: "Display flagspace stack (JSON mode)" },
-  ftlj: { summary: "List all flag tags (JSON mode)" },
-  ftll: { summary: "List all flag tags (verbose mode)" },
-  fzlj: { summary: "List all flag zones (JSON mode)" },
-  fzl: { summary: "List all flag zones" },
-  fL: { summary: "Show the flag length / Set the flag length" },
-  fN: {
-    summary: "Show the realname of the flag / Set the realname of the flag",
-  },
-  fs: { summary: "Select flagspace" },
-  "/R": {
-    args_str: " [<re>]",
-    description: "Find gadgets ending in ret",
-    summary: "Search rop gadgets",
-  },
-  "/Rk": {
-    args: [{ name: "key=value", type: "string" }],
-    args_str: " <key>[=<val>] ...",
-    summary: "Query ROP Gadgets by providing constraints",
-  },
-  izj: { summary: "List strings in data sections (JSON mode)" },
-  agc: { args_str: " [<format>]", summary: "Global callgraph" },
-  agw: { summary: "Write graph to file" },
-  afn: { summary: "Rename function" },
-  CC: { summary: "Add comment" },
-  wx: { summary: "Write hex" },
-  e: { summary: "Get/set config" },
-  o: { summary: "Open file" },
-  s: { summary: "Seek" },
-  aoe: { summary: "Emulate op" },
-  cc: {
+  "%lq": {
     summary:
-      "Compare hexdump of data of block size at <addr> with the data at current offset",
+      "Calculate length of string <str>. Quiet mode stores value in `$?` register. (quiet mode)",
   },
-  ccc: {
+  "%o": { summary: "Print <expr> in octal format" },
+  "%p": { summary: "Virtual to physical address conversion" },
+  "%s": {
     summary:
-      "Show different lines between hexdump of a block of data at <addr> wth the data at current offset",
+      "Generate sequence of numbers from <start> to <stop> with <step> increments",
   },
-  ccd: {
-    summary:
-      "Compare disassembly of block size at <addr> and at the current offset",
-  },
-  cX: {
-    summary:
-      "Compare hexdump of data of block size at <addr> with the data at current offset using hexdiff output",
-  },
-  cXj: {
-    summary:
-      "Compare hexdump of data of block size at <addr> with the data at current offset using hexdiff output (JSON mode)",
-  },
-  cfj: {
-    summary:
-      "Compare the contents of <file> with the data at current offset (JSON mode)",
-  },
-  cu: { summary: "Compare data at <offset> with the current offset" },
-  cu1: { summary: "Compare bytes at <offset> with the current offset" },
-  cu2: {
-    summary: "Compare words (16-bit) at <offset> with the current offset",
-  },
-  cu4: {
-    summary: "Compare dwords (32-bit) at <offset> with the current offset",
-  },
-  cu8: {
-    summary: "Compare qwords (64-bit) at <offset> with the current offset",
-  },
-  cud: { summary: "Compare disassembly at <offset> with the current offset" },
+  "%u": { summary: "Convert <expr> to K, M, G, T etc... units" },
   "%v": { summary: "Show last expression ($?) or currently evaluated <expr>" },
   "%vi": {
     summary:
@@ -241,83 +102,201 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     summary:
       "Show last expression ($?) or currently evaluated <expr> as 8 bytes integer",
   },
-  "%X": { summary: "Show evaluated expression <expr> in hex" },
-  "%x": { summary: "ASCII string to hex string" },
-  "%b64": { summary: "Encode <str> in Base64" },
-  "%b": { summary: "Print <expr> in binary format" },
-  "%o": { summary: "Print <expr> in octal format" },
-  "%u": { summary: "Convert <expr> to K, M, G, T etc... units" },
-  "%l": {
-    summary:
-      "Calculate length of string <str>. Quiet mode stores value in `$?` register.",
-  },
-  "%lq": {
-    summary:
-      "Calculate length of string <str>. Quiet mode stores value in `$?` register. (quiet mode)",
-  },
-  "%h": { summary: "Print hash value of string <str>" },
-  "%f": {
-    summary:
-      "Treat given string as bitstring and get selected characters from bitstring using given value. Bits that are flagged in value are used to get characters from given string. Bitstring is treated in big-endian format",
-  },
-  "%s": {
-    summary:
-      "Generate sequence of numbers from <start> to <stop> with <step> increments",
-  },
-  "%btw": { summary: "Check if <middle> number is between <first> and <last>" },
-  "%P": { summary: "Convert physical to virtual address" },
-  "%p": { summary: "Virtual to physical address conversion" },
   "%w": { summary: "Get references of given address" },
-  "%B": {
-    summary:
-      "There are multiple search modes in Rizin that can be listed using the command `e search.in=?`. This command can be used to get boundaries of those search modes.",
+  "%x": { summary: "ASCII string to hex string" },
+  "/F": {
+    args: [{ name: "file", required: true, type: "string" }],
+    args_str: " <file>",
+    summary: "Search the content of a file.",
   },
-  "%Bj": {
-    summary:
-      "There are multiple search modes in Rizin that can be listed using the command `e search.in=?`. This command can be used to get boundaries of those search modes.",
+  "/R": {
+    args_str: " [<re>]",
+    description: "Find gadgets ending in ret",
+    summary: "Search rop gadgets",
   },
-  "%Bt": {
-    summary:
-      "There are multiple search modes in Rizin that can be listed using the command `e search.in=?`. This command can be used to get boundaries of those search modes.",
+  "/Rk": {
+    args: [{ name: "key=value", type: "string" }],
+    args_str: " <key>[=<val>] ...",
+    summary: "Query ROP Gadgets by providing constraints",
   },
-  "%$": { summary: "Print Rizin variables and their values" },
-  "%j": { summary: "Evaluate numerical expression <expr> (JSON mode)" },
-  y: { summary: "Yank bytes / Show yank contents" },
-  yj: { summary: "Yank bytes / Show yank contents (JSON mode)" },
-  yq: { summary: "Yank bytes / Show yank contents (quiet mode)" },
-  ys: { summary: "Print contents of clipboards as string" },
-  yx: { summary: "Print contents of clipboard in hexadecimal" },
+  "/m": {
+    args: [{ name: "magic-file", type: "string" }],
+    args_str: " [<magic-file>]",
+    summary: "Magic constants search.",
+  },
+  "/x": {
+    args: [{ name: "hex", required: true, type: "string" }],
+    args_str: " <hex>",
+    summary: "Search hex string",
+  },
+  "C.": { summary: "Show all meta information at current address" },
+  "C.j": {
+    summary: "Show all meta information at current address (JSON mode)",
+  },
+  "C.l": {
+    summary: "Show all meta information at current address (verbose mode)",
+  },
+  CC: { summary: "Add comment" },
+  aL: {
+    summary:
+      "List all asm/analysis plugins (e asm.arch=?) or CPU details for a plugin.",
+  },
+  aLc: { summary: "Shows the CPU details for a specific plugin." },
+  aLj: {
+    summary:
+      "List all asm/analysis plugins (e asm.arch=?) or CPU details for a plugin. (JSON mode)",
+  },
+  aai: { summary: "Print preformed analysis details" },
+  aaij: { summary: "Print preformed analysis details (JSON mode)" },
+  aau: { summary: "Print memory areas not covered by functions" },
+  afbr: { summary: "Show addresses of instructions which leave the function" },
+  afcl: { summary: "List all available calling conventions" },
+  afclj: { summary: "List all available calling conventions (JSON mode)" },
+  afclk: { summary: "List all available calling conventions (sdb mode)" },
+  afcll: { summary: "List all available calling conventions (verbose mode)" },
+  afcr: { summary: "Show register usage for the current function" },
+  afcrj: {
+    summary: "Show register usage for the current function (JSON mode)",
+  },
+  afd: { summary: "Show function + delta for given offset" },
+  afn: { summary: "Rename function" },
+  afns: {
+    summary: "Print all strings referenced by the function in current seek",
+  },
+  afnsj: {
+    summary:
+      "Print all strings referenced by the function in current seek (JSON mode)",
+  },
+  afsb: {
+    summary:
+      "Outputs the function signature bytes, mask and search mask at current address",
+  },
+  afsbj: {
+    summary:
+      "Outputs the function signature bytes, mask and search mask at current address (JSON mode)",
+  },
+  afvc: {
+    summary: "List value constraints of all variables / of the given one",
+  },
+  afvcj: {
+    summary:
+      "List value constraints of all variables / of the given one (JSON mode)",
+  },
+  afvf: { summary: "Show BP relative stackframe variables" },
+  afx: { summary: "Info all fcn variables/args" },
+  agc: { args_str: " [<format>]", summary: "Global callgraph" },
+  agw: { summary: "Write graph to file" },
+  aoe: { summary: "Emulate op" },
   as: { summary: "Show syscall and arguments" },
   asl: { summary: "List syscalls" },
   aslj: { summary: "List syscalls (JSON mode)" },
   asn: { summary: "Returns the syscall number by the name" },
   asr: { summary: "Returns the syscall name by the number" },
-  ol: { summary: "List opened files" },
-  olj: { summary: "List opened files (JSON mode)" },
-  olq: { summary: "List opened files (quiet mode)" },
-  olt: { summary: "List opened files (table mode)" },
-  obl: { summary: "List opened binary files" },
-  oblj: { summary: "List opened binary files (JSON mode)" },
-  oblq: { summary: "List opened binary files (quiet mode)" },
-  oblt: { summary: "List opened binary files (table mode)" },
-  oml: {
-    summary: "List maps of all file descriptor or only the specified <fd>",
-  },
-  omlj: {
+  av: { summary: "search for vtables in data sections and show results" },
+  avgc: { summary: "List value constraints of all globals / of the given one" },
+  avgcj: {
     summary:
-      "List maps of all file descriptor or only the specified <fd> (JSON mode)",
+      "List value constraints of all globals / of the given one (JSON mode)",
   },
-  omlq: {
-    summary:
-      "List maps of all file descriptor or only the specified <fd> (quiet mode)",
+  avgl: { summary: "show/list global variables" },
+  avglj: { summary: "show/list global variables (JSON mode)" },
+  avglq: { summary: "show/list global variables (quiet mode)" },
+  avglt: { summary: "show/list global variables (table mode)" },
+  avgp: { summary: "print the global variable value" },
+  avgx: { summary: "print all xrefs to the global variable" },
+  avgxj: { summary: "print all xrefs to the global variable (JSON mode)" },
+  avgxq: { summary: "print all xrefs to the global variable (quiet mode)" },
+  avj: {
+    summary: "search for vtables in data sections and show results (JSON mode)",
   },
-  omlQ: {
+  avrD: { summary: "demangle a class name from RTTI" },
+  avx: { summary: "Show the addresses of calls to the virtual function." },
+  avxt: {
     summary:
-      "List maps of all file descriptor or only the specified <fd> (quietest mode)",
+      "Show the addresses of calls to the virtual function. (table mode)",
   },
-  omlt: {
+  axg: { summary: "Show xrefs graph to reach function at current seek" },
+  axgj: {
+    summary: "Show xrefs graph to reach function at current seek (JSON mode)",
+  },
+  axl: { summary: "List all xrefs" },
+  axlj: { summary: "List all xrefs (JSON mode)" },
+  axlq: { summary: "List all xrefs (quiet mode)" },
+  cX: {
     summary:
-      "List maps of all file descriptor or only the specified <fd> (table mode)",
+      "Compare hexdump of data of block size at <addr> with the data at current offset using hexdiff output",
+  },
+  cXj: {
+    summary:
+      "Compare hexdump of data of block size at <addr> with the data at current offset using hexdiff output (JSON mode)",
+  },
+  cc: {
+    summary:
+      "Compare hexdump of data of block size at <addr> with the data at current offset",
+  },
+  ccc: {
+    summary:
+      "Show different lines between hexdump of a block of data at <addr> wth the data at current offset",
+  },
+  ccd: {
+    summary:
+      "Compare disassembly of block size at <addr> and at the current offset",
+  },
+  cfj: {
+    summary:
+      "Compare the contents of <file> with the data at current offset (JSON mode)",
+  },
+  cu: { summary: "Compare data at <offset> with the current offset" },
+  cu1: { summary: "Compare bytes at <offset> with the current offset" },
+  cu2: {
+    summary: "Compare words (16-bit) at <offset> with the current offset",
+  },
+  cu4: {
+    summary: "Compare dwords (32-bit) at <offset> with the current offset",
+  },
+  cu8: {
+    summary: "Compare qwords (64-bit) at <offset> with the current offset",
+  },
+  cud: { summary: "Compare disassembly at <offset> with the current offset" },
+  e: { summary: "Get/set config" },
+  "f.l": { summary: "List the local flags for the function" },
+  "f.lj": { summary: "List the local flags for the function (JSON mode)" },
+  "f.lq": { summary: "List the local flags for the function (quiet mode)" },
+  fL: { summary: "Show the flag length / Set the flag length" },
+  fN: {
+    summary: "Show the realname of the flag / Set the realname of the flag",
+  },
+  "fd.": { summary: "Describe flags for the current offset" },
+  fg: { summary: "Show the flag graph" },
+  fi: { summary: "Show the flags in the block or custom range" },
+  fij: { summary: "Show the flags in the block or custom range (JSON mode)" },
+  fiq: { summary: "Show the flags in the block or custom range (quiet mode)" },
+  fit: { summary: "Show the flags in the block or custom range (table mode)" },
+  fl: { summary: "List all flags" },
+  "fl.": { summary: "List all flags at the current offset" },
+  flj: { summary: "List all flags (JSON mode)" },
+  flq: { summary: "List all flags (quiet mode)" },
+  flt: { summary: "List all flags (table mode)" },
+  fs: { summary: "Select flagspace" },
+  fsl: { summary: "Display flagspaces" },
+  fslj: { summary: "Display flagspaces (JSON mode)" },
+  fslq: { summary: "Display flagspaces (quiet mode)" },
+  fssl: { summary: "Display flagspace stack" },
+  fsslj: { summary: "Display flagspace stack (JSON mode)" },
+  ftl: { summary: "List all flag tags" },
+  ftlj: { summary: "List all flag tags (JSON mode)" },
+  ftll: { summary: "List all flag tags (verbose mode)" },
+  "fz.": { summary: "Show around flag zone context" },
+  fzl: { summary: "List all flag zones" },
+  fzlj: { summary: "List all flag zones (JSON mode)" },
+  id: { summary: "Show DWARF source lines information" },
+  idj: { summary: "Show DWARF source lines information (JSON mode)" },
+  idp: { summary: "Load PDB file information" },
+  idq: { summary: "Show DWARF source lines information (quiet mode)" },
+  izj: { summary: "List strings in data sections (JSON mode)" },
+  kj: {
+    summary:
+      "List all namespaces under 'analysis/' and sdb databases in JSON format (SDB).",
   },
   md: {
     summary:
@@ -350,80 +329,65 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   mlj: { summary: "List all marks. (JSON mode)" },
   mlq: { summary: "List all marks. (quiet mode)" },
   mlt: { summary: "List all marks. (table mode)" },
-  "C.": { summary: "Show all meta information at current address" },
-  "C.j": {
-    summary: "Show all meta information at current address (JSON mode)",
+  o: { summary: "Open file" },
+  obl: { summary: "List opened binary files" },
+  oblj: { summary: "List opened binary files (JSON mode)" },
+  oblq: { summary: "List opened binary files (quiet mode)" },
+  oblt: { summary: "List opened binary files (table mode)" },
+  ol: { summary: "List opened files" },
+  olj: { summary: "List opened files (JSON mode)" },
+  olq: { summary: "List opened files (quiet mode)" },
+  olt: { summary: "List opened files (table mode)" },
+  oml: {
+    summary: "List maps of all file descriptor or only the specified <fd>",
   },
-  "C.l": {
-    summary: "Show all meta information at current address (verbose mode)",
-  },
-  sh: { summary: "List undo seek history" },
-  shj: { summary: "List undo seek history (JSON mode)" },
-  x: { summary: "Alias for 'px' (print hexdump)." },
-  xj: { summary: "Alias for 'px' (print hexdump). (JSON mode)" },
-  xc: { summary: "Alias for 'pxc' (show hexdump with comments)." },
-  aL: {
+  omlQ: {
     summary:
-      "List all asm/analysis plugins (e asm.arch=?) or CPU details for a plugin.",
+      "List maps of all file descriptor or only the specified <fd> (quietest mode)",
   },
-  aLj: {
+  omlj: {
     summary:
-      "List all asm/analysis plugins (e asm.arch=?) or CPU details for a plugin. (JSON mode)",
+      "List maps of all file descriptor or only the specified <fd> (JSON mode)",
   },
-  aLc: { summary: "Shows the CPU details for a specific plugin." },
+  omlq: {
+    summary:
+      "List maps of all file descriptor or only the specified <fd> (quiet mode)",
+  },
+  omlt: {
+    summary:
+      "List maps of all file descriptor or only the specified <fd> (table mode)",
+  },
+  p6d: { args_str: " [<n>]", summary: "Base64 decoding" },
+  pd: {
+    args: [{ name: "n", type: "number" }],
+    args_str: " [<n>]",
+    summary: "Disassemble N instructions",
+  },
+  pdf: { args_str: "", summary: "Disassemble a function" },
+  pdsf: { args_str: "", summary: "Summarize the current function" },
   pf: { summary: "Show data using given format string" },
-  pfj: { summary: "Show data using given format string (JSON mode)" },
-  pfq: { summary: "Show data using given format string (quiet mode)" },
   "pf.": { summary: "Show data using given named format" },
   "pf.j": { summary: "Show data using given named format (JSON mode)" },
   "pf.q": { summary: "Show data using given named format (quiet mode)" },
   pfc: { summary: "Show data using given format string with C syntax" },
   pfd: { summary: "Show data using given format string as DOT" },
+  pfj: { summary: "Show data using given format string (JSON mode)" },
+  pfq: { summary: "Show data using given format string (quiet mode)" },
   pfs: { summary: "Print the size of format in bytes" },
   pfv: { summary: "Print the value for named format" },
-  av: { summary: "search for vtables in data sections and show results" },
-  avj: {
-    summary: "search for vtables in data sections and show results (JSON mode)",
-  },
-  avx: { summary: "Show the addresses of calls to the virtual function." },
-  avxt: {
+  pfw: { summary: "Write a format" },
+  ph: {
+    args: [
+      {
+        choices: ["md5", "entropy"],
+        name: "algo",
+        required: true,
+        type: "choice",
+      },
+    ],
+    args_str: " <algo>",
     summary:
-      "Show the addresses of calls to the virtual function. (table mode)",
-  },
-  avrD: { summary: "demangle a class name from RTTI" },
-  avgl: { summary: "show/list global variables" },
-  avglj: { summary: "show/list global variables (JSON mode)" },
-  avglq: { summary: "show/list global variables (quiet mode)" },
-  avglt: { summary: "show/list global variables (table mode)" },
-  avgp: { summary: "print the global variable value" },
-  avgx: { summary: "print all xrefs to the global variable" },
-  avgxj: { summary: "print all xrefs to the global variable (JSON mode)" },
-  avgxq: { summary: "print all xrefs to the global variable (quiet mode)" },
-  avgc: { summary: "List value constraints of all globals / of the given one" },
-  avgcj: {
-    summary:
-      "List value constraints of all globals / of the given one (JSON mode)",
-  },
-  tp: { summary: "Print formatted type casted to the address or variable" },
-  tpv: { summary: "Print formatted type casted to the value" },
-  tpx: { summary: "Print formatted type casted to the hexadecimal sequence" },
-  ts: {
-    summary:
-      "List loaded structures / Show pf format string for given structure",
-  },
-  tsj: {
-    summary:
-      "List loaded structures / Show pf format string for given structure (JSON mode)",
-  },
-  tsl: {
-    summary:
-      "List loaded structures / Show pf format string for given structure (verbose mode)",
-  },
-  tsc: { summary: "Show structure in the C output format with newlines" },
-  tsd: { summary: "Show structure in the C output format without newlines" },
-  kj: {
-    summary:
-      "List all namespaces under 'analysis/' and sdb databases in JSON format (SDB).",
+      "Prints a hash/message digest or entropy (use @! to change the block size)",
   },
   pm: {
     args: [{ name: "file/directory", type: "string" }],
@@ -436,8 +400,50 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     summary:
       "Search magics and print the long description of them. (JSON mode)",
   },
-  // --- read-only extras (chapter B) --- (`e` is defined above)
-  // Configuration
+  pr: { args_str: " [<n>]", summary: "Print raw bytes" },
+  prx: { args_str: " [<n>]", summary: "Printable chars with real offset" },
+  px: {
+    args: [{ name: "n", type: "number" }],
+    args_str: " [<n>]",
+    summary: "Show hexdump",
+  },
+  s: { summary: "Seek" },
+  sh: { summary: "List undo seek history" },
+  shj: { summary: "List undo seek history (JSON mode)" },
+  tp: { summary: "Print formatted type casted to the address or variable" },
+  tpv: { summary: "Print formatted type casted to the value" },
+  tpx: { summary: "Print formatted type casted to the hexadecimal sequence" },
+  ts: {
+    summary:
+      "List loaded structures / Show pf format string for given structure",
+  },
+  tsc: { summary: "Show structure in the C output format with newlines" },
+  tsd: { summary: "Show structure in the C output format without newlines" },
+  tsj: {
+    summary:
+      "List loaded structures / Show pf format string for given structure (JSON mode)",
+  },
+  tsl: {
+    summary:
+      "List loaded structures / Show pf format string for given structure (verbose mode)",
+  },
+  wx: { summary: "Write hex" },
+  x: { summary: "Alias for 'px' (print hexdump)." },
+  xc: { summary: "Alias for 'pxc' (show hexdump with comments)." },
+  xj: { summary: "Alias for 'px' (print hexdump). (JSON mode)" },
+  y: { summary: "Yank bytes / Show yank contents" },
+  yj: { summary: "Yank bytes / Show yank contents (JSON mode)" },
+  yq: { summary: "Yank bytes / Show yank contents (quiet mode)" },
+  ys: { summary: "Print contents of clipboards as string" },
+  yx: { summary: "Print contents of clipboard in hexadecimal" },
+};
+
+// --- read-only extras (chapter B) --- (`e` is defined above)
+// Configuration
+const CONFIG_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
+  "e-": { summary: "Reset config variables" },
+  ec: { summary: "List eval colors and keys" },
+  ecr: { summary: "Set random palette" },
   el: {
     args: [{ name: "key", type: "string" }],
     summary: "List config variables with their descriptions",
@@ -446,67 +452,67 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     args: [{ name: "key", type: "string" }],
     summary: "List config variables with their descriptions (JSON mode)",
   },
+  es: { summary: "List all config variable spaces" },
   et: {
     args: [{ name: "key", type: "string" }],
     summary: "Show type of given config variable <key>",
   },
-  es: { summary: "List all config variable spaces" },
-  ec: { summary: "List eval colors and keys" },
-  ecr: { summary: "Set random palette" },
-  "e-": { summary: "Reset config variables" },
-  // Analysis hints (list only)
+};
+
+// Analysis hints (list only)
+const HINT_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
+  aha: { summary: "Set arch hint" },
   ahl: { summary: "List all analysis hints" },
   ahlj: { summary: "List all analysis hints (JSON mode)" },
-  aha: { summary: "Set arch hint" },
-  // Address info
+};
+
+// Address info
+const ADDRESS_INFO_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   ai: { summary: "show address information" },
-  aij: { summary: "show address information (JSON mode)" },
   aii: { summary: "list/add global import (like afii, but global)" },
-  // Classes
-  acl: { summary: "List all classes" },
-  aclj: { summary: "List all classes (JSON mode)" },
+  aij: { summary: "show address information (JSON mode)" },
+};
+
+// Classes
+const CLASS_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   aci: {
     args: [{ name: "class_name", type: "string" }],
     summary: "Show information of class",
   },
+  acl: { summary: "List all classes" },
+  aclj: { summary: "List all classes (JSON mode)" },
+  acn: { summary: "Rename class" },
   acvf: {
     args: [{ name: "offset", type: "string" }],
     summary: "Lookup function address on vtable offset",
   },
-  acn: { summary: "Rename class" },
-  // Metadata & strings
+};
+
+// Metadata & strings
+const METADATA_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   C: { summary: "List all meta information" },
+  Cd: { summary: 'Set the "data" mark to the current address' },
   Cj: { summary: "List all meta information (JSON mode)" },
   Cl: { summary: "List all meta information (verbose mode)" },
+  Cs: { summary: "Add string (autodetects the encoding)" },
+  "Cs.": { summary: "Show string at the current address" },
   Csl: { summary: "List all strings" },
   Cslj: { summary: "List all strings (JSON mode)" },
-  "Cs.": { summary: "Show string at the current address" },
-  Cs: { summary: "Add string (autodetects the encoding)" },
   Csp: { summary: "Add Pascal-style string with the size" },
-  Cd: { summary: 'Set the "data" mark to the current address' },
-  // Types
+};
+
+// Types
+const TYPE_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   t: { summary: "List all types / Show type information" },
-  tl: {
-    args: [{ name: "type", type: "string" }],
-    summary: "List all types / Show type information (verbose mode)",
-  },
+  "t-": { summary: "Remove the type" },
   tc: {
     args: [{ name: "type", type: "string" }],
     summary: "List loaded types in C format with newlines",
   },
+  tcc: { summary: "List all calling conventions" },
   te: {
     args: [{ name: "enum", type: "string" }],
     summary: "List loaded enums / Show enum member",
-  },
-  tu: { summary: "List loaded unions / Show pf format string for given union" },
-  tcc: { summary: "List all calling conventions" },
-  tx: {
-    args: [{ name: "type", type: "string" }],
-    summary: "List functions using the type",
-  },
-  tk: {
-    args: [{ name: "type", type: "string" }],
-    summary: "Show the typeclass of the given type",
   },
   tfc: {
     args: [
@@ -515,6 +521,10 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     ],
     summary: "Show or set function calling convention",
   },
+  tk: {
+    args: [{ name: "type", type: "string" }],
+    summary: "Show the typeclass of the given type",
+  },
   tks: {
     args: [
       { name: "type", type: "string" },
@@ -522,29 +532,34 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     ],
     summary: "Set the typeclass of a type",
   },
-  "t-": { summary: "Remove the type" },
+  tl: {
+    args: [{ name: "type", type: "string" }],
+    summary: "List all types / Show type information (verbose mode)",
+  },
   to: {
     args: [{ name: "file", type: "string" }],
     summary: "Open C header file and load types from it",
   },
-  // Plugin listings
-  Ll: { summary: "List the lang plugins" },
-  La: { summary: "List the arch plugins" },
-  LD: { summary: "List the demanglers plugins (alias for iDl)" },
+  tu: { summary: "List loaded unions / Show pf format string for given union" },
+  tx: {
+    args: [{ name: "type", type: "string" }],
+    summary: "List functions using the type",
+  },
+};
+
+// Plugin listings
+const PLUGIN_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   L: {
     args: [{ name: "file", type: "string" }],
     summary: "Load a plugin from file",
   },
-  // Positional duals
-  tn: {
-    args: [{ name: "name", type: "string" }],
-    summary: "List all noreturn references / Add a noreturn function",
-  },
-  tnj: {
-    args: [{ name: "name", type: "string" }],
-    summary:
-      "List all noreturn references / Add a noreturn function (JSON mode)",
-  },
+  LD: { summary: "List the demanglers plugins (alias for iDl)" },
+  La: { summary: "List the arch plugins" },
+  Ll: { summary: "List the lang plugins" },
+};
+
+// Positional duals
+const POSITIONAL_DUAL_SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   Ld: {
     args: [{ name: "handler", type: "string" }],
     summary: "List debug plugins / Set debug backend (e dbg.backend)",
@@ -558,6 +573,27 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     args: [{ name: "path", type: "string" }],
     summary: "List IO plugins / Register IO plugin from <path>",
   },
+  tn: {
+    args: [{ name: "name", type: "string" }],
+    summary: "List all noreturn references / Add a noreturn function",
+  },
+  tnj: {
+    args: [{ name: "name", type: "string" }],
+    summary:
+      "List all noreturn references / Add a noreturn function (JSON mode)",
+  },
+};
+
+const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
+  ...CORE_SPECS,
+  ...CONFIG_SPECS,
+  ...HINT_SPECS,
+  ...ADDRESS_INFO_SPECS,
+  ...CLASS_SPECS,
+  ...METADATA_SPECS,
+  ...TYPE_SPECS,
+  ...PLUGIN_SPECS,
+  ...POSITIONAL_DUAL_SPECS,
 };
 const CATALOG: RzCatalog = new Map(
   Object.entries(SPECS).map(([cmd, spec]) => [cmd, { ...spec, cmd }])

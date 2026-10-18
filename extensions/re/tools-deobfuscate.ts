@@ -125,12 +125,12 @@ export const registerDeobfuscateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "deobfuscate",
-    label: "Deobfuscate",
+    approval: "read",
     description:
       "Reveal obfuscated bytes in place: apply a byte transform (xor/add/sub/or/and with a key), an endian swap, or a cipher decrypt (decrypt with algo+key[+iv]) to a window and show the result as hex and as a string. Common for unmasking xor-hidden strings and decrypting embedded configs (RC4/AES). The transform runs under rizin's write cache and is reset immediately — the file on disk is never modified. Read-only and recorded as evidence.",
-    approval: "read",
+    label: "Deobfuscate",
     loadMode: "essential",
+    name: "deobfuscate",
     parameters: params,
     ...reRenderers({ body: "text", subject: "op", title: "Deobfuscate" }),
     async execute(_id, p, signal, _onUpdate, ctx) {

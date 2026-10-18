@@ -180,14 +180,14 @@ describe("writeReport", () => {
       {
         customType: "re.evidence",
         data: {
-          id: "ev-repro",
-          tool: "rizin_command",
           args: { command: "iz" },
-          commands: ["iz"],
-          reproHash: "b".repeat(64),
           binarySha256: "a".repeat(64),
+          commands: ["iz"],
+          id: "ev-repro",
+          reproHash: "b".repeat(64),
           // an IOC in the summary makes this a grounded claim that cites ev-repro
           summary: "found string: http://185.220.101.99/beacon",
+          tool: "rizin_command",
         },
         type: "custom",
       },

@@ -955,20 +955,20 @@ export const inheritFindings = async (
     const id = randomUUID();
     const openSha = getState(ctx).binarySha256;
     const record: FindingRecord = {
-      id,
       claim: finding.claim,
       evidenceIds: newEvidence,
+      id,
       ...(anchorMoved
         ? { addr: anchorMoved }
         : finding.addr
           ? { addr: finding.addr }
           : {}),
-      confidence: finding.confidence,
       audit: {
         reason:
           "re-verified by /re carry; the report's support audit re-checks it",
         verdict: "inherited",
       },
+      confidence: finding.confidence,
       ...(openSha ? { binarySha256: openSha } : {}),
       inherited: {
         carryStatus: status,

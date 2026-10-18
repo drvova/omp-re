@@ -46,10 +46,6 @@ export const registerMapFileTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "map_file",
-    label: "Map File",
-    description:
-      "Open an additional file into the current session at a virtual address (`o <file> <addr>`), alongside the primary binary — e.g. overlay a dumped/unpacked region over the packed image, or map a library for cross-module analysis. The file is mapped read-only (never written on disk) and the map is re-applied automatically on resume/respawn. To just analyze a dump on its own, use open_binary instead. Not an undoable annotation: reopen the binary to drop the map.",
     approval: (args) => {
       const record =
         args && typeof args === "object"
@@ -65,7 +61,11 @@ export const registerMapFileTools = (pi: ExtensionAPI): void => {
         tier: "exec" as const,
       };
     },
+    description:
+      "Open an additional file into the current session at a virtual address (`o <file> <addr>`), alongside the primary binary — e.g. overlay a dumped/unpacked region over the packed image, or map a library for cross-module analysis. The file is mapped read-only (never written on disk) and the map is re-applied automatically on resume/respawn. To just analyze a dump on its own, use open_binary instead. Not an undoable annotation: reopen the binary to drop the map.",
+    label: "Map File",
     loadMode: "essential",
+    name: "map_file",
     parameters: mapFileParams,
     ...reRenderers({ body: "text", subject: "path", title: "Map file" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

@@ -177,14 +177,14 @@ export const registerTriageTools = async (pi: ExtensionAPI): Promise<void> => {
     }
 
     pi.registerTool({
-      name: `triage_${def.name}`,
-      label: `Triage: ${def.name}`,
-      description: def.description,
       approval: {
         reason: `Run ${def.bin} against the open binary.`,
         tier: "exec",
       },
+      description: def.description,
+      label: `Triage: ${def.name}`,
       loadMode: "essential",
+      name: `triage_${def.name}`,
       parameters: noParams,
       ...reRenderers({ body: "json", title: `Triage: ${def.name}` }),
       async execute(_id, _params, signal, _onUpdate, ctx) {
@@ -236,14 +236,14 @@ export const registerTriageTools = async (pi: ExtensionAPI): Promise<void> => {
 
   if (yaraAvailable) {
     pi.registerTool({
-      name: "triage_yara",
-      label: "Triage: yara",
-      description: "Scan the binary with user-supplied YARA rules.",
       approval: (args) => ({
         reason: `Run yara with rules ${JSON.stringify((args as { rules_path?: unknown })?.rules_path ?? "?")} against the open binary.`,
         tier: "exec",
       }),
+      description: "Scan the binary with user-supplied YARA rules.",
+      label: "Triage: yara",
       loadMode: "essential",
+      name: "triage_yara",
       parameters: yaraParams,
       ...reRenderers({
         body: "json",

@@ -195,12 +195,12 @@ export const registerInfoTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "get_binary_info",
-    label: "Binary Info",
+    approval: "read",
     description:
       "Binary identity: architecture, bits, base address, format, class, compiler, sizes and checksums (rizin iIj). Useful immediately after open_binary as the ground-truth anchor for later claims.",
-    approval: "read",
+    label: "Binary Info",
     loadMode: "essential",
+    name: "get_binary_info",
     parameters: noParams,
     ...reRenderers({ body: "json", subject: "binary", title: "Binary info" }),
     async execute(_id, _params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -210,12 +210,12 @@ export const registerInfoTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "list_entrypoints",
-    label: "List Entrypoints",
+    approval: "read",
     description:
       "Binary entry points with their addresses and types (rizin iej).",
-    approval: "read",
+    label: "List Entrypoints",
     loadMode: "essential",
+    name: "list_entrypoints",
     parameters: noParams,
     ...reRenderers({ body: "json", subject: "binary", title: "Entrypoints" }),
     async execute(_id, _params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -225,12 +225,12 @@ export const registerInfoTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "list_relocations",
-    label: "List Relocations",
+    approval: "read",
     description:
       "Relocations applied at load time (rizin irj) — relevant when analysing a rebased or patched image.",
-    approval: "read",
+    label: "List Relocations",
     loadMode: "essential",
+    name: "list_relocations",
     parameters: relocationsParams,
     ...reRenderers({ body: "json", subject: "binary", title: "Relocations" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -240,12 +240,12 @@ export const registerInfoTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "list_flags",
-    label: "List Flags",
+    approval: "read",
     description:
       "Named flags/labels rizin knows about (rizin flj) — analysis flags, reloc.*, section and function labels. Filter by name substring; page through large lists.",
-    approval: "read",
+    label: "List Flags",
     loadMode: "essential",
+    name: "list_flags",
     parameters: listFlagsParams,
     ...reRenderers({ body: "json", subject: "filter", title: "List flags" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -255,12 +255,12 @@ export const registerInfoTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "list_classes",
-    label: "List Classes",
+    approval: "read",
     description:
       "Classes recovered from binary metadata — C++ RTTI, Objective-C, Swift metadata (rizin icj). Empty on plain C binaries. Rows can carry methods and fields.",
-    approval: "read",
+    label: "List Classes",
     loadMode: "essential",
+    name: "list_classes",
     parameters: listClassesParams,
     ...reRenderers({ body: "json", subject: "filter", title: "List classes" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {

@@ -414,15 +414,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "rename_function",
-    label: "Rename Function",
-    description:
-      "Rename the function at an address, verifying the rename actually landed before reporting success.",
     approval: (args) => ({
       reason: `Rename function ${describeArg(args, "addr")} to ${describeArg(args, "new")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Rename the function at an address, verifying the rename actually landed before reporting success.",
+    label: "Rename Function",
     loadMode: "essential",
+    name: "rename_function",
     parameters: renameFunctionParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Rename function" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -455,15 +455,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "rename_variable",
-    label: "Rename Variable",
-    description:
-      "Rename a local variable or argument within a function, verifying the rename actually landed before reporting success.",
     approval: (args) => ({
       reason: `Rename variable ${describeArg(args, "old")} to ${describeArg(args, "new")} in ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Rename a local variable or argument within a function, verifying the rename actually landed before reporting success.",
+    label: "Rename Variable",
     loadMode: "essential",
+    name: "rename_variable",
     parameters: renameVariableParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Rename variable" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -505,15 +505,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_comment",
-    label: "Set Comment",
-    description:
-      "Set (or clear, with empty text) the comment at an address, replacing any existing comment, and verify it landed before reporting success.",
     approval: (args) => ({
       reason: `Set the comment at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Set (or clear, with empty text) the comment at an address, replacing any existing comment, and verify it landed before reporting success.",
+    label: "Set Comment",
     loadMode: "essential",
+    name: "set_comment",
     parameters: setCommentParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Comment" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -545,15 +545,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_prototype",
-    label: "Set Prototype",
-    description:
-      "Set a function's C prototype, e.g. `int parse_config(const char *path, int flags)`. The name in the prototype becomes the function's name. Verifies what rizin stored and reports it if rizin's C parser normalized it differently.",
     approval: (args) => ({
       reason: `Set the prototype of ${describeArg(args, "addr")} to ${describeArg(args, "sig")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Set a function's C prototype, e.g. `int parse_config(const char *path, int flags)`. The name in the prototype becomes the function's name. Verifies what rizin stored and reports it if rizin's C parser normalized it differently.",
+    label: "Set Prototype",
     loadMode: "essential",
+    name: "set_prototype",
     parameters: setPrototypeParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Prototype" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -586,15 +586,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_variable_type",
-    label: "Set Variable Type",
-    description:
-      "Set a local variable's or argument's C type, verifying it actually landed before reporting success.",
     approval: (args) => ({
       reason: `Set the type of ${describeArg(args, "var")} in ${describeArg(args, "addr")} to ${describeArg(args, "type")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Set a local variable's or argument's C type, verifying it actually landed before reporting success.",
+    label: "Set Variable Type",
     loadMode: "essential",
+    name: "set_variable_type",
     parameters: setVariableTypeParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Variable type" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -636,15 +636,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "define_variable",
-    label: "Define Variable",
-    description:
-      "Define a local variable or argument in a function that rizin's analysis didn't recover — a stack slot (`afvs`, by frame delta) or a register variable (`afvr`, by register) — so the decompiler and disassembly name it instead of showing a raw offset. Refuses when a variable of that name already exists, verifies the new one landed, and is reversible with /re undo (which runs `afv-`).",
     approval: (args) => ({
       reason: `Define ${describeArg(args, "storage")} variable ${describeArg(args, "name")} in ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Define a local variable or argument in a function that rizin's analysis didn't recover — a stack slot (`afvs`, by frame delta) or a register variable (`afvr`, by register) — so the decompiler and disassembly name it instead of showing a raw offset. Refuses when a variable of that name already exists, verifies the new one landed, and is reversible with /re undo (which runs `afv-`).",
+    label: "Define Variable",
     loadMode: "essential",
+    name: "define_variable",
     parameters: defineVariableParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Define variable" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -689,15 +689,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "define_global",
-    label: "Define Global",
-    description:
-      "Define a global variable at a data address (`avga`), giving it a name and a C type so disassembly, xrefs, and the decompiler show the name and typed accesses instead of a raw address. Refuses when a global of that name already exists, verifies it landed, and is reversible with /re undo (which runs `avgm`).",
     approval: (args) => ({
       reason: `Define global ${describeArg(args, "name")} at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Define a global variable at a data address (`avga`), giving it a name and a C type so disassembly, xrefs, and the decompiler show the name and typed accesses instead of a raw address. Refuses when a global of that name already exists, verifies it landed, and is reversible with /re undo (which runs `avgm`).",
+    label: "Define Global",
     loadMode: "essential",
+    name: "define_global",
     parameters: defineGlobalParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Define global" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -738,15 +738,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "define_function",
-    label: "Define Function",
-    description:
-      "Define a function at an address rizin's auto-analysis missed (obfuscated call targets, hand-written stubs, code reached only indirectly). Runs `af`, then verifies a function now begins exactly there. Reversible with /re undo (which runs `af-`).",
     approval: (args) => ({
       reason: `Define a function at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Define a function at an address rizin's auto-analysis missed (obfuscated call targets, hand-written stubs, code reached only indirectly). Runs `af`, then verifies a function now begins exactly there. Reversible with /re undo (which runs `af-`).",
+    label: "Define Function",
     loadMode: "essential",
+    name: "define_function",
     parameters: defineFunctionParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Define function" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -786,15 +786,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_calling_convention",
-    label: "Set Calling Convention",
-    description:
-      "Set a function's calling convention (how arguments and the return value are passed), which corrects argument recovery in the decompiler and call sites. Verifies what rizin stored; an unknown convention is rejected with rizin's own error (list them with rizin_command afcl). Reversible with /re undo.",
     approval: (args) => ({
       reason: `Set the calling convention of ${describeArg(args, "addr")} to ${describeArg(args, "cc")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Set a function's calling convention (how arguments and the return value are passed), which corrects argument recovery in the decompiler and call sites. Verifies what rizin stored; an unknown convention is rejected with rizin's own error (list them with rizin_command afcl). Reversible with /re undo.",
+    label: "Set Calling Convention",
     loadMode: "essential",
+    name: "set_calling_convention",
     parameters: setCallingConventionParams,
     ...reRenderers({
       body: "none",
@@ -831,15 +831,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_flag",
-    label: "Set Flag",
-    description:
-      "Name an address with a flag (rizin's named label), so disassembly, xrefs, and your own commands can refer to it by name. Replaces any flag already at that address. Verifies the flag landed. Reversible with /re undo.",
     approval: (args) => ({
       reason: `Flag ${describeArg(args, "addr")} as ${describeArg(args, "name")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Name an address with a flag (rizin's named label), so disassembly, xrefs, and your own commands can refer to it by name. Replaces any flag already at that address. Verifies the flag landed. Reversible with /re undo.",
+    label: "Set Flag",
     loadMode: "essential",
+    name: "set_flag",
     parameters: setFlagParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Flag" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -869,15 +869,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_arch_hint",
-    label: "Set Arch Hint",
-    description:
-      "Hint the architecture and/or word size to disassemble from an address, for a region that differs from the file's default — most often ARM/Thumb switches (bits 16) or mixed-arch firmware. Sets `aha`/`ahb`, verifies the hint landed, and is reversible with /re undo (which deletes it).",
     approval: (args) => ({
       reason: `Hint arch/bits at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Hint the architecture and/or word size to disassemble from an address, for a region that differs from the file's default — most often ARM/Thumb switches (bits 16) or mixed-arch firmware. Sets `aha`/`ahb`, verifies the hint landed, and is reversible with /re undo (which deletes it).",
+    label: "Set Arch Hint",
     loadMode: "essential",
+    name: "set_arch_hint",
     parameters: setArchHintParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Arch hint" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -923,15 +923,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_hint",
-    label: "Set Hint",
-    description:
-      "Set an analysis hint at an instruction that corrects how rizin reads it: the display base of an immediate (hex/decimal/char/string/syscall/IP-relative), the opcode type, the opcode byte-length (to realign disassembly), the real target of an indirect jump/call, or a function's return value. Verifies the hint landed and records what rizin stored; reversible with /re undo (which deletes it or restores the prior hint).",
     approval: (args) => ({
       reason: `Set the ${describeArg(args, "hint")} hint at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Set an analysis hint at an instruction that corrects how rizin reads it: the display base of an immediate (hex/decimal/char/string/syscall/IP-relative), the opcode type, the opcode byte-length (to realign disassembly), the real target of an indirect jump/call, or a function's return value. Verifies the hint landed and records what rizin stored; reversible with /re undo (which deletes it or restores the prior hint).",
+    label: "Set Hint",
     loadMode: "essential",
+    name: "set_hint",
     parameters: setHintParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Hint" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -968,15 +968,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_data",
-    label: "Set Data",
-    description:
-      "Mark bytes as a data element (or an array, with `count`) so disassembly and xrefs stop rendering data as code. Verifies the mark landed; reversible with /re undo.",
     approval: (args) => ({
       reason: `Mark data at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Mark bytes as a data element (or an array, with `count`) so disassembly and xrefs stop rendering data as code. Verifies the mark landed; reversible with /re undo.",
+    label: "Set Data",
     loadMode: "essential",
+    name: "set_data",
     parameters: setDataParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Data" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -1007,15 +1007,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_string",
-    label: "Set String",
-    description:
-      "Mark bytes as a string where rizin's auto-analysis missed one, so it shows in the disassembly and string views. Omit `size` to autodetect encoding and length. Verifies it landed; reversible with /re undo.",
     approval: (args) => ({
       reason: `Mark a string at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Mark bytes as a string where rizin's auto-analysis missed one, so it shows in the disassembly and string views. Omit `size` to autodetect encoding and length. Verifies it landed; reversible with /re undo.",
+    label: "Set String",
     loadMode: "essential",
+    name: "set_string",
     parameters: setStringParams,
     ...reRenderers({ body: "none", subject: "addr", title: "String" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -1050,15 +1050,15 @@ export const registerMutateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "set_format",
-    label: "Set Format",
-    description:
-      "Overlay a struct format (a pf format string, optionally with field names) on a memory region, so the disassembly shows named, typed fields instead of raw bytes — one of the highest-leverage annotations for data structures. Display-only (doesn't perturb analysis). Verifies it landed; reversible with /re undo.",
     approval: (args) => ({
       reason: `Overlay a format at ${describeArg(args, "addr")}. ${undoNote}`,
       tier: "write",
     }),
+    description:
+      "Overlay a struct format (a pf format string, optionally with field names) on a memory region, so the disassembly shows named, typed fields instead of raw bytes — one of the highest-leverage annotations for data structures. Display-only (doesn't perturb analysis). Verifies it landed; reversible with /re undo.",
+    label: "Set Format",
     loadMode: "essential",
+    name: "set_format",
     parameters: setFormatParams,
     ...reRenderers({ body: "none", subject: "addr", title: "Format" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

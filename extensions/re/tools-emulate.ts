@@ -111,10 +111,6 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "rizin_emulate",
-    label: "emulator",
-    description:
-      "Emulate code with rizin's RzIL VM: init at an address, step instructions and watch register/flag changes, step until an address, read and set VM variables. No process runs — the target's logic is interpreted inside rizin, and the VM state lives in the analysis session (init resets it). External calls and syscalls are not emulated; keep runs small (a decryptor loop, an argument computation). To execute the real process instead, use the debugger tool.",
     approval: (args) => {
       let action: EmulateAction | undefined;
       if (
@@ -134,7 +130,11 @@ export const registerEmulateTools = (pi: ExtensionAPI): void => {
         tier: "exec",
       };
     },
+    description:
+      "Emulate code with rizin's RzIL VM: init at an address, step instructions and watch register/flag changes, step until an address, read and set VM variables. No process runs — the target's logic is interpreted inside rizin, and the VM state lives in the analysis session (init resets it). External calls and syscalls are not emulated; keep runs small (a decryptor loop, an argument computation). To execute the real process instead, use the debugger tool.",
+    label: "emulator",
     loadMode: "essential",
+    name: "rizin_emulate",
     parameters: emulateParams,
     ...reRenderers({ body: "text", subject: "action", title: "emulator" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

@@ -109,12 +109,12 @@ export const registerSyscallTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "list_syscalls",
-    label: "List Syscalls",
+    approval: "read",
     description:
       "List the active syscall profile's syscalls (rizin aslj) — on a PE binary this is the Windows Nt* profile. Rows carry the syscall name and its number (num) within the OS module id (swi). Filter by name substring; page through large lists.",
-    approval: "read",
+    label: "List Syscalls",
     loadMode: "essential",
+    name: "list_syscalls",
     parameters: listSyscallsParams,
     ...reRenderers({ body: "json", subject: "filter", title: "List syscalls" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -124,12 +124,12 @@ export const registerSyscallTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "syscall_lookup",
-    label: "Syscall Lookup",
+    approval: "read",
     description:
       "Resolve one syscall: by name to its number (rizin asn) or by number to its name (rizin asr). Supply exactly one of name or number.",
-    approval: "read",
+    label: "Syscall Lookup",
     loadMode: "essential",
+    name: "syscall_lookup",
     parameters: syscallLookupParams,
     ...reRenderers({ body: "text", subject: "name", title: "Syscall lookup" }),
     async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {

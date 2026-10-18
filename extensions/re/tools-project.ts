@@ -35,16 +35,16 @@ export const registerProjectTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "export_project",
-    label: "Export Project",
-    description:
-      "Save the current analysis as a rizin project (.rzdb) — functions, names, comments, flags, and types, including every annotation omp-re has applied — so it can be opened in interactive rizin or Cutter (`Po <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re does not load projects (it manages analysis state through its own session log). Returns the file path and size.",
     approval: () => ({
       reason:
         "Write the current analysis to a rizin project file in omp-re's output directory — the sample and the analysis are not modified.",
       tier: "exec" as const,
     }),
+    description:
+      "Save the current analysis as a rizin project (.rzdb) — functions, names, comments, flags, and types, including every annotation omp-re has applied — so it can be opened in interactive rizin or Cutter (`Po <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re does not load projects (it manages analysis state through its own session log). Returns the file path and size.",
+    label: "Export Project",
     loadMode: "essential",
+    name: "export_project",
     parameters: exportProjectParams,
     ...reRenderers({ body: "text", subject: "file", title: "export_project" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

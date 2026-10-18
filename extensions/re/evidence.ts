@@ -171,11 +171,11 @@ export const recordEvidence = async (
   }
 
   pi.appendEntry("re.evidence", {
-    id,
-    tool: toolName,
     args: input,
     ea,
+    id,
     outputHash,
+    tool: toolName,
     ...(artifactId ? { artifactId } : {}),
     ...(commands ? { commands } : {}),
     ...(reproHash ? { reproHash } : {}),

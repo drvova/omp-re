@@ -42,10 +42,6 @@ export const registerAnalyzeTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "analyze",
-    label: "Analyze",
-    description:
-      "Re-run a rizin analysis pass to recover more than open_binary's baseline `aaa` found: prelude scans for stripped code, Go/Objective-C recovery, pointer and call/xref analysis, recursive type matching, or per-function emulation. Reports the function count before and after. The pass is re-run automatically on resume/respawn; it is not an undoable annotation (reopen the binary to return to the baseline). Some passes (emulate_functions) can be slow.",
     approval: (args) => {
       const pass =
         args && typeof args === "object"
@@ -56,7 +52,11 @@ export const registerAnalyzeTools = (pi: ExtensionAPI): void => {
         tier: "exec" as const,
       };
     },
+    description:
+      "Re-run a rizin analysis pass to recover more than open_binary's baseline `aaa` found: prelude scans for stripped code, Go/Objective-C recovery, pointer and call/xref analysis, recursive type matching, or per-function emulation. Reports the function count before and after. The pass is re-run automatically on resume/respawn; it is not an undoable annotation (reopen the binary to return to the baseline). Some passes (emulate_functions) can be slow.",
+    label: "Analyze",
     loadMode: "essential",
+    name: "analyze",
     parameters: analyzeParams,
     ...reRenderers({ body: "text", subject: "pass", title: "analyze" }),
     async execute(_id, params, signal, _onUpdate, ctx) {

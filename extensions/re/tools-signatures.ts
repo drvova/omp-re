@@ -46,10 +46,6 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "apply_signatures",
-    label: "Apply Signatures",
-    description:
-      "Name library functions from FLIRT signatures. source 'sigdb' re-applies rizin's built-in signature database (already applied once by open_binary's analysis); source 'file' applies a custom .sig/.pat file you provide, which open_binary can't know about. This renames matched functions (it changes analysis). A custom file is re-applied automatically on resume/respawn. List the built-in database with rizin_command Flt.",
     approval: (args) => {
       const record =
         args && typeof args === "object"
@@ -67,7 +63,11 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
         tier: "exec" as const,
       };
     },
+    description:
+      "Name library functions from FLIRT signatures. source 'sigdb' re-applies rizin's built-in signature database (already applied once by open_binary's analysis); source 'file' applies a custom .sig/.pat file you provide, which open_binary can't know about. This renames matched functions (it changes analysis). A custom file is re-applied automatically on resume/respawn. List the built-in database with rizin_command Flt.",
+    label: "Apply Signatures",
     loadMode: "essential",
+    name: "apply_signatures",
     parameters: applyParams,
     ...reRenderers({
       body: "text",
@@ -124,16 +124,16 @@ export const registerSignatureTools = (pi: ExtensionAPI): void => {
   });
 
   pi.registerTool({
-    name: "create_signature",
-    label: "Create Signature",
-    description:
-      "Build a FLIRT signature file (`Fc`) from the current binary's analyzed functions, to recognize those same functions in other samples (e.g. tracking a routine across a malware family). Written to omp-re's output directory as a `.pat` (text patterns) or `.sig` (compiled). Apply it elsewhere with apply_signatures (source 'file'). Reads the analysis and writes a file — it does not modify the analysis or the sample.",
     approval: () => ({
       reason:
         "Create a FLIRT signature file from the current analysis in omp-re's output directory — the analysis and the sample are not modified.",
       tier: "exec" as const,
     }),
+    description:
+      "Build a FLIRT signature file (`Fc`) from the current binary's analyzed functions, to recognize those same functions in other samples (e.g. tracking a routine across a malware family). Written to omp-re's output directory as a `.pat` (text patterns) or `.sig` (compiled). Apply it elsewhere with apply_signatures (source 'file'). Reads the analysis and writes a file — it does not modify the analysis or the sample.",
+    label: "Create Signature",
     loadMode: "essential",
+    name: "create_signature",
     parameters: createParams,
     ...reRenderers({
       body: "text",
