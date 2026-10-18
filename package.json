@@ -27,6 +27,7 @@
     "test": "bun test",
     "test:tui": "bash test/tui.sh",
     "test:tui:carry": "bash test/tui-carry.sh",
+    "test:live": "bash test/live-model.sh",
     "qa:tui": "bash test/tui-qa.sh"
   },
   "devDependencies": {

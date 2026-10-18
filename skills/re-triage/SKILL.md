@@ -11,8 +11,8 @@ evidence id behind it, and `/re report` withholds the **entire** report if any
 claim in it is unbacked. Get findings through the tools.
 
 When you reach a conclusion, record it with `record_finding`: the claim, stated
-as narrowly as the evidence supports, plus the evidence ids behind it (shown in
-`/re evidence` and accepted as 6+ character prefixes). That is how a conclusion
+as narrowly as the evidence supports, plus the evidence ids behind it (every RE
+tool result ends with an `[evidence xxxxxxxx]` tag; cite those 8 characters). That is how a conclusion
 gets into the report. A finding is refused if an id doesn't resolve or the
 support auditor judges the claim more than the evidence shows. Read the reason,
 then narrow the claim or gather better evidence. Prefer `rizin_command` evidence

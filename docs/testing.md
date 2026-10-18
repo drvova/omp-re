@@ -104,6 +104,31 @@ wizard on a fresh profile. ~40s, 9 PASS. It requires tmux, `omp`, rizin, `bun`
 and a C compiler, and skips (exit 0) without them. Like the other tmux tiers,
 it is not run in CI.
 
+## Live-model tier — `bash test/live-model.sh` (`bun run test:live`)
+
+```bash
+MINIMAX_CODE_API_KEY=… bun run test:live          # default model: minimax-code/MiniMax-M3
+OMPRE_LIVE_MODEL=anthropic/claude-… bun run test:live   # or any provider omp knows
+```
+
+This tier covers the model-facing half of findings, which no deterministic
+test can reach. A real model drives omp in print mode on two builds of the
+fixture:
+
+1. **v1.** It reads `checksum` and `fib` with `rizin_command`, records a
+   finding for each by citing the `[evidence …]` tags, and then attempts an
+   overreaching claim, which the support auditor should refuse.
+2. **v2.** `/re carry … --resolve` re-proves what holds and sends the drifted
+   checksum finding to the model as a turn.
+3. **v2 report.** The script writes it, then reports how many findings the
+   model recorded while resolving.
+
+Assertions are on recorded state only (session entries and report files),
+never on model prose. Logs and sessions stay in the work directory (set
+`OMPRE_LIVE_WORKDIR` to keep them somewhere specific). It costs real tokens
+and is not run in CI. It skips without a key, omp, rizin, bun or a C compiler.
+The model's host must be reachable through the network policy.
+
 ## Full QA tier — `bash test/tui-qa.sh` (`bun run qa:tui`)
 
 ```bash

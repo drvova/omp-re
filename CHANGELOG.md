@@ -67,6 +67,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`test/tui-carry.sh` (`bun run test:tui:carry`).** A self-contained tmux
   e2e that runs `/re carry --inherit` in a real omp TUI against two compiled
   builds of the fixture. It needs no model.
+- **`test/live-model.sh` (`bun run test:live`).** A live-model tier for the
+  findings loop: record and audit on v1, carry `--resolve` onto v2, and write
+  the v2 report. It asserts on recorded state only.
 - **Support-audit fallback.** The side-turn auditor retries once without
   `tools: false` when a transport refuses that option (native-tools models, or
   tool-call history, which is the normal state when `record_finding` asks).
@@ -107,6 +110,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   fails on relocated claims.
 
 ### Fixed
+
+- **Evidence ids are visible to the model.** Evidence records go to the session
+  through `appendEntry`, which never reaches the model, so `record_finding`
+  asked for ids the model had no way to learn. The only listing was
+  `/re evidence`, a slash command. The `tool_result` evidence hook now appends
+  a trailing `[evidence xxxxxxxx — cite it in record_finding]` block to every
+  evidence-tier result. The tool's own text, and the hashes and summary taken
+  over it, are unchanged. The hook now has direct tests, including the tag
+  round-tripping into `record_finding`.
 
 - **Status band findings count.** The band's "N findings" counter was never
   incremented, so it always read 0. It now counts live findings, and it

@@ -204,7 +204,7 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 	const z = pi.zod;
 	const recordFindingParams = z.object({
 		claim: z.string().min(1).max(600).describe("The conclusion, stated as narrowly as the evidence supports — one finding per claim."),
-		evidence: z.array(z.string()).min(1).max(16).describe("Evidence ids (or ≥6-char prefixes, as shown in tool results and /re evidence) the claim rests on."),
+		evidence: z.array(z.string()).min(1).max(16).describe("Evidence ids the claim rests on: the 8-character id in the `[evidence xxxxxxxx]` tag at the end of each RE tool result."),
 		addr: z.string().optional().describe("The address or function the finding is about, when it is about one."),
 		confidence: z.enum(["confirmed", "likely", "speculative"]).optional().describe("How sure the claim is (default likely)."),
 		supersedes: z.string().optional().describe("Id of an earlier finding this one revises; the old one leaves the report."),
@@ -235,7 +235,7 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 		name: "record_finding",
 		label: "Record Finding",
 		description:
-			"Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it (from earlier RE tool results). Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.",
+			"Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it — each RE tool result ends with an `[evidence xxxxxxxx]` tag; cite those ids. Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.",
 		approval: "read",
 		loadMode: "essential",
 		parameters: recordFindingParams,
