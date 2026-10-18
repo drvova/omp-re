@@ -41,6 +41,8 @@ export interface EvidenceRecord {
 	reproHash?: string;
 	/** `rizin_command` only: a short canonical excerpt for human diffing. */
 	canonicalExcerpt?: string;
+	/** `rizin_command` only: SHA-256 of the address-masked canonical output — the shift-tolerant key `/re carry` compares on another build. */
+	shiftHash?: string;
 	/** SHA-256 of the binary this evidence was taken against, stamped at record time. */
 	binarySha256?: string;
 }
@@ -67,6 +69,7 @@ export function collectEvidence(entries: readonly { type: string; customType?: s
 			commands: Array.isArray(data.commands) && data.commands.every((c) => typeof c === "string") ? data.commands : undefined,
 			reproHash: typeof data.reproHash === "string" ? data.reproHash : undefined,
 			canonicalExcerpt: typeof data.canonicalExcerpt === "string" ? data.canonicalExcerpt : undefined,
+			shiftHash: typeof data.shiftHash === "string" ? data.shiftHash : undefined,
 			binarySha256: typeof data.binarySha256 === "string" ? data.binarySha256 : undefined,
 		});
 	}

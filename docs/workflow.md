@@ -31,8 +31,9 @@ system binary like `/bin/ls` is enough to learn the flow.
    the open binary and checks its recorded output hash — proving the report's
    evidence is not just cited but reproducible.
 10. `/re carry <report>.manifest.json --against <next-build>` replays that
-    report on a different binary and labels each claim holds, drifted (with
-    a line diff of what changed), broken (its anchor is gone), or unchecked.
+    report on a different binary and labels each claim holds, relocated
+    (found again by fingerprint after a rename or move), drifted (with a line
+    diff of what changed), broken (its anchor is gone), or unchecked.
     It works as a regression test for the next build: a broken claim exits
     non-zero headless, and `--strict` also fails on drift.
 
@@ -90,9 +91,25 @@ tells you which findings carry over (`holds`), which still run but now say
 something different (`drifted`, shown as a diff of the canonical excerpt), and
 which point at something that no longer exists (`broken`: a symbolic anchor such
 as `sym.decrypt_config` that does not resolve, or a command that now produces
-nothing). A claim takes the worst status among its checked evidence. Evidence
-anchored to a numeric address is flagged when it drifts, because the code it
-named may have moved. Manifests written since carry shipped record each
+nothing). A claim takes the worst status among its checked evidence.
+
+A rebuild moves almost everything, so two mechanisms keep carry from reporting
+that motion as change. First, every `rizin_command` record also stores a
+`shiftHash`: the hash of its canonical output with *positional* addresses
+masked. These are the leading address of a disassembly or listing line, `@ 0x…`,
+branch and call targets, RIP-relative displacements, and auto-names such as
+`fcn.000011fd`. Immediates in other operands are kept, so a changed constant
+still drifts. Output that matches only after masking counts as **holds**, and
+drift diffs are matched on the masked lines, so they show only real changes.
+Second, when `/re report` writes the manifest with the report's own binary still
+open, every address-pinned entry gets an **anchor fingerprint**: the containing
+function's name, offset, size, block count, the anchor's offset inside it, and
+its mnemonic sequence. When the anchor no longer resolves, or a numeric anchor
+drifts, carry prefilters the new build's functions by size and block count,
+scores the closest by mnemonic-sequence similarity (threshold 0.8), and re-runs
+the command at the best match plus the same offset. The new name is folded back
+to the old one before comparing, so a pure rename is **relocated**, not
+drifted. Manifests written since carry shipped record each
 `rizin_command`'s structured `{ command, addr }`. Older manifests are handled by
 splitting the recorded line on its trailing `@ addr`.
 

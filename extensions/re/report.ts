@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { branchEntries, collectEvidence, type EvidenceRecord, lastRecordedBinarySha256 } from "./entries.ts";
 import { recordedCommand, recordedStatus } from "./verify.ts";
+import { type AnchorFingerprint, fingerprintAnchor } from "./anchor.ts";
+import { ensureRizin, getState } from "./state.ts";
 import { type AuditClaimInput, type AuditMode, type AuditOutcome, auditClaims, type ClaimJudge, ephemeralJudge, flaggedVerdicts } from "./audit-claims.ts";
 
 /**
@@ -552,7 +554,7 @@ export async function writeReport(ctx: ExtensionContext, outputPath?: string, op
 		const manifestPath = `${outputPath}.manifest.json`;
 		let manifestNote = ` (+ ${manifestPath})`;
 		try {
-			await writeFile(manifestPath, `${JSON.stringify(buildManifestJson(report), null, 2)}\n`, "utf8");
+			await writeFile(manifestPath, `${JSON.stringify(buildManifestJson(report, await collectAnchors(ctx, report)), null, 2)}\n`, "utf8");
 		} catch (err) {
 			// The report itself is already on disk; a sidecar failure (disk full, EACCES) must not undo that — note it and carry on.
 			manifestNote = ` (manifest sidecar not written: ${err instanceof Error ? err.message : String(err)})`;
@@ -573,7 +575,10 @@ export async function writeReport(ctx: ExtensionContext, outputPath?: string, op
  * the binary can re-derive it" from: re-run each command read-only, canonicalize,
  * hash, compare.
  */
-function buildManifestJson(report: BuiltReport): {
+function buildManifestJson(
+	report: BuiltReport,
+	anchors: ReadonlyMap<string, AnchorFingerprint> = new Map(),
+): {
 	binarySha256: string | null;
 	entries: Array<{
 		evidenceId: string;
@@ -584,6 +589,9 @@ function buildManifestJson(report: BuiltReport): {
 		commands: string[] | null;
 		reproHash: string | null;
 		canonicalExcerpt: string | null;
+		shiftHash: string | null;
+		/** Fingerprint of the function containing the command's anchor, so `/re carry` can find it again in another build. */
+		anchor: AnchorFingerprint | null;
 		binarySha256: string | null;
 		status: string;
 		claims: string[];
@@ -611,6 +619,8 @@ function buildManifestJson(report: BuiltReport): {
 				commands: ev?.commands ?? null,
 				reproHash: ev?.reproHash ?? null,
 				canonicalExcerpt: ev?.canonicalExcerpt ?? null,
+				shiftHash: ev?.shiftHash ?? null,
+				anchor: anchors.get(id) ?? null,
 				binarySha256: ev?.binarySha256 ?? null,
 				status: ev ? recordedStatus(ev) : "unverifiable (legacy)",
 				claims: claimsById.get(id) ?? [],
@@ -625,4 +635,31 @@ function rizinCommandArgs(ev: EvidenceRecord): { command: string; addr?: string 
 	const args = ev.args as { command?: unknown; addr?: unknown } | undefined;
 	if (!args || typeof args.command !== "string") return null;
 	return typeof args.addr === "string" && args.addr ? { command: args.command, addr: args.addr } : { command: args.command };
+}
+
+/**
+ * Fingerprint the anchor of every cited, address-pinned `rizin_command` record —
+ * but only while the binary that evidence was taken against is the one open, since
+ * a fingerprint of any other build would point `/re carry` at the wrong code.
+ * Best-effort: no open binary, a different binary, or any rizin failure just
+ * leaves the entry without an anchor (carry then can't relocate it).
+ */
+async function collectAnchors(ctx: ExtensionContext, report: BuiltReport): Promise<Map<string, AnchorFingerprint>> {
+	const anchors = new Map<string, AnchorFingerprint>();
+	const state = getState(ctx);
+	if (!state.binaryPath || !state.binarySha256) return anchors;
+	const cited = new Set(report.sections.flatMap((s) => s.claims.flatMap((c) => c.evidenceIds)));
+	try {
+		for (const id of cited) {
+			const ev = report.evidenceById.get(id);
+			if (!ev || ev.binarySha256 !== state.binarySha256) continue;
+			const addr = rizinCommandArgs(ev)?.addr;
+			if (!addr) continue;
+			const fp = await fingerprintAnchor(await ensureRizin(ctx), addr);
+			if (fp) anchors.set(id, fp);
+		}
+	} catch {
+		// rizin unavailable: the manifest is still complete, just without relocation fingerprints.
+	}
+	return anchors;
 }

@@ -26,6 +26,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   records each `rizin_command`'s structured `args` (`{ command, addr }`).
   Older manifests still work, because the recorded line is split on its
   trailing `@ addr`.
+- **Shift-tolerant comparison and relocation for `/re carry`.** Every
+  `rizin_command` evidence record now also stores a `shiftHash`: the canonical
+  output with positional addresses masked (line-leading addresses, `@ 0x…`,
+  branch and call targets, RIP-relative displacements, `fcn.…`/`loc.…`
+  auto-names), while immediates are kept. A rebuild that only moved code now
+  **holds** instead of drifting, and drift diffs show only lines that really
+  changed. `/re report` also writes an **anchor fingerprint** for each
+  address-pinned manifest entry: the containing function's name, offset, size,
+  block count, anchor offset and mnemonic sequence, taken while the report's
+  binary is open. When an anchor was renamed away, or a numeric anchor's code
+  moved, carry finds the function again by fingerprint (prefiltered by size and
+  block count, scored by mnemonic-sequence similarity, threshold 0.8) and
+  re-runs the command there. The result is a new **relocated** status. If the
+  output still changed, the claim is drifted, with the relocation noted. The
+  manifest's fingerprint is shape-checked as untrusted input. `--strict` also
+  fails on relocated claims.
 
 ## [0.5.0] - 2026-10-17
 

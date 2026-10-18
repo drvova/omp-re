@@ -33,6 +33,8 @@ export interface ReToolDetails {
 	reproHash?: string;
 	/** First lines of the canonical output, for human diffing in the manifest. */
 	canonicalExcerpt?: string;
+	/** SHA-256 of the canonical output with addresses masked (see {@link maskAddresses}) — the shift-tolerant key `/re carry` compares on another build. */
+	shiftHash?: string;
 }
 
 export type ReToolResult = AgentToolResult<ReToolDetails>;
@@ -114,6 +116,8 @@ export interface ResultOptions {
 	reproHash?: string;
 	/** rizin_command only: a short canonical excerpt for human diffing. */
 	canonicalExcerpt?: string;
+	/** rizin_command only: SHA-256 of the address-masked canonical output (the shift-tolerant carry key). */
+	shiftHash?: string;
 }
 
 async function spill(full: string, options: ResultOptions): Promise<string | undefined> {
@@ -150,6 +154,7 @@ async function buildResult(lead: string, header: string, body: string, options: 
 			...(options.commands ? { commands: options.commands } : {}),
 			...(options.reproHash ? { reproHash: options.reproHash } : {}),
 			...(options.canonicalExcerpt ? { canonicalExcerpt: options.canonicalExcerpt } : {}),
+			...(options.shiftHash ? { shiftHash: options.shiftHash } : {}),
 		},
 	};
 }
@@ -187,6 +192,35 @@ export function canonicalizeRizinOutput(raw: string, binaryPath?: string): strin
 /** SHA-256 hex of the canonical form of `raw` (see {@link canonicalizeRizinOutput}) — the reproducibility key recorded as `reproHash` and recomputed at verify time. */
 export function canonicalHash(raw: string, binaryPath?: string): string {
 	return createHash("sha256").update(canonicalizeRizinOutput(raw, binaryPath), "utf8").digest("hex");
+}
+
+/**
+ * Mask addresses in canonical rizin output where they are positional, not semantic,
+ * so a rebuild that only moves code compares equal: the leading address of a
+ * listing/disassembly line, `@ 0x…` (XREF comments, seeks), branch and call
+ * targets, every hex value on a RIP-relative line (its displacement and the
+ * resolved-target comment), and address-derived auto-names (`fcn.000011fd`,
+ * `loc.…`). Immediates in other operands are kept — a changed constant still
+ * changes the result. Shaped around rizin's text disassembly and listings; JSON
+ * output is left as is (its offsets are decimal), so it compares exactly.
+ */
+export function maskAddresses(canonical: string): string {
+	return canonical
+		.split("\n")
+		.map((line) => {
+			if (/\brip\b/.test(line)) line = line.replace(/0x[0-9a-fA-F]+/g, "<ADDR>");
+			return line
+				.replace(/^([\s|\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+/, "$1<ADDR>")
+				.replace(/@ 0x[0-9a-fA-F]+/g, "@ <ADDR>")
+				.replace(/\b(call|jmp|j[a-z]{1,4}|bl|b|b\.[a-z]{2}|cbn?z|tbn?z|loop[a-z]*)(\s+)0x[0-9a-fA-F]+/g, "$1$2<ADDR>")
+				.replace(/\b(fcn|sub|loc|case|switch|entry|section)\.[0-9a-fA-F]{4,}\b/g, "$1.<ADDR>");
+		})
+		.join("\n");
+}
+
+/** SHA-256 hex of the address-masked canonical output — equal across builds that differ only in where the code sits. */
+export function shiftHash(raw: string, binaryPath?: string): string {
+	return createHash("sha256").update(maskAddresses(canonicalizeRizinOutput(raw, binaryPath)), "utf8").digest("hex");
 }
 
 /** The first `maxLines` lines (≤ `maxBytes`) of the canonical output, stored for human diffing in the verification manifest. Display-only — never hashed. */

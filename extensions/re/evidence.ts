@@ -108,12 +108,14 @@ export function registerEvidenceStore(pi: ExtensionAPI): void {
 				commands?: unknown;
 				reproHash?: unknown;
 				canonicalExcerpt?: unknown;
+				shiftHash?: unknown;
 			};
 			const ea = typeof details.ea === "string" ? details.ea : undefined;
 			const artifactId = typeof details.artifactId === "string" ? details.artifactId : undefined;
 			const commands = Array.isArray(details.commands) && details.commands.every((c) => typeof c === "string") ? (details.commands as string[]) : undefined;
 			const reproHash = typeof details.reproHash === "string" ? details.reproHash : undefined;
 			const canonicalExcerpt = typeof details.canonicalExcerpt === "string" ? details.canonicalExcerpt : undefined;
+			const shiftHash = typeof details.shiftHash === "string" ? details.shiftHash : undefined;
 			// Stamped at open time (index.ts): binds this evidence to the exact binary bytes it was taken
 			// against, so `/re verify` re-runs against the right binary. Absent on a resume whose re.binary
 			// entry predates the field — such evidence is then "unverifiable (legacy)", never a failure.
@@ -133,6 +135,7 @@ export function registerEvidenceStore(pi: ExtensionAPI): void {
 				...(commands ? { commands } : {}),
 				...(reproHash ? { reproHash } : {}),
 				...(canonicalExcerpt ? { canonicalExcerpt } : {}),
+				...(shiftHash ? { shiftHash } : {}),
 				...(binarySha256 ? { binarySha256 } : {}),
 				summary,
 			});

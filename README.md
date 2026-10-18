@@ -261,12 +261,16 @@ A report's manifest is also a regression test. `/re carry <manifest.json>
 [--against <binary>] [--strict] [--out <path>]` replays every cited command
 against a *different* binary (the next sample of a family, a firmware update,
 a patched build) and gives each claim a status. **holds** means the output is
-identical. **drifted** means the command still runs but its output changed;
-the recorded excerpt is line-diffed against the new one, so the claim arrives
-with the exact change under it. **broken** means the symbol it was anchored to
-is gone or the command now produces nothing. **unchecked** means the evidence
-was provenance-only. Headless, a broken claim exits non-zero, and `--strict`
-also fails on drift. Every command still goes through the read-only
+identical, or identical once positional addresses are masked, so a rebuild that
+only moved code still passes. **relocated** means the anchor was renamed or
+moved, but its function was found again by a fingerprint (size, block count and
+mnemonic sequence, recorded when the report was written) and the command says
+the same thing there. **drifted** means the command still runs but its output
+changed; the claim arrives with a diff limited to what really changed, not every
+shifted address. **broken** means the anchor is gone and nothing matches its
+fingerprint, or the command now produces nothing. **unchecked** means the
+evidence was provenance-only. Headless, a broken claim exits non-zero, and
+`--strict` also fails on relocation or drift. Every command still goes through the read-only
 `rizin_command` gate, because a manifest is untrusted input, and carrying
 records no evidence.
 

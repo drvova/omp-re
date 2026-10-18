@@ -9,32 +9,39 @@
  * carry runs it against whatever binary is open now and classifies each piece of
  * evidence, then each claim:
  *
- * - **holds**: the re-run's canonical output hash is identical — the finding
- *   carries over unchanged.
- * - **drifted**: the command still runs but its output changed. The recorded
- *   canonical excerpt is line-diffed against the new one, so the claim lands
- *   with the exact change under it — a patch-diff starting point.
+ * - **holds**: the re-run's canonical output hash is identical, or identical
+ *   once positional addresses are masked (`shiftHash`, format.ts) — the code
+ *   didn't change, the build just moved it.
+ * - **relocated**: the anchor vanished (a renamed symbol) or a numeric anchor
+ *   now points elsewhere, but the function it named was found again by its
+ *   fingerprint (anchor.ts) and the command re-run there says the same thing.
+ * - **drifted**: the command still runs (at the original or relocated anchor)
+ *   but its output changed. The recorded canonical excerpt is line-diffed
+ *   against the new one, matching lines with addresses masked so the diff keeps
+ *   to what really changed — a patch-diff starting point.
  * - **broken**: the anchor is gone — the symbol/flag the command was pinned to no
- *   longer resolves, or the command now produces nothing (or only an error).
+ *   longer resolves and nothing matches its fingerprint, or the command now
+ *   produces nothing (or only an error).
  * - **unchecked**: the evidence was provenance-only or legacy (no reproducible
  *   hash), or the manifest's command is no longer runnable in this rizin.
  *
  * A claim takes the worst status among its checked evidence (broken > drifted >
- * holds); a claim with no checkable evidence is unchecked.
+ * relocated > holds); a claim with no checkable evidence is unchecked.
  *
  * Deterministic and read-only, like `/re verify`: the manifest is untrusted
  * input, so every command goes back through `checkRizinCommand` (the same
  * read-only gate `rizin_command` uses) and every address through
  * `validateAddr`; commands run via `rz.cmdWithStderr`, never omp tool dispatch,
  * so carrying records no new evidence. Headless, a broken claim sets
- * `process.exitCode = 1` (`--strict` also fails on drifted or unchecked), so a
+ * `process.exitCode = 1` (`--strict` also fails on relocated, drifted, or unchecked), so a
  * report doubles as a CI regression test for the next build.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { checkRizinCommand, loadCatalog } from "./catalog.ts";
-import { canonicalExcerpt, canonicalHash } from "./format.ts";
-import { resolveNumericAddr, validateAddr } from "./rizin.ts";
+import { type AnchorFingerprint, relocateAnchor } from "./anchor.ts";
+import { checkRizinCommand, loadCatalog, type RzCatalog } from "./catalog.ts";
+import { canonicalExcerpt, canonicalHash, maskAddresses, shiftHash } from "./format.ts";
+import { normalizeAddr, resolveNumericAddr, type RzSession, validateAddr } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
 import { cleanStderr } from "./tools-rizin.ts";
 import { sha256File } from "./verify.ts";
@@ -42,6 +49,8 @@ import { sha256File } from "./verify.ts";
 const CARRY_COMMAND_TIMEOUT_MS = 120_000;
 /** Cap on diff lines shown per drifted record — the excerpt is ≤20 lines a side, so this only bites on a total rewrite. */
 const MAX_DIFF_LINES = 40;
+/** {@link canonicalExcerpt}'s default byte cap: an excerpt this long was cut mid-line. */
+const EXCERPT_MAX_BYTES = 1024;
 
 /** One entry of a `<report>.manifest.json`, as read back. Every field is optional on read: manifests are untrusted and may predate a field. */
 export interface ManifestEntry {
@@ -52,6 +61,8 @@ export interface ManifestEntry {
 	commands?: string[] | null;
 	reproHash?: string | null;
 	canonicalExcerpt?: string | null;
+	shiftHash?: string | null;
+	anchor?: AnchorFingerprint | null;
 	binarySha256?: string | null;
 	claims: string[];
 }
@@ -61,7 +72,7 @@ export interface CarryManifest {
 	entries: ManifestEntry[];
 }
 
-export type CarryStatus = "holds" | "drifted" | "broken" | "unchecked";
+export type CarryStatus = "holds" | "relocated" | "drifted" | "broken" | "unchecked";
 
 export interface CarryEvidenceRow {
 	evidenceId: string;
@@ -72,6 +83,8 @@ export interface CarryEvidenceRow {
 	detail: string;
 	/** drifted only: unified-style line diff of recorded excerpt (`-`) vs. new excerpt (`+`). */
 	diff?: string[];
+	/** Set when the anchor was found again elsewhere by fingerprint (relocated, or drifted after relocating). */
+	relocation?: { from: string; to: string; addr: string; similarity: number };
 }
 
 export interface CarryClaimRow {
@@ -121,11 +134,29 @@ export function parseManifest(text: string): CarryManifest {
 			commands: Array.isArray(row.commands) ? row.commands.filter((c): c is string => typeof c === "string") : null,
 			reproHash: str(row.reproHash),
 			canonicalExcerpt: str(row.canonicalExcerpt),
+			shiftHash: str(row.shiftHash),
+			anchor: parseAnchor(row.anchor),
 			binarySha256: str(row.binarySha256),
 			claims: Array.isArray(row.claims) ? row.claims.filter((c): c is string => typeof c === "string") : [],
 		});
 	}
 	return { binarySha256: str(obj.binarySha256), entries };
+}
+
+/**
+ * Shape-check a manifest entry's anchor fingerprint. Untrusted input: the name and
+ * offset are only displayed, the delta becomes part of an address (so it must be a
+ * small non-negative integer), and the mnemonics only feed the similarity score.
+ * Anything malformed drops the fingerprint (the entry just can't be relocated).
+ */
+function parseAnchor(raw: unknown): AnchorFingerprint | null {
+	const a = raw as Partial<Record<keyof AnchorFingerprint, unknown>> | null | undefined;
+	if (!a || typeof a !== "object") return null;
+	const okNum = (v: unknown, max: number) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
+	if (typeof a.anchor !== "string" || typeof a.function !== "string" || typeof a.offset !== "string") return null;
+	if (!okNum(a.delta, 1 << 24) || !okNum(a.size, 1 << 30) || !okNum(a.nbbs, 1 << 24)) return null;
+	if (!Array.isArray(a.mnemonics) || a.mnemonics.length === 0 || !a.mnemonics.every((m) => typeof m === "string")) return null;
+	return { anchor: a.anchor, function: a.function, offset: a.offset, delta: a.delta as number, size: a.size as number, nbbs: a.nbbs as number, mnemonics: a.mnemonics as string[] };
 }
 
 /**
@@ -143,22 +174,30 @@ export function entryRequest(entry: ManifestEntry): { command: string; addr?: st
 	return { command: line.trim() };
 }
 
-/** Line diff (LCS) of two short texts: unchanged lines prefixed `  `, removed `- `, added `+ `. Inputs are canonical excerpts (≤20 lines), so the O(n·m) table is trivial. */
-export function lineDiff(before: string, after: string): string[] {
+/**
+ * Line diff (LCS) of two short texts: unchanged lines prefixed `  `, removed `- `,
+ * added `+ `. Lines are matched on `key(line)` (default: the line itself) but
+ * printed as written, so with an address mask a line that only moved shows as
+ * unchanged (new form) and the diff keeps to what really changed. Inputs are
+ * canonical excerpts (≤20 lines), so the O(n·m) table is trivial.
+ */
+export function lineDiff(before: string, after: string, key: (line: string) => string = (line) => line): string[] {
 	const a = before === "" ? [] : before.split("\n");
 	const b = after === "" ? [] : after.split("\n");
+	const ka = a.map(key);
+	const kb = b.map(key);
 	const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
 	for (let i = a.length - 1; i >= 0; i--) {
 		for (let j = b.length - 1; j >= 0; j--) {
-			lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+			lcs[i]![j] = ka[i] === kb[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
 		}
 	}
 	const out: string[] = [];
 	let i = 0;
 	let j = 0;
 	while (i < a.length && j < b.length) {
-		if (a[i] === b[j]) {
-			out.push(`  ${a[i]}`);
+		if (ka[i] === kb[j]) {
+			out.push(`  ${b[j]}`);
 			i++;
 			j++;
 		} else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
@@ -172,7 +211,7 @@ export function lineDiff(before: string, after: string): string[] {
 	return out;
 }
 
-const RANK: Record<CarryStatus, number> = { unchecked: 0, holds: 1, drifted: 2, broken: 3 };
+const RANK: Record<CarryStatus, number> = { unchecked: 0, holds: 1, relocated: 2, drifted: 3, broken: 4 };
 
 /** Roll evidence statuses up to claims: worst checked status wins; all-unchecked stays unchecked. Claim order follows first appearance in the manifest. */
 export function rollUpClaims(manifest: CarryManifest, evidence: readonly CarryEvidenceRow[]): CarryClaimRow[] {
@@ -193,6 +232,62 @@ export function rollUpClaims(manifest: CarryManifest, evidence: readonly CarryEv
 		}
 		return { text, status, evidenceIds };
 	});
+}
+
+/**
+ * Whether a re-run's output still says what the recorded one did: the exact
+ * canonical hash, or — when the manifest carries one — the address-masked
+ * `shiftHash`, which forgives a rebuild that only moved code. Returns the holds
+ * detail, or undefined when the output really changed.
+ */
+function compareOutput(entry: ManifestEntry, output: string, binaryPath: string): string | undefined {
+	if (canonicalHash(output, binaryPath) === entry.reproHash) return "output identical";
+	if (entry.shiftHash && shiftHash(output, binaryPath) === entry.shiftHash) return "output identical apart from shifted addresses";
+	return undefined;
+}
+
+/** Line diff of the recorded canonical excerpt against the new output's, capped; undefined when the excerpts are equal (the change lies further down). */
+function excerptDiff(recordedExcerpt: string, output: string, binaryPath: string): string[] | undefined {
+	const newExcerpt = canonicalExcerpt(output, binaryPath);
+	if (recordedExcerpt === newExcerpt) return undefined;
+	// An excerpt that hit its byte cap ends mid-line, at a different column on each side; drop that partial line so it never shows as a change.
+	const whole = (excerpt: string) => (excerpt.length >= EXCERPT_MAX_BYTES ? excerpt.slice(0, Math.max(0, excerpt.lastIndexOf("\n"))) : excerpt);
+	const diff = lineDiff(whole(recordedExcerpt), whole(newExcerpt), maskAddresses);
+	if (!diff.some((line) => !line.startsWith("  "))) return undefined;
+	return diff.length > MAX_DIFF_LINES ? [...diff.slice(0, MAX_DIFF_LINES), `  … ${diff.length - MAX_DIFF_LINES} more diff line(s)`] : diff;
+}
+
+/**
+ * Find the anchor's function in this build by fingerprint and re-run the command
+ * there. The new function's name is folded back to the recorded one before
+ * comparing, so a pure rename compares equal. Returns the row fields — relocated
+ * when the output then matches (exactly or apart from addresses), drifted with the
+ * relocation noted and a diff when it doesn't — or undefined when nothing matches
+ * the fingerprint or the relocated line can't run.
+ */
+async function tryRelocated(
+	rz: RzSession,
+	catalog: RzCatalog,
+	entry: ManifestEntry,
+	request: { command: string; addr?: string },
+	fp: AnchorFingerprint,
+	binaryPath: string,
+): Promise<Omit<CarryEvidenceRow, "evidenceId" | "tool"> | undefined> {
+	const found = await relocateAnchor(rz, fp);
+	if (!found) return undefined;
+	const check = checkRizinCommand(catalog, request.command, found.addr);
+	if (!check.ok) return undefined;
+	const { output } = await rz.cmdWithStderr(check.line, { timeoutMs: CARRY_COMMAND_TIMEOUT_MS });
+	const folded = found.function !== fp.function ? output.split(found.function).join(fp.function) : output;
+	const relocation = { from: `${fp.function} @ ${fp.offset}`, to: `${found.function} @ ${found.offset}`, addr: found.addr, similarity: found.similarity };
+	const renamed = found.function !== fp.function;
+	const moved = normalizeAddr(found.offset) !== normalizeAddr(fp.offset);
+	const how = renamed && moved ? `moved to ${found.function} @ ${found.offset}` : renamed ? `renamed to ${found.function}` : moved ? `moved from ${fp.offset} to ${found.offset}` : `found at ${found.offset}`;
+	const where = `${fp.function} ${how} (code similarity ${found.similarity})`;
+	const same = compareOutput(entry, folded, binaryPath);
+	if (same) return { command: check.line, status: "relocated", detail: `${where}; ${same}`, relocation };
+	const diff = excerptDiff(entry.canonicalExcerpt ?? "", folded, binaryPath);
+	return { command: check.line, status: "drifted", detail: `${where}; output changed${diff ? "" : " beyond the recorded 20-line excerpt"}`, relocation, ...(diff ? { diff } : {}) };
 }
 
 /**
@@ -238,15 +333,20 @@ export async function buildCarry(ctx: ExtensionContext, manifest: CarryManifest)
 
 		try {
 			const rz = await ensureRizin(ctx);
-			// A symbolic anchor (sym.decrypt_config, a flag) that no longer resolves is the clearest
-			// "broken": the thing the claim is about is gone from this build. A numeric anchor can't be
-			// checked this way — it always "resolves" — so it is judged by its output and flagged below.
+			const fp = entry.anchor ?? undefined;
+			// A symbolic anchor (sym.decrypt_config, a flag) that no longer resolves means the thing the
+			// claim is about is gone under that name; with a fingerprint it may just have been renamed,
+			// so look for it before calling it broken. A numeric anchor always "resolves", so it is
+			// judged by its output (and relocated by fingerprint below when that output changed).
 			const numericAnchor = request.addr !== undefined && /^(0x[0-9a-f]+|\d+)$/i.test(request.addr);
 			if (request.addr !== undefined && !numericAnchor) {
-				try {
-					await resolveNumericAddr(rz, request.addr);
-				} catch {
-					evidence.push({ ...base, command: line, status: "broken", detail: `anchor \`${request.addr}\` no longer resolves in this binary` });
+				const resolves = await resolveNumericAddr(rz, request.addr).then(
+					() => true,
+					() => false,
+				);
+				if (!resolves) {
+					const moved = fp ? await tryRelocated(rz, catalog!, entry, request, fp, binaryPath) : undefined;
+					evidence.push(moved ? { ...base, ...moved } : { ...base, command: line, status: "broken", detail: `anchor \`${request.addr}\` no longer resolves in this binary${fp ? " and no function matching its fingerprint was found" : ""}` });
 					continue;
 				}
 			}
@@ -255,27 +355,31 @@ export async function buildCarry(ctx: ExtensionContext, manifest: CarryManifest)
 			if (output.trim() === "") {
 				const errors = cleanStderr(stderr);
 				if (errors || recordedExcerpt.trim() !== "") {
+					const moved = numericAnchor && fp ? await tryRelocated(rz, catalog!, entry, request, fp, binaryPath) : undefined;
 					const said = errors ? `: ${errors.split("\n").slice(-1)[0]}` : "";
-					evidence.push({ ...base, command: line, status: "broken", detail: `command now produces no output${said}` });
+					evidence.push(moved ? { ...base, ...moved } : { ...base, command: line, status: "broken", detail: `command now produces no output${said}` });
 					continue;
 				}
 			}
-			const rehash = canonicalHash(output, binaryPath);
-			if (rehash === entry.reproHash) {
-				evidence.push({ ...base, command: line, status: "holds", detail: "output identical" });
+			const same = compareOutput(entry, output, binaryPath);
+			if (same) {
+				evidence.push({ ...base, command: line, status: "holds", detail: same });
 				continue;
 			}
-			const newExcerpt = canonicalExcerpt(output, binaryPath);
-			const diff = recordedExcerpt === newExcerpt ? [] : lineDiff(recordedExcerpt, newExcerpt);
-			const parts = [diff.length > 0 ? "output changed" : "output changed beyond the recorded 20-line excerpt (re-run to see it)"];
-			if (numericAnchor) parts.push(`pinned to numeric address ${request.addr} — the code it named may have moved in this build`);
-			evidence.push({
-				...base,
-				command: line,
-				status: "drifted",
-				detail: parts.join("; "),
-				...(diff.length > 0 ? { diff: diff.length > MAX_DIFF_LINES ? [...diff.slice(0, MAX_DIFF_LINES), `  … ${diff.length - MAX_DIFF_LINES} more diff line(s)`] : diff } : {}),
-			});
+			// Drifted at a numeric anchor: the code it named may simply have moved. Relocate by
+			// fingerprint and re-run there; keep the drift only if the code isn't found elsewhere.
+			if (numericAnchor && fp) {
+				const moved = await tryRelocated(rz, catalog!, entry, request, fp, binaryPath);
+				if (moved && moved.relocation?.addr !== normalizeAddr(request.addr!)) {
+					evidence.push({ ...base, ...moved });
+					continue;
+				}
+			}
+			const parts = [];
+			const diff = excerptDiff(recordedExcerpt, output, binaryPath);
+			parts.push(diff ? "output changed" : "output changed beyond the recorded 20-line excerpt (re-run to see it)");
+			if (numericAnchor) parts.push(`pinned to numeric address ${request.addr}${fp ? "; no function matching its fingerprint was found elsewhere" : " — the code it named may have moved in this build"}`);
+			evidence.push({ ...base, command: line, status: "drifted", detail: parts.join("; "), ...(diff ? { diff } : {}) });
 		} catch (err) {
 			evidence.push({ ...base, command: line, status: "unchecked", detail: `re-run failed: ${err instanceof Error ? err.message : String(err)}` });
 		}
@@ -285,7 +389,7 @@ export async function buildCarry(ctx: ExtensionContext, manifest: CarryManifest)
 }
 
 function counts(rows: readonly { status: CarryStatus }[]): Record<CarryStatus, number> {
-	const c: Record<CarryStatus, number> = { holds: 0, drifted: 0, broken: 0, unchecked: 0 };
+	const c: Record<CarryStatus, number> = { holds: 0, relocated: 0, drifted: 0, broken: 0, unchecked: 0 };
 	for (const row of rows) c[row.status]++;
 	return c;
 }
@@ -296,10 +400,10 @@ const short = (sha: string | null) => (sha ? `${sha.slice(0, 12)}…` : "unknown
 export function formatCarrySummary(result: CarryResult): string {
 	const c = counts(result.claims);
 	const lines = [
-		`omp-re: carry ${short(result.fromSha256)} → ${short(result.toSha256)} — ${c.holds} hold, ${c.drifted} drifted, ${c.broken} BROKEN, ${c.unchecked} unchecked (of ${result.claims.length} claim(s))`,
+		`omp-re: carry ${short(result.fromSha256)} → ${short(result.toSha256)} — ${c.holds} hold, ${c.relocated} relocated, ${c.drifted} drifted, ${c.broken} BROKEN, ${c.unchecked} unchecked (of ${result.claims.length} claim(s))`,
 	];
 	if (result.fromSha256 && result.fromSha256 === result.toSha256) lines.push("  (same binary the report was written against — this is /re verify; open the new build to carry onto it)");
-	const order: CarryStatus[] = ["broken", "drifted", "unchecked", "holds"];
+	const order: CarryStatus[] = ["broken", "drifted", "unchecked", "relocated", "holds"];
 	for (const status of order) {
 		for (const claim of result.claims.filter((cl) => cl.status === status)) lines.push(`  ${status.toUpperCase().padEnd(9)} ${claim.text}`);
 	}
@@ -317,7 +421,7 @@ export function formatCarryMarkdown(result: CarryResult, manifestPath: string): 
 		`- **Manifest:** \`${manifestPath}\``,
 		`- **From binary:** \`${result.fromSha256 ?? "unknown"}\``,
 		`- **To binary:** \`${result.toSha256 ?? "unknown"}\`${result.toPath ? ` (${result.toPath})` : ""}`,
-		`- **Claims:** ${c.holds} hold · ${c.drifted} drifted · ${c.broken} broken · ${c.unchecked} unchecked`,
+		`- **Claims:** ${c.holds} hold · ${c.relocated} relocated · ${c.drifted} drifted · ${c.broken} broken · ${c.unchecked} unchecked`,
 		"",
 		"## Claims",
 		"",
@@ -331,6 +435,7 @@ export function formatCarryMarkdown(result: CarryResult, manifestPath: string): 
 	for (const row of result.evidence) {
 		out.push(`### \`${row.evidenceId.slice(0, 8)}\` — ${row.status}`, "", `- **Tool:** ${row.tool}`);
 		if (row.command) out.push(`- **Command:** \`${row.command}\``);
+		if (row.relocation) out.push(`- **Relocated:** ${row.relocation.from} → ${row.relocation.to} (similarity ${row.relocation.similarity})`);
 		out.push(`- **Detail:** ${row.detail}`, "");
 		if (row.diff && row.diff.length > 0) out.push("```diff", ...row.diff, "```", "");
 	}
@@ -353,7 +458,7 @@ export async function carryManifest(ctx: ExtensionContext, manifestPath: string,
 	}
 	const result = await buildCarry(ctx, parseManifest(text));
 	const c = counts(result.claims);
-	const failed = c.broken > 0 || (opts.strict === true && (c.drifted > 0 || c.unchecked > 0));
+	const failed = c.broken > 0 || (opts.strict === true && (c.relocated > 0 || c.drifted > 0 || c.unchecked > 0));
 
 	let summary = formatCarrySummary(result);
 	if (opts.out) {

@@ -8,7 +8,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { checkRizinCommand, loadCatalog, searchCatalog } from "./catalog.ts";
-import { canonicalExcerpt, canonicalHash, plainResult, textResult } from "./format.ts";
+import { canonicalExcerpt, canonicalHash, plainResult, shiftHash, textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { eaFromOffset, resolveNumericAddr } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
@@ -102,6 +102,7 @@ export function registerRizinTools(pi: ExtensionAPI): void {
 				commands: [check.line],
 				reproHash: canonicalHash(output, binaryPath),
 				canonicalExcerpt: canonicalExcerpt(output, binaryPath),
+				shiftHash: shiftHash(output, binaryPath),
 			});
 		},
 	});
