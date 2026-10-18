@@ -14,7 +14,6 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { textResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { debugTimeoutMs, rizinBitsMismatch, validateAddr } from "./rizin.ts";
-import type { RzSession } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
 const EMULATE_ACTIONS = [
@@ -48,7 +47,7 @@ function approvalReason(action: EmulateAction): string {
  * anything else anyway; validating here keeps the error message ours.
  */
 function validateVarName(name: string): string {
-  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(name)) {
     throw new Error(
       `omp-re: emulate: bad variable name ${JSON.stringify(name)} — use a name from the vars action`
     );
@@ -58,7 +57,7 @@ function validateVarName(name: string): string {
 
 /** A value for `aezv <name> <number>` — rizin accepts decimal and 0x hex. */
 function validateVarValue(value: string): string {
-  if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/.test(value)) {
+  if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/u.test(value)) {
     throw new Error(
       `omp-re: emulate: bad value ${JSON.stringify(value)} — use a decimal or 0x hex number`
     );

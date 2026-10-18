@@ -59,13 +59,13 @@ describe.skipIf(!canRunRizin)("analyze (chapter H)", () => {
   });
 
   test("a pass reports the function count before and after", async () => {
-    expect(textOf(await run("calls"))).toMatch(/aac: functions \d+ -> \d+/);
+    expect(textOf(await run("calls"))).toMatch(/aac: functions \d+ -> \d+/u);
   });
 
   test("a pass that doesn't apply surfaces rizin's own message and is not recorded for replay", async () => {
     // /bin/ls is not a Go binary, so `golang` (aalg) reports it can't recover and leaves nothing to replay.
     const out = textOf(await run("golang"));
-    expect(out.toLowerCase()).toMatch(/cannot|no .*found|not a/);
+    expect(out.toLowerCase()).toMatch(/cannot|no .*found|not a/u);
     expect(recordedAnalysisPasses(entries as never, binaryPath)).not.toContain(
       "golang"
     );

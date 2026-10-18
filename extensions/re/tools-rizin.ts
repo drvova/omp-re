@@ -31,7 +31,7 @@ const RIZIN_COMMAND_TIMEOUT_MS = 120_000;
  */
 export function cleanStderr(stderr: string): string {
   return stderr
-    .replaceAll(/\x1B\[[0-9;?]*[A-Za-z]/g, "")
+    .replaceAll(/\u001B\[[0-9;?]*[A-Za-z]/gu, "")
     .replaceAll("\r", "\n")
     .split("\n")
     .map((line) => line.trimEnd())
@@ -150,7 +150,7 @@ export async function runRizinCommand(
   // open binary's path, so `/re verify` can re-run this exact line and hash-compare. The body
   // sent to the model is still the trimmed/truncated text; only the verification key sees raw.
   const binaryPath = getState(ctx).binaryPath ?? undefined;
-  return textResult(header, output.replace(/\n+$/, ""), {
+  return textResult(header, output.replace(/\n+$/u, ""), {
     canonicalExcerpt: canonicalExcerpt(output, binaryPath),
     commands: [check.line],
     ctx,

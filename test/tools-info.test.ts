@@ -19,10 +19,10 @@ function stubRz(replies: Record<string, string>) {
   return {
     ran,
     rz: {
-      cmdj,
       cmd: (c: string) => Promise.resolve(replies[c] ?? ""),
       cmdWithStderr: (c: string) =>
         Promise.resolve({ output: replies[c] ?? "", stderr: "" }),
+      cmdj,
     } as unknown as RzSession,
   };
 }
@@ -35,7 +35,7 @@ describe("getBinaryInfo", () => {
     const { rz } = stubRz({
       iIj: JSON.stringify({
         arch: "x86",
-        baddr: 5368709120,
+        baddr: 5_368_709_120,
         bintype: "pe",
         bits: 64,
         compiler: "Linker 0",
@@ -53,12 +53,12 @@ describe("listEntryPointRows", () => {
     const { rz } = stubRz({
       iej: JSON.stringify([
         {
-          baddr: 5368709120,
+          baddr: 5_368_709_120,
           haddr: 168,
           laddr: 0,
           paddr: 2330,
           type: "program",
-          vaddr: 5368714010,
+          vaddr: 5_368_714_010,
         },
       ]),
     });
@@ -74,10 +74,10 @@ describe("listRelocationRows", () => {
     const relocs = Array.from({ length: 4 }, (_, i) => ({
       is_ifunc: false,
       name: `reloc.${i}`,
-      paddr: 17920 + i * 8,
+      paddr: 17_920 + i * 8,
       sym_va: 0,
       type: "IMAGE_REL_BASED_DIR64",
-      vaddr: 20480 + i * 8,
+      vaddr: 20_480 + i * 8,
     }));
     const { rz } = stubRz({ irj: JSON.stringify(relocs) });
     const result = await listRelocationRows(rz, { limit: 2, offset: 1 });
@@ -90,8 +90,8 @@ describe("listRelocationRows", () => {
 describe("listFlagRows", () => {
   test("filters flag names case-insensitively", async () => {
     const flags = [
-      { name: "entry0", offset: 5368714010, size: 16 },
-      { name: "reloc.pe_00005000", offset: 20480, size: 0 },
+      { name: "entry0", offset: 5_368_714_010, size: 16 },
+      { name: "reloc.pe_00005000", offset: 20_480, size: 0 },
     ];
     const { rz } = stubRz({ flj: JSON.stringify(flags) });
     const result = await listFlagRows(rz, { filter: "RELOC" });
@@ -105,11 +105,11 @@ describe("listClassRows", () => {
   test("passes class rows through and filters on name", async () => {
     const classes = [
       {
-        addr: 4194304,
-        methods: [{ name: "push_back", addr: 4194350 }],
+        addr: 4_194_304,
+        methods: [{ addr: 4_194_350, name: "push_back" }],
         name: "std::vector<int>",
       },
-      { addr: 4194600, name: "CFoo" },
+      { addr: 4_194_600, name: "CFoo" },
     ];
     const { rz } = stubRz({ icj: JSON.stringify(classes) });
     const result = await listClassRows(rz, { filter: "vector" });

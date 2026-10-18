@@ -152,10 +152,11 @@ export function makeHarness(sessionId: string): Harness {
     pi,
     tool(name: string) {
       const def = tools.get(name);
-      if (!def)
+      if (!def) {
         throw new Error(
           `omp-re test setup: tool "${name}" was never registered`
         );
+      }
       return def;
     },
   };
@@ -178,7 +179,7 @@ export function splitHeaderBody(text: string): {
 } {
   const nl = text.indexOf("\n");
   if (nl === -1) {
-    return { header: text, body: "" };
+    return { body: "", header: text };
   }
   return { body: text.slice(nl + 1), header: text.slice(0, nl) };
 }

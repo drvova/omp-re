@@ -195,10 +195,10 @@ export function evidenceTag(id: string): string {
 export function registerEvidenceStore(pi: ExtensionAPI): void {
   pi.on("tool_result", async (event, ctx) => {
     if (event.isError) {
-      return undefined;
+      return;
     }
     if (RE_EVIDENCE_TOOL_NAMES[event.toolName] !== true) {
-      return undefined;
+      return;
     }
 
     try {
@@ -230,7 +230,5 @@ export function registerEvidenceStore(pi: ExtensionAPI): void {
         pi.logger.error(msg);
       }
     }
-
-    return;
   });
 }

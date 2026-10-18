@@ -94,7 +94,7 @@ async function signatureAt(
   ea: string,
   signal?: AbortSignal
 ): Promise<string> {
-  return (await rz.cmd(`afs @ ${ea}`, { signal })).trim().replace(/;\s*$/, "");
+  return (await rz.cmd(`afs @ ${ea}`, { signal })).trim().replace(/;\s*$/u, "");
 }
 
 /** The function whose start address is exactly `ea`, or undefined when none begins there (`afij` returns the function *containing* ea, which may start earlier). */
@@ -201,8 +201,8 @@ async function metaAt(
 function normalizeCType(value: string): string {
   return value
     .trim()
-    .replace(/;+\s*$/, "")
-    .replaceAll(/\s+/g, "");
+    .replace(/;+\s*$/u, "")
+    .replaceAll(/\s+/gu, "");
 }
 
 async function apply(

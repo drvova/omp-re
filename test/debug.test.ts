@@ -54,7 +54,7 @@ function restoreEnable() {
 // rizin (see docs/testing.md). The pure enable-gate tests below always run.
 const debuggerSupported =
   process.platform !== "darwin" ||
-  /^(1|true|yes|on)$/i.test((process.env.OMPRE_FORCE_DEBUGGER ?? "").trim());
+  /^(1|true|yes|on)$/iu.test((process.env.OMPRE_FORCE_DEBUGGER ?? "").trim());
 
 describe("debuggerEnabled (no rizin needed)", () => {
   afterEach(restoreEnable);
@@ -106,7 +106,7 @@ describe("buildRunDirectives (no rizin needed)", () => {
         input: "payload",
         maxfd: 64,
         maxproc: 8,
-        maxstack: 0x100000,
+        maxstack: 0x10_00_00,
         stderr: "C:/err.txt",
         stdin: "C:/in.txt",
         stdout: "C:/out.txt",
@@ -134,7 +134,7 @@ describe("buildRunDirectives (no rizin needed)", () => {
       { args: "not-a-list" },
       "not-an-object",
     ]) {
-      expect(() => buildRunDirectives(run)).toThrow(/omp-re: debug: run/);
+      expect(() => buildRunDirectives(run)).toThrow(/omp-re: debug: run/u);
     }
   });
 });
@@ -155,20 +155,20 @@ describe("buildDebugTarget (no rizin needed)", () => {
   });
 
   test("refuses a bad pid, a non-gdb/windbg or flag-shaped URI, and both-or-neither", () => {
-    expect(() => buildDebugTarget({ pid: 0 })).toThrow(/positive integer/);
-    expect(() => buildDebugTarget({ pid: -1 })).toThrow(/positive integer/);
-    expect(() => buildDebugTarget({ pid: 1.5 })).toThrow(/positive integer/);
+    expect(() => buildDebugTarget({ pid: 0 })).toThrow(/positive integer/u);
+    expect(() => buildDebugTarget({ pid: -1 })).toThrow(/positive integer/u);
+    expect(() => buildDebugTarget({ pid: 1.5 })).toThrow(/positive integer/u);
     expect(() => buildDebugTarget({ remote: "http://evil" })).toThrow(
-      /gdb:\/\/ or windbg:\/\//
+      /gdb:\/\/ or windbg:\/\//u
     );
     expect(() => buildDebugTarget({ remote: "gdb://host; rm -rf /" })).toThrow(
-      /gdb:\/\/ or windbg:\/\//
+      /gdb:\/\/ or windbg:\/\//u
     );
-    expect(() => buildDebugTarget({})).toThrow(/exactly one/);
+    expect(() => buildDebugTarget({})).toThrow(/exactly one/u);
     expect(() => buildDebugTarget({ pid: 1, remote: "gdb://h:1" })).toThrow(
-      /exactly one/
+      /exactly one/u
     );
-    expect(() => buildDebugTarget("nope")).toThrow(/must be an object/);
+    expect(() => buildDebugTarget("nope")).toThrow(/must be an object/u);
   });
 });
 
@@ -207,7 +207,7 @@ describe.skipIf(!canRunRizin)(
       // on PC numerically and never on register names or padding.
       const initVars = JSON.parse(
         textOf(await run("init", { addr: "entry0" })).replace(
-          /^emulate: VM initialized at .+\n(?:rizin build is [^\n]*\n)?/,
+          /^emulate: VM initialized at .+\n(?:rizin build is [^\n]*\n)?/u,
           ""
         )
       );
@@ -218,13 +218,13 @@ describe.skipIf(!canRunRizin)(
         value: `0x${(pc0 + 0x10).toString(16)}`,
       });
       const afterSet = JSON.parse(
-        textOf(await run("vars")).replace(/^emulate: vars\n/, "")
+        textOf(await run("vars")).replace(/^emulate: vars\n/u, "")
       );
       expect(Number.parseInt(String(afterSet.PC), 16)).toBe(pc0 + 0x10);
       const stepped = textOf(await run("step", { count: 2 }));
       expect(stepped).toContain("pc_write");
       const vars = JSON.parse(
-        textOf(await run("vars")).replace(/^emulate: vars\n/, "")
+        textOf(await run("vars")).replace(/^emulate: vars\n/u, "")
       );
       expect(Number.parseInt(String(vars.PC), 16)).not.toBe(pc0 + 0x10);
     }, 30_000);
@@ -235,7 +235,7 @@ describe.skipIf(!canRunRizin)(
       await run("init", { addr: "entry0" });
       const changes = JSON.parse(
         textOf(await run("step", { count: 1 })).replace(
-          /^emulate: step 1\n/,
+          /^emulate: step 1\n/u,
           ""
         )
       );
@@ -247,7 +247,7 @@ describe.skipIf(!canRunRizin)(
       await run("init", { addr: "entry0" });
       const vars = JSON.parse(
         textOf(await run("step_until", { addr: target })).replace(
-          /^emulate: step_until .+\n(?:rizin build is [^\n]*\n)?/,
+          /^emulate: step_until .+\n(?:rizin build is [^\n]*\n)?/u,
           ""
         )
       );
@@ -347,7 +347,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     test("start launches the process with a loud warning and a stopped PC", async () => {
       const out = textOf(await run("start"));
       expect(out).toContain(DEBUG_LAUNCH_WARNING);
-      expect(out).toMatch(/rip = 0x[0-9a-f]+/);
+      expect(out).toMatch(/rip = 0x[0-9a-f]+/u);
       expect(getState(ctx).dbg?.isClosed).toBe(false);
     }, 20_000);
 
@@ -356,8 +356,8 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
         '"enabled":true'
       );
       const cont = textOf(await run("continue"));
-      expect(cont).toMatch(/rip = 0x[0-9a-f]+/);
-      expect(textOf(await run("registers"))).toMatch(/"rip":\d+/);
+      expect(cont).toMatch(/rip = 0x[0-9a-f]+/u);
+      expect(textOf(await run("registers"))).toMatch(/"rip":\d+/u);
       expect(textOf(await run("backtrace"))).toContain('"idx":0');
       expect(textOf(await run("break_list"))).toContain("addr");
     }, 20_000);
@@ -369,7 +369,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       expect(after).not.toBe(before);
       expect(
         textOf(await run("read_memory", { addr: "rip", size: 8 }))
-      ).toMatch(/^\[.*\]$/m);
+      ).toMatch(/^\[.*\]$/mu);
     }, 20_000);
 
     test("dump_memory writes live memory to a file in the output dir, with a matching size and sha256", async () => {
@@ -405,7 +405,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       const out = textOf(
         await run("write_register", { reg: "rax", value: "0x1234" })
       );
-      expect(out).toMatch(/rax = 0x0*1234/);
+      expect(out).toMatch(/rax = 0x0*1234/u);
     });
 
     test("write_memory writes bytes to the live process and reads them back", async () => {
@@ -415,12 +415,12 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       expect(out).toContain("deadbeef");
       expect(
         textOf(await run("read_memory", { addr: "rsp", size: 4 }))
-      ).toMatch(/^\[.*\]$/m);
+      ).toMatch(/^\[.*\]$/mu);
     });
 
     test("disassemble returns live instructions as JSON (at the PC by default)", async () => {
       const out = textOf(await run("disassemble", { count: 3 }));
-      expect(out).toMatch(/"opcode"/);
+      expect(out).toMatch(/"opcode"/u);
     });
 
     test("watch_add arms a hardware watchpoint that break_list shows", async () => {
@@ -464,11 +464,11 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       const out = textOf(await run("continue_to_syscall"));
       // It either stops at a syscall (PC line) or reports the resume; never a desync.
       expect(out.length).toBeGreaterThan(0);
-      expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
+      expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/u);
     }, 20_000);
 
     test("registers_telescope resolves registers, and resolve_symbol looks up a loaded symbol", async () => {
-      expect(textOf(await run("registers_telescope"))).toMatch(/rsp|rip|pc/i);
+      expect(textOf(await run("registers_telescope"))).toMatch(/rsp|rip|pc/iu);
       // resolve_symbol returns rizin's lookup (a match or its 'not mapped' note); never a desync.
       expect(
         textOf(await run("resolve_symbol", { name: "write" })).length
@@ -509,14 +509,14 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
             run("break_command", { addr: "main", command: "!id" })
           )
         ).message
-      ).toMatch(/not a read-only on-hit command|not allowed/);
+      ).toMatch(/not a read-only on-hit command|not allowed/u);
       expect(
         (
           await captureError(
             run("break_command", { addr: "main", command: "w hello" })
           )
         ).message
-      ).toMatch(/not a read-only on-hit command|not allowed/);
+      ).toMatch(/not a read-only on-hit command|not allowed/u);
       // debugger control (continue) is refused — on-hit commands log state, they never drive the process
       expect(
         (
@@ -524,7 +524,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
             run("break_command", { addr: "main", command: "dc" })
           )
         ).message
-      ).toMatch(/not a read-only on-hit command/);
+      ).toMatch(/not a read-only on-hit command/u);
       // the register-assign dual (`dr reg=val`) is caught by the `=` guard, not allowed as a bare read
       expect(
         (
@@ -532,7 +532,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
             run("break_command", { addr: "main", command: "dr rax=0" })
           )
         ).message
-      ).toMatch(/would assign\/select/);
+      ).toMatch(/would assign\/select/u);
       // but a vetted debugger-state read the static policy forbids (maps) is allowed here
       expect(
         textOf(await run("break_command", { addr: "main", command: "dmj" }))
@@ -541,12 +541,12 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
 
     test("reverse debugging: record a trace, step forward, then step_back returns to an earlier PC", async () => {
       expect(textOf(await run("trace_start"))).toMatch(
-        /trace session|step backward/i
+        /trace session|step backward/iu
       );
       await run("step", { count: 3 });
       const forward = textOf(await run("registers"));
       const back = textOf(await run("step_back", { count: 2 }));
-      expect(back).toMatch(/0x[0-9a-f]+/);
+      expect(back).toMatch(/0x[0-9a-f]+/u);
       // The PC after stepping back differs from where we were after stepping forward.
       expect(textOf(await run("registers"))).not.toBe(forward);
       await run("trace_stop");
@@ -586,7 +586,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       for (const action of ["heap_arenas", "heap_chunks", "heap_bins"]) {
         expect(textOf(await run(action)).length).toBeGreaterThan(0);
       }
-      expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
+      expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/u);
     }, 20_000);
 
     test("addr is validated like every other tool", async () => {
@@ -639,7 +639,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
       const out = textOf(await run("start", { attach: { pid: victim!.pid } }));
       expect(out).toContain(`attached to PID ${victim!.pid}`);
       expect(out).toContain(DEBUG_LAUNCH_WARNING);
-      expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/);
+      expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/u);
     }, 25_000);
 
     test("attach cannot be combined with run", async () => {

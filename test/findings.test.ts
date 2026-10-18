@@ -261,7 +261,7 @@ describe.skipIf(!canRunLive)(
       await writeFile(join(dir, "v1.c"), src);
       await writeFile(
         join(dir, "v2.c"),
-        src.replace("h * 33u", "h * 31u").replaceAll(/\bfib\b/g, "fibonacci")
+        src.replace("h * 33u", "h * 31u").replaceAll(/\bfib\b/gu, "fibonacci")
       );
       v1 = join(dir, "v1");
       v2 = join(dir, "v2");
@@ -302,7 +302,7 @@ describe.skipIf(!canRunLive)(
       const subagentFinding = {
         addr: "sym.fib",
         claim: "fib computes Fibonacci numbers iteratively.",
-        commands: [{ command: "pdf", addr: "sym.fib" }],
+        commands: [{ addr: "sym.fib", command: "pdf" }],
         confidence: "possible",
         expect_sha256: v1Sha,
         source: "re-analyst",
@@ -425,7 +425,7 @@ describe.skipIf(!canRunLive)(
       });
       const inh = result.inheritance!;
       expect(
-        inh.inherited.map((i) => [i.claim.split(" ")[0], i.status]).sort()
+        inh.inherited.map((i) => [i.claim.split(" ")[0], i.status]).toSorted()
       ).toEqual([
         ["clamp", "holds"],
         ["fib", "relocated"],

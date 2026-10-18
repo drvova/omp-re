@@ -164,7 +164,8 @@ export function parseManifest(text: string): CarryManifest {
     raw = JSON.parse(text);
   } catch (error) {
     throw new Error(
-      `omp-re: carry: manifest is not valid JSON (${error instanceof Error ? error.message : String(error)})`
+      `omp-re: carry: manifest is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error }
     );
   }
   const obj = raw as { binarySha256?: unknown; entries?: unknown } | null;
@@ -189,7 +190,7 @@ export function parseManifest(text: string): CarryManifest {
       args:
         args && typeof args.command === "string"
           ? typeof args.addr === "string" && args.addr
-            ? { command: args.command, addr: args.addr }
+            ? { addr: args.addr, command: args.command }
             : { command: args.command }
           : null,
       binarySha256: str(row.binarySha256),
@@ -302,9 +303,9 @@ export function entryRequest(
   if (!line) {
     return undefined;
   }
-  const match = /^(.*\S)\s+@\s+([^!\s]\S*)$/.exec(line.trim());
+  const match = /^(.*\S)\s+@\s+([^!\s]\S*)$/u.exec(line.trim());
   if (match) {
-    return { command: match[1]!, addr: match[2]! };
+    return { addr: match[2]!, command: match[1]! };
   }
   return { command: line.trim() };
 }
@@ -517,10 +518,10 @@ async function tryRelocated(
   if (same) {
     return {
       command: check.line,
-      status: "relocated",
       detail: `${where}; ${same}`,
       relocation,
-      rerun: { command: request.command, addr: found.addr },
+      rerun: { addr: found.addr, command: request.command },
+      status: "relocated",
     };
   }
   const diff = excerptDiff(entry.canonicalExcerpt ?? "", folded, binaryPath);
@@ -604,8 +605,8 @@ export async function buildCarry(
       evidence.push({
         ...base,
         command: request.command,
-        status: "unchecked",
         detail: `not runnable here: ${error instanceof Error ? error.message : String(error)}`,
+        status: "unchecked",
       });
       continue;
     }
@@ -618,7 +619,8 @@ export async function buildCarry(
       // so look for it before calling it broken. A numeric anchor always "resolves", so it is
       // judged by its output (and relocated by fingerprint below when that output changed).
       const numericAnchor =
-        request.addr !== undefined && /^(0x[0-9a-f]+|\d+)$/i.test(request.addr);
+        request.addr !== undefined &&
+        /^(0x[0-9a-f]+|\d+)$/iu.test(request.addr);
       if (request.addr !== undefined && !numericAnchor) {
         const resolves = await resolveNumericAddr(rz, request.addr).then(
           () => true,
@@ -716,8 +718,8 @@ export async function buildCarry(
       evidence.push({
         ...base,
         command: line,
-        status: "unchecked",
         detail: `re-run failed: ${error instanceof Error ? error.message : String(error)}`,
+        status: "unchecked",
       });
     }
   }
@@ -1030,7 +1032,8 @@ export async function carryManifest(
     text = await readFile(manifestPath, "utf-8");
   } catch (error) {
     throw new Error(
-      `omp-re: carry: could not read manifest ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`
+      `omp-re: carry: could not read manifest ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
   const manifest = parseManifest(text);

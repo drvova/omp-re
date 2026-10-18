@@ -62,7 +62,7 @@ async function readLiveBytes(
     const hex = (
       await dbg.cmd(`p8 ${want} @ ${ea}+${read}`, { signal })
     ).trim();
-    if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length === 0) {
+    if (!/^[0-9a-fA-F]*$/u.test(hex) || hex.length === 0) {
       break;
     } // unmapped / end of readable memory
     const chunk = Buffer.from(hex, "hex");
@@ -80,7 +80,7 @@ async function readLiveBytes(
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
 export function debuggerEnabled(): boolean {
-  return /^(1|true|yes|on)$/i.test(
+  return /^(1|true|yes|on)$/iu.test(
     (process.env.OMPRE_ENABLE_DEBUGGER ?? "").trim()
   );
 }
@@ -201,7 +201,7 @@ function approvalReason(action: DebugAction): string {
 
 /** A register name for `dr <reg>=...`. */
 function validateRegName(reg: string): string {
-  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(reg)) {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(reg)) {
     throw new Error(`omp-re: debug: bad register name ${JSON.stringify(reg)}`);
   }
   return reg;
@@ -209,7 +209,7 @@ function validateRegName(reg: string): string {
 
 /** A register value for `dr <reg>=<value>`: decimal or 0x hex. */
 function validateRegValue(value: string): string {
-  if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/.test(value)) {
+  if (!/^0x[0-9a-fA-F]+$|^[0-9]+$/u.test(value)) {
     throw new Error(
       `omp-re: debug: bad register value ${JSON.stringify(value)} — use decimal or 0x hex`
     );
@@ -219,8 +219,8 @@ function validateRegValue(value: string): string {
 
 /** Hex bytes for `wx <bytes>`: an even-length string of hex digits, no spaces. */
 function validateHexBytes(bytes: string): string {
-  const b = bytes.replaceAll(/\s+/g, "");
-  if (!/^[0-9a-fA-F]+$/.test(b) || b.length % 2 !== 0) {
+  const b = bytes.replaceAll(/\s+/gu, "");
+  if (!/^[0-9a-fA-F]+$/u.test(b) || b.length % 2 !== 0) {
     throw new Error(
       `omp-re: debug: bad hex bytes ${JSON.stringify(bytes)} — an even number of hex digits, e.g. 9090 or 4889e5`
     );
@@ -230,7 +230,7 @@ function validateHexBytes(bytes: string): string {
 
 /** A library or symbol name for `dmi` (allows the dots/versioning of lib names like libc.so.6). */
 function validateSymbolQuery(name: string): string {
-  if (!/^[A-Za-z0-9_.+-]+$/.test(name)) {
+  if (!/^[A-Za-z0-9_.+-]+$/u.test(name)) {
     throw new Error(
       `omp-re: debug: bad symbol/library name ${JSON.stringify(name)}`
     );
@@ -249,7 +249,7 @@ function validateWatchPerm(perm: string | undefined): string {
   return p;
 }
 
-const REMOTE_URI = /^(gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/;
+const REMOTE_URI = /^(gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/u;
 
 /**
  * Turn an `attach` object into the rizin `-d <target>` string: a pid
@@ -333,7 +333,7 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
     throw new Error("omp-re: debug: run must be an object of rz-run settings");
   }
   const clean = (key: string, value: string): string => {
-    if (/[\r\n]/.test(value)) {
+    if (/[\r\n]/u.test(value)) {
       throw new Error(`omp-re: debug: run.${key} must not contain line breaks`);
     }
     return value;
@@ -359,21 +359,22 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
           throw new Error("omp-re: debug: run.env must be an object");
         }
         for (const [k, v] of Object.entries(raw)) {
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(k)) {
             throw new Error(
               `omp-re: debug: run.env: bad variable name ${JSON.stringify(k)}`
             );
           }
           if (typeof v !== "string") {
-            throw new Error(`omp-re: debug: run.env.${k} must be a string`);
+            throw new TypeError(`omp-re: debug: run.env.${k} must be a string`);
           }
           directives.push(`setenv=${k}=${clean(key, v)}`);
         }
         break;
       }
       case "cwd": {
-        if (typeof raw !== "string")
-          throw new Error("omp-re: debug: run.cwd must be a string");
+        if (typeof raw !== "string") {
+          throw new TypeError("omp-re: debug: run.cwd must be a string");
+        }
         directives.push(`chdir=${clean(key, raw)}`);
         break;
       }
@@ -381,7 +382,7 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
       case "stdout":
       case "stderr": {
         if (typeof raw !== "string") {
-          throw new Error(`omp-re: debug: run.${key} must be a file path`);
+          throw new TypeError(`omp-re: debug: run.${key} must be a file path`);
         }
         if (raw.startsWith("!")) {
           throw new Error(
@@ -393,7 +394,7 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
       }
       case "input": {
         if (typeof raw !== "string") {
-          throw new Error("omp-re: debug: run.input must be a string");
+          throw new TypeError("omp-re: debug: run.input must be a string");
         }
         if (raw.length > 65_536) {
           throw new Error("omp-re: debug: run.input is limited to 64 KiB");
@@ -403,7 +404,7 @@ export function buildRunDirectives(run?: unknown): string[] | undefined {
       }
       case "aslr": {
         if (typeof raw !== "boolean") {
-          throw new Error("omp-re: debug: run.aslr must be true or false");
+          throw new TypeError("omp-re: debug: run.aslr must be true or false");
         }
         directives.push(`aslr=${raw ? "yes" : "no"}`);
         break;
@@ -534,14 +535,32 @@ export function registerDebugTools(pi: ExtensionAPI): void {
           .array(z.string())
           .optional()
           .describe("Program arguments (arg0..argN)."),
-        env: z
-          .record(z.string(), z.string())
+        aslr: z
+          .boolean()
           .optional()
-          .describe("Environment variables for the debuggee."),
+          .describe("Enable or disable ASLR for the debuggee."),
         cwd: z
           .string()
           .optional()
           .describe("Working directory for the debuggee."),
+        env: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Environment variables for the debuggee."),
+        input: z
+          .string()
+          .optional()
+          .describe("String passed to the debuggee via stdin."),
+        maxfd: z
+          .number()
+          .optional()
+          .describe("Maximum number of file descriptors."),
+        maxproc: z.number().optional().describe("Maximum number of processes."),
+        maxstack: z.number().optional().describe("Maximum stack size (bytes)."),
+        stderr: z
+          .string()
+          .optional()
+          .describe("File to write the debuggee's stderr to."),
         stdin: z
           .string()
           .optional()
@@ -550,24 +569,6 @@ export function registerDebugTools(pi: ExtensionAPI): void {
           .string()
           .optional()
           .describe("File to write the debuggee's stdout to."),
-        stderr: z
-          .string()
-          .optional()
-          .describe("File to write the debuggee's stderr to."),
-        input: z
-          .string()
-          .optional()
-          .describe("String passed to the debuggee via stdin."),
-        aslr: z
-          .boolean()
-          .optional()
-          .describe("Enable or disable ASLR for the debuggee."),
-        maxstack: z.number().optional().describe("Maximum stack size (bytes)."),
-        maxfd: z
-          .number()
-          .optional()
-          .describe("Maximum number of file descriptors."),
-        maxproc: z.number().optional().describe("Maximum number of processes."),
         timeout: z
           .number()
           .optional()
@@ -611,14 +612,14 @@ export function registerDebugTools(pi: ExtensionAPI): void {
         const { pid, remote } = record.attach;
         if (typeof pid === "number") {
           return {
-            tier: "exec",
             reason: `Attach the debugger to running PID ${pid} — it will control that process.`,
+            tier: "exec",
           };
         }
         if (typeof remote === "string") {
           return {
-            tier: "exec",
             reason: `Connect the debugger to the remote target ${JSON.stringify(remote)}.`,
+            tier: "exec",
           };
         }
       }
@@ -657,7 +658,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
         }); // the debug process is a revertible effect on the session scope
         const pc = await programCounter(dbg, signal);
         if (debugTarget !== undefined) {
-          const how = /^\d+$/.test(debugTarget)
+          const how = /^\d+$/u.test(debugTarget)
             ? `attached to PID ${debugTarget}`
             : `connected to ${debugTarget}`;
           return textResult(
@@ -681,7 +682,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
         const { dbg } = getState(ctx);
         if (dbg && !dbg.isClosed) {
           try {
-            await dbg.cmd("dk 9", { signal, timeoutMs: 5_000 });
+            await dbg.cmd("dk 9", { signal, timeoutMs: 5000 });
           } catch {
             // Best effort: disposing the effect below kills the debuggee regardless.
           }
@@ -907,7 +908,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
           const base = (await dbg.cmd(`?v ${ea}`, { signal })).trim() || ea;
           const name =
             params.file === undefined
-              ? `dump_${base.replace(/^0x/, "")}_${size}.bin`
+              ? `dump_${base.replace(/^0x/u, "")}_${size}.bin`
               : params.file;
           const path = await prepareOutputPath(name); // validates the basename; throws before any read on a bad name
           const bytes = await readLiveBytes(dbg, ea, size, signal);
@@ -1218,7 +1219,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
           // `dmhgd [<bin_type>]`: all bins, or one of tcache/fast/unsorted/small/large via `bin` (reuses addr as the bin selector).
           const bin =
             params.addr !== undefined &&
-            /^(tcache|fast|unsorted|small|large)$/.test(params.addr)
+            /^(tcache|fast|unsorted|small|large)$/u.test(params.addr)
               ? ` ${params.addr}`
               : "";
           const out = (await dbg.cmd(`dmhgd${bin}`, { signal })).trim();

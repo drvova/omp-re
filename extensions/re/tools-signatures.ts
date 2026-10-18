@@ -143,7 +143,7 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
       const rz = await ensureRizin(ctx, { signal });
       const binaryPath = requireBinary(getState(ctx));
       const requested = params.file ?? `${basename(binaryPath)}.pat`;
-      const name = /\.(pat|sig)$/i.test(requested)
+      const name = /\.(pat|sig)$/iu.test(requested)
         ? requested
         : `${requested}.pat`;
       const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin

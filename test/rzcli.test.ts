@@ -190,7 +190,7 @@ describe.skipIf(!canRunRizin || !isRzToolAvailable("rz-bin"))(
         await run("rz-hash", ["-a", "sha256", BINARY_PLACEHOLDER])
       );
       expect(out).toContain(TEST_BINARY);
-      expect(out).toMatch(/sha256: [0-9a-f]{64}/);
+      expect(out).toMatch(/sha256: [0-9a-f]{64}/u);
     });
 
     test("rz-asm disassembles a hexpair string", async () => {

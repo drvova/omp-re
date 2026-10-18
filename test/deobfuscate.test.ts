@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
+import { RzSession } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import {
   deobfuscateCommand,
@@ -21,7 +21,6 @@ import {
   makeHarness,
   rizinPath,
   rmDirSafe,
-  TEST_BINARY,
   textOf,
 } from "./helpers.ts";
 
@@ -120,7 +119,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
     // The write cache was reset: the raw (still-xored) bytes are back.
     expect((await rz.cmd("p8 24 @ 0x10")).trim()).toBe(before);
     // And nothing was committed to the write cache.
-    expect((await rz.cmd("wcj")).trim()).toMatch(/^\[\]$|^$/);
+    expect((await rz.cmd("wcj")).trim()).toMatch(/^\[\]$|^$/u);
   });
 
   test("a bad size is rejected before any transform", async () => {
@@ -131,7 +130,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
     expect(
       (
         await captureError(
-          run({ addr: "0x10", key: "5a", op: "xor", size: 99999999 })
+          run({ addr: "0x10", key: "5a", op: "xor", size: 99_999_999 })
         )
       ).message
     ).toContain("size must be an integer");

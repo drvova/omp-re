@@ -159,7 +159,8 @@ export async function binaryFacts(ctx: ExtensionContext): Promise<BinaryFacts> {
     facts.prot = prot;
   }
   facts.size = info?.core?.size ?? null;
-  facts.entry = entry == null ? null : eaFromOffset(entry);
+  facts.entry =
+    entry === null || entry === undefined ? null : eaFromOffset(entry);
   return facts;
 }
 
@@ -174,7 +175,7 @@ function formatSize(bytes: number): string {
     value /= 1024;
     unitIndex++;
   }
-  return `${value.toFixed(1).replace(/\.0$/, "")}${units[unitIndex]}`;
+  return `${value.toFixed(1).replace(/\.0$/u, "")}${units[unitIndex]}`;
 }
 
 function renderBand(f: BinaryFacts, theme: Theme, width: number): string[] {
@@ -183,7 +184,7 @@ function renderBand(f: BinaryFacts, theme: Theme, width: number): string[] {
     f.name,
     info,
     f.entry ? `entry ${f.entry}` : null,
-    f.size == null ? null : formatSize(f.size),
+    f.size === null ? null : formatSize(f.size),
     f.prot.join(",") || null,
   ].filter(Boolean);
   const line1 = theme.fg("accent", groups.join("  "));
@@ -265,7 +266,7 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
     );
     sl.onSelect = async (item) => {
       if ((await opts.onChoose?.(item)) !== "keep") {
-        opts.done(undefined);
+        opts.done();
       }
     };
     sl.onCancel = () => opts.done();
@@ -275,15 +276,15 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
   return {
     handleInput(data: string) {
       if (matchesKey(data, "escape")) {
-        if (filter !== "") {
+        if (filter === "") {
+          opts.done(undefined);
+        } else {
           filter = "";
           selectList = buildSelectList();
-        } else {
-          opts.done(undefined);
         }
         return;
       }
-      if (data === "\x7f" || data === "\b") {
+      if (data === "\u007F" || data === "\b") {
         filter = filter.slice(0, -1);
         selectList = buildSelectList();
         return;
@@ -300,9 +301,9 @@ function makePickerPanel(theme: Theme, opts: PickerOptions): Component {
     },
     render(width: number): string[] {
       const filterLine =
-        filter !== ""
-          ? `${theme.fg("dim", "/")}${filter}`
-          : theme.fg("dim", "(type to filter)");
+        filter === ""
+          ? theme.fg("dim", "(type to filter)")
+          : `${theme.fg("dim", "/")}${filter}`;
       const count = theme.fg("dim", ` ${allItems.length}`);
       const lines = [
         theme.fg("accent", opts.title) + count,
@@ -332,7 +333,7 @@ async function showPanel(
     ctx.ui.notify(`${opts.title}\n${body}`.slice(0, 4000), "info");
     return;
   }
-  await ctx.ui.custom<undefined>(
+  await ctx.ui.custom<void>(
     (_tui, theme, _keybindings, done) =>
       makePickerPanel(theme, { ...opts, done }),
     { overlay: true }
@@ -359,7 +360,7 @@ export async function showFunctionsPanel(ctx: ExtensionContext): Promise<void> {
     const value = eaFromOffset(addr);
     return [
       {
-        description: fn.size !== undefined ? `${value} · ${fn.size}b` : value,
+        description: fn.size === undefined ? value : `${value} · ${fn.size}b`,
         label: fn.name,
         value,
       },
@@ -394,7 +395,7 @@ function makeCodeView(opts: {
   onToggle: () => boolean;
   onXrefs: () => void;
   onAsk: () => void;
-  done: (result: undefined) => void;
+  done: (result?: undefined) => void;
 }): Component {
   let mode: CodeViewMode = "disasm";
   let offset = 0;
@@ -413,7 +414,7 @@ function makeCodeView(opts: {
   return {
     handleInput(data: string) {
       if (matchesKey(data, "escape")) {
-        opts.done(undefined);
+        opts.done();
         return;
       }
       if (data === "d") {
@@ -432,13 +433,17 @@ function makeCodeView(opts: {
         return;
       }
       const kb = opts.keybindings;
-      if (kb.matches(data, "tui.select.up")) offset -= 1;
-      else if (kb.matches(data, "tui.select.down")) offset += 1;
-      else if (kb.matches(data, "tui.select.pageUp"))
+      if (kb.matches(data, "tui.select.up")) {
+        offset -= 1;
+      } else if (kb.matches(data, "tui.select.down")) {
+        offset += 1;
+      } else if (kb.matches(data, "tui.select.pageUp")) {
         offset -= MAX_VISIBLE_ROWS;
-      else if (kb.matches(data, "tui.select.pageDown"))
+      } else if (kb.matches(data, "tui.select.pageDown")) {
         offset += MAX_VISIBLE_ROWS;
-      else return;
+      } else {
+        return;
+      }
       clamp();
     },
     invalidate() {},
@@ -553,7 +558,7 @@ export async function showCodeView(
     });
   }
 
-  await ctx.ui.custom<undefined>(
+  await ctx.ui.custom<void>(
     (_tui, theme, keybindings, done) => {
       let decompileLines: string[] | null = null;
       let decompileLabel = "decompile";
@@ -579,7 +584,7 @@ export async function showCodeView(
           ctx.ui.setEditorText(
             `Analyze function ${name ?? addr} at ${addr}. Use the RE tools to gather evidence first; report only what the evidence supports.`
           );
-          done(undefined);
+          done();
         },
         onToggle: () => {
           if (!decompileLines) {
@@ -658,7 +663,9 @@ export async function showEvidencePanel(
     items,
     onChoose: (item) => {
       const match = all.find((e) => e.id === item.value);
-      if (!match) return "keep" as const;
+      if (!match) {
+        return "keep" as const;
+      }
       // Close the panel and prefill a citation: a notify raised under an open overlay can render underneath it.
       citeEvidence(ctx, match);
       return "close" as const;
@@ -712,13 +719,13 @@ export async function showStringsPanel(ctx: ExtensionContext): Promise<void> {
         return "keep" as const;
       }
       await showPanel(ctx, {
-        title: `omp-re: xrefs to ${JSON.stringify(item.label.slice(0, 40))}`,
+        hint: "enter open · esc back",
         items: await labelXrefs(rz, rows),
         onChoose: async (xref) => {
           await showCodeView(ctx, xref.value, xref.label);
           return "keep" as const;
         },
-        hint: "enter open · esc back",
+        title: `omp-re: xrefs to ${JSON.stringify(item.label.slice(0, 40))}`,
       });
       return "keep" as const;
     },
@@ -760,13 +767,13 @@ export async function showImportsPanel(ctx: ExtensionContext): Promise<void> {
         return "keep" as const;
       }
       await showPanel(ctx, {
-        title: `omp-re: callers of ${item.label}`,
+        hint: "enter open · esc back",
         items: await labelXrefs(rz, rows),
         onChoose: async (xref) => {
           await showCodeView(ctx, xref.value, xref.label);
           return "keep" as const;
         },
-        hint: "enter open · esc back",
+        title: `omp-re: callers of ${item.label}`,
       });
       return "keep" as const;
     },
@@ -831,13 +838,15 @@ export async function showFindingsPanel(
   await showPanel(ctx, {
     hint: "enter discuss · type to filter · esc close",
     items: all.map((f) => ({
-      value: f.id,
-      label: `[${f.id.slice(0, 8)}] ${f.claim}`,
       description: `${f.confidence}${f.inherited ? " · inherited" : ""}${f.addr ? ` · ${f.addr}` : ""}`,
+      label: `[${f.id.slice(0, 8)}] ${f.claim}`,
+      value: f.id,
     })),
     onChoose: (item) => {
       const match = all.find((f) => f.id === item.value);
-      if (!match) return "keep" as const;
+      if (!match) {
+        return "keep" as const;
+      }
       ctx.ui.setEditorText(`Re: ${detail(match)}\n\n`);
       return "close" as const;
     },

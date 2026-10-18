@@ -80,34 +80,37 @@ function callLine(
 
 /** Split the content text into the header the details recorded and the body below it. */
 function splitBody(
-  text: string,
+  content: string,
   details: ReToolDetails | undefined
 ): { header: string; body: string } {
-  const header = details?.header ?? text.split("\n")[0] ?? "";
-  if (text.startsWith(`${header}\n`)) {
-    return { header, body: text.slice(header.length + 1) };
+  const header = details?.header ?? content.split("\n")[0] ?? "";
+  if (content.startsWith(`${header}\n`)) {
+    return { body: content.slice(header.length + 1), header };
   }
-  if (text.startsWith(header)) {
-    return { header, body: text.slice(header.length).replace(/^\s*\n?/, "") };
+  if (content.startsWith(header)) {
+    return {
+      body: content.slice(header.length).replace(/^\s*\n?/u, ""),
+      header,
+    };
   }
-  const nl = text.indexOf("\n");
+  const nl = content.indexOf("\n");
   return nl === -1
-    ? { body: "", header: text }
-    : { body: text.slice(nl + 1), header: text.slice(0, nl) };
+    ? { body: "", header: content }
+    : { body: content.slice(nl + 1), header: content.slice(0, nl) };
 }
 
 /** omp's highlighter, degrading to plain lines: a renderer must never be the thing that breaks the transcript. */
-function highlighted(code: string, lang: string, theme: Theme): string[] {
+function highlighted(source: string, lang: string, theme: Theme): string[] {
   try {
-    return highlightCode(code, lang, theme);
+    return highlightCode(source, lang, theme);
   } catch {
-    return code.split("\n").map((line) => theme.fg("toolOutput", line));
+    return source.split("\n").map((line) => theme.fg("toolOutput", line));
   }
 }
 
 /** Drop the trailing truncation/artifact notice; the header meta already says so. */
 function withoutNotice(body: string): string {
-  return body.replace(/\n\n\[Output truncated:[^\n]*\]$/, "");
+  return body.replace(/\n\n\[Output truncated:[^\n]*\]$/u, "");
 }
 
 function bodyLines(
@@ -155,7 +158,7 @@ function nativeBody(
   details: ReToolDetails | undefined
 ) {
   if (style === "none" || body.trim() === "") {
-    return undefined;
+    return;
   }
   const source = withoutNotice(body);
   if (
@@ -175,7 +178,7 @@ function nativeBody(
 export function reRenderers(spec: RenderSpec) {
   return {
     describeCall(args: RenderArgs): NativeToolView {
-      return { tool: nativeHead(spec, args), inline: true };
+      return { inline: true, tool: nativeHead(spec, args) };
     },
 
     describeResult(
@@ -187,10 +190,10 @@ export function reRenderers(spec: RenderSpec) {
       if (options.isPartial) {
         const progress = textContent || `${spec.title}…`;
         return {
+          inline: true,
           tool: nativeHead(spec, args, [
             [span(progress, "muted", { fx: "shimmer" })],
           ]),
-          inline: true,
         };
       }
       if (result.isError) {
@@ -201,15 +204,15 @@ export function reRenderers(spec: RenderSpec) {
             ? `${first.slice(0, ERROR_GIST_CHARS - 1)}…`
             : first;
         return {
-          tool: nativeHead(spec, args, [[span(`— ${gist}`, "muted")]]),
-          tone: "error",
           inline: true,
+          tone: "error",
+          tool: nativeHead(spec, args, [[span(`— ${gist}`, "muted")]]),
           ...(gist === full
             ? {}
             : { body: [text([span(full, "error")], { wrap: "word" })] }),
         };
       }
-      const details = result.details;
+      const { details } = result;
       const { header, body } = splitBody(textContent, details);
       const meta = [
         header,
@@ -224,13 +227,13 @@ export function reRenderers(spec: RenderSpec) {
       const node = nativeBody(spec.body, body, details);
       return node
         ? {
-            tool: nativeHead(spec, args, meta),
             body: [node],
+            tool: nativeHead(spec, args, meta),
             ...(details?.decompiler === "disasm"
               ? { tone: "warning" as const }
               : {}),
           }
-        : { tool: nativeHead(spec, args, meta), inline: true };
+        : { inline: true, tool: nativeHead(spec, args, meta) };
     },
 
     renderCall(
@@ -247,7 +250,7 @@ export function reRenderers(spec: RenderSpec) {
       theme: Theme,
       args?: RenderArgs
     ): Component {
-      const text = firstText(result);
+      const resultText = firstText(result);
       if (options.isPartial) {
         const frames = theme.spinnerFrames;
         const spinner =
@@ -255,13 +258,13 @@ export function reRenderers(spec: RenderSpec) {
             ? frames[options.spinnerFrame % frames.length]
             : theme.styledSymbol("status.running", "accent");
         return new Text(
-          `${spinner} ${theme.fg("muted", text || `${spec.title}…`)}`,
+          `${spinner} ${theme.fg("muted", resultText || `${spec.title}…`)}`,
           0,
           0
         );
       }
       if (result.isError) {
-        const message = text.split("\n")[0] || "failed";
+        const message = resultText.split("\n")[0] || "failed";
         return new Text(
           `${theme.styledSymbol("status.error", "error")} ${theme.fg("error", message)}`,
           0,
@@ -269,14 +272,18 @@ export function reRenderers(spec: RenderSpec) {
         );
       }
 
-      const details = result.details;
-      const { header, body } = splitBody(text, details);
+      const { details } = result;
+      const { header, body } = splitBody(resultText, details);
       const meta: string[] = [];
-      if (details?.decompiler === "disasm")
+      if (details?.decompiler === "disasm") {
         meta.push(theme.fg("warning", "disassembly only"));
-      if (details?.truncated) meta.push(theme.fg("warning", "truncated"));
-      if (details?.artifactId)
+      }
+      if (details?.truncated) {
+        meta.push(theme.fg("warning", "truncated"));
+      }
+      if (details?.artifactId) {
         meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
+      }
       const subject = spec.subject ? args?.[spec.subject] : undefined;
       const headLine = [
         theme.styledSymbol("status.success", "success"),
@@ -296,13 +303,14 @@ export function reRenderers(spec: RenderSpec) {
       const shown = lines.slice(0, limit);
       const out = [headLine, ...shown];
       const hidden = lines.length - shown.length;
-      if (hidden > 0)
+      if (hidden > 0) {
         out.push(
           theme.fg(
             "dim",
             `… ${hidden} more line${hidden === 1 ? "" : "s"}${options.expanded ? "" : " (expand to show)"}`
           )
         );
+      }
       return new Text(out.join("\n"), 0, 0);
     },
   };

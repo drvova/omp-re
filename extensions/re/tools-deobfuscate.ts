@@ -46,8 +46,8 @@ const OPS = [
   "decrypt",
 ] as const;
 
-const HEX = /^[0-9a-fA-F]+$/;
-const ALGO = /^[a-z0-9][a-z0-9-]*$/i;
+const HEX = /^[0-9a-fA-F]+$/u;
+const ALGO = /^[a-z0-9][a-z0-9-]*$/iu;
 const MAX_SIZE = 65_536;
 
 function hexArg(key: string, value: string | undefined): string {
@@ -56,7 +56,7 @@ function hexArg(key: string, value: string | undefined): string {
       `omp-re: deobfuscate: ${key} is required (hex bytes, e.g. deadbeef)`
     );
   }
-  const h = value.replaceAll(/\s+/g, "");
+  const h = value.replaceAll(/\s+/gu, "");
   if (!HEX.test(h) || h.length % 2 !== 0) {
     throw new Error(
       `omp-re: deobfuscate: ${key} must be an even number of hex digits (got ${JSON.stringify(value)})`

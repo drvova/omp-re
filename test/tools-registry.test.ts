@@ -651,8 +651,8 @@ describe.skipIf(!canRunRizin)(
           eaFromOffset(ground.nodes.find((n) => n.id === id)!.offset)
         );
         expect(
-          rows.find((r) => r.ea === eaFromOffset(entry.offset))?.to.sort()
-        ).toEqual(expectedTo.sort());
+          rows.find((r) => r.ea === eaFromOffset(entry.offset))?.to.toSorted()
+        ).toEqual(expectedTo.toSorted());
       });
 
       test("callgraph works and function_cfg without addr is rejected before rizin", async () => {
@@ -668,7 +668,7 @@ describe.skipIf(!canRunRizin)(
 
     describe("long output", () => {
       test("get_function on a large function spills to a session artifact when truncated", async () => {
-        const biggest = [...groundFns].sort((a, b) => b.size - a.size)[0]!;
+        const biggest = [...groundFns].toSorted((a, b) => b.size - a.size)[0]!;
         const result = await run("get_function", {
           target: eaFromOffset(addrOf(biggest)!),
         });
@@ -833,7 +833,7 @@ describe("reRenderers", () => {
     expect(JSON.stringify(fallback.tool?.meta)).toContain("disassembly only");
     expect(JSON.stringify(fallback.tool?.meta)).toContain("artifact://2");
     expect(
-      (fallback.body?.[0] as { p?: { lang?: string } }).p?.lang
+      (fallback.body?.[0] as { p?: { lang?: string } } | undefined)?.p?.lang
     ).toBeUndefined();
   });
 

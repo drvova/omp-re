@@ -57,18 +57,18 @@ function makeUi(notes: string[], editor: { text: string }) {
   return {
     addAutocompleteProvider: noop,
     confirm: async () => true,
-    custom: async () => undefined,
-    editor: async () => undefined,
+    custom: async () => {},
+    editor: async () => {},
     getAllThemes: async () => [],
     getEditorText: () => editor.text,
-    getTheme: async () => undefined,
+    getTheme: async () => {},
     getToolsExpanded: () => false,
-    input: async () => undefined,
+    input: async () => {},
     notify: (message: string, type?: string) =>
       notes.push(`[${type ?? "info"}] ${message}`),
     onTerminalInput: () => noop,
     pasteToEditor: noop,
-    select: async () => undefined,
+    select: async () => {},
     setEditorComponent: noop,
     setEditorText: (text: string) => {
       editor.text = text;
@@ -147,8 +147,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
     for (const name of ALWAYS_REGISTERED) {
       expect(h.session.getToolByName(name)).toBeDefined();
     }
-    expect(activeRe(h.session).sort()).toEqual(
-      expect.arrayContaining(ALWAYS_REGISTERED.sort())
+    expect(activeRe(h.session).toSorted()).toEqual(
+      expect.arrayContaining(ALWAYS_REGISTERED.toSorted())
     );
   });
 
@@ -156,8 +156,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
     await h.session.prompt("/re off");
     expect(activeRe(h.session)).toEqual([]);
     await h.session.prompt("/re on");
-    expect(activeRe(h.session).sort()).toEqual(
-      expect.arrayContaining(ALWAYS_REGISTERED.sort())
+    expect(activeRe(h.session).toSorted()).toEqual(
+      expect.arrayContaining(ALWAYS_REGISTERED.toSorted())
     );
     expect(h.notes.at(-1)).toBe(
       "[info] omp-re: RE tools enabled for this session"

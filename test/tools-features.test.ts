@@ -38,14 +38,14 @@ function stubRz(replies: Record<string, string>) {
         : { output: reply, stderr: "" }
     );
   };
-  return { ran, rz: { cmd, cmdj, cmdWithStderr } as unknown as RzSession };
+  return { ran, rz: { cmd, cmdWithStderr, cmdj } as unknown as RzSession };
 }
 
 describe("searchCommand", () => {
   test("maps /xj hit rows to ea/size/flag rows", async () => {
     const { rz } = stubRz({
       "/xj 686173683a": JSON.stringify([
-        { address: 5368737792, flag: "hit.bytes.0", size: 5 },
+        { address: 5_368_737_792, flag: "hit.bytes.0", size: 5 },
       ]),
     });
     const result = await searchCommand(
@@ -70,7 +70,7 @@ describe("searchCommand", () => {
 
   test("paginates hit lists with a total in the header", async () => {
     const hits = Array.from({ length: 5 }, (_, i) => ({
-      address: 0x140000000 + i * 8,
+      address: 0x1_40_00_00_00 + i * 8,
       flag: `hit${i}`,
       size: 4,
     }));
@@ -103,7 +103,7 @@ describe("validateSearchArg (search-argument injection guard)", () => {
       "a\\b",
     ]) {
       expect(() => validateSearchArg("search_regex_bytes", bad)).toThrow(
-        /not allowed in a search argument/
+        /not allowed in a search argument/u
       );
     }
   });
@@ -125,9 +125,9 @@ describe("validateSearchArg (search-argument injection guard)", () => {
 describe("scopedSearch", () => {
   test("scopes a search to a function's bounds and restores the prior scope", async () => {
     const { rz, ran } = stubRz({
-      "/xj 90": JSON.stringify([{ address: 0x1100, size: 1, flag: "hit" }]),
+      "/xj 90": JSON.stringify([{ address: 0x11_00, flag: "hit", size: 1 }]),
       "afij @ main": JSON.stringify([
-        { name: "main", minbound: 0x1000, maxbound: 0x1200 },
+        { maxbound: 0x12_00, minbound: 0x10_00, name: "main" },
       ]),
       "e search.from": "0",
       "e search.in": "io.maps",
@@ -163,7 +163,7 @@ describe("scopedSearch", () => {
       ran.push(command);
       if (command === "afij @ main") {
         return Promise.resolve([
-          { name: "main", minbound: 0x1000, maxbound: 0x1200 },
+          { maxbound: 0x12_00, minbound: 0x10_00, name: "main" },
         ] as never);
       }
       throw new Error("boom");
@@ -238,8 +238,7 @@ describe("defineTypeLines", () => {
   });
 
   test("surfaces rizin stderr for rejected definitions", async () => {
-    const { rz } = stubRz({ "td bogus;": "" });
-    // The stub replies by exact command; emulate stderr via a rejected parse: use output channel only here.
+    // Emulate stderr via a rejected parse: the inline session below answers on the output channel only.
     const result = await defineTypeLines(
       {
         cmd: () => Promise.resolve(""),
@@ -319,7 +318,7 @@ describe("search_asm", () => {
   test("assembles text and runs /aj", async () => {
     const { rz } = stubRz({
       "/aj push rbp": JSON.stringify([
-        { address: 5368713524, flag: "hit.asm_text.0", size: 1 },
+        { address: 5_368_713_524, flag: "hit.asm_text.0", size: 1 },
       ]),
     });
     const result = await searchCommand(rz, "/aj push rbp", "asm hits", {});
@@ -333,13 +332,20 @@ describe("searchGadgets", () => {
     const ran: string[] = [];
     const nativeJson = JSON.stringify([
       {
-        opcodes: [{ offset: 5368713216, opcode: "ret", size: 1, type: "ret" }],
+        opcodes: [
+          { offset: 5_368_713_216, opcode: "ret", size: 1, type: "ret" },
+        ],
         retaddr: 5_368_713_216,
         size: 1,
       },
       {
         opcodes: [
-          { offset: 5368713220, opcode: "pop rdi; ret", size: 2, type: "pop" },
+          {
+            offset: 5_368_713_220,
+            opcode: "pop rdi; ret",
+            size: 2,
+            type: "pop",
+          },
         ],
         retaddr: 5_368_713_220,
         size: 2,

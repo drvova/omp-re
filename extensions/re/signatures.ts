@@ -32,7 +32,7 @@ export function signatureApplyCommand(path: string): string {
 
 /** rizin's `Fs` prints `Found <n> FLIRT signatures via <path>`; pull out the count for a verifiable result. */
 export function parseAppliedCount(output: string): number | undefined {
-  const m = /Found\s+(\d+)\s+FLIRT signatures?/i.exec(output);
+  const m = /Found\s+(\d+)\s+FLIRT signatures?/iu.exec(output);
   return m ? Number(m[1]) : undefined;
 }
 

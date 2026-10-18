@@ -66,7 +66,7 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
     };
     const a = approval({ addr: "0x50000", path: blob });
     expect(a.tier).toBe("exec");
-    expect(a.reason).toMatch(/not modified|read-only/);
+    expect(a.reason).toMatch(/not modified|read-only/u);
   });
 
   test("maps the file, independently readable at the address, and records it for replay", async () => {

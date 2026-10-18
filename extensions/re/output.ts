@@ -47,7 +47,7 @@ export function toRizinPath(path: string): string {
  * {@link safeBasename} besides.)
  */
 function assertRizinSafePath(path: string): void {
-  if (/[\r\n\0]/.test(path)) {
+  if (/[\r\n\0]/u.test(path)) {
     throw new Error(
       `omp-re: the output path ${JSON.stringify(path)} contains a line break or NUL`
     );
@@ -71,7 +71,7 @@ export function safeBasename(name: string): string {
     throw new Error(`omp-re: invalid output filename ${JSON.stringify(name)}`);
   }
   if (
-    !/^[A-Za-z0-9._-]+$/.test(trimmed) ||
+    !/^[A-Za-z0-9._-]+$/u.test(trimmed) ||
     trimmed.includes("..") ||
     isAbsolute(trimmed)
   ) {

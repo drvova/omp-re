@@ -549,7 +549,7 @@ function registerShell(pi: ExtensionAPI): void {
     const idPrefix = prefix.slice(space + 1).trim();
     try {
       const matches = evidenceRecords(latestCtx)
-        .reverse()
+        .toReversed()
         .filter((e) => e.id.startsWith(idPrefix))
         .slice(0, 50)
         .map((e) => ({
@@ -587,7 +587,7 @@ function registerShell(pi: ExtensionAPI): void {
     getArgumentCompletions: completeArguments,
     handler: async (args, ctx) => {
       latestCtx = ctx;
-      const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+      const [sub, ...rest] = args.trim().split(/\s+/u).filter(Boolean);
       try {
         switch (sub) {
           case "open": {

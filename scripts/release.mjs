@@ -27,8 +27,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
 const PKG = join(ROOT, "package.json");
@@ -53,18 +52,18 @@ function gitLog(...revArgs) {
     }
   );
   return out
-    .split("\x1E")
+    .split("\u001E")
     .map((e) => e.trim())
     .filter(Boolean)
     .map((e) => {
-      const sep = e.indexOf("\x1F");
+      const sep = e.indexOf("\u001F");
       return { hash: e.slice(0, sep), message: e.slice(sep + 1) };
     });
 }
 
 /** Resolve the commit range to inspect, tolerating a missing/zero/invalid base. */
 function resolveCommits() {
-  const isZero = (s) => !s || /^0+$/.test(s);
+  const isZero = (s) => !s || /^0+$/u.test(s);
   if (!isZero(base)) {
     try {
       return gitLog(`${base}..${head}`);
@@ -90,13 +89,13 @@ function resolveCommits() {
   return gitLog(head, "-1");
 }
 
-const TYPE_RE = /^([a-zA-Z]+)(?:\([^)]*\))?(!)?:/;
+const TYPE_RE = /^([a-zA-Z]+)(?:\([^)]*\))?(!)?:/u;
 
 /** The release level a single commit implies, or "none". */
 function levelOf(message) {
   const subject = message.split("\n")[0].trim();
   const m = TYPE_RE.exec(subject);
-  const breakingFooter = /(^|\n)BREAKING[ -]CHANGE:/.test(message);
+  const breakingFooter = /(^|\n)BREAKING[ -]CHANGE:/u.test(message);
   if ((m && m[2] === "!") || breakingFooter) {
     return "major";
   }
@@ -144,7 +143,7 @@ function bump(version, level) {
 /** Replace the first `"version": "..."` value in a raw JSON string. */
 function setJsonVersion(raw, next) {
   let done = false;
-  const out = raw.replace(/("version":\s*")[^"]*(")/, (_, pre, post) => {
+  const out = raw.replace(/("version":\s*")[^"]*(")/u, (_, pre, post) => {
     done = true;
     return `${pre}${next}${post}`;
   });
@@ -225,7 +224,7 @@ if (changelog.includes("## [Unreleased]")) {
   writeFileSync(
     CHANGELOG,
     changelog.replace(
-      /## \[Unreleased\]\n/,
+      /## \[Unreleased\]\n/u,
       `## [Unreleased]\n\n## [${next}] - ${date}\n`
     )
   );

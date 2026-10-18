@@ -90,13 +90,13 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
   test("source 'sigdb' re-applies the built-in database and reports the function count", async () => {
     const result = await run({ source: "sigdb" });
     expect(textOf(result)).toMatch(
-      /Re-applied the built-in signature database\. Functions: \d+ before, \d+ after\./
+      /Re-applied the built-in signature database\. Functions: \d+ before, \d+ after\./u
     );
   });
 
   test("source 'file' applies a custom .pat, is recorded, and creates rizin's flirt flag", async () => {
     const result = await run({ path: pat, source: "file" });
-    expect(textOf(result)).toMatch(/Applied \d+ FLIRT signature\(s\)/);
+    expect(textOf(result)).toMatch(/Applied \d+ FLIRT signature\(s\)/u);
     expect(await flirtFlagExists()).toBe(true);
     // Recorded for replay, scoped to this binary.
     expect(recordedSignatures(entries as never, binaryPath)).toContain(pat);
@@ -148,7 +148,7 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
     const result = textOf(await run({ file: "fixture" })); // `.pat` appended
     const path = join(outDir, "fixture.pat");
     expect(result).toContain(path);
-    expect(result).toMatch(/wrote \d+ function signature\(s\)/);
+    expect(result).toMatch(/wrote \d+ function signature\(s\)/u);
     const made = readFileSync(path, "utf-8");
     expect(made.length).toBeGreaterThan(0);
     // The created file is a real FLIRT signature: applying it to the same binary matches (rizin loads it without error).
@@ -158,7 +158,7 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
   }, 30_000);
 
   test("derives a .pat name from the binary when no file is given, and refuses a traversing name", async () => {
-    expect(textOf(await run({}))).toMatch(/\.pat \(\d+ bytes\)/);
+    expect(textOf(await run({}))).toMatch(/\.pat \(\d+ bytes\)/u);
     expect(
       (await captureError(run({ file: "../escape.pat" }))).message
     ).toContain("invalid output filename");

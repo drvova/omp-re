@@ -96,7 +96,7 @@ export function registerMapFileTools(pi: ExtensionAPI): void {
       // Record for replay only once per path+addr on this binary's branch.
       const already = recordedMapFiles(branchEntries(ctx), binary);
       if (!already.some((m) => m.path === path && m.addr === addr)) {
-        pi.appendEntry("re.mapfile", { path, addr, ...(perm ? { perm } : {}) });
+        pi.appendEntry("re.mapfile", { addr, path, ...(perm ? { perm } : {}) });
       }
 
       const sample = (await rz.cmd(`p8 16 @ ${addr}`, { signal })).trim();

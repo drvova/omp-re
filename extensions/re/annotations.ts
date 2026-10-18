@@ -111,10 +111,11 @@ export function annotationCommands(
         : [`afs ${rzQuote(validateTypeLike("sig", to))} ${at}`];
     }
     case "set_variable_type": {
-      if (!target)
+      if (!target) {
         throw new Error(
           "omp-re: set_variable_type annotation is missing the variable name"
         );
+      }
       return to === ""
         ? []
         : [
@@ -226,7 +227,7 @@ export function defineVariableCommands(
   const typeArg =
     type === "" ? "" : ` ${rzQuote(validateTypeLike("type", type))}`;
   if (storage === "stack") {
-    if (!/^-?(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(loc)) {
+    if (!/^-?(?:0x[0-9a-fA-F]+|[0-9]+)$/u.test(loc)) {
       throw new Error(
         `omp-re: invalid stack delta: ${JSON.stringify(loc)} — a decimal or 0x-hex offset`
       );
@@ -247,17 +248,19 @@ function hintValueArg(kind: HintKind, value: string): string {
   switch (kind) {
     case "immediate_base": {
       // Documented inputs (2/8/10/10u/16/b/o/h/i/p/S/s) plus the numeric codes `ahl.j` reads back (e.g. 11, 32, 80), for round-trip/undo.
-      if (!/^(?:[0-9]+u?|d|du|[bohipSs])$/.test(v))
+      if (!/^(?:[0-9]+u?|d|du|[bohipSs])$/u.test(v)) {
         throw new Error(
           `omp-re: invalid immediate_base: ${JSON.stringify(value)} — one of 2, 8, 10, 10u, 16, b, o, h, i, p, S, s`
         );
+      }
       return v;
     }
     case "opcode_type": {
-      if (!/^[a-z][a-z0-9]*$/.test(v))
+      if (!/^[a-z][a-z0-9]*$/u.test(v)) {
         throw new Error(
           `omp-re: invalid opcode_type: ${JSON.stringify(value)} — a lowercase opcode type such as call, jmp, ret, nop, mov`
         );
+      }
       return v;
     }
     case "opcode_size": {
@@ -267,10 +270,11 @@ function hintValueArg(kind: HintKind, value: string): string {
       return validateAddr(v);
     }
     case "return_value": {
-      if (!/^(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(v))
+      if (!/^(?:0x[0-9a-fA-F]+|[0-9]+)$/u.test(v)) {
         throw new Error(
           `omp-re: invalid return_value: ${JSON.stringify(value)} — a decimal or 0x-hex integer`
         );
+      }
       return v;
     }
     default: {
@@ -281,7 +285,7 @@ function hintValueArg(kind: HintKind, value: string): string {
 
 /** A positive integer argument (data/string/format sizes). */
 function intArg(key: string, value: string): string {
-  if (!/^[0-9]+$/.test(value) || value === "0") {
+  if (!/^[0-9]+$/u.test(value) || value === "0") {
     throw new Error(
       `omp-re: invalid ${key}: ${JSON.stringify(value)} — a positive integer`
     );
@@ -307,7 +311,7 @@ function formatMarkArgs(encoded: string): string {
   }
   const size = intArg("size", encoded.slice(0, sp));
   const format = encoded.slice(sp + 1).trim();
-  if (!/^[A-Za-z0-9_ .*[\]]+$/.test(format)) {
+  if (!/^[A-Za-z0-9_ .*[\]]+$/u.test(format)) {
     throw new Error(`omp-re: invalid pf format: ${JSON.stringify(format)}`);
   }
   return `${size} ${format}`;
@@ -321,7 +325,7 @@ export function archHintCommands(encoded: string, at: string): string[] {
     if (key === "arch") {
       cmds.push(`aha ${validateIdent("arch", value ?? "")} ${at}`);
     } else if (key === "bits") {
-      if (!/^(8|16|32|64)$/.test(value ?? "")) {
+      if (!/^(8|16|32|64)$/u.test(value ?? "")) {
         throw new Error(
           `omp-re: invalid arch hint bits: ${JSON.stringify(value)} — one of 8, 16, 32, 64`
         );

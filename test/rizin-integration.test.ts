@@ -42,7 +42,7 @@ function hitTotal(result: {
 }): number {
   const text =
     result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
-  const m = [...text.matchAll(/(\d+) hits/g)].at(-1);
+  const m = [...text.matchAll(/(\d+) hits/gu)].at(-1);
   return m ? Number(m[1]) : -1;
 }
 
@@ -70,7 +70,7 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
       bin?: { arch?: string };
     };
     expect(typeof parsed.bin?.arch).toBe("string");
-    expect(String(parsed.core?.format)).toMatch(/elf|pe|mach0/i);
+    expect(String(parsed.core?.format)).toMatch(/elf|pe|mach0/iu);
   });
 
   test("50 sequential commands in one session all return their own output", async () => {
@@ -116,7 +116,7 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
       caught = error;
     }
     expect(caught).toBeInstanceOf(RzProtocolError);
-    expect((caught as Error).message).toMatch(/timed out/);
+    expect((caught as Error).message).toMatch(/timed out/u);
     expect(slow.isClosed).toBe(true);
   });
 
@@ -211,7 +211,7 @@ describe.skipIf(!canRunRizin)(
         // A read-only command returns output or an empty frame — never a stream-desyncing error.
         const out = await session.cmd(command);
         expect((await session.cmd("echo aligned")).trim()).toBe("aligned");
-        expect(out).not.toMatch(/Wrong number of arguments/);
+        expect(out).not.toMatch(/Wrong number of arguments/u);
       }
     });
 

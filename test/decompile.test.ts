@@ -6,11 +6,11 @@ import type { RzSession } from "../extensions/re/rizin.ts";
 /** Stub session whose cmd() replays canned replies; only what decompileAt needs. */
 function stubRz(replies: Record<string, string>): RzSession {
   const cmd = (command: string) => {
-    const key = command.trim().split(/\s+/)[0];
+    const key = command.trim().split(/\s+/u)[0];
     return Promise.resolve(replies[key] ?? "");
   };
   const cmdj = (command: string) => {
-    const raw = (replies[command.trim().split(/\s+/)[0]] ?? "").trim();
+    const raw = (replies[command.trim().split(/\s+/u)[0]] ?? "").trim();
     return Promise.resolve(raw ? JSON.parse(raw) : null);
   };
   return { cmd, cmdj } as unknown as RzSession;
@@ -36,7 +36,7 @@ describe("decompileAt", () => {
     const rz = stubRz({
       pdfj: JSON.stringify({
         name: "sym.main",
-        ops: [{ offset: 0x1400014c9, disasm: "push rbp" }],
+        ops: [{ disasm: "push rbp", offset: 0x1_40_00_14_c9 }],
       }),
       pdg: "",
       "pdg?": "Usage: pdg",

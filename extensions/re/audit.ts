@@ -247,14 +247,13 @@ async function appendAuditLine(
 export function registerAuditLog(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     if (RE_ALL_TOOL_NAMES[event.toolName] !== true) {
-      return undefined;
+      return;
     }
     await appendAuditLine(
       ctx,
       { args: event.input, tool: event.toolName, toolCallId: event.toolCallId },
       pi.logger
     );
-    return;
   });
 
   pi.on("tool_approval_resolved", async (event, ctx) => {

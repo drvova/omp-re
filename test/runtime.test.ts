@@ -79,7 +79,7 @@ describe.skipIf(!canRunRizin)(
       expect(rz.isClosed).toBe(false);
       expect(dbg.isClosed).toBe(false);
       // sanity: the debug process really launched (has a PC)
-      expect((await dbg.cmd("dr rip")).trim()).toMatch(/rip = 0x[0-9a-f]+/);
+      expect((await dbg.cmd("dr rip")).trim()).toMatch(/rip = 0x[0-9a-f]+/u);
       shutdownState("runtime-dispose");
       expect(rz.isClosed).toBe(true);
       expect(dbg.isClosed).toBe(true);

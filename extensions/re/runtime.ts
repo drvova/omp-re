@@ -89,16 +89,20 @@ function newScope(): Scope {
   const teardowns = new Set<Teardown>();
   return {
     async dispose() {
-      const pending = [...teardowns].reverse();
+      const pending = [...teardowns].toReversed();
       teardowns.clear();
-      for (const teardown of pending) await teardown();
+      for (const teardown of pending) {
+        await teardown();
+      }
     },
     effect(setup) {
       const teardown = setup();
       teardowns.add(teardown);
       let disposed = false;
       return async () => {
-        if (disposed) return;
+        if (disposed) {
+          return;
+        }
         disposed = true;
         teardowns.delete(teardown);
         await teardown();

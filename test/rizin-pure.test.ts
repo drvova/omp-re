@@ -499,7 +499,7 @@ describe("annotationCommands", () => {
 describe("analysis passes", () => {
   test("every pass maps to an analysis command and isAnalysisPass recognizes exactly those names", () => {
     for (const [name, command] of Object.entries(ANALYSIS_PASSES)) {
-      expect(command).toMatch(/^(aa[a-z]+|avrr)$/); // aa* passes, plus avrr (RTTI class recovery)
+      expect(command).toMatch(/^(aa[a-z]+|avrr)$/u); // aa* passes, plus avrr (RTTI class recovery)
       expect(isAnalysisPass(name)).toBe(true);
     }
     expect(isAnalysisPass("not_a_pass")).toBe(false);
@@ -856,7 +856,7 @@ describe("resolveRizinPath bits-aware precedence", () => {
   afterEach(() => {
     for (const k of KEYS) {
       if (saved[k] === undefined) {
-        delete process.env[k];
+        Reflect.deleteProperty(process.env, k);
       } else {
         process.env[k] = saved[k];
       }
@@ -866,7 +866,7 @@ describe("resolveRizinPath bits-aware precedence", () => {
     for (const [k, v] of Object.entries(vars)) {
       saved[k] = process.env[k];
       if (v === undefined) {
-        delete process.env[k];
+        Reflect.deleteProperty(process.env, k);
       } else {
         process.env[k] = v;
       }

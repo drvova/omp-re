@@ -32,7 +32,7 @@ describe("safeBasename", () => {
       "a;b",
       "`id`",
     ]) {
-      expect(() => safeBasename(bad)).toThrow(/invalid output filename/);
+      expect(() => safeBasename(bad)).toThrow(/invalid output filename/u);
     }
   });
 });
@@ -49,7 +49,7 @@ describe("toRizinPath", () => {
     );
     // A drive-colon path is what reaches rizin on Windows; it must survive normalization as safe characters only.
     expect(
-      /^[A-Za-z0-9_.:/-]+$/.test(toRizinPath("C:\\Temp\\omp-re-out\\dump.bin"))
+      /^[A-Za-z0-9_.:/-]+$/u.test(toRizinPath("C:\\Temp\\omp-re-out\\dump.bin"))
     ).toBe(true);
   });
 });
@@ -88,10 +88,10 @@ describe("prepareOutputPath", () => {
 
   test("refuses a name that escapes the directory before any write", async () => {
     await expect(prepareOutputPath("../escape.bin")).rejects.toThrow(
-      /invalid output filename/
+      /invalid output filename/u
     );
     await expect(prepareOutputPath("sub/escape.bin")).rejects.toThrow(
-      /invalid output filename/
+      /invalid output filename/u
     );
   });
 });

@@ -28,7 +28,7 @@ export interface MapFile {
 
 /** Validate an IO-map permission string (`r`, `rw`, `rwx`, …) — the access the mapped VA region allows, not a file write mode. */
 export function validateMapPerm(perm: string): string {
-  if (!/^[rwx]+$/.test(perm)) {
+  if (!/^[rwx]+$/u.test(perm)) {
     throw new Error(
       `omp-re: map_file: invalid permission ${JSON.stringify(perm)} — use r, w, x characters (e.g. r, rw, rx)`
     );

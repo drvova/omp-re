@@ -42,14 +42,14 @@ logSkip("rizin CLI integration tests");
 
 const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   pd: {
-    args: [{ type: "number", name: "n" }],
+    args: [{ name: "n", type: "number" }],
     args_str: " [<n>]",
     summary: "Disassemble N instructions",
   },
   pdf: { args_str: "", summary: "Disassemble a function" },
   pdsf: { args_str: "", summary: "Summarize the current function" },
   px: {
-    args: [{ type: "number", name: "n" }],
+    args: [{ name: "n", type: "number" }],
     args_str: " [<n>]",
     summary: "Show hexdump",
   },
@@ -59,10 +59,10 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   ph: {
     args: [
       {
-        type: "choice",
+        choices: ["md5", "entropy"],
         name: "algo",
         required: true,
-        choices: ["md5", "entropy"],
+        type: "choice",
       },
     ],
     args_str: " <algo>",
@@ -71,17 +71,17 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   },
   pfw: { summary: "Write a format" },
   "/x": {
-    args: [{ type: "string", name: "hex", required: true }],
+    args: [{ name: "hex", required: true, type: "string" }],
     args_str: " <hex>",
     summary: "Search hex string",
   },
   "/F": {
-    args: [{ type: "string", name: "file", required: true }],
+    args: [{ name: "file", required: true, type: "string" }],
     args_str: " <file>",
     summary: "Search the content of a file.",
   },
   "/m": {
-    args: [{ type: "string", name: "magic-file" }],
+    args: [{ name: "magic-file", type: "string" }],
     args_str: " [<magic-file>]",
     summary: "Magic constants search.",
   },
@@ -169,7 +169,7 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
     summary: "Search rop gadgets",
   },
   "/Rk": {
-    args: [{ type: "string", name: "key=value" }],
+    args: [{ name: "key=value", type: "string" }],
     args_str: " <key>[=<val>] ...",
     summary: "Query ROP Gadgets by providing constraints",
   },
@@ -425,12 +425,12 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
       "List all namespaces under 'analysis/' and sdb databases in JSON format (SDB).",
   },
   pm: {
-    args: [{ type: "string", name: "file/directory" }],
+    args: [{ name: "file/directory", type: "string" }],
     args_str: " [<file/directory>]",
     summary: "Search magics and print the long description of them.",
   },
   pmj: {
-    args: [{ type: "string", name: "file/directory" }],
+    args: [{ name: "file/directory", type: "string" }],
     args_str: " [<file/directory>]",
     summary:
       "Search magics and print the long description of them. (JSON mode)",
@@ -438,15 +438,15 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   // --- read-only extras (chapter B) --- (`e` is defined above)
   // Configuration
   el: {
-    args: [{ type: "string", name: "key" }],
+    args: [{ name: "key", type: "string" }],
     summary: "List config variables with their descriptions",
   },
   elj: {
-    args: [{ type: "string", name: "key" }],
+    args: [{ name: "key", type: "string" }],
     summary: "List config variables with their descriptions (JSON mode)",
   },
   et: {
-    args: [{ type: "string", name: "key" }],
+    args: [{ name: "key", type: "string" }],
     summary: "Show type of given config variable <key>",
   },
   es: { summary: "List all config variable spaces" },
@@ -465,11 +465,11 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   acl: { summary: "List all classes" },
   aclj: { summary: "List all classes (JSON mode)" },
   aci: {
-    args: [{ type: "string", name: "class_name" }],
+    args: [{ name: "class_name", type: "string" }],
     summary: "Show information of class",
   },
   acvf: {
-    args: [{ type: "string", name: "offset" }],
+    args: [{ name: "offset", type: "string" }],
     summary: "Lookup function address on vtable offset",
   },
   acn: { summary: "Rename class" },
@@ -486,44 +486,44 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   // Types
   t: { summary: "List all types / Show type information" },
   tl: {
-    args: [{ type: "string", name: "type" }],
+    args: [{ name: "type", type: "string" }],
     summary: "List all types / Show type information (verbose mode)",
   },
   tc: {
-    args: [{ type: "string", name: "type" }],
+    args: [{ name: "type", type: "string" }],
     summary: "List loaded types in C format with newlines",
   },
   te: {
-    args: [{ type: "string", name: "enum" }],
+    args: [{ name: "enum", type: "string" }],
     summary: "List loaded enums / Show enum member",
   },
   tu: { summary: "List loaded unions / Show pf format string for given union" },
   tcc: { summary: "List all calling conventions" },
   tx: {
-    args: [{ type: "string", name: "type" }],
+    args: [{ name: "type", type: "string" }],
     summary: "List functions using the type",
   },
   tk: {
-    args: [{ type: "string", name: "type" }],
+    args: [{ name: "type", type: "string" }],
     summary: "Show the typeclass of the given type",
   },
   tfc: {
     args: [
-      { type: "string", name: "name" },
-      { type: "string", name: "cc" },
+      { name: "name", type: "string" },
+      { name: "cc", type: "string" },
     ],
     summary: "Show or set function calling convention",
   },
   tks: {
     args: [
-      { type: "string", name: "type" },
-      { type: "string", name: "typeclass" },
+      { name: "type", type: "string" },
+      { name: "typeclass", type: "string" },
     ],
     summary: "Set the typeclass of a type",
   },
   "t-": { summary: "Remove the type" },
   to: {
-    args: [{ type: "string", name: "file" }],
+    args: [{ name: "file", type: "string" }],
     summary: "Open C header file and load types from it",
   },
   // Plugin listings
@@ -531,30 +531,30 @@ const SPECS: Record<string, Omit<RzCommandSpec, "cmd">> = {
   La: { summary: "List the arch plugins" },
   LD: { summary: "List the demanglers plugins (alias for iDl)" },
   L: {
-    args: [{ type: "string", name: "file" }],
+    args: [{ name: "file", type: "string" }],
     summary: "Load a plugin from file",
   },
   // Positional duals
   tn: {
-    args: [{ type: "string", name: "name" }],
+    args: [{ name: "name", type: "string" }],
     summary: "List all noreturn references / Add a noreturn function",
   },
   tnj: {
-    args: [{ type: "string", name: "name" }],
+    args: [{ name: "name", type: "string" }],
     summary:
       "List all noreturn references / Add a noreturn function (JSON mode)",
   },
   Ld: {
-    args: [{ type: "string", name: "handler" }],
+    args: [{ name: "handler", type: "string" }],
     summary: "List debug plugins / Set debug backend (e dbg.backend)",
   },
   Ldj: {
-    args: [{ type: "string", name: "handler" }],
+    args: [{ name: "handler", type: "string" }],
     summary:
       "List debug plugins / Set debug backend (e dbg.backend) (JSON mode)",
   },
   Lo: {
-    args: [{ type: "string", name: "path" }],
+    args: [{ name: "path", type: "string" }],
     summary: "List IO plugins / Register IO plugin from <path>",
   },
 };
@@ -619,7 +619,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
     expect(
       checkRizinCommand(CATALOG, "pd:xrefsTo/sort:csv", "main")
     ).toMatchObject({ ok: true });
-    expect(refusal("pd:bad=spec")).toMatch(/table spec parts/);
+    expect(refusal("pd:bad=spec")).toMatch(/table spec parts/u);
     expect(refusal("pdzz:size/sort")).toBe(
       'omp-re: rizin_command: this rizin has no command "pdzz" — look it up with rizin_help'
     );
@@ -680,7 +680,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
     ]) {
       const reason = refusal(command);
       expect(reason).toMatch(
-        /is not available here|is not allowed in a command/
+        /is not available here|is not allowed in a command/u
       );
     }
     expect(refusal("afn evil")).toContain("rename_function");
@@ -703,7 +703,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
       "ax-*",
       "axm 0x40",
     ]) {
-      expect(refusal(command)).toMatch(/is not available here/);
+      expect(refusal(command)).toMatch(/is not available here/u);
     }
   });
 
@@ -912,11 +912,11 @@ describe("checkRizinCommand (no rizin needed)", () => {
       "avgcs",
       "avg /tmp/x",
     ]) {
-      expect(refusal(command)).toMatch(/is not available here/);
+      expect(refusal(command)).toMatch(/is not available here/u);
     }
     // DWARF line info reads, but PDB loading/downloading stays out
-    expect(refusal("idp /tmp/x.pdb")).toMatch(/is not available here/);
-    expect(refusal("idpd")).toMatch(/is not available here/);
+    expect(refusal("idp /tmp/x.pdb")).toMatch(/is not available here/u);
+    expect(refusal("idpd")).toMatch(/is not available here/u);
   });
 
   test("chapter B: read-only extras (config, hints, meta, classes, types, plugin lists) run", () => {
@@ -988,7 +988,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
     // Lo also has a <path> arg, so either guard may fire — but it must be refused with one.
     expect(checkRizinCommand(CATALOG, "Lo")).toMatchObject({ ok: true });
     expect(refusal("Lo /tmp/plugin.so")).toMatch(
-      /read-only only with no argument|reads <path> from disk/
+      /read-only only with no argument|reads <path> from disk/u
     );
   });
 
@@ -1010,7 +1010,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
       "L /tmp/p.so",
     ]) {
       expect(refusal(command)).toMatch(
-        /is not available here|read-only only with no argument|setting config/
+        /is not available here|read-only only with no argument|setting config/u
       );
     }
   });
@@ -1170,9 +1170,9 @@ describe("missingRequiredCommands and cleanStderr (no rizin needed)", () => {
   });
 
   test("drops terminal control sequences and blank lines, keeps messages", () => {
-    expect(cleanStderr("\x1B[2K\r\x1B[2K\r")).toBe("");
+    expect(cleanStderr("\u001B[2K\r\u001B[2K\r")).toBe("");
     expect(
-      cleanStderr("\x1B[2K\rERROR: Flag combination '4' is invalid.\n")
+      cleanStderr("\u001B[2K\rERROR: Flag combination '4' is invalid.\n")
     ).toBe("ERROR: Flag combination '4' is invalid.");
   });
 });
@@ -1251,7 +1251,7 @@ describe.skipIf(!canRunRizin)(
 
     test("rizin_command output matches rizin's own, at the given address", async () => {
       const expected = (await session.cmd(`px 32 @ ${mainEa}`)).replace(
-        /\n+$/,
+        /\n+$/u,
         ""
       );
       const result = await run("rizin_command", {
@@ -1274,7 +1274,7 @@ describe.skipIf(!canRunRizin)(
           command: "ph entropy @!4096",
         })
       );
-      expect(entropy).toMatch(/^rizin> ph entropy @!4096 @ main\n\d+\.\d+$/);
+      expect(entropy).toMatch(/^rizin> ph entropy @!4096 @ main\n\d+\.\d+$/u);
     });
 
     test("a search with no hits is empty output, not an error", async () => {

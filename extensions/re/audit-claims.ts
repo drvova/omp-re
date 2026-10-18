@@ -104,7 +104,7 @@ export function buildAuditPrompt(items: readonly AuditClaimInput[]): string {
 
 /** Extract a JSON array/object from a free-text reply: a fenced ```json block first, else a balanced structure from the first `[`/`{`. Null when none is found. */
 function extractJson(text: string): string | null {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text);
   if (fenced?.[1]) {
     return fenced[1].trim();
   }
@@ -213,8 +213,9 @@ export function ephemeralJudge(ctx: ExtensionContext): ClaimJudge | null {
         if (
           !(error instanceof Error) ||
           !error.message.includes("tools: false")
-        )
+        ) {
           throw error;
+        }
         result = await turn(false);
       }
       return parseAuditReply(result.replyText);
@@ -265,8 +266,8 @@ export async function auditClaims(
     if (!byIndex.has(item.index)) {
       byIndex.set(item.index, {
         index: item.index,
-        verdict: "unaudited",
         reason: "not returned by the auditor",
+        verdict: "unaudited",
       });
     }
   }

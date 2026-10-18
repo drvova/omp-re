@@ -13,8 +13,7 @@
 // Not part of the plugin: standalone dev tool under tools/shotgen/, isolated
 // from the root package.json.
 import { readdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import Convert from "ansi-to-html";
 
@@ -96,14 +95,13 @@ const CHAR_TO_ENTITY: Record<string, string> = {
 
 function decodeEntities(text: string): string {
   return text.replaceAll(
-    /&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z]+);/g,
+    /&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z]+);/gu,
     (whole, body: string) => {
       if (body[0] === "#") {
         const isHex = body[1] === "x" || body[1] === "X";
-        const codePoint = Number.parseInt(
-          isHex ? body.slice(2) : body.slice(1),
-          isHex ? 16 : 10
-        );
+        const codePoint = isHex
+          ? Number.parseInt(body.slice(2), 16)
+          : Number.parseInt(body.slice(1), 10);
         return Number.isFinite(codePoint)
           ? String.fromCodePoint(codePoint)
           : whole;
@@ -138,7 +136,7 @@ function wrapTextRun(text: string): string {
 /** Splits `html` into tag/text tokens and wraps only the text tokens — tags (the ansi-to-html color spans) pass through untouched, so color survives. */
 function applyCellGrid(html: string): string {
   return html
-    .split(/(<[^>]+>)/)
+    .split(/(<[^>]+>)/u)
     .map((token) => (token.startsWith("<") ? token : wrapTextRun(token)))
     .join("");
 }

@@ -119,7 +119,7 @@ function functionRow(fn: RzFunc): Record<string, unknown> {
     ...(fn.nbbs === undefined ? {} : { blocks: fn.nbbs }),
     ...(fn.indegree === undefined ? {} : { callers: fn.indegree }),
     ...(fn.outdegree === undefined ? {} : { callees: fn.outdegree }),
-    ...(fn.signature ? { signature: fn.signature.replace(/;\s*$/, "") } : {}),
+    ...(fn.signature ? { signature: fn.signature.replace(/;\s*$/u, "") } : {}),
   };
 }
 
@@ -213,7 +213,7 @@ async function functionSummary(
     ea,
     ...metrics,
     ...(typeof fn.signature === "string"
-      ? { signature: fn.signature.replace(/;\s*$/, "") }
+      ? { signature: fn.signature.replace(/;\s*$/u, "") }
       : {}),
     args: vars.filter((v) => v.arg).map(describeVar),
     locals: vars.filter((v) => !v.arg).map(describeVar),
@@ -417,7 +417,9 @@ export function registerReadTools(pi: ExtensionAPI): void {
     async execute(_id, params, signal, _onUpdate, ctx) {
       const rz = await ensureRizin(ctx, { signal });
       const fns = (await rz.cmdj<RzFunc[]>("aflj", { signal })) ?? [];
-      const sorted = params.sort ? [...fns].sort(SORTERS[params.sort]) : fns;
+      const sorted = params.sort
+        ? [...fns].toSorted(SORTERS[params.sort])
+        : fns;
       const { page, total } = paginate(sorted, params.offset, params.limit);
       const label =
         params.sort && params.sort !== "address"
@@ -806,8 +808,9 @@ export function registerReadTools(pi: ExtensionAPI): void {
       // out_nodes are node ids; map each id to its block/function address so edges read as addresses.
       const eaById = new Map<number, string>();
       for (const n of nodes) {
-        if (typeof n.offset === "number")
+        if (typeof n.offset === "number") {
           eaById.set(n.id, eaFromOffset(knownAddr(n.offset) ?? n.offset));
+        }
       }
       const rows = nodes.map((n) => ({
         ea:

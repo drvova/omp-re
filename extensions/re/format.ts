@@ -221,7 +221,7 @@ export function formatJson(data: unknown): string {
   return `[\n${data.map((row) => `  ${JSON.stringify(row)}`).join(",\n")}\n]`;
 }
 
-const ANSI_ESCAPE = /\x1B\[[0-9;?]*[A-Za-z]/g;
+const ANSI_ESCAPE = /\u001B\[[0-9;?]*[A-Za-z]/gu;
 
 /**
  * Normalize raw rizin output so an independent re-run on the same binary and the
@@ -236,11 +236,11 @@ export function canonicalizeRizinOutput(
   raw: string,
   binaryPath?: string
 ): string {
-  let text = raw.replace(ANSI_ESCAPE, "").replaceAll(/\r\n?/g, "\n");
+  let text = raw.replace(ANSI_ESCAPE, "").replaceAll(/\r\n?/gu, "\n");
   if (binaryPath && binaryPath.length > 0) {
     text = text.split(binaryPath).join("<BINARY>");
   }
-  const lines = text.split("\n").map((line) => line.replace(/[ \t]+$/, ""));
+  const lines = text.split("\n").map((line) => line.replace(/[ \t]+$/u, ""));
   while (lines.length > 0 && lines.at(-1) === "") {
     lines.pop();
   }
@@ -268,18 +268,18 @@ export function maskAddresses(canonical: string): string {
   return canonical
     .split("\n")
     .map((line) => {
-      if (/\brip\b/.test(line)) {
-        line = line.replace(/0x[0-9a-fA-F]+/g, "<ADDR>");
+      if (/\brip\b/u.test(line)) {
+        line = line.replaceAll(/0x[0-9a-fA-F]+/gu, "<ADDR>");
       }
       return line
-        .replace(/^([\s|\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+/, "$1<ADDR>")
-        .replaceAll(/@ 0x[0-9a-fA-F]+/g, "@ <ADDR>")
+        .replace(/^([\s|\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+/u, "$1<ADDR>")
+        .replaceAll(/@ 0x[0-9a-fA-F]+/gu, "@ <ADDR>")
         .replaceAll(
-          /\b(call|jmp|j[a-z]{1,4}|bl|b|b\.[a-z]{2}|cbn?z|tbn?z|loop[a-z]*)(\s+)0x[0-9a-fA-F]+/g,
+          /\b(call|jmp|j[a-z]{1,4}|bl|b|b\.[a-z]{2}|cbn?z|tbn?z|loop[a-z]*)(\s+)0x[0-9a-fA-F]+/gu,
           "$1$2<ADDR>"
         )
         .replaceAll(
-          /\b(fcn|sub|loc|case|switch|entry|section)\.[0-9a-fA-F]{4,}\b/g,
+          /\b(fcn|sub|loc|case|switch|entry|section)\.[0-9a-fA-F]{4,}\b/gu,
           "$1.<ADDR>"
         );
     })

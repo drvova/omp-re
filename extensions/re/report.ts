@@ -55,7 +55,7 @@ async function readEvidenceOutput(
     try {
       const path = await ctx.sessionManager.getArtifactPath(ev.artifactId);
       if (path) {
-        return await readFile(path, "utf8");
+        return await readFile(path, "utf-8");
       }
     } catch {
       // fall through to the blob
@@ -147,20 +147,20 @@ function collectAnnotations(
 
 // --- IOC extraction, ported from ioc.go ---
 
-const PATH_PATTERN = /(?:\/[^/\s]+){3,}|(?:[A-Za-z]:\\[^\\\s]+){3,}/g;
-const URL_PATTERN = /(?:https?|hxxps?):\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%]+/gi;
-const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
-const REGKEY_PATTERN = /(?:HKLM|HKCU)\\[^\\\s]+/g;
+const PATH_PATTERN = /(?:\/[^/\s]+){3,}|(?:[A-Za-z]:\\[^\\\s]+){3,}/gu;
+const URL_PATTERN = /(?:https?|hxxps?):\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%]+/giu;
+const IPV4_PATTERN = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/gu;
+const REGKEY_PATTERN = /(?:HKLM|HKCU)\\[^\\\s]+/gu;
 
 // Non-global copies for defangIOC's shape checks: `.test()` on a `/g` regex
 // is stateful (advances lastIndex across calls), which silently alternates
 // between defanging and not defanging consecutive IOCs from the same list.
-const URL_SHAPE = /^(?:https?|hxxps?):\/\//i;
-const IPV4_SHAPE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const URL_SHAPE = /^(?:https?|hxxps?):\/\//iu;
+const IPV4_SHAPE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u;
 
 /** Evidence text scanned here includes raw JSON (`ev.summary`), whose escaping/delimiters (trailing `",`, `),`, etc.) can hang off an otherwise-real match — trim them so an IOC never ends mid-punctuation. */
 function trimTrailingPunctuation(match: string): string {
-  return match.replace(/["'),;.]+$/, "");
+  return match.replace(/["'),;.]+$/u, "");
 }
 
 function extractIOCsFromString(text: string): string[] {
@@ -186,7 +186,7 @@ function extractIOCsFromString(text: string): string[] {
  * for paths and registry keys too (no-ops for those).
  */
 export function defangIOC(ioc: string): string {
-  let out = ioc.replace(/^https?/i, (scheme) =>
+  let out = ioc.replace(/^https?/iu, (scheme) =>
     scheme.toLowerCase().replace("tt", "xx")
   );
   // The replace above only rewrites the scheme; still defang dots for URLs/IPv4 specifically to avoid mangling path/registry-key separators.
@@ -299,8 +299,8 @@ async function extractCapabilities(
   }
 
   return {
-    attackIds: [...attackSet.keys()].sort(),
-    capabilities: [...capSet.keys()].sort(),
+    attackIds: [...attackSet.keys()].toSorted(),
+    capabilities: [...capSet.keys()].toSorted(),
     labelByAttack: labelSet,
     sourceByAttack: attackSet,
     sourceByCapability: capSet,
@@ -385,12 +385,12 @@ async function buildIOCClaims(
       ];
     } else {
       seen.set(claim.text, {
-        text: claim.text,
         evidenceIds: [...claim.evidenceIds],
+        text: claim.text,
       });
     }
   }
-  return [...seen.values()].sort((a, b) => a.text.localeCompare(b.text));
+  return [...seen.values()].toSorted((a, b) => a.text.localeCompare(b.text));
 }
 
 interface BuiltReport {
@@ -417,11 +417,12 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
     toolById.set(ev.id, ev.tool);
   }
   for (const annotation of annotations) {
-    if (annotation.evidenceId)
+    if (annotation.evidenceId) {
       toolById.set(
         annotation.evidenceId,
         toolById.get(annotation.evidenceId) ?? "annotation"
       );
+    }
   }
 
   const capaEvidence = evidence.filter(
@@ -470,9 +471,9 @@ async function buildReport(ctx: ExtensionContext): Promise<BuiltReport> {
   if (findings.length > 0) {
     sections.push({
       claims: findings.map((f) => ({
-        text: f.claim,
         evidenceIds: [...f.evidenceIds],
         note: findingNote(f),
+        text: f.claim,
       })),
       title: "Findings",
     });
@@ -600,9 +601,7 @@ function appendVerificationManifest(
     "## Verification Manifest",
     "",
     `Binary SHA-256: \`${report.binarySha256 ?? "unbound (legacy)"}\``,
-    ""
-  );
-  lines.push(
+    "",
     "Each `reproducible` row can be re-derived from the binary: re-run its command read-only and compare the output hash (`/re verify`).",
     "",
     "| Evidence | Tool | Command | Output hash (repro) | Status |",
@@ -681,7 +680,7 @@ async function buildAuditInputs(
         });
       }
       if (evidence.length > 0) {
-        items.push({ index, claimText: claim.text, evidence });
+        items.push({ claimText: claim.text, evidence, index });
       }
       index++;
     }
@@ -765,7 +764,8 @@ export async function writeReport(
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `omp-re: could not write report to ${outputPath}: ${reason}`
+        `omp-re: could not write report to ${outputPath}: ${reason}`,
+        { cause: error }
       );
     }
     const manifestPath = `${outputPath}.manifest.json`;
@@ -844,26 +844,26 @@ function buildManifestJson(
     entries: [...claimsById.keys()].map((id) => {
       const ev = report.evidenceById.get(id);
       return {
-        evidenceId: id,
-        tool: report.toolById.get(id) ?? ev?.tool ?? "unknown",
+        anchor: anchors.get(id) ?? null,
         args: ev ? rizinCommandArgs(ev) : null,
+        binarySha256: ev?.binarySha256 ?? null,
+        canonicalExcerpt: ev?.canonicalExcerpt ?? null,
+        claims: claimsById.get(id) ?? [],
         command: ev ? (recordedCommand(ev) ?? null) : null,
         commands: ev?.commands ?? null,
+        evidenceId: id,
         reproHash: ev?.reproHash ?? null,
-        canonicalExcerpt: ev?.canonicalExcerpt ?? null,
         shiftHash: ev?.shiftHash ?? null,
-        anchor: anchors.get(id) ?? null,
-        binarySha256: ev?.binarySha256 ?? null,
         status: ev ? recordedStatus(ev) : "unverifiable (legacy)",
-        claims: claimsById.get(id) ?? [],
+        tool: report.toolById.get(id) ?? ev?.tool ?? "unknown",
       };
     }),
     findings: report.findings.map((f) => ({
-      id: f.id,
-      claim: f.claim,
-      evidenceIds: f.evidenceIds,
       addr: f.addr ?? null,
+      claim: f.claim,
       confidence: f.confidence,
+      evidenceIds: f.evidenceIds,
+      id: f.id,
     })),
   };
 }

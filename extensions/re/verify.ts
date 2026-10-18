@@ -189,8 +189,8 @@ export async function buildVerification(
     } catch (error) {
       rows.push({
         ...base,
-        status: "unverifiable",
         detail: `re-run failed: ${error instanceof Error ? error.message : String(error)}`,
+        status: "unverifiable",
       });
     }
   }

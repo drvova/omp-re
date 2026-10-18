@@ -244,7 +244,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
     // Hex pairs, spaces optional; rizin's `..` byte-mask wildcard is honored (e.g. "8b 4f ..").
     pattern: z
       .string()
-      .regex(/^[0-9a-fA-F.?]+(?:\s+[0-9a-fA-F.?]+)*$/)
+      .regex(/^[0-9a-fA-F.?]+(?:\s+[0-9a-fA-F.?]+)*$/u)
       .describe(
         'Raw hex bytes to search for, spaces optional; ".." masks one nibble (e.g. "8b 4f ..").'
       ),
@@ -321,7 +321,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
     ...reRenderers({ body: "json", subject: "pattern", title: "Search bytes" }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const rz = await ensureRizin(ctx, { signal });
-      const hex = params.pattern.replaceAll(/\s+/g, "");
+      const hex = params.pattern.replaceAll(/\s+/gu, "");
       return scopedSearch(
         rz,
         `/xj ${hex}`,

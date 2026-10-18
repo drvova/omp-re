@@ -22,7 +22,7 @@ import { access, realpath as fsRealpath } from "node:fs/promises";
  * arithmetic (sym.main+0x10, $$). `@` itself is excluded so no value can smuggle in rizin's
  * `@@` foreach iterators, and `(`/`;`/`~`/`|`/quotes are excluded so no value can open a command
  * substitution, a separator, a grep, or a pipe. */
-const ADDR_CHARS = /^[0-9a-zA-Z_.:$+-]+$/;
+const ADDR_CHARS = /^[0-9a-zA-Z_.:$+-]+$/u;
 
 export function validateAddr(addr: string): string {
   if (!ADDR_CHARS.test(addr)) {
@@ -50,7 +50,7 @@ export function normalizeAddr(raw: string): string {
 }
 
 /** Identifiers for rename targets (function/variable names). */
-const IDENT_CHARS = /^[A-Za-z_][A-Za-z0-9_.]*$/;
+const IDENT_CHARS = /^[A-Za-z_][A-Za-z0-9_.]*$/u;
 
 export function validateIdent(key: string, value: string): string {
   if (!IDENT_CHARS.test(value)) {
@@ -166,7 +166,7 @@ export function debugTimeoutMs(): number {
 export function baseRizinFlags(): string[] {
   const flags = ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false"];
   if (
-    !/^(1|true|yes|on)$/i.test(
+    !/^(1|true|yes|on)$/iu.test(
       (process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim()
     )
   ) {
@@ -196,7 +196,7 @@ export interface LoadOptions {
   format?: string;
 }
 
-const ARCH_NAME = /^[A-Za-z][A-Za-z0-9_.]*$/;
+const ARCH_NAME = /^[A-Za-z][A-Za-z0-9_.]*$/u;
 const LOAD_BITS: ReadonlySet<number> = new Set([8, 16, 32, 64]);
 
 /**
@@ -206,13 +206,16 @@ const LOAD_BITS: ReadonlySet<number> = new Set([8, 16, 32, 64]);
  * clarity and early rejection, not injection defense.
  */
 export function buildLoadFlags(opts?: LoadOptions): string[] {
-  if (!opts) return [];
+  if (!opts) {
+    return [];
+  }
   const flags: string[] = [];
   if (opts.arch !== undefined) {
-    if (!ARCH_NAME.test(opts.arch))
+    if (!ARCH_NAME.test(opts.arch)) {
       throw new Error(
         `omp-re: load: invalid arch ${JSON.stringify(opts.arch)} — a plugin name like x86, arm, mips (see rizin -L)`
       );
+    }
     flags.push("-a", opts.arch);
   }
   if (opts.bits !== undefined) {
@@ -450,7 +453,9 @@ export class RzSession {
           remaining
         );
         if (frame.trim() === marker) {
-          await new Promise((resolve) => setImmediate(resolve));
+          await new Promise((resolve) => {
+            setImmediate(resolve);
+          });
           const written = this.stderrSeen - stderrStart;
           const stderr =
             written > 0
@@ -538,7 +543,9 @@ export class RzSession {
       return session;
     } catch (error) {
       session.close();
-      if (options.signal?.aborted) throw new RzAbortError("rizin analysis");
+      if (options.signal?.aborted) {
+        throw new RzAbortError("rizin analysis");
+      }
       throw error;
     } finally {
       if (ticker) {
@@ -594,7 +601,9 @@ export class RzSession {
       return session;
     } catch (error) {
       session.close();
-      if (options.signal?.aborted) throw new RzAbortError("debug launch");
+      if (options.signal?.aborted) {
+        throw new RzAbortError("debug launch");
+      }
       throw error;
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
@@ -694,15 +703,15 @@ export function readBinaryBits(path: string): 32 | 64 | undefined {
 
 /** The build's pointer width from `rizin -v`'s first line ("rizin 0.9.1 @ windows-x86-64"), or undefined when it doesn't say. */
 export function parseRizinVersionArch(version: string): 32 | 64 | undefined {
-  const m = /-(32|64)(?:\s|$)/.exec(version);
+  const m = /-(32|64)(?:\s|$)/u.exec(version);
   if (m) {
     return m[1] === "64" ? 64 : 32;
   }
   // 64-bit names checked before 32-bit ones: "x86_64" contains "x86".
-  if (/x86_64|aarch64|arm64/.test(version)) {
+  if (/x86_64|aarch64|arm64/u.test(version)) {
     return 64;
   }
-  if (/x86|arm(?![_-]?[6-9])|i386/.test(version)) {
+  if (/x86|arm(?![_-]?[6-9])|i386/u.test(version)) {
     return 32;
   }
   return undefined;
@@ -768,7 +777,7 @@ export async function isExecutable(name: string): Promise<boolean> {
     return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
   }
   for (const candidate of process.platform === "win32" &&
-  !/\.(exe|cmd|bat)$/i.test(name)
+  !/\.(exe|cmd|bat)$/iu.test(name)
     ? [name, `${name}.exe`]
     : [name]) {
     try {

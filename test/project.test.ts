@@ -60,7 +60,7 @@ describe.skipIf(!canRunRizin)(
       ) => { tier: string; reason: string };
       const a = approval({});
       expect(a.tier).toBe("exec");
-      expect(a.reason).toMatch(/not modified|unchanged|output directory/);
+      expect(a.reason).toMatch(/not modified|unchanged|output directory/u);
     });
 
     test("writes a non-empty .rzdb to the output dir, and rizin -p re-opens it with an annotation intact", async () => {
@@ -80,7 +80,7 @@ describe.skipIf(!canRunRizin)(
       const out = await new Response(proc.stdout).text();
       await proc.exited;
       const names = (
-        JSON.parse(out.replaceAll(/\x1B\[[0-9;]*[A-Za-z]/g, "").trim()) as {
+        JSON.parse(out.replaceAll(/\u001B\[[0-9;]*[A-Za-z]/gu, "").trim()) as {
           name: string;
         }[]
       ).map((f) => f.name);
@@ -89,7 +89,7 @@ describe.skipIf(!canRunRizin)(
 
     test("derives a .rzdb name from the binary when no file is given", async () => {
       const result = textOf(await run({}));
-      expect(result).toMatch(/\.rzdb \(\d+ bytes\)/);
+      expect(result).toMatch(/\.rzdb \(\d+ bytes\)/u);
     }, 30_000);
 
     test("refuses a traversing or separator-bearing filename before touching rizin", async () => {

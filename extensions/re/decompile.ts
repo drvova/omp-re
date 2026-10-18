@@ -54,10 +54,12 @@ export function decompilerCommands(): DecompilerKind[] {
   const configured = (process.env.OMPRE_DECOMPILER ?? "")
     .split(",")
     .map((name) => name.trim())
-    .filter((name) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(name));
+    .filter((name) => /^[a-zA-Z][a-zA-Z0-9]*$/u.test(name));
   const ordered: DecompilerKind[] = [];
   for (const name of [...configured, ...DEFAULT_DECOMPILER_COMMANDS]) {
-    if (!ordered.includes(name)) ordered.push(name);
+    if (!ordered.includes(name)) {
+      ordered.push(name);
+    }
   }
   return ordered;
 }
@@ -144,9 +146,9 @@ export async function decompileAt(
       })
     )
       .replaceAll("\r\n", "\n")
-      .replace(/^\n+/, "");
+      .replace(/^\n+/u, "");
     if (code.trim().length > 0) {
-      return { kind, code };
+      return { code, kind };
     }
   }
   const disasm = await disassembleAt(rz, ea, signal);

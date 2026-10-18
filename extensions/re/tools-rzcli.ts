@@ -122,7 +122,7 @@ export type RzCliCheck = { ok: true } | { ok: false; reason: string };
 
 function isShortCluster(token: string): boolean {
   // A single-dash run of letters (`-ij`, `-qO`); not `--long`, not a negative number, not a bare `-` (stdin).
-  return /^-[A-Za-z]+$/.test(token);
+  return /^-[A-Za-z]+$/u.test(token);
 }
 
 /**
@@ -163,11 +163,11 @@ export function checkRzCli(
   def: RzCliToolDef,
   args: readonly string[]
 ): RzCliCheck {
-  const denied = new Set(def.deniedTokens ?? []);
+  const denied = new Set(def.deniedTokens);
   const letters = new Set(def.deniedLetters.split(""));
   const repeatCounts = new Map<string, number>();
   for (const token of args) {
-    if (/[\n\r\0]/.test(token)) {
+    if (/[\n\r\0]/u.test(token)) {
       return {
         ok: false,
         reason: "omp-re: rizin_cli: an argument contains a line break or NUL",
@@ -302,7 +302,9 @@ export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
       const header = `${def.tool} ${argv.join(" ")}`.trim();
       // rz-* tools on Windows end lines with CRLF; normalize to LF so the
       // model (and exact assertions) never see a stray `\r`.
-      const stdout = result.stdout.replaceAll("\r\n", "\n").replace(/\n+$/, "");
+      const stdout = result.stdout
+        .replaceAll("\r\n", "\n")
+        .replace(/\n+$/u, "");
       if (stdout === "") {
         const err = result.stderr.replaceAll("\r\n", "\n").trim();
         // Many of these tools report "no match" / "no difference" with a non-zero exit and nothing on stdout; only treat stderr as an error.

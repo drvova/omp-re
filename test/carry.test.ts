@@ -238,9 +238,9 @@ describe("rollUpClaims (no rizin needed)", () => {
     const manifest: CarryManifest = {
       binarySha256: null,
       entries: [
-        entry({ evidenceId: "e1", claims: ["A", "B"] }),
-        entry({ evidenceId: "e2", claims: ["A"] }),
-        entry({ evidenceId: "e3", claims: ["C"] }),
+        entry({ claims: ["A", "B"], evidenceId: "e1" }),
+        entry({ claims: ["A"], evidenceId: "e2" }),
+        entry({ claims: ["C"], evidenceId: "e3" }),
       ],
       findings: [],
     };
@@ -281,7 +281,7 @@ describe.skipIf(!canCarryLive)(
       );
       const v2src = src
         .replace("h * 33u", "h * 31u")
-        .replaceAll(/\bfib\b/g, "fibonacci");
+        .replaceAll(/\bfib\b/gu, "fibonacci");
       await writeFile(join(dir, "v1.c"), src);
       await writeFile(join(dir, "v2.c"), v2src);
       v1 = join(dir, "v1");
@@ -367,7 +367,7 @@ describe.skipIf(!canCarryLive)(
                 ? ((await fingerprintAnchor(rz, r.addr)) ?? null)
                 : null,
             args: r.addr
-              ? { command: r.command, addr: r.addr }
+              ? { addr: r.addr, command: r.command }
               : { command: r.command },
             binarySha256: v1Sha,
             canonicalExcerpt: canonicalExcerpt(output, v1),
@@ -512,7 +512,7 @@ describe.skipIf(!canCarryLive)(
           data: {
             id: "ev-anchored",
             tool: "rizin_command",
-            args: { command: "pdf", addr: "sym.fib" },
+            args: { addr: "sym.fib", command: "pdf" },
             commands: ["pdf @ sym.fib"],
             reproHash: "b".repeat(64),
             binarySha256: sha,

@@ -51,7 +51,7 @@ export function loadCatalog(
 
 async function readCatalog(rizinPath: string): Promise<RzCatalog> {
   // `-N` (skip user rizinrc) unless overridden, so the catalog reflects the same stock command set the session spawns with; plugins still load, so plugin commands (pdg, …) appear.
-  const noUserConfig = !/^(1|true|yes|on)$/i.test(
+  const noUserConfig = !/^(1|true|yes|on)$/iu.test(
     (process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim()
   );
   const proc = Bun.spawn(
@@ -84,7 +84,9 @@ export function isKnownCommand(catalog: RzCatalog, name: string): boolean {
     return true;
   }
   for (const cmd of catalog.keys()) {
-    if (cmd.startsWith(name)) return true;
+    if (cmd.startsWith(name)) {
+      return true;
+    }
   }
   return false;
 }
@@ -366,7 +368,7 @@ export const NOARG_DUALS: ReadonlySet<string> = new Set([
  * checked by {@link isRunnable} and gated in {@link checkRizinCommand}.
  */
 const ALLOWED_COMMAND =
-  /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/;
+  /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/u;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:
@@ -386,7 +388,7 @@ const ALLOWED_COMMAND =
  * still denied.
  */
 const DENIED_COMMAND =
-  /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/;
+  /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/u;
 
 /**
  * The `p=`/`p==` statistical-histogram family (book: print_modes) — entropy
@@ -398,7 +400,7 @@ const DENIED_COMMAND =
  * `…v` forms, which drive an ncurses UI and would block the pipe) are excluded
  * by the trailing-`v` negative lookahead.
  */
-const ENTROPY_MAP = /^p={1,2}(?![0-9A-Za-z]*v$)[0-9A-Za-z]*$/;
+const ENTROPY_MAP = /^p={1,2}(?![0-9A-Za-z]*v$)[0-9A-Za-z]*$/u;
 
 /**
  * Syntax refused anywhere in a raw command, because it would leave the single
@@ -411,20 +413,20 @@ const ENTROPY_MAP = /^p={1,2}(?![0-9A-Za-z]*v$)[0-9A-Za-z]*$/;
  * `\` escapes, and line breaks end the pipe line.
  */
 const FORBIDDEN_SYNTAX: readonly [RegExp, string][] = [
-  [/;/, "`;` (command chaining)"],
-  [/\|/, "`|` (pipes)"],
-  [/[<>]/, "`<`/`>` (redirection)"],
-  [/`/, "backticks (command substitution)"],
-  [/\$[({]/, "`$(`/`${` (substitution)"],
-  [/~/, "`~` (grep)"],
+  [/;/u, "`;` (command chaining)"],
+  [/\|/u, "`|` (pipes)"],
+  [/[<>]/u, "`<`/`>` (redirection)"],
+  [/`/u, "backticks (command substitution)"],
+  [/\$[({]/u, "`$(`/`${` (substitution)"],
+  [/~/u, "`~` (grep)"],
   [
-    /@(?!!(?:0x[0-9a-fA-F]+|\d+)(?:\s|$))/,
+    /@(?!!(?:0x[0-9a-fA-F]+|\d+)(?:\s|$))/u,
     "`@` modifiers other than `@!<blocksize>` (use the addr parameter to seek)",
   ],
-  [/"/, "double quotes (use single quotes)"],
-  [/#/, "`#`"],
-  [/\\/, "backslashes"],
-  [/[\n\r\0]/, "line breaks or NUL"],
+  [/"/u, "double quotes (use single quotes)"],
+  [/#/u, "`#`"],
+  [/\\/u, "backslashes"],
+  [/[\n\r\0]/u, "line breaks or NUL"],
 ];
 
 export type CommandCheck =
@@ -442,7 +444,9 @@ export type CommandCheck =
  */
 export function forbiddenSyntaxReason(value: string): string | undefined {
   for (const [pattern, label] of FORBIDDEN_SYNTAX) {
-    if (pattern.test(value)) return label;
+    if (pattern.test(value)) {
+      return label;
+    }
   }
   return undefined;
 }
@@ -464,7 +468,7 @@ export function checkRizinCommand(
       reason: `omp-re: rizin_command: ${forbidden} is not allowed in a command`,
     };
   }
-  const name = trimmed.split(/\s+/, 1)[0]!;
+  const name = trimmed.split(/\s+/u, 1)[0]!;
   // Table-query suffix (book: tools/rz-bin/tables.md): `cmd:spec[:spec...]`
   // sorts/filters/paginates/reformats the command's table. Only the head must
   // be runnable and known; every spec part must be table-grammar-shaped
@@ -476,7 +480,7 @@ export function checkRizinCommand(
   if (checked.includes(":")) {
     const head = checked.slice(0, checked.indexOf(":"));
     const specs = checked.slice(checked.indexOf(":") + 1).split(":");
-    if (!specs.every((s) => /^[A-Za-z0-9_*/.-]+$/.test(s))) {
+    if (!specs.every((s) => /^[A-Za-z0-9_*/.-]+$/u.test(s))) {
       return {
         ok: false,
         reason:
@@ -498,7 +502,7 @@ export function checkRizinCommand(
       reason: `omp-re: rizin_command: this rizin has no command ${JSON.stringify(checked)} — look it up with rizin_help`,
     };
   }
-  if (/(^|\s)interactive(\s|$)/.test(trimmed)) {
+  if (/(^|\s)interactive(\s|$)/u.test(trimmed)) {
     return {
       ok: false,
       reason:
@@ -525,7 +529,7 @@ export function checkRizinCommand(
   // A command whose catalog entry takes a file or path argument (`/m <magic-file>`) reads from disk; it runs only with none given.
   const fileArg = catalog
     .get(checked)
-    ?.args?.find((arg) => /file|path|dir/i.test(arg.name));
+    ?.args?.find((arg) => /file|path|dir/iu.test(arg.name));
   if (fileArg && trimmed !== name) {
     return {
       ok: false,
@@ -688,7 +692,7 @@ export function checkDebugOnHitCommand(
       };
     }
   }
-  const name = trimmed.split(/\s+/, 1)[0]!;
+  const name = trimmed.split(/\s+/u, 1)[0]!;
   if (DEBUG_READ_COMMANDS.has(name)) {
     // `=` is the only way these turn into a write (register assignment) or a stateful select (`dm=`/`dp=`); refuse it.
     if (trimmed.includes("=")) {
@@ -751,7 +755,7 @@ export function searchCatalog(
   const exact = catalog.get(q);
   const family = [...catalog.values()]
     .filter((spec) => spec.cmd.startsWith(q) && q !== "")
-    .sort((a, b) => a.cmd.localeCompare(b.cmd));
+    .toSorted((a, b) => a.cmd.localeCompare(b.cmd));
   if (exact || family.length > 0) {
     const lines: string[] = [];
     if (exact) {
@@ -777,7 +781,7 @@ export function searchCatalog(
     };
   }
 
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const words = q.toLowerCase().split(/\s+/u).filter(Boolean);
   const scored = [...catalog.values()]
     .map((spec) => {
       const summary = (spec.summary ?? "").toLowerCase();
@@ -789,14 +793,14 @@ export function searchCatalog(
         } else if (description.includes(word)) {
           score += 1;
         } else {
-          return { spec, score: 0 };
+          return { score: 0, spec };
         }
       }
       // Prefer the plain form over its j/q/t output-mode twins.
       return { score: score - spec.cmd.length * 0.01, spec };
     })
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .toSorted((a, b) => b.score - a.score);
   return {
     header: `rizin help search: ${JSON.stringify(q)} (${scored.length} match${scored.length === 1 ? "" : "es"})`,
     lines:

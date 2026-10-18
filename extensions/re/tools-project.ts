@@ -51,7 +51,9 @@ export function registerProjectTools(pi: ExtensionAPI): void {
       const rz = await ensureRizin(ctx, { signal });
       const binaryPath = requireBinary(getState(ctx));
       const requested = params.file ?? `${basename(binaryPath)}.rzdb`;
-      const name = /\.rzdb$/i.test(requested) ? requested : `${requested}.rzdb`;
+      const name = /\.rzdb$/iu.test(requested)
+        ? requested
+        : `${requested}.rzdb`;
       const path = await rizinOutputPath(name); // validates the basename and asserts a rizin-safe path, before touching rizin
       const { stderr } = await rz.cmdWithStderr(`Ps ${rizinPathArg(path)}`, {
         signal,

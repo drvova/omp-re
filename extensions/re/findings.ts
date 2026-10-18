@@ -82,22 +82,31 @@ export function collectFindings(
 ): FindingRecord[] {
   const live = new Map<string, FindingRecord>();
   for (const entry of entries) {
-    if (entry.type !== "custom") continue;
-    if (entry.customType === "re.finding.retract") {
-      const id = (entry.data as { id?: unknown } | undefined)?.id;
-      if (typeof id === "string") live.delete(id);
+    if (entry.type !== "custom") {
       continue;
     }
-    if (entry.customType !== "re.finding") continue;
+    if (entry.customType === "re.finding.retract") {
+      const id = (entry.data as { id?: unknown } | undefined)?.id;
+      if (typeof id === "string") {
+        live.delete(id);
+      }
+      continue;
+    }
+    if (entry.customType !== "re.finding") {
+      continue;
+    }
     const d = entry.data as Partial<FindingRecord> | undefined;
     if (
       !d ||
       typeof d.id !== "string" ||
       typeof d.claim !== "string" ||
       !Array.isArray(d.evidenceIds)
-    )
+    ) {
       continue;
-    if (typeof d.supersedes === "string") live.delete(d.supersedes);
+    }
+    if (typeof d.supersedes === "string") {
+      live.delete(d.supersedes);
+    }
     live.set(d.id, {
       id: d.id,
       claim: d.claim,
@@ -131,7 +140,7 @@ function resolveId<T extends { id: string }>(
 ): { ok: true; item: T } | { ok: false; reason: string } {
   const exact = items.find((i) => i.id === id);
   if (exact) {
-    return { ok: true, item: exact };
+    return { item: exact, ok: true };
   }
   if (id.length < MIN_ID_PREFIX) {
     return {
@@ -141,7 +150,7 @@ function resolveId<T extends { id: string }>(
   }
   const matches = items.filter((i) => i.id.startsWith(id));
   if (matches.length === 1) {
-    return { ok: true, item: matches[0]! };
+    return { item: matches[0]!, ok: true };
   }
   return {
     ok: false,
@@ -205,10 +214,10 @@ async function gateAndRecord(
   const item: AuditClaimInput = {
     claimText: input.claim,
     evidence: resolved.map((ev) => ({
-      id: ev.id,
-      tool: ev.tool,
-      summary: ev.summary,
       canonicalExcerpt: ev.canonicalExcerpt,
+      id: ev.id,
+      summary: ev.summary,
+      tool: ev.tool,
     })),
     index: 0,
   };
@@ -333,13 +342,13 @@ export function registerFindingTools(
     commands: z
       .array(
         z.object({
-          command: z
-            .string()
-            .describe("A read-only rizin command, e.g. `pdf` or `px 64`."),
           addr: z
             .string()
             .optional()
             .describe("Where to run it (address or name)."),
+          command: z
+            .string()
+            .describe("A read-only rizin command, e.g. `pdf` or `px 64`."),
         })
       )
       .min(1)
@@ -468,11 +477,12 @@ export function registerFindingTools(
       for (const { command, addr } of params.commands) {
         const res = await runRizinCommand(ctx, command, addr, signal);
         if (res.isError) {
+          const said = res.content
+            .map((c) => ("text" in c ? c.text : ""))
+            .join(" ")
+            .slice(0, 300);
           throw new Error(
-            `omp-re: adopt_finding: \`${command}${addr ? ` @ ${addr}` : ""}\` failed here: ${res.content
-              .map((c) => ("text" in c ? c.text : ""))
-              .join(" ")
-              .slice(0, 300)}`
+            `omp-re: adopt_finding: \`${command}${addr ? ` @ ${addr}` : ""}\` failed here: ${said}`
           );
         }
         const evidenceId = await recordEvidence(

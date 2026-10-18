@@ -38,7 +38,7 @@ describe("writeBlob / readBlob", () => {
   test("round-trips content and returns a stable content-addressed hash", async () => {
     const content = "some evidence text";
     const hash = await writeBlob(content);
-    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/u);
     const read = await readBlob(hash);
     expect(read).toBe(content);
   });
@@ -116,7 +116,7 @@ describe("the tool_result evidence hook", () => {
       handler!(
         {
           content: [
-            { type: "text", text: "rizin> pdf @ sym.f\nimul eax, eax, 0x21" },
+            { text: "rizin> pdf @ sym.f\nimul eax, eax, 0x21", type: "text" },
           ],
           details: { ea: "0x10" },
           input: { addr: "sym.f", command: "pdf" },
@@ -157,7 +157,7 @@ describe("the tool_result evidence hook", () => {
         })),
     });
     const tagged = await fire("rizin_command");
-    const id = /\[evidence ([0-9a-f]{8})/.exec(
+    const id = /\[evidence ([0-9a-f]{8})/u.exec(
       tagged?.content?.[1]?.text ?? ""
     )?.[1];
     const res = await h

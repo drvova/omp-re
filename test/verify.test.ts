@@ -40,7 +40,7 @@ afterEach(() => {
 describe("canonicalizeRizinOutput / canonicalHash (no rizin needed)", () => {
   test("ANSI escapes, CRLF, trailing whitespace, and trailing blank lines don't change the hash", () => {
     const clean = "section .text\nsection .data";
-    const noisy = "\x1B[2Ksection .text  \r\nsection .data\t\n\n\n";
+    const noisy = "\u001B[2Ksection .text  \r\nsection .data\t\n\n\n";
     expect(canonicalizeRizinOutput(noisy)).toBe(clean);
     expect(canonicalHash(noisy)).toBe(canonicalHash(clean));
   });

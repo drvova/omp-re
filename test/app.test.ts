@@ -36,7 +36,9 @@ describe("composeApp", () => {
     const subs: ReSubsystem[] = [
       {
         apply: async () => {
-          await new Promise((r) => setTimeout(r, 20));
+          await new Promise((r) => {
+            setTimeout(r, 20);
+          });
           done = true;
         },
         name: "slow",

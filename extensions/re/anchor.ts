@@ -77,7 +77,9 @@ async function mnemonicsAt(
   }
   return pdf.ops
     .filter((op) => typeof op.disasm === "string" && op.type !== "invalid")
-    .map((op) => (op.disasm as string).trim().split(/\s+/, 1)[0]!.toLowerCase())
+    .map((op) =>
+      (op.disasm as string).trim().split(/\s+/u, 1)[0]!.toLowerCase()
+    )
     .slice(0, MAX_MNEMONICS);
 }
 
@@ -154,7 +156,7 @@ export async function relocateAnchor(
           Math.abs(fn.size - fp.size) <= fp.size * 0.5 &&
           Math.abs(fn.nbbs - fp.nbbs) <= fp.nbbs * 0.5 + 2
       )
-      .sort(
+      .toSorted(
         (x, y) =>
           Math.abs(x.size - fp.size) / fp.size +
           Math.abs(x.nbbs - fp.nbbs) -

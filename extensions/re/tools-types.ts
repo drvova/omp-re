@@ -86,7 +86,7 @@ export function quoteTypeDefinition(definition: string): string {
   if (trimmed === "") {
     throw new Error("omp-re: define_types: empty definition");
   }
-  const bad = trimmed.match(/["`$\\\x00-\x1F]/);
+  const bad = trimmed.match(/["`$\\\u0000-\u001F]/u);
   if (bad) {
     throw new Error(
       `omp-re: define_types: a C type definition may not contain ${JSON.stringify(bad[0])}`
@@ -116,8 +116,8 @@ export async function defineTypeLines(
     return {
       content: [
         {
-          type: "text",
           text: `${definitions.length} definition(s) accepted silently (rizin td prints nothing on success). Verify with list_types.`,
+          type: "text",
         },
       ],
     };
