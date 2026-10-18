@@ -33,6 +33,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/re carry`: a report becomes a regression test for the next build.** `/re carry <report>.manifest.json [--against <binary>] [--strict] [--out <path>]` replays a finished report's cited commands against a _different_ binary (a new malware variant, a firmware update, a patched build) and classifies every claim. **holds**: the canonical output hash is identical. **drifted**: the command runs but the output changed, shown as a line diff of the recorded excerpt against the new one. **broken**: the symbolic anchor no longer resolves, or the command now produces nothing. **unchecked**: the evidence was provenance-only or legacy. A claim takes the worst status among its evidence. Headless, any broken claim sets a non-zero exit code; `--strict` also fails on drifted or unchecked claims. `--out` writes a Markdown carry report plus a `.json` sidecar. Deterministic and read-only like `/re verify`: the manifest is treated as untrusted input, so every command passes back through the `rizin_command` read-only gate and address validation, and carrying records no evidence. The report manifest now also records each `rizin_command`'s structured `args` (`{ command, addr }`). Older manifests still work, because the recorded line is split on its trailing `@ addr`.
 - **Shift-tolerant comparison and relocation for `/re carry`.** Every `rizin_command` evidence record now also stores a `shiftHash`: the canonical output with positional addresses masked (line-leading addresses, `@ 0x…`, branch and call targets, RIP-relative displacements, `fcn.…`/`loc.…` auto-names), while immediates are kept. A rebuild that only moved code now **holds** instead of drifting, and drift diffs show only lines that really changed. `/re report` also writes an **anchor fingerprint** for each address-pinned manifest entry: the containing function's name, offset, size, block count, anchor offset and mnemonic sequence, taken while the report's binary is open. When an anchor was renamed away, or a numeric anchor's code moved, carry finds the function again by fingerprint (prefiltered by size and block count, scored by mnemonic-sequence similarity, threshold 0.8) and re-runs the command there. The result is a new **relocated** status. If the output still changed, the claim is drifted, with the relocation noted. The manifest's fingerprint is shape-checked as untrusted input. `--strict` also fails on relocated claims.
 
+### Changed
+
+- **Linting and formatting with Ultracite v8 (Oxlint + Oxfmt).** The project
+  previously had no linter or formatter. It now uses `oxlint.config.mts`
+  (the `ultracite/oxlint/core` preset; no framework presets apply) and
+  `oxfmt.config.mts`, plus a `bun run fix` script. The existing `check`
+  script is still the type-check. There is also an `AGENTS.md`, a Claude
+  Code hook that runs `ultracite fix --hook` after edits, and the Ultracite
+  skill. The repo was formatted and the mechanical findings were fixed:
+  - the `u` flag on all 178 regex literals;
+  - inline comments moved onto their own lines;
+  - `++`/`--` rewritten as `+= 1`/`-= 1`;
+  - numeric separators, escapes, `curly`, `toSorted` and `toReversed`;
+  - small correctness rules: unused code, `eqeqeq`, `radix`, error `cause`.
+- **Ultracite check backlog: 1,635 → 1,060 findings.** The rest need
+  judgement or restructuring rather than a mechanical rewrite: `func-style`
+  (361), `no-await-expression-member` (178), `no-non-null-assertion` (141),
+  `sort-keys` (75), `no-use-before-define` (53), `no-await-in-loop` (53,
+  mostly deliberate sequential commands on rizin's single pipe), named
+  capture groups (40), and a long tail.
+
 ### Fixed
 
 - **Evidence ids are visible to the model.** Evidence records go to the session through `appendEntry`, which never reaches the model, so `record_finding` asked for ids the model had no way to learn. The only listing was `/re evidence`, a slash command. The `tool_result` evidence hook now appends a trailing `[evidence xxxxxxxx — cite it in record_finding]` block to every evidence-tier result. The tool's own text, and the hashes and summary taken over it, are unchanged. The hook now has direct tests, including the tag round-tripping into `record_finding`.
