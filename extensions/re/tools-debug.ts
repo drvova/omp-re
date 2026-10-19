@@ -56,26 +56,30 @@ const readLiveBytes = async (
   signal?: AbortSignal
 ): Promise<Buffer> => {
   const parts: Buffer[] = [];
-  let read = 0;
-  while (read < size) {
+  // Read DUMP_CHUNK bytes at a time from offset `read`, stopping at `size`.
+  const readFrom = async (read: number): Promise<void> => {
+    if (read >= size) {
+      return;
+    }
     const want = Math.min(DUMP_CHUNK, size - read);
     const rawHex = await dbg.cmd(`p8 ${want} @ ${ea}+${read}`, { signal });
     const hex = rawHex.trim();
+    // unmapped / end of readable memory
     if (!/^[0-9a-fA-F]*$/u.test(hex) || hex.length === 0) {
-      break;
-      // unmapped / end of readable memory
+      return;
     }
     const chunk = Buffer.from(hex, "hex");
     if (chunk.length === 0) {
-      break;
+      return;
     }
     parts.push(chunk);
-    read += chunk.length;
+    // short read: hit an unmapped page
     if (chunk.length < want) {
-      break;
-      // short read: hit an unmapped page
+      return;
     }
-  }
+    await readFrom(read + chunk.length);
+  };
+  await readFrom(0);
   return Buffer.concat(parts);
 };
 

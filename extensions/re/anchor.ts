@@ -18,6 +18,7 @@
  */
 import type { RzSession } from "./rizin.ts";
 import { eaFromOffset, resolveNumericAddr } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 
 /** Cap on mnemonics kept per fingerprint: plenty to identify a function, small enough to keep the manifest and the O(n·m) similarity cheap. */
 const MAX_MNEMONICS = 512;
@@ -160,10 +161,10 @@ export const relocateAnchor = async (
       )
       .slice(0, MAX_CANDIDATES);
     let best: { fn: FnInfo; similarity: number } | undefined;
-    for (const fn of candidates) {
+    await inSequence(candidates, async (fn) => {
       const mnemonics = await mnemonicsAt(rz, fn.offset);
       if (!mnemonics) {
-        continue;
+        return;
       }
       const similarity = sequenceSimilarity(fp.mnemonics, mnemonics);
       const better =
@@ -173,7 +174,7 @@ export const relocateAnchor = async (
       if (better) {
         best = { fn, similarity };
       }
-    }
+    });
     if (!best || best.similarity < RELOCATE_THRESHOLD) {
       return undefined;
     }

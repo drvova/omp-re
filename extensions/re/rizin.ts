@@ -18,6 +18,8 @@ import {
 } from "node:fs";
 import { access, realpath as fsRealpath } from "node:fs/promises";
 
+import { firstInSequence } from "./sequence.ts";
+
 /** Allowed characters in an address/expression interpolated after `@`: hex, flag names, and
  * arithmetic (sym.main+0x10, $$). `@` itself is excluded so no value can smuggle in rizin's
  * `@@` foreach iterators, and `(`/`;`/`~`/`|`/quotes are excluded so no value can open a command
@@ -439,8 +441,14 @@ export class RzSession {
       this.proc.stdin?.write(`${command}\necho ${marker}\n`);
 
       const collected: string[] = [];
-      // The loop bound is a defensive ceiling against a genuinely desynced stream, not the expected path.
-      for (let i = 0; i < 8; i += 1) {
+      // Read frames until the sync marker. The attempt bound is a defensive ceiling against a
+      // genuinely desynced stream, not the expected path.
+      const readUntilMarker = async (
+        attempt: number
+      ): Promise<{ output: string; stderr: string } | undefined> => {
+        if (attempt >= 8) {
+          return undefined;
+        }
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
           const err = this.timeoutError(command, timeoutMs);
@@ -466,6 +474,11 @@ export class RzSession {
           return { output: collected.join(""), stderr };
         }
         collected.push(frame);
+        return readUntilMarker(attempt + 1);
+      };
+      const reply = await readUntilMarker(0);
+      if (reply) {
+        return reply;
       }
       const detail = this.stderrTail.trim();
       this.close();
@@ -782,18 +795,20 @@ export const isExecutable = async (name: string): Promise<boolean> => {
   if (!name.includes("/")) {
     return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
   }
-  for (const candidate of process.platform === "win32" &&
-  !/\.(?:exe|cmd|bat)$/iu.test(name)
-    ? [name, `${name}.exe`]
-    : [name]) {
+  const candidates =
+    process.platform === "win32" && !/\.(?:exe|cmd|bat)$/iu.test(name)
+      ? [name, `${name}.exe`]
+      : [name];
+  const executable = await firstInSequence(candidates, async (candidate) => {
     try {
       await access(candidate, fsConstants.X_OK);
       return true;
     } catch {
-      // try the next candidate
+      // not executable: try the next candidate
+      return;
     }
-  }
-  return false;
+  });
+  return executable === true;
 };
 
 export const assertRizinAvailable = async (): Promise<void> => {

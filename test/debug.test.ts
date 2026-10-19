@@ -17,6 +17,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
+import { inSequence } from "../extensions/re/sequence.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import {
   DEBUG_LAUNCH_WARNING,
@@ -571,9 +572,12 @@ describe.skipIf(!canRunRizin || !debuggerSupported)(
     test("the glibc heap actions return a result without desyncing (even with no heap mapped yet)", async () => {
       // Early in a tiny process there may be no glibc arena; the tool returns
       // rizin's own note instead of erroring, and the stream stays aligned.
-      for (const action of ["heap_arenas", "heap_chunks", "heap_bins"]) {
-        expect(textOf(await run(action)).length).toBeGreaterThan(0);
-      }
+      await inSequence(
+        ["heap_arenas", "heap_chunks", "heap_bins"],
+        async (action) => {
+          expect(textOf(await run(action)).length).toBeGreaterThan(0);
+        }
+      );
       expect(textOf(await run("registers"))).toMatch(/"rip":\d+|"pc":\d+/u);
     }, 20_000);
 

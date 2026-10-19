@@ -17,6 +17,8 @@ import nodePath from "node:path";
 
 import Convert from "ansi-to-html";
 
+import { inSequence } from "../../extensions/re/sequence.ts";
+
 const SHOTGEN_DIR = import.meta.dirname;
 const OUT_DIR = nodePath.join(SHOTGEN_DIR, "out");
 
@@ -189,7 +191,7 @@ const main = async (): Promise<void> => {
     );
     process.exit(1);
   }
-  for (const name of ansiFiles) {
+  await inSequence(ansiFiles, async (name) => {
     const scene = name.slice(0, -".ansi".length);
     const raw = await Bun.file(nodePath.join(OUT_DIR, name)).text();
     const convert = new Convert({
@@ -204,7 +206,7 @@ const main = async (): Promise<void> => {
     const outPath = nodePath.join(OUT_DIR, `${scene}.html`);
     await Bun.write(outPath, page);
     console.log(`render.ts: wrote ${outPath}`);
-  }
+  });
 };
 
 await main();

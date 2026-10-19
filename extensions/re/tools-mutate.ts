@@ -36,6 +36,7 @@ import {
   validateTypeLike,
 } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState, markAnnotationsApplied } from "./state.ts";
 
 interface AfijRow {
@@ -213,9 +214,9 @@ const apply = async (
   commands: string[],
   signal?: AbortSignal
 ): Promise<void> => {
-  for (const command of commands) {
+  await inSequence(commands, async (command) => {
     await rz.cmd(command, { signal });
-  }
+  });
 };
 
 /** Append the `re.annotation` entry (grounded by the latest evidence at the same EA, if any) and record that rizin now matches the branch. */

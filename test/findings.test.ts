@@ -32,6 +32,7 @@ import {
   registerFindingTools,
 } from "../extensions/re/findings.ts";
 import { writeReport } from "../extensions/re/report.ts";
+import { inSequence } from "../extensions/re/sequence.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { runRizinCommand } from "../extensions/re/tools-rizin.ts";
 import { sha256File } from "../extensions/re/verify.ts";
@@ -271,21 +272,24 @@ describe.skipIf(!canRunLive)(
       );
       v1 = nodePath.join(dir, "v1");
       v2 = nodePath.join(dir, "v2");
-      for (const [out, file] of [
-        [v1, "v1.c"],
-        [v2, "v2.c"],
-      ] as const) {
-        const proc = Bun.spawn(
-          [must(CC), "-O0", "-o", out, nodePath.join(dir, file)],
-          {
-            stderr: "pipe",
-            stdout: "pipe",
+      await inSequence(
+        [
+          [v1, "v1.c"],
+          [v2, "v2.c"],
+        ] as const,
+        async ([out, file]) => {
+          const proc = Bun.spawn(
+            [must(CC), "-O0", "-o", out, nodePath.join(dir, file)],
+            {
+              stderr: "pipe",
+              stdout: "pipe",
+            }
+          );
+          if ((await proc.exited) !== 0) {
+            throw new Error(`inherit test: compiling ${file} failed`);
           }
-        );
-        if ((await proc.exited) !== 0) {
-          throw new Error(`inherit test: compiling ${file} failed`);
         }
-      }
+      );
     }, 60_000);
     afterAll(() => rmDirSafe(dir));
 

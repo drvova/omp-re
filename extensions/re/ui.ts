@@ -35,6 +35,7 @@ import { findingNote, liveFindings } from "./findings.ts";
 import type { FindingRecord } from "./findings.ts";
 import { addrOf, eaFromOffset } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState } from "./state.ts";
 
 /** The live rizin session for UI use, or null (with the reason already shown) when there is none. Respawns transparently like the tools do, so a panel opened after a branch change still works. */
@@ -443,9 +444,9 @@ const labelXrefs = async (
 ): Promise<SelectItem[]> => {
   const LABEL_CAP = 64;
   const items: SelectItem[] = [];
-  for (const [index, row] of rows.entries()) {
+  await inSequence(rows.entries(), async ([index, row]) => {
     if (typeof row.from !== "number") {
-      continue;
+      return;
     }
     const ea = eaFromOffset(row.from);
     let label = ea;
@@ -459,7 +460,7 @@ const labelXrefs = async (
       }
     }
     items.push({ description: row.type, label, value: ea });
-  }
+  });
   return items;
 };
 

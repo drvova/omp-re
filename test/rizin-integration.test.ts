@@ -18,6 +18,7 @@ import {
   RzSession,
   resolveBinaryPath,
 } from "../extensions/re/rizin.ts";
+import { inSequence } from "../extensions/re/sequence.ts";
 import {
   ensureRizin,
   getState,
@@ -76,11 +77,14 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
   });
 
   test("50 sequential commands in one session all return their own output", async () => {
-    for (let i = 0; i < 50; i += 1) {
-      const marker = `omp-re-seq-${i}`;
-      const echoOutput = await session.cmd(`echo ${marker}`);
-      expect(echoOutput.trim()).toBe(marker);
-    }
+    await inSequence(
+      Array.from({ length: 50 }, (_, i) => i),
+      async (i) => {
+        const marker = `omp-re-seq-${i}`;
+        const echoOutput = await session.cmd(`echo ${marker}`);
+        expect(echoOutput.trim()).toBe(marker);
+      }
+    );
   });
 
   test("an invalid address returns empty output and keeps the stream aligned", async () => {
@@ -198,27 +202,30 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("the policy accepts the new reads and the real rizin runs them without error", async () => {
-      for (const command of [
-        "elj",
-        "ahlj",
-        "aij",
-        "aclj",
-        "Cj",
-        "Cslj",
-        "tj",
-        "tuj",
-        "tcc",
-        "Llj",
-        "LDj",
-      ]) {
-        const check = checkRizinCommand(catalog, command);
-        expect(check.ok).toBe(true);
-        // A read-only command returns output or an empty frame — never a stream-desyncing error.
-        const out = await session.cmd(command);
-        const echoOutput4 = await session.cmd("echo aligned");
-        expect(echoOutput4.trim()).toBe("aligned");
-        expect(out).not.toMatch(/Wrong number of arguments/u);
-      }
+      await inSequence(
+        [
+          "elj",
+          "ahlj",
+          "aij",
+          "aclj",
+          "Cj",
+          "Cslj",
+          "tj",
+          "tuj",
+          "tcc",
+          "Llj",
+          "LDj",
+        ],
+        async (command) => {
+          const check = checkRizinCommand(catalog, command);
+          expect(check.ok).toBe(true);
+          // A read-only command returns output or an empty frame — never a stream-desyncing error.
+          const out = await session.cmd(command);
+          const echoOutput4 = await session.cmd("echo aligned");
+          expect(echoOutput4.trim()).toBe("aligned");
+          expect(out).not.toMatch(/Wrong number of arguments/u);
+        }
+      );
     });
 
     test("`e asm.arch` reads the value through the host, `e asm.bits=32` is refused before rizin", async () => {
@@ -257,14 +264,17 @@ describe.skipIf(!canRunRizin)(
     });
 
     test("the p= statistical/entropy histograms are allowed (despite the `=`) and run read-only", async () => {
-      for (const command of ["p= 16", "p=e 16", "p==e 16", "p=rj", "p=d"]) {
-        const check = checkRizinCommand(catalog, command);
-        expect(check).toMatchObject({ ok: true });
-        await session.cmd((check as { line: string }).line);
-        // no stream desync
-        const echoOutput5 = await session.cmd("echo aligned");
-        expect(echoOutput5.trim()).toBe("aligned");
-      }
+      await inSequence(
+        ["p= 16", "p=e 16", "p==e 16", "p=rj", "p=d"],
+        async (command) => {
+          const check = checkRizinCommand(catalog, command);
+          expect(check).toMatchObject({ ok: true });
+          await session.cmd((check as { line: string }).line);
+          // no stream desync
+          const echoOutput5 = await session.cmd("echo aligned");
+          expect(echoOutput5.trim()).toBe("aligned");
+        }
+      );
       // interactive visual variants (`…v`) and a `=`-write form stay refused
       expect(checkRizinCommand(catalog, "p==ev")).toMatchObject({ ok: false });
       expect(checkRizinCommand(catalog, "p==v")).toMatchObject({ ok: false });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { RzSession } from "../extensions/re/rizin.ts";
+import { inSequence } from "../extensions/re/sequence.ts";
 import {
   scopedSearch,
   searchCommand,
@@ -226,16 +227,19 @@ describe("defineTypeLines", () => {
   test("refuses a definition that could break out of the quoting", async () => {
     const { rz } = stubRz({});
     // A raw `"` would close the quote early; backtick/`$`/`\` could substitute or escape. None appears in a real C type.
-    for (const bad of [
-      'struct X { int a; }" ; !id',
-      "struct Y { char *p; } `id`",
-      "struct Z { int $x; }",
-      "struct W { int a; }\\",
-    ]) {
-      await expect(defineTypeLines(rz, [bad])).rejects.toThrow(
-        "may not contain"
-      );
-    }
+    await inSequence(
+      [
+        'struct X { int a; }" ; !id',
+        "struct Y { char *p; } `id`",
+        "struct Z { int $x; }",
+        "struct W { int a; }\\",
+      ],
+      async (bad) => {
+        await expect(defineTypeLines(rz, [bad])).rejects.toThrow(
+          "may not contain"
+        );
+      }
+    );
   });
 
   test("surfaces rizin stderr for rejected definitions", async () => {

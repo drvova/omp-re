@@ -37,6 +37,7 @@ import {
 import type { EvidenceRecord } from "./entries.ts";
 import { collectFindings, findingNote } from "./findings.ts";
 import type { FindingRecord } from "./findings.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState } from "./state.ts";
 import { recordedCommand, recordedStatus } from "./verify.ts";
 
@@ -260,10 +261,10 @@ const extractCapabilities = async (
   // attack id -> capa's own technique/subtechnique label
   const labelSet = new Map<string, string>();
 
-  for (const ev of capaEvidence) {
+  await inSequence(capaEvidence, async (ev) => {
     const raw = await readEvidenceOutput(ctx, ev);
     if (!raw) {
-      continue;
+      return;
     }
     let findings: CapaFinding[];
     try {
@@ -271,7 +272,7 @@ const extractCapabilities = async (
       findings = Array.isArray(parsed) ? (parsed as CapaFinding[]) : [];
     } catch {
       // truncated or malformed blob (e.g. output-size cap) — degrade to no capabilities, never crash
-      continue;
+      return;
     }
     for (const rule of findings) {
       const name = rule.meta?.name?.trim() || rule.name?.trim();
@@ -299,7 +300,7 @@ const extractCapabilities = async (
         }
       }
     }
-  }
+  });
 
   return {
     attackIds: [...attackSet.keys()].toSorted(),
@@ -343,7 +344,7 @@ const buildIOCClaims = async (
 ): Promise<Claim[]> => {
   const claims: Claim[] = [];
 
-  for (const ev of evidence) {
+  await inSequence(evidence, async (ev) => {
     const lowerTool = ev.tool.toLowerCase();
     const texts: string[] = [ev.summary];
     if (
@@ -366,7 +367,7 @@ const buildIOCClaims = async (
         claims.push({ evidenceIds: [ev.id], text: defangIOC(ioc) });
       }
     }
-  }
+  });
 
   for (const annotation of annotations) {
     for (const text of [annotation.oldValue, annotation.newValue]) {
@@ -663,13 +664,13 @@ const buildAuditInputs = async (
   const items: AuditClaimInput[] = [];
   const textCache = new Map<string, string | undefined>();
   let index = 0;
-  for (const section of report.sections) {
-    for (const claim of section.claims) {
+  await inSequence(report.sections, async (section) => {
+    await inSequence(section.claims, async (claim) => {
       const evidence: AuditClaimInput["evidence"] = [];
-      for (const id of claim.evidenceIds) {
+      await inSequence(claim.evidenceIds, async (id) => {
         const ev = report.evidenceById.get(id);
         if (!ev) {
-          continue;
+          return;
         }
         let fullText: string | undefined;
         if (withFullText) {
@@ -686,13 +687,13 @@ const buildAuditInputs = async (
           summary: ev.summary,
           tool: ev.tool,
         });
-      }
+      });
       if (evidence.length > 0) {
         items.push({ claimText: claim.text, evidence, index });
       }
       index += 1;
-    }
-  }
+    });
+  });
   return items;
 };
 
@@ -809,20 +810,20 @@ const collectAnchors = async (
     report.sections.flatMap((s) => s.claims.flatMap((c) => c.evidenceIds))
   );
   try {
-    for (const id of cited) {
+    await inSequence(cited, async (id) => {
       const ev = report.evidenceById.get(id);
       if (!ev || ev.binarySha256 !== state.binarySha256) {
-        continue;
+        return;
       }
       const addr = rizinCommandArgs(ev)?.addr;
       if (!addr) {
-        continue;
+        return;
       }
       const fp = await fingerprintAnchor(await ensureRizin(ctx), addr);
       if (fp) {
         anchors.set(id, fp);
       }
-    }
+    });
   } catch {
     // rizin unavailable: the manifest is still complete, just without relocation fingerprints.
   }

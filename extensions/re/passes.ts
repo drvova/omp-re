@@ -12,6 +12,7 @@
  * is the single pass-name → command map shared by the tool and the replay.
  */
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 
 /** Analysis passes exposed by the `analyze` tool, each a rizin analysis command. All are additive (they find functions/xrefs/names, match types, or recover classes); none deletes analysis. */
 export const ANALYSIS_PASSES = {
@@ -59,10 +60,10 @@ export const replayAnalysisPasses = async (
   timeoutMs?: number
 ): Promise<string[]> => {
   const failures: string[] = [];
-  for (const pass of passes) {
+  await inSequence(passes, async (pass) => {
     if (!isAnalysisPass(pass)) {
       failures.push(`analysis pass ${pass}: unknown`);
-      continue;
+      return;
     }
     try {
       await rz.cmd(
@@ -74,6 +75,6 @@ export const replayAnalysisPasses = async (
         `analysis pass ${pass}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-  }
+  });
   return failures;
 };

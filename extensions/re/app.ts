@@ -20,6 +20,8 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
+import { inSequence } from "./sequence.ts";
+
 /** A subsystem: a name and the registration it runs with the host. */
 export interface ReSubsystem {
   name: string;
@@ -35,7 +37,7 @@ export const composeApp = async (
   pi: ExtensionAPI,
   subsystems: readonly ReSubsystem[]
 ): Promise<void> => {
-  for (const sub of subsystems) {
+  await inSequence(subsystems, async (sub) => {
     await sub.apply(pi);
-  }
+  });
 };

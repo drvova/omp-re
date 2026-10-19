@@ -19,6 +19,7 @@
  */
 import { rzQuote, validateAddr } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 
 export interface MapFile {
   path: string;
@@ -46,7 +47,7 @@ export const replayMapFiles = async (
   maps: readonly MapFile[]
 ): Promise<string[]> => {
   const failures: string[] = [];
-  for (const m of maps) {
+  await inSequence(maps, async (m) => {
     try {
       await rz.cmd(mapFileCommand(m));
     } catch (error) {
@@ -54,6 +55,6 @@ export const replayMapFiles = async (
         `map ${m.path} @ ${m.addr}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-  }
+  });
   return failures;
 };

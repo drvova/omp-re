@@ -15,6 +15,7 @@ import type { ReToolResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
 import { resolveNumericAddr, validateAddr } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin } from "./state.ts";
 import {
   DEFAULT_LIMIT,
@@ -101,7 +102,7 @@ export const defineTypeLines = async (
   definitions: string[]
 ): Promise<ReToolResult> => {
   const lines: string[] = [];
-  for (const definition of definitions) {
+  await inSequence(definitions, async (definition) => {
     const { output, stderr } = await rz.cmdWithStderr(
       quoteTypeDefinition(definition)
     );
@@ -111,7 +112,7 @@ export const defineTypeLines = async (
     if (stderr.trim().length > 0) {
       lines.push(stderr.trim());
     }
-  }
+  });
   if (lines.length === 0) {
     return {
       content: [

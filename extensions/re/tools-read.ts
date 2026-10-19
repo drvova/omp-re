@@ -27,6 +27,7 @@ import {
   validateAddr,
 } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
 export const DEFAULT_LIMIT = 200;
@@ -175,7 +176,7 @@ const functionSummary = async (
     ),
   ];
   const calls: { ea: string; name?: string }[] = [];
-  for (const to of callTargets.slice(0, REF_CAP)) {
+  await inSequence(callTargets.slice(0, REF_CAP), async (to) => {
     const flag = await rz.cmdj<{ name?: string; offset?: number }>(
       `fdj @ ${eaFromOffset(to)}`,
       { signal }
@@ -184,7 +185,7 @@ const functionSummary = async (
       ea: eaFromOffset(to),
       ...(flag?.name && flag.offset === to ? { name: flag.name } : {}),
     });
-  }
+  });
   const callers = [
     ...new Set(
       refs("codexrefs")

@@ -36,6 +36,7 @@ import { recordEvidence } from "./evidence.ts";
 import { plainResult } from "./format.ts";
 import type { ReToolResult } from "./format.ts";
 import { reRenderers } from "./render.ts";
+import { inSequence } from "./sequence.ts";
 import { getState } from "./state.ts";
 import { runRizinCommand } from "./tools-rizin.ts";
 import { recordedStatus } from "./verify.ts";
@@ -476,7 +477,7 @@ export const registerFindingTools = (
       // exactly as a live rizin_command result, bound to the open binary. A claim is adopted only
       // on evidence this session observed itself.
       const resolved: EvidenceRecord[] = [];
-      for (const { command, addr } of params.commands) {
+      await inSequence(params.commands, async ({ command, addr }) => {
         const res = await runRizinCommand(ctx, command, addr, signal);
         if (res.isError) {
           const said = res.content
@@ -501,7 +502,7 @@ export const registerFindingTools = (
         if (record) {
           resolved.push(record);
         }
-      }
+      });
       return gateAndRecord(
         pi,
         ctx,

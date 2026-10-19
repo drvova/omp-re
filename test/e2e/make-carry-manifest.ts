@@ -8,6 +8,7 @@
 import { recordEvidence } from "../../extensions/re/evidence.ts";
 import { registerFindingTools } from "../../extensions/re/findings.ts";
 import { writeReport } from "../../extensions/re/report.ts";
+import { inSequence } from "../../extensions/re/sequence.ts";
 import { getState, shutdownState } from "../../extensions/re/state.ts";
 import { runRizinCommand } from "../../extensions/re/tools-rizin.ts";
 import { sha256File } from "../../extensions/re/verify.ts";
@@ -43,7 +44,7 @@ const findings: [string, string][] = [
   ["sym.clamp", "clamp bounds its input to [lo, hi]."],
   ["sym.checksum", "checksum is a djb2 hash (h * 33 + c)."],
 ];
-for (const [fn, claim] of findings) {
+await inSequence(findings, async ([fn, claim]) => {
   const res = await runRizinCommand(h.ctx, "pdf", fn);
   const id = await recordEvidence(
     h.pi,
@@ -62,6 +63,6 @@ for (const [fn, claim] of findings) {
       undefined,
       h.ctx
     );
-}
+});
 await writeReport(h.ctx, reportPath, { audit: "off" });
 shutdownState("tui-carry-fixture");

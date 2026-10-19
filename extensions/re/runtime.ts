@@ -41,6 +41,7 @@ import {
   resolveRizinPath,
 } from "./rizin.ts";
 import type { LoadOptions, SpawnOptions } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 import { replaySignatures } from "./signatures.ts";
 
 /** The per-omp-session record. The public fields are read and written directly by the tools, UI, evidence, and audit modules exactly as before. */
@@ -91,9 +92,9 @@ const newScope = (): Scope => {
     async dispose() {
       const pending = [...teardowns].toReversed();
       teardowns.clear();
-      for (const teardown of pending) {
+      await inSequence(pending, async (teardown) => {
         await teardown();
-      }
+      });
     },
     effect(setup) {
       const teardown = setup();

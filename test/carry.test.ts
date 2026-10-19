@@ -48,6 +48,7 @@ import {
 } from "../extensions/re/format.ts";
 import { writeReport } from "../extensions/re/report.ts";
 import { RzSession, resolveRizinPath } from "../extensions/re/rizin.ts";
+import { inSequence } from "../extensions/re/sequence.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { sha256File } from "../extensions/re/verify.ts";
 import { makeHarness, rizinAvailable, rmDirSafe, must } from "./helpers.ts";
@@ -286,23 +287,26 @@ describe.skipIf(!canCarryLive)(
       await writeFile(nodePath.join(dir, "v2.c"), v2src);
       v1 = nodePath.join(dir, "v1");
       v2 = nodePath.join(dir, "v2");
-      for (const [out, file] of [
-        [v1, "v1.c"],
-        [v2, "v2.c"],
-      ] as const) {
-        const proc = Bun.spawn(
-          [must(CC), "-O0", "-o", out, nodePath.join(dir, file)],
-          {
-            stderr: "pipe",
-            stdout: "pipe",
-          }
-        );
-        if ((await proc.exited) !== 0) {
-          throw new Error(
-            `carry test: compiling ${file} failed: ${await new Response(proc.stderr).text()}`
+      await inSequence(
+        [
+          [v1, "v1.c"],
+          [v2, "v2.c"],
+        ] as const,
+        async ([out, file]) => {
+          const proc = Bun.spawn(
+            [must(CC), "-O0", "-o", out, nodePath.join(dir, file)],
+            {
+              stderr: "pipe",
+              stdout: "pipe",
+            }
           );
+          if ((await proc.exited) !== 0) {
+            throw new Error(
+              `carry test: compiling ${file} failed: ${await new Response(proc.stderr).text()}`
+            );
+          }
         }
-      }
+      );
 
       // Record evidence on v1 exactly the way rizin_command does (reproHash over raw output, path-redacted).
       const v1Sha = await sha256File(v1);
@@ -351,7 +355,8 @@ describe.skipIf(!canCarryLive)(
         },
       ];
       const rz = await RzSession.spawn(resolveRizinPath(v1), v1);
-      const entries = [];
+      // manifest entries, written out as the v1 report's verification manifest
+      const entries: Record<string, unknown>[] = [];
       try {
         // The numeric anchor: transform's v1 start address, which moves in v2.
         const transform = (
@@ -361,7 +366,7 @@ describe.skipIf(!canCarryLive)(
         )[0].offset;
         must(requests.find((r) => r.id === "ev-transform")).addr =
           `0x${transform.toString(16)}`;
-        for (const r of requests) {
+        await inSequence(requests, async (r) => {
           const line = r.addr ? `${r.command} @ ${r.addr}` : r.command;
           const { output } = await rz.cmdWithStderr(line);
           entries.push({
@@ -383,7 +388,7 @@ describe.skipIf(!canCarryLive)(
             status: "reproducible",
             tool: "rizin_command",
           });
-        }
+        });
       } finally {
         rz.close();
       }

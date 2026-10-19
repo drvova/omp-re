@@ -24,6 +24,7 @@ import {
   validateTypeLike,
 } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 
 export type AnnotationKind =
   | "rename_function"
@@ -414,22 +415,25 @@ export const replayAnnotations = async (
   live: readonly LiveAnnotation[]
 ): Promise<string[]> => {
   const failures: string[] = [];
-  for (const { data } of live) {
+  await inSequence(live, async ({ data }) => {
     try {
-      for (const command of annotationCommands(
-        data.kind,
-        data.ea,
-        data.newValue,
-        data.oldValue,
-        data.target
-      )) {
-        await rz.cmd(command);
-      }
+      await inSequence(
+        annotationCommands(
+          data.kind,
+          data.ea,
+          data.newValue,
+          data.oldValue,
+          data.target
+        ),
+        async (command) => {
+          await rz.cmd(command);
+        }
+      );
     } catch (error) {
       failures.push(
         `${data.kind} @ ${data.ea}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-  }
+  });
   return failures;
 };

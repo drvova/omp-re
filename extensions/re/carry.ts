@@ -57,6 +57,7 @@ import {
 } from "./format.ts";
 import { normalizeAddr, resolveNumericAddr, validateAddr } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState } from "./state.ts";
 import { cleanStderr, runRizinCommand } from "./tools-rizin.ts";
 import { sha256File } from "./verify.ts";
@@ -563,9 +564,9 @@ export const buildCarry = async (
   const evidence: CarryEvidenceRow[] = [];
   const seen = new Set<string>();
 
-  for (const entry of manifest.entries) {
+  await inSequence(manifest.entries, async (entry) => {
     if (seen.has(entry.evidenceId)) {
-      continue;
+      return;
     }
     seen.add(entry.evidenceId);
     const request =
@@ -582,7 +583,7 @@ export const buildCarry = async (
         detail,
         status: "unchecked",
       });
-      continue;
+      return;
     }
 
     let line: string;
@@ -602,7 +603,7 @@ export const buildCarry = async (
           detail: `not runnable here: ${check.reason}`,
           status: "unchecked",
         });
-        continue;
+        return;
       }
       ({ line } = check);
     } catch (error) {
@@ -612,7 +613,7 @@ export const buildCarry = async (
         detail: `not runnable here: ${error instanceof Error ? error.message : String(error)}`,
         status: "unchecked",
       });
-      continue;
+      return;
     }
 
     try {
@@ -644,7 +645,7 @@ export const buildCarry = async (
                   status: "broken",
                 }
           );
-          continue;
+          return;
         }
       }
       const { output, stderr } = await rz.cmdWithStderr(line, {
@@ -669,7 +670,7 @@ export const buildCarry = async (
                   status: "broken",
                 }
           );
-          continue;
+          return;
         }
       }
       const same = compareOutput(entry, output, binaryPath);
@@ -681,7 +682,7 @@ export const buildCarry = async (
           rerun: request,
           status: "holds",
         });
-        continue;
+        return;
       }
       // Drifted at a numeric anchor: the code it named may simply have moved. Relocate by
       // fingerprint and re-run there; keep the drift only if the code isn't found elsewhere.
@@ -700,7 +701,7 @@ export const buildCarry = async (
           moved.relocation?.addr !== normalizeAddr(request.addr)
         ) {
           evidence.push({ ...base, ...moved });
-          continue;
+          return;
         }
       }
       const parts = [];
@@ -730,7 +731,7 @@ export const buildCarry = async (
         status: "unchecked",
       });
     }
-  }
+  });
 
   return {
     claims: rollUpClaims(manifest, evidence),
@@ -891,10 +892,10 @@ export const inheritFindings = async (
     inherited: [],
   };
 
-  for (const finding of manifest.findings) {
+  await inSequence(manifest.findings, async (finding) => {
     if (present.has(finding.claim)) {
       outcome.alreadyPresent += 1;
-      continue;
+      return;
     }
     const status = statusByClaim.get(finding.claim) ?? "unchecked";
     const rows = finding.evidenceIds
@@ -919,14 +920,14 @@ export const inheritFindings = async (
         rows,
         status,
       });
-      continue;
+      return;
     }
 
     const newEvidence: string[] = [];
-    for (const row of reproduced) {
+    await inSequence(reproduced, async (row) => {
       const res = await runRizinCommand(ctx, row.rerun.command, row.rerun.addr);
       if (res.isError) {
-        continue;
+        return;
       }
       newEvidence.push(
         await recordEvidence(
@@ -938,7 +939,7 @@ export const inheritFindings = async (
           res.details
         )
       );
-    }
+    });
     if (newEvidence.length === 0) {
       outcome.agenda.push({
         claim: finding.claim,
@@ -946,7 +947,7 @@ export const inheritFindings = async (
         rows,
         status: "unchecked",
       });
-      continue;
+      return;
     }
     // An address the finding was about follows its evidence's anchor when that anchor relocated.
     const relocationOf = reproduced.find((r) => r.relocation)?.relocation;
@@ -995,7 +996,7 @@ export const inheritFindings = async (
       status,
       toId: id,
     });
-  }
+  });
   return outcome;
 };
 

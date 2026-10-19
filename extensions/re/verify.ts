@@ -28,6 +28,7 @@ import { checkRizinCommand, loadCatalog } from "./catalog.ts";
 import { branchEntries, collectEvidence } from "./entries.ts";
 import type { EvidenceRecord } from "./entries.ts";
 import { canonicalHash } from "./format.ts";
+import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState } from "./state.ts";
 
 const VERIFY_COMMAND_TIMEOUT_MS = 120_000;
@@ -107,7 +108,7 @@ export const buildVerification = async (
   const rows: VerifyRow[] = [];
   let catalog: Awaited<ReturnType<typeof loadCatalog>> | undefined;
 
-  for (const ev of records) {
+  await inSequence(records, async (ev) => {
     const command = recordedCommand(ev);
     const base = { command, id: ev.id, tool: ev.tool };
 
@@ -116,7 +117,7 @@ export const buildVerification = async (
         ? "provenance-only: tool ran multiple internal commands; re-run manually"
         : "legacy: no reproducible hash recorded";
       rows.push({ ...base, detail, status: "unverifiable" });
-      continue;
+      return;
     }
     if (!ev.binarySha256) {
       rows.push({
@@ -124,7 +125,7 @@ export const buildVerification = async (
         detail: "legacy: evidence not bound to a binary hash",
         status: "unverifiable",
       });
-      continue;
+      return;
     }
     if (!currentSha) {
       rows.push({
@@ -132,7 +133,7 @@ export const buildVerification = async (
         detail: "no binary open to verify against",
         status: "unverifiable",
       });
-      continue;
+      return;
     }
     if (ev.binarySha256 !== currentSha) {
       rows.push({
@@ -140,7 +141,7 @@ export const buildVerification = async (
         detail: `evidence was taken against a different binary — open sha ${ev.binarySha256.slice(0, 12)}… to verify`,
         status: "unverifiable",
       });
-      continue;
+      return;
     }
 
     const args = ev.args as { command?: unknown; addr?: unknown } | undefined;
@@ -152,7 +153,7 @@ export const buildVerification = async (
         detail: "recorded args carry no command to re-run",
         status: "unverifiable",
       });
-      continue;
+      return;
     }
 
     try {
@@ -166,7 +167,7 @@ export const buildVerification = async (
           detail: `command no longer runnable in this rizin build: ${check.reason}`,
           status: "unverifiable",
         });
-        continue;
+        return;
       }
       const rz = await ensureRizin(ctx);
       const { output } = await rz.cmdWithStderr(check.line, {
@@ -193,7 +194,7 @@ export const buildVerification = async (
         status: "unverifiable",
       });
     }
-  }
+  });
   return rows;
 };
 

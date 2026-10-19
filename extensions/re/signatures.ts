@@ -11,6 +11,7 @@
  */
 import { rzQuote } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
+import { inSequence } from "./sequence.ts";
 
 /** Reject paths that would break the NUL-framed pipe; everything else is made literal by rzQuote (so a path with spaces or rizin metacharacters is one argument). */
 export const validateSignaturePath = (path: string): string => {
@@ -45,7 +46,7 @@ export const replaySignatures = async (
   paths: readonly string[]
 ): Promise<string[]> => {
   const failures: string[] = [];
-  for (const path of paths) {
+  await inSequence(paths, async (path) => {
     try {
       await rz.cmd(signatureApplyCommand(path));
     } catch (error) {
@@ -53,6 +54,6 @@ export const replaySignatures = async (
         `signature ${path}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-  }
+  });
   return failures;
 };

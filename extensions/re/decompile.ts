@@ -10,6 +10,7 @@
  */
 import { disassembleAt } from "./disasm.ts";
 import type { RzSession } from "./rizin.ts";
+import { firstInSequence, inSequence } from "./sequence.ts";
 
 /**
  * A decompiler is identified by the rizin command that runs it. The two known
@@ -93,11 +94,11 @@ export const availableDecompilers = async (
   signal?: AbortSignal
 ): Promise<DecompilerKind[]> => {
   const found: DecompilerKind[] = [];
-  for (const command of decompilerCommands()) {
+  await inSequence(decompilerCommands(), async (command) => {
     if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
       found.push(command);
     }
-  }
+  });
   return found;
 };
 
@@ -117,14 +118,14 @@ export const resolveDecompiler = async (
   if (kindBySession.has(rz)) {
     return kindBySession.get(rz) ?? null;
   }
-  for (const command of decompilerCommands()) {
-    if (isAvailableReply(await rz.cmd(`${command}?`, { signal }))) {
-      kindBySession.set(rz, command);
-      return command;
-    }
-  }
-  kindBySession.set(rz, null);
-  return null;
+  // Probe in priority order and stop at the first plugin that answers.
+  const found = await firstInSequence(decompilerCommands(), async (command) =>
+    isAvailableReply(await rz.cmd(`${command}?`, { signal }))
+      ? command
+      : undefined
+  );
+  kindBySession.set(rz, found ?? null);
+  return found ?? null;
 };
 
 /**
