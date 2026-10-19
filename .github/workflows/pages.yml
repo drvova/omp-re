@@ -1,0 +1,59 @@
+name: Pages
+
+# Builds the documentation site (site/, a small Rust generator over README.md
+# and docs/) and publishes it to GitHub Pages from main. Pull requests only
+# build it, so a broken doc link or generator change shows up before merge.
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  # Never cancel a deploy halfway; superseded PR builds can go.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: site
+      - run: cargo test --locked --manifest-path site/Cargo.toml
+      - run: cargo run --locked --release --manifest-path site/Cargo.toml -- --out site/dist
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

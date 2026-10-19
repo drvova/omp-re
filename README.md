@@ -261,6 +261,8 @@ Three environment variables, all optional:
 
 ## Docs
 
+The docs are also published as a website at **[drvova.github.io/omp-re](https://drvova.github.io/omp-re/)**, built from this repo by a small Rust generator in [`site/`](site/).
+
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.

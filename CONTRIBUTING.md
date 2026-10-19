@@ -23,6 +23,8 @@ bash test/tui.sh   # fast tmux smoke test, ~30s
 bun run qa:tui     # full tmux QA pass, 99 assertions
 ```
 
+The website ([drvova.github.io/omp-re](https://drvova.github.io/omp-re/)) is generated from `README.md` and `docs/` by the Rust crate in `site/` and deployed from `main` by `.github/workflows/pages.yml`. Preview it with `cargo run --manifest-path site/Cargo.toml` and open `site/dist/index.html`; add a new doc page to `PAGES` in `site/src/main.rs`.
+
 Run `bun test` with rizin installed before opening a PR that touches `extensions/re/` — CI cannot run the rizin suites. The last two need tmux, `omp`, rizin, a fixture (`OMPRE_TEST_BINARY`), and for `qa:tui` a working model. See [`docs/testing.md`](docs/testing.md) for what each tier actually needs and the exact PASS/SKIP matrix.
 
 Declare each tool's parameter schema as a named `const` before `pi.registerTool({...})`, never inline: omp 18's `pi.zod` builder only lets TypeScript infer `params` from a schema declared outside the call. Give every tool both renderer pairs via `reRenderers(...)` (`renderCall`/`renderResult` for the ANSI transcript, `describeCall`/`describeResult` for Tern).

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:image" content="img/hero.png" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e8590c'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'%3Ere%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="bar">
+        <a class="brand" href="index.html"
+          ><span class="mark">re</span>omp-re</a
+        >
+        <a class="gh" href="{{repo_url}}">GitHub</a>
+      </div>
+      <nav class="site-nav" aria-label="Documentation">{{nav}}</nav>
+    </header>
+    {{hero}}
+    <div class="layout">
+      <main id="content" class="doc">{{content}} {{edit}}</main>
+      <aside class="side">{{outline}}</aside>
+    </div>
+    <footer class="site-footer">
+      <p>
+        omp-re is MIT licensed · <a href="{{repo_url}}">Source on GitHub</a> ·
+        built with Rust and
+        <a href="https://github.com/pulldown-cmark/pulldown-cmark"
+          >pulldown-cmark</a
+        >
+      </p>
+    </footer>
+  </body>
+</html>

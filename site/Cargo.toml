@@ -1,0 +1,15 @@
+[package]
+name = "omp-re-site"
+version = "0.1.0"
+edition = "2024"
+description = "Static site generator for the omp-re GitHub Pages site: renders README.md and docs/ to HTML."
+license = "MIT"
+publish = false
+
+[dependencies]
+pulldown-cmark = { version = "0.13", default-features = false, features = [
+  "html",
+] }
+
+[profile.release]
+strip = true
