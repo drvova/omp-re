@@ -340,6 +340,86 @@ const statusText = async (ctx: ExtensionContext): Promise<string> => {
 };
 
 /**
+ * `/re report` flags: --audit[=advisory|strict] / --no-audit (--audit=off)
+ * toggle the claim-support audit; the flag tokens are stripped so the rest
+ * joins back into the output path (mirrors verify's flag parse).
+ */
+const parseReportArgs = (
+  rest: readonly string[]
+): { audit: AuditMode; path: string | undefined } => {
+  let audit: AuditMode = "advisory";
+  const pathTokens: string[] = [];
+  for (const tok of rest) {
+    if (tok === "--no-audit" || tok === "--audit=off") {
+      audit = "off";
+    } else if (tok === "--audit" || tok === "--audit=advisory") {
+      audit = "advisory";
+    } else if (tok === "--audit=strict") {
+      audit = "strict";
+    } else {
+      pathTokens.push(tok);
+    }
+  }
+  return { audit, path: pathTokens.join(" ") || undefined };
+};
+
+interface CarryArgs {
+  against: string | undefined;
+  inherit: boolean;
+  manifestPath: string;
+  out: string | undefined;
+  resolve: boolean;
+  strict: boolean;
+}
+
+/**
+ * `/re carry <manifest> [--against <binary>] [--strict] [--out <path>]`: flags
+ * take the next token as their value; everything else joins back into the
+ * manifest path.
+ */
+const parseCarryArgs = (rest: readonly string[]): CarryArgs => {
+  const args: CarryArgs = {
+    against: undefined,
+    inherit: false,
+    manifestPath: "",
+    out: undefined,
+    resolve: false,
+    strict: false,
+  };
+  const pathTokens: string[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const tok = rest[i];
+    if (tok === "--strict") {
+      args.strict = true;
+    } else if (tok === "--inherit") {
+      args.inherit = true;
+    } else if (tok === "--resolve") {
+      args.resolve = true;
+    } else if (tok === "--against") {
+      i += 1;
+      args.against = rest[i];
+    } else if (tok === "--out") {
+      i += 1;
+      args.out = rest[i];
+    } else {
+      pathTokens.push(tok);
+    }
+  }
+  args.manifestPath = pathTokens.join(" ");
+  return args;
+};
+
+/** A `/re` subcommand: the command context and the tokens after the subcommand name. */
+type Subcommand = (
+  ctx: ExtensionCommandContext,
+  rest: string[]
+) => Promise<void> | void;
+
+const showHelp: Subcommand = (ctx) => {
+  ctx.ui.notify(HELP_TEXT, "info");
+};
+
+/**
  * The command shell subsystem: the `re.binary` renderer, the `open_binary`
  * tool and `--binary` flag, the session-lifecycle handlers, argument
  * completion, and the `/re` command. Applied like every other subsystem (see
@@ -587,6 +667,120 @@ const registerShell = (pi: ExtensionAPI): void => {
     }
   };
 
+  const subcommands = new Map<string, Subcommand>([
+    [
+      "open",
+      async (ctx, rest) => {
+        const path = rest.join(" ");
+        if (path) {
+          await runOpen(ctx, path);
+        } else {
+          ctx.ui.notify("Usage: /re open <path>", "error");
+        }
+      },
+    ],
+    ["functions", (ctx) => showFunctionsPanel(ctx)],
+    ["strings", (ctx) => showStringsPanel(ctx)],
+    ["imports", (ctx) => showImportsPanel(ctx)],
+    ["evidence", (ctx, rest) => showEvidencePanel(ctx, rest[0])],
+    ["findings", (ctx, rest) => showFindingsPanel(ctx, rest[0])],
+    [
+      "cite",
+      (ctx, rest) => {
+        const [id] = rest;
+        if (!id) {
+          ctx.ui.notify("Usage: /re cite <id>", "error");
+          return;
+        }
+        const rec = findEvidence(ctx, id);
+        if (rec) {
+          citeEvidence(ctx, rec);
+        } else {
+          ctx.ui.notify(`omp-re: no evidence found with id ${id}`, "error");
+        }
+      },
+    ],
+    [
+      "undo",
+      async (ctx) => {
+        ctx.ui.notify(await undoLastAnnotation(pi, ctx), "info");
+      },
+    ],
+    [
+      "report",
+      async (ctx, rest) => {
+        const { audit, path } = parseReportArgs(rest);
+        await writeReport(ctx, path, { audit });
+      },
+    ],
+    [
+      "verify",
+      async (ctx, rest) => {
+        await verifyEvidence(ctx, { strict: rest.includes("--strict") });
+      },
+    ],
+    [
+      "carry",
+      async (ctx, rest) => {
+        const { against, inherit, manifestPath, out, resolve, strict } =
+          parseCarryArgs(rest);
+        if (!manifestPath) {
+          ctx.ui.notify(
+            "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]",
+            "error"
+          );
+          return;
+        }
+        if (against) {
+          await runOpen(ctx, against);
+        }
+        // --resolve implies --inherit: re-prove what holds, then hand the agenda to the model as a turn.
+        await carryManifest(ctx, manifestPath, {
+          out,
+          strict,
+          ...(inherit || resolve ? { inherit: pi } : {}),
+          resolve,
+        });
+        // --inherit records evidence and findings outside any tool call, so no tool_result refreshes the band.
+        await refreshStatusBand(ctx);
+      },
+    ],
+    [
+      "status",
+      async (ctx) => {
+        ctx.ui.notify(await statusText(ctx), "info");
+      },
+    ],
+    [
+      "off",
+      async (ctx) => {
+        const active = pi.getActiveTools();
+        await pi.setActiveTools(
+          active.filter((name) => !RE_ALL_TOOL_NAMES[name])
+        );
+        ctx.ui.notify(
+          "omp-re: RE tools disabled for this session — /re on to re-enable",
+          "info"
+        );
+      },
+    ],
+    [
+      "on",
+      async (ctx) => {
+        const all = new Set(pi.getAllTools().map((tool) => tool.name));
+        const active = new Set(pi.getActiveTools());
+        for (const name of Object.keys(RE_ALL_TOOL_NAMES)) {
+          if (all.has(name)) {
+            active.add(name);
+          }
+        }
+        await pi.setActiveTools([...active]);
+        ctx.ui.notify("omp-re: RE tools enabled for this session", "info");
+      },
+    ],
+    ["help", showHelp],
+  ]);
+
   pi.registerCommand("re", {
     description:
       "reverse engineering with rizin: open <path> | functions | strings | imports | evidence [id] | cite <id> | findings [id] | undo | report [path] | verify [--strict] | carry <manifest> | status | on | off | help",
@@ -594,162 +788,15 @@ const registerShell = (pi: ExtensionAPI): void => {
     handler: async (args, ctx) => {
       latestCtx = ctx;
       const [sub, ...rest] = args.trim().split(/\s+/u).filter(Boolean);
+      const run = sub === undefined ? showHelp : subcommands.get(sub);
       try {
-        switch (sub) {
-          case "open": {
-            const path = rest.join(" ");
-            if (path) {
-              await runOpen(ctx, path);
-            } else {
-              ctx.ui.notify("Usage: /re open <path>", "error");
-            }
-            return;
-          }
-          case "functions": {
-            return await showFunctionsPanel(ctx);
-          }
-          case "strings": {
-            return await showStringsPanel(ctx);
-          }
-          case "imports": {
-            return await showImportsPanel(ctx);
-          }
-          case "evidence": {
-            return await showEvidencePanel(ctx, rest[0]);
-          }
-          case "findings": {
-            return await showFindingsPanel(ctx, rest[0]);
-          }
-          case "cite": {
-            const [id] = rest;
-            if (!id) {
-              ctx.ui.notify("Usage: /re cite <id>", "error");
-              return;
-            }
-            const rec = findEvidence(ctx, id);
-            if (rec) {
-              citeEvidence(ctx, rec);
-            } else {
-              ctx.ui.notify(`omp-re: no evidence found with id ${id}`, "error");
-            }
-            return;
-          }
-          case "undo": {
-            ctx.ui.notify(await undoLastAnnotation(pi, ctx), "info");
-            return;
-          }
-          case "report": {
-            // --audit[=advisory|strict] / --no-audit (--audit=off) toggle the claim-support audit;
-            // strip the flag token so the rest joins back into the output path (mirrors verify's flag parse).
-            let audit: AuditMode = "advisory";
-            const pathTokens: string[] = [];
-            for (const tok of rest) {
-              if (tok === "--no-audit" || tok === "--audit=off") {
-                audit = "off";
-              } else if (tok === "--audit" || tok === "--audit=advisory") {
-                audit = "advisory";
-              } else if (tok === "--audit=strict") {
-                audit = "strict";
-              } else {
-                pathTokens.push(tok);
-              }
-            }
-            await writeReport(ctx, pathTokens.join(" ") || undefined, {
-              audit,
-            });
-            return;
-          }
-          case "verify": {
-            await verifyEvidence(ctx, { strict: rest.includes("--strict") });
-            return;
-          }
-          case "carry": {
-            // /re carry <manifest> [--against <binary>] [--strict] [--out <path>]: flags take the next
-            // token as their value; everything else joins back into the manifest path.
-            let against: string | undefined;
-            let out: string | undefined;
-            let strict = false;
-            let inherit = false;
-            let resolve = false;
-            const pathTokens: string[] = [];
-            for (let i = 0; i < rest.length; i += 1) {
-              const tok = rest[i];
-              if (tok === "--strict") {
-                strict = true;
-              } else if (tok === "--inherit") {
-                inherit = true;
-              } else if (tok === "--resolve") {
-                resolve = true;
-              } else if (tok === "--against") {
-                i += 1;
-                against = rest[i];
-              } else if (tok === "--out") {
-                i += 1;
-                out = rest[i];
-              } else {
-                pathTokens.push(tok);
-              }
-            }
-            const manifestPath = pathTokens.join(" ");
-            if (!manifestPath) {
-              ctx.ui.notify(
-                "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]",
-                "error"
-              );
-              return;
-            }
-            if (against) {
-              await runOpen(ctx, against);
-            }
-            // --resolve implies --inherit: re-prove what holds, then hand the agenda to the model as a turn.
-            await carryManifest(ctx, manifestPath, {
-              out,
-              strict,
-              ...(inherit || resolve ? { inherit: pi } : {}),
-              resolve,
-            });
-            // --inherit records evidence and findings outside any tool call, so no tool_result refreshes the band.
-            await refreshStatusBand(ctx);
-            return;
-          }
-          case "status": {
-            ctx.ui.notify(await statusText(ctx), "info");
-            return;
-          }
-          case "off": {
-            const active = pi.getActiveTools();
-            await pi.setActiveTools(
-              active.filter((name) => !RE_ALL_TOOL_NAMES[name])
-            );
-            ctx.ui.notify(
-              "omp-re: RE tools disabled for this session — /re on to re-enable",
-              "info"
-            );
-            return;
-          }
-          case "on": {
-            const all = new Set(pi.getAllTools().map((tool) => tool.name));
-            const active = new Set(pi.getActiveTools());
-            for (const name of Object.keys(RE_ALL_TOOL_NAMES)) {
-              if (all.has(name)) {
-                active.add(name);
-              }
-            }
-            await pi.setActiveTools([...active]);
-            ctx.ui.notify("omp-re: RE tools enabled for this session", "info");
-            return;
-          }
-          case "help":
-          case undefined: {
-            ctx.ui.notify(HELP_TEXT, "info");
-            return;
-          }
-          default: {
-            ctx.ui.notify(
-              `omp-re: unknown /re subcommand ${JSON.stringify(sub)} — try /re help`,
-              "error"
-            );
-          }
+        if (run) {
+          await run(ctx, rest);
+        } else {
+          ctx.ui.notify(
+            `omp-re: unknown /re subcommand ${JSON.stringify(sub)} — try /re help`,
+            "error"
+          );
         }
       } catch (error) {
         ctx.ui.notify(

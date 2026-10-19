@@ -14,8 +14,8 @@ bun install --ignore-scripts
 bun run check      # tsc-ts (native TypeScript 7 build) --noEmit — must exit 0
                     # (bun run check:tsc runs the stock tsc as a fallback)
 bun run fix        # Ultracite: Oxfmt formatting + Oxlint safe fixes
-bunx ultracite check  # Oxlint (Ultracite core preset) + Oxfmt check; don't add
-                    # new findings (the backlog is listed in CHANGELOG.md)
+bunx ultracite check  # Oxlint (Ultracite core preset) + Oxfmt check — must exit 0;
+                    # fix findings rather than disabling rules
 bun test           # unit + integration tests; the rizin suites run against
                     # /bin/ls when rizin is on PATH and skip otherwise —
                     # see docs/testing.md

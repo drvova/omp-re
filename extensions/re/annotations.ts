@@ -220,6 +220,113 @@ export const archHintCommands = (encoded: string, at: string): string[] => {
   return cmds;
 };
 
+/** What an annotation-command builder receives: the validated `@ <ea>` suffix, the new value, the value it replaces, and the named target. */
+interface AnnotationTarget {
+  at: string;
+  to: string;
+  from: string;
+  target?: string;
+}
+
+/** The named target (variable, global, hint kind) a kind needs, or the error naming what's missing. */
+const requireTarget = (
+  target: string | undefined,
+  kind: string,
+  what: string
+): string => {
+  if (!target) {
+    throw new Error(`omp-re: ${kind} annotation is missing the ${what}`);
+  }
+  return target;
+};
+
+/** Per annotation kind: the rizin commands that set it to `to` at `at`. */
+const ANNOTATION_COMMANDS: Readonly<
+  Record<string, (a: AnnotationTarget) => string[]>
+> = {
+  define_function: ({ at, to }) =>
+    // `to` is a non-empty sentinel (the function name rizin assigned) when a function should exist, "" when it should not.
+    to === "" ? [`af- ${at}`] : [`af ${at}`],
+  define_global: ({ at, to, target }) => {
+    // `target` is the global's name, `to` its C type ("" removes it). avga adds a global at `ea`; avgm deletes it by name (addressed by name, so no `@`). The type is single-quoted so `char *`/`unsigned int` pass as one argument.
+    const name = validateIdent(
+      "name",
+      requireTarget(target, "define_global", "variable name")
+    );
+    return to === ""
+      ? [`avgm ${name}`]
+      : [`avga ${name} ${rzQuote(validateTypeLike("type", to))} ${at}`];
+  },
+  define_variable: ({ at, to, target }) => {
+    // `target` is the variable name; `to` encodes `<storage> <location> [<type>]` ("" removes it on undo). afvs/afvr add; afv- deletes by name.
+    const name = validateIdent(
+      "name",
+      requireTarget(target, "define_variable", "variable name")
+    );
+    return to === ""
+      ? [`afv- ${name} ${at}`]
+      : defineVariableCommands(name, to, at);
+  },
+  rename_function: ({ at, to }) => [
+    `afn ${rzQuote(validateIdent("name", to))} ${at}`,
+  ],
+  rename_variable: ({ at, to, from }) => [
+    `afvn ${rzQuote(validateIdent("name", to))} ${rzQuote(validateIdent("name", from))} ${at}`,
+  ],
+  set_arch_hint: ({ at, to }) =>
+    // `to` encodes the arch/bits hint at `ea` as `arch=<a>` and/or `bits=<n>` joined by `;`; "" means no hint (undo deletes both).
+    to === "" ? [`aha- ${at}`, `ahb- ${at}`] : archHintCommands(to, at),
+  set_calling_convention: ({ at, to }) => [
+    // A function always has some convention, so both the forward value and the restored one are non-empty cc names.
+    `afc ${validateIdent("cc", to)} ${at}`,
+  ],
+  set_comment: ({ at, to }) =>
+    // rizin's CC appends to an existing comment, so a replace is always clear-then-write.
+    to === ""
+      ? [`CC- ${at}`]
+      : [`CC- ${at}`, `CC ${rzQuote(validateText(to))} ${at}`],
+  set_data: ({ at, to }) =>
+    // `to` is `<size>` or `<size>:<repeat>`; "" removes the data mark.
+    to === "" ? [`Cd- ${at}`] : [`Cd ${dataMarkArgs(to)} ${at}`],
+  set_flag: ({ at, to, from }) => [
+    // The flag at `ea` is named `to` (was `from`): drop the old name, add the new. Either side may be "" (no flag).
+    ...(from === "" ? [] : [`f- ${validateIdent("flag", from)}`]),
+    ...(to === "" ? [] : [`f ${validateIdent("flag", to)} ${at}`]),
+  ],
+  set_format: ({ at, to }) =>
+    // `to` is `<size> <pf-format[ fields...]>`; "" removes the format mark.
+    to === "" ? [`Cf- ${at}`] : [`Cf ${formatMarkArgs(to)} ${at}`],
+  set_hint: ({ at, to, target }) => {
+    // `target` names which hint (immediate_base/opcode_type/…); `to` is its value, "" removes it. The hint kind is carried in `target` so undo can delete the right one even with an empty value.
+    const kind = requireTarget(target, "set_hint", "hint kind");
+    const spec = HINT_SPEC[kind];
+    if (!spec) {
+      throw new Error(`omp-re: unknown hint kind: ${kind}`);
+    }
+    return to === ""
+      ? [`${spec.cmd}- ${at}`]
+      : [`${spec.cmd} ${hintValueArg(kind as HintKind, to)} ${at}`];
+  },
+  set_prototype: ({ at, to }) =>
+    // An empty value only arises when undoing onto a function rizin had no signature for: nothing to restore.
+    to === "" ? [] : [`afs ${rzQuote(validateTypeLike("sig", to))} ${at}`],
+  set_string: ({ at, to }) => {
+    // `to` is a byte size, or "auto" to let rizin detect the encoding/length; "" removes the string mark.
+    if (to === "") {
+      return [`Cs- ${at}`];
+    }
+    return [`Cs${to === "auto" ? "" : ` ${intArg("size", to)}`} ${at}`];
+  },
+  set_variable_type: ({ at, to, target }) => {
+    const name = requireTarget(target, "set_variable_type", "variable name");
+    return to === ""
+      ? []
+      : [
+          `afvt ${rzQuote(validateIdent("var", name))} ${rzQuote(validateTypeLike("type", to))} ${at}`,
+        ];
+  },
+};
+
 /**
  * rizin commands that set annotation `kind` at `ea` to `to`. `from` is the
  * value being replaced — only rename_variable needs it (`afvn` addresses the
@@ -233,115 +340,13 @@ export const annotationCommands = (
   target?: string
 ): string[] => {
   const at = `@ ${validateAddr(ea)}`;
-  switch (kind) {
-    case "rename_function": {
-      return [`afn ${rzQuote(validateIdent("name", to))} ${at}`];
-    }
-    case "rename_variable": {
-      return [
-        `afvn ${rzQuote(validateIdent("name", to))} ${rzQuote(validateIdent("name", from))} ${at}`,
-      ];
-    }
-    case "set_comment": {
-      // rizin's CC appends to an existing comment, so a replace is always clear-then-write.
-      return to === ""
-        ? [`CC- ${at}`]
-        : [`CC- ${at}`, `CC ${rzQuote(validateText(to))} ${at}`];
-    }
-    case "set_prototype": {
-      // An empty value only arises when undoing onto a function rizin had no signature for: nothing to restore.
-      return to === ""
-        ? []
-        : [`afs ${rzQuote(validateTypeLike("sig", to))} ${at}`];
-    }
-    case "set_variable_type": {
-      if (!target) {
-        throw new Error(
-          "omp-re: set_variable_type annotation is missing the variable name"
-        );
-      }
-      return to === ""
-        ? []
-        : [
-            `afvt ${rzQuote(validateIdent("var", target))} ${rzQuote(validateTypeLike("type", to))} ${at}`,
-          ];
-    }
-    case "define_variable": {
-      // `target` is the variable name; `to` encodes `<storage> <location> [<type>]` ("" removes it on undo). afvs/afvr add; afv- deletes by name.
-      if (!target) {
-        throw new Error(
-          "omp-re: define_variable annotation is missing the variable name"
-        );
-      }
-      const name = validateIdent("name", target);
-      return to === ""
-        ? [`afv- ${name} ${at}`]
-        : defineVariableCommands(name, to, at);
-    }
-    case "define_global": {
-      // `target` is the global's name, `to` its C type ("" removes it). avga adds a global at `ea`; avgm deletes it by name (addressed by name, so no `@`). The type is single-quoted so `char *`/`unsigned int` pass as one argument.
-      if (!target) {
-        throw new Error(
-          "omp-re: define_global annotation is missing the variable name"
-        );
-      }
-      const name = validateIdent("name", target);
-      return to === ""
-        ? [`avgm ${name}`]
-        : [`avga ${name} ${rzQuote(validateTypeLike("type", to))} ${at}`];
-    }
-    case "define_function": {
-      // `to` is a non-empty sentinel (the function name rizin assigned) when a function should exist, "" when it should not.
-      return to === "" ? [`af- ${at}`] : [`af ${at}`];
-    }
-    case "set_calling_convention": {
-      // A function always has some convention, so both the forward value and the restored one are non-empty cc names.
-      return [`afc ${validateIdent("cc", to)} ${at}`];
-    }
-    case "set_flag": {
-      // The flag at `ea` is named `to` (was `from`): drop the old name, add the new. Either side may be "" (no flag).
-      return [
-        ...(from === "" ? [] : [`f- ${validateIdent("flag", from)}`]),
-        ...(to === "" ? [] : [`f ${validateIdent("flag", to)} ${at}`]),
-      ];
-    }
-    case "set_arch_hint": {
-      // `to` encodes the arch/bits hint at `ea` as `arch=<a>` and/or `bits=<n>` joined by `;`; "" means no hint (undo deletes both).
-      return to === ""
-        ? [`aha- ${at}`, `ahb- ${at}`]
-        : archHintCommands(to, at);
-    }
-    case "set_hint": {
-      // `target` names which hint (immediate_base/opcode_type/…); `to` is its value, "" removes it. The hint kind is carried in `target` so undo can delete the right one even with an empty value.
-      if (!target) {
-        throw new Error("omp-re: set_hint annotation is missing the hint kind");
-      }
-      const spec = HINT_SPEC[target];
-      if (!spec) {
-        throw new Error(`omp-re: unknown hint kind: ${target}`);
-      }
-      return to === ""
-        ? [`${spec.cmd}- ${at}`]
-        : [`${spec.cmd} ${hintValueArg(target as HintKind, to)} ${at}`];
-    }
-    case "set_data": {
-      // `to` is `<size>` or `<size>:<repeat>`; "" removes the data mark.
-      return to === "" ? [`Cd- ${at}`] : [`Cd ${dataMarkArgs(to)} ${at}`];
-    }
-    case "set_string": {
-      // `to` is a byte size, or "auto" to let rizin detect the encoding/length; "" removes the string mark.
-      return to === ""
-        ? [`Cs- ${at}`]
-        : [`Cs${to === "auto" ? "" : ` ${intArg("size", to)}`} ${at}`];
-    }
-    case "set_format": {
-      // `to` is `<size> <pf-format[ fields...]>`; "" removes the format mark.
-      return to === "" ? [`Cf- ${at}`] : [`Cf ${formatMarkArgs(to)} ${at}`];
-    }
-    default: {
-      throw new Error(`omp-re: unknown annotation kind: ${kind}`);
-    }
+  const build = Object.hasOwn(ANNOTATION_COMMANDS, kind)
+    ? ANNOTATION_COMMANDS[kind]
+    : undefined;
+  if (!build) {
+    throw new Error(`omp-re: unknown annotation kind: ${kind}`);
   }
+  return build({ at, from, target, to });
 };
 
 /**

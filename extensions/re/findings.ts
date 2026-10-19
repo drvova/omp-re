@@ -74,6 +74,41 @@ const CONFIDENCES: ReadonlySet<FindingConfidence> = new Set([
 /** Shortest evidence/finding id prefix accepted — the panels show 8 characters. */
 const MIN_ID_PREFIX = 6;
 
+/** One `re.finding` entry's data as a FindingRecord, or undefined when it is malformed (no id, claim or evidence list). */
+const parseFindingRecord = (data: unknown): FindingRecord | undefined => {
+  const d = data as Partial<FindingRecord> | undefined;
+  if (
+    !d ||
+    typeof d.id !== "string" ||
+    typeof d.claim !== "string" ||
+    !Array.isArray(d.evidenceIds)
+  ) {
+    return undefined;
+  }
+  return {
+    claim: d.claim,
+    evidenceIds: d.evidenceIds.filter(
+      (x): x is string => typeof x === "string"
+    ),
+    id: d.id,
+    ...(typeof d.addr === "string" ? { addr: d.addr } : {}),
+    confidence: CONFIDENCES.has(d.confidence as FindingConfidence)
+      ? (d.confidence as FindingConfidence)
+      : "likely",
+    ...(typeof d.supersedes === "string" ? { supersedes: d.supersedes } : {}),
+    ...(d.audit && typeof d.audit === "object" ? { audit: d.audit } : {}),
+    ...(typeof d.binarySha256 === "string"
+      ? { binarySha256: d.binarySha256 }
+      : {}),
+    ...(d.inherited && typeof d.inherited === "object"
+      ? { inherited: d.inherited }
+      : {}),
+    ...(typeof d.adoptedFrom === "string"
+      ? { adoptedFrom: d.adoptedFrom }
+      : {}),
+  };
+};
+
 /**
  * The live findings on a branch, in order: every `re.finding` minus those later
  * superseded by another finding or withdrawn by a `re.finding.retract`.
@@ -93,43 +128,17 @@ export const collectFindings = (
       }
       continue;
     }
-    if (entry.customType !== "re.finding") {
+    const record =
+      entry.customType === "re.finding"
+        ? parseFindingRecord(entry.data)
+        : undefined;
+    if (!record) {
       continue;
     }
-    const d = entry.data as Partial<FindingRecord> | undefined;
-    if (
-      !d ||
-      typeof d.id !== "string" ||
-      typeof d.claim !== "string" ||
-      !Array.isArray(d.evidenceIds)
-    ) {
-      continue;
+    if (record.supersedes) {
+      live.delete(record.supersedes);
     }
-    if (typeof d.supersedes === "string") {
-      live.delete(d.supersedes);
-    }
-    live.set(d.id, {
-      claim: d.claim,
-      evidenceIds: d.evidenceIds.filter(
-        (x): x is string => typeof x === "string"
-      ),
-      id: d.id,
-      ...(typeof d.addr === "string" ? { addr: d.addr } : {}),
-      confidence: CONFIDENCES.has(d.confidence as FindingConfidence)
-        ? (d.confidence as FindingConfidence)
-        : "likely",
-      ...(typeof d.supersedes === "string" ? { supersedes: d.supersedes } : {}),
-      ...(d.audit && typeof d.audit === "object" ? { audit: d.audit } : {}),
-      ...(typeof d.binarySha256 === "string"
-        ? { binarySha256: d.binarySha256 }
-        : {}),
-      ...(d.inherited && typeof d.inherited === "object"
-        ? { inherited: d.inherited }
-        : {}),
-      ...(typeof d.adoptedFrom === "string"
-        ? { adoptedFrom: d.adoptedFrom }
-        : {}),
-    });
+    live.set(record.id, record);
   }
   return [...live.values()];
 };
@@ -196,6 +205,40 @@ interface FindingInput {
   /** adopt_finding only: who made the claim originally (e.g. "re-analyst"). */
   adoptedFrom?: string;
 }
+
+/** The tool result for a recorded finding: what was recorded, how the audit went, and whether it can carry. */
+const recordedSummary = (
+  tool: string,
+  id: string,
+  input: FindingInput,
+  audit: { verdict: string; reason: string },
+  overridden: boolean,
+  resolved: readonly EvidenceRecord[]
+): string => {
+  const reproducible = resolved.filter(
+    (ev) => recordedStatus(ev) === "reproducible"
+  ).length;
+  const evidenceList = resolved.map((ev) => ev.id.slice(0, 8)).join(", ");
+  const supersedes = input.supersedes
+    ? ` (supersedes ${input.supersedes.slice(0, 8)})`
+    : "";
+  const lines = [
+    `${tool}: recorded ${id.slice(0, 8)}${supersedes}`,
+    `claim: ${input.claim}`,
+  ];
+  if (input.adoptedFrom) {
+    lines.push(
+      `adopted from ${input.adoptedFrom}: re-proven in this session on evidence ${evidenceList}`
+    );
+  }
+  lines.push(
+    `support audit: ${audit.verdict}${audit.reason ? ` — ${audit.reason}` : ""}${overridden ? " (overridden)" : ""}`,
+    reproducible > 0
+      ? `evidence: ${reproducible} of ${resolved.length} machine-reproducible — this finding will carry to the next build (/re carry)`
+      : `evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable`
+  );
+  return lines.join("\n");
+};
 
 /**
  * The gate every recorded finding passes after its evidence is resolved: the
@@ -265,23 +308,10 @@ const gateAndRecord = async (
   };
   pi.appendEntry("re.finding", record);
 
-  const reproducible = resolved.filter(
-    (ev) => recordedStatus(ev) === "reproducible"
-  ).length;
-  const lines = [
-    `${tool}: recorded ${id.slice(0, 8)}${input.supersedes ? ` (supersedes ${input.supersedes.slice(0, 8)})` : ""}`,
-    `claim: ${input.claim}`,
-    ...(input.adoptedFrom
-      ? [
-          `adopted from ${input.adoptedFrom}: re-proven in this session on evidence ${evidenceList}`,
-        ]
-      : []),
-    `support audit: ${audit.verdict}${audit.reason ? ` — ${audit.reason}` : ""}${refused ? " (overridden)" : ""}`,
-    reproducible > 0
-      ? `evidence: ${reproducible} of ${resolved.length} machine-reproducible — this finding will carry to the next build (/re carry)`
-      : `evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable`,
-  ];
-  return plainResult(lines.join("\n"), input.addr);
+  return plainResult(
+    recordedSummary(tool, id, input, audit, Boolean(refused), resolved),
+    input.addr
+  );
 };
 
 export interface FindingToolOptions {

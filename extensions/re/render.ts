@@ -173,6 +173,39 @@ const nativeBody = (
   return code(source, { preview: { lines: 12 } });
 };
 
+/** The in-progress line: a spinner frame (or the running symbol) and the partial text, or the tool's title. */
+const pendingLine = (
+  partial: string,
+  title: string,
+  options: ToolRenderResultOptions,
+  theme: Theme
+): string => {
+  const frames = theme.spinnerFrames;
+  const spinner =
+    options.spinnerFrame !== undefined && frames.length > 0
+      ? frames[options.spinnerFrame % frames.length]
+      : theme.styledSymbol("status.running", "accent");
+  return `${spinner} ${theme.fg("muted", partial || `${title}…`)}`;
+};
+
+/** The status tags shown after a result's header: disassembly-only, truncated, and where the full output went. */
+const resultTags = (
+  details: ReToolDetails | undefined,
+  theme: Theme
+): string[] => {
+  const tags: string[] = [];
+  if (details?.decompiler === "disasm") {
+    tags.push(theme.fg("warning", "disassembly only"));
+  }
+  if (details?.truncated) {
+    tags.push(theme.fg("warning", "truncated"));
+  }
+  if (details?.artifactId) {
+    tags.push(theme.fg("dim", `artifact://${details.artifactId}`));
+  }
+  return tags;
+};
+
 /** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */
 export const reRenderers = (spec: RenderSpec) => ({
   describeCall(args: RenderArgs): NativeToolView {
@@ -250,13 +283,8 @@ export const reRenderers = (spec: RenderSpec) => ({
   ): Component {
     const resultText = firstText(result);
     if (options.isPartial) {
-      const frames = theme.spinnerFrames;
-      const spinner =
-        options.spinnerFrame !== undefined && frames.length > 0
-          ? frames[options.spinnerFrame % frames.length]
-          : theme.styledSymbol("status.running", "accent");
       return new Text(
-        `${spinner} ${theme.fg("muted", resultText || `${spec.title}…`)}`,
+        pendingLine(resultText, spec.title, options, theme),
         0,
         0
       );
@@ -272,16 +300,7 @@ export const reRenderers = (spec: RenderSpec) => ({
 
     const { details } = result;
     const { header, body } = splitBody(resultText, details);
-    const meta: string[] = [];
-    if (details?.decompiler === "disasm") {
-      meta.push(theme.fg("warning", "disassembly only"));
-    }
-    if (details?.truncated) {
-      meta.push(theme.fg("warning", "truncated"));
-    }
-    if (details?.artifactId) {
-      meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
-    }
+    const meta = resultTags(details, theme);
     const subject = spec.subject ? args?.[spec.subject] : undefined;
     const headLine = [
       theme.styledSymbol("status.success", "success"),

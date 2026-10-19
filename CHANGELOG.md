@@ -41,7 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `++`/`--` rewritten as `+= 1`/`-= 1`;
   - numeric separators, escapes, `curly`, `toSorted` and `toReversed`;
   - small correctness rules: unused code, `eqeqeq`, `radix`, error `cause`.
-- **Ultracite check backlog: 1,635 → 1,060 findings.** The rest need judgement or restructuring rather than a mechanical rewrite: `func-style` (361), `no-await-expression-member` (178), `no-non-null-assertion` (141), `sort-keys` (75), `no-use-before-define` (53), `no-await-in-loop` (53, mostly deliberate sequential commands on rizin's single pipe), named capture groups (40), and a long tail.
+- **Ultracite check is clean (1,635 → 0 findings), with no rules turned off and no inline disables.** Beyond the mechanical rewrites above: function declarations became `const` arrows defined before use; non-null assertions and awaited member access were replaced with named, checked values; object keys were sorted (objects with section comments were split into per-group constants and joined with spread); deliberate one-at-a-time awaits on rizin's single pipe go through an explicit `inSequence` helper (`extensions/re/sequence.ts`); promise chains became `async`/`await`; and the functions over the complexity limit (the debugger's `execute`, the `/re` command, carry, findings, annotations and render helpers) were split into small helpers or tables of handlers. Behaviour is unchanged.
 
 ### Fixed
 

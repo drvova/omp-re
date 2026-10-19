@@ -231,8 +231,8 @@ export const availableRzCliTools = async (): Promise<RzCliToolDef[]> => {
 export const registerRzCliTools = async (pi: ExtensionAPI): Promise<void> => {
   const available = await availableRzCliTools();
   if (available.length === 0) {
-    return;
     // no rz-* tools found — don't offer a tool that can't run
+    return;
   }
   const byName = new Map(available.map((def) => [def.tool, def]));
 

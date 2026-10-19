@@ -21,6 +21,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 import { checkDebugOnHitCommand, loadCatalog } from "./catalog.ts";
 import { plainResult, textResult } from "./format.ts";
+import type { ReToolResult } from "./format.ts";
 import { outputSubdir, prepareOutputPath } from "./output.ts";
 import { reRenderers } from "./render.ts";
 import {
@@ -330,6 +331,86 @@ const clean = (key: string, value: string): string => {
   return value;
 };
 
+/** A stdio redirection: a file path only (`!`-prefixed targets would run a shell command on this machine). */
+const stdioDirective = (key: string, raw: unknown): string[] => {
+  if (typeof raw !== "string") {
+    throw new TypeError(`omp-re: debug: run.${key} must be a file path`);
+  }
+  if (raw.startsWith("!")) {
+    throw new Error(
+      `omp-re: debug: run.${key} does not accept command targets`
+    );
+  }
+  return [`${key}=${clean(key, raw)}`];
+};
+
+/** A positive resource limit, floored to an integer. */
+const limitDirective = (key: string, raw: unknown): string[] => {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    throw new Error(`omp-re: debug: run.${key} must be a positive number`);
+  }
+  return [`${key}=${Math.floor(raw)}`];
+};
+
+/** Per rz-run setting: validate the value and build its directive(s). */
+const RUN_DIRECTIVES: Readonly<
+  Record<string, (key: string, raw: unknown) => string[]>
+> = {
+  args: (key, raw) => {
+    if (!Array.isArray(raw) || raw.some((a) => typeof a !== "string")) {
+      throw new Error("omp-re: debug: run.args must be a list of strings");
+    }
+    if (raw.length > 64) {
+      throw new Error("omp-re: debug: run.args supports at most 64 arguments");
+    }
+    return raw.map((a: string, i) => `arg${i}=${clean(key, a)}`);
+  },
+  aslr: (_key, raw) => {
+    if (typeof raw !== "boolean") {
+      throw new TypeError("omp-re: debug: run.aslr must be true or false");
+    }
+    return [`aslr=${raw ? "yes" : "no"}`];
+  },
+  cwd: (key, raw) => {
+    if (typeof raw !== "string") {
+      throw new TypeError("omp-re: debug: run.cwd must be a string");
+    }
+    return [`chdir=${clean(key, raw)}`];
+  },
+  env: (key, raw) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new Error("omp-re: debug: run.env must be an object");
+    }
+    return Object.entries(raw).map(([k, v]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(k)) {
+        throw new Error(
+          `omp-re: debug: run.env: bad variable name ${JSON.stringify(k)}`
+        );
+      }
+      if (typeof v !== "string") {
+        throw new TypeError(`omp-re: debug: run.env.${k} must be a string`);
+      }
+      return `setenv=${k}=${clean(key, v)}`;
+    });
+  },
+  input: (key, raw) => {
+    if (typeof raw !== "string") {
+      throw new TypeError("omp-re: debug: run.input must be a string");
+    }
+    if (raw.length > 65_536) {
+      throw new Error("omp-re: debug: run.input is limited to 64 KiB");
+    }
+    return [`input=${clean(key, raw)}`];
+  },
+  maxfd: limitDirective,
+  maxproc: limitDirective,
+  maxstack: limitDirective,
+  stderr: stdioDirective,
+  stdin: stdioDirective,
+  stdout: stdioDirective,
+  timeout: limitDirective,
+};
+
 /**
  * Build rz-run directives for the debug launch (book: tools/rz-run — rizin
  * loads them as `-R directive` flags). One directive per argv element, so
@@ -345,104 +426,24 @@ export const buildRunDirectives = (run?: unknown): string[] | undefined => {
     throw new Error("omp-re: debug: run must be an object of rz-run settings");
   }
   const directives: string[] = [];
-  const r = run as Record<string, unknown>;
-  for (const [key, raw] of Object.entries(r)) {
-    switch (key) {
-      case "args": {
-        if (!Array.isArray(raw) || raw.some((a) => typeof a !== "string")) {
-          throw new Error("omp-re: debug: run.args must be a list of strings");
-        }
-        if (raw.length > 64) {
-          throw new Error(
-            "omp-re: debug: run.args supports at most 64 arguments"
-          );
-        }
-        for (const [i, a] of raw.entries()) {
-          directives.push(`arg${i}=${clean(key, a)}`);
-        }
-        break;
-      }
-      case "env": {
-        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-          throw new Error("omp-re: debug: run.env must be an object");
-        }
-        for (const [k, v] of Object.entries(raw)) {
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(k)) {
-            throw new Error(
-              `omp-re: debug: run.env: bad variable name ${JSON.stringify(k)}`
-            );
-          }
-          if (typeof v !== "string") {
-            throw new TypeError(`omp-re: debug: run.env.${k} must be a string`);
-          }
-          directives.push(`setenv=${k}=${clean(key, v)}`);
-        }
-        break;
-      }
-      case "cwd": {
-        if (typeof raw !== "string") {
-          throw new TypeError("omp-re: debug: run.cwd must be a string");
-        }
-        directives.push(`chdir=${clean(key, raw)}`);
-        break;
-      }
-      case "stdin":
-      case "stdout":
-      case "stderr": {
-        if (typeof raw !== "string") {
-          throw new TypeError(`omp-re: debug: run.${key} must be a file path`);
-        }
-        if (raw.startsWith("!")) {
-          throw new Error(
-            `omp-re: debug: run.${key} does not accept command targets`
-          );
-        }
-        directives.push(`${key}=${clean(key, raw)}`);
-        break;
-      }
-      case "input": {
-        if (typeof raw !== "string") {
-          throw new TypeError("omp-re: debug: run.input must be a string");
-        }
-        if (raw.length > 65_536) {
-          throw new Error("omp-re: debug: run.input is limited to 64 KiB");
-        }
-        directives.push(`input=${clean(key, raw)}`);
-        break;
-      }
-      case "aslr": {
-        if (typeof raw !== "boolean") {
-          throw new TypeError("omp-re: debug: run.aslr must be true or false");
-        }
-        directives.push(`aslr=${raw ? "yes" : "no"}`);
-        break;
-      }
-      case "maxstack":
-      case "maxfd":
-      case "maxproc":
-      case "timeout": {
-        if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
-          throw new Error(
-            `omp-re: debug: run.${key} must be a positive number`
-          );
-        }
-        directives.push(`${key}=${Math.floor(raw)}`);
-        break;
-      }
-      default: {
-        throw new Error(
-          `omp-re: debug: run.${key} is not a supported rz-run setting (args, env, cwd, stdin, stdout, stderr, input, aslr, maxstack, maxfd, maxproc, timeout)`
-        );
-      }
+  for (const [key, raw] of Object.entries(run as Record<string, unknown>)) {
+    const build = Object.hasOwn(RUN_DIRECTIVES, key)
+      ? RUN_DIRECTIVES[key]
+      : undefined;
+    if (!build) {
+      throw new Error(
+        `omp-re: debug: run.${key} is not a supported rz-run setting (args, env, cwd, stdin, stdout, stderr, input, aslr, maxstack, maxfd, maxproc, timeout)`
+      );
     }
+    directives.push(...build(key, raw));
   }
   return directives.length > 0 ? directives : undefined;
 };
 
 export const registerDebugTools = (pi: ExtensionAPI): void => {
+  // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
   if (!debuggerEnabled()) {
     return;
-    // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
   }
 
   // Named const schema: see registerReadTools for why it stays outside registerTool({...}).
@@ -643,657 +644,818 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
     async execute(_id, params, signal, _onUpdate, ctx) {
       const dbgTimeout = debugTimeoutMs();
 
-      if (params.action === "start") {
-        const existing = getState(ctx).dbg;
-        if (existing && !existing.isClosed) {
-          const pc = await programCounter(existing, signal);
-          return plainResult(`debug: already running\n${pc}`);
-        }
-        const binary = requireBinary(getState(ctx));
-        // throws on a bad pid/URI, before anything starts
-        const debugTarget = buildDebugTarget(params.attach);
-        if (debugTarget !== undefined && params.run !== undefined) {
-          throw new Error(
-            "omp-re: debug: attach cannot be combined with run (there is no new process to configure)"
-          );
-        }
-        if (ctx.hasUI) {
-          ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
-        }
-        // throws on bad settings, before anything launches
-        const runDirectives = buildRunDirectives(params.run);
-        const dbg = await startDebug(ctx, {
-          debugTarget,
-          runDirectives,
-          signal,
-          // the debug process is a revertible effect on the session scope
-        });
-        const pc = await programCounter(dbg, signal);
-        if (debugTarget !== undefined) {
-          const how = /^\d+$/u.test(debugTarget)
-            ? `attached to PID ${debugTarget}`
-            : `connected to ${debugTarget}`;
-          return textResult(
-            `debug: ${how}`,
-            `${DEBUG_LAUNCH_WARNING}\nControlling the live process (${how}), symbols from ${binary}.${pc ? `\n${pc}` : ""}\nSet breakpoints (break_add), then continue or step.`
-          );
-        }
-        const runNote = runDirectives
-          ? ` Target env: ${runDirectives.join(", ")}.`
-          : "";
-        // Already surfaced as a warning by startDebug; repeat in the result so
-        // the text record carries it.
-        const bitsNote = (await rizinBitsMismatch(binary)) ?? "";
-        return textResult(
-          `debug: started ${binary}`,
-          `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}${bitsNote ? `\n${bitsNote}` : ""}${pc ? `\n${pc}` : ""}\nSet breakpoints (break_add), then continue or step.`
-        );
-      }
-
-      if (params.action === "stop") {
-        const { dbg } = getState(ctx);
-        if (dbg && !dbg.isClosed) {
-          try {
-            await dbg.cmd("dk 9", { signal, timeoutMs: 5000 });
-          } catch {
-            // Best effort: disposing the effect below kills the debuggee regardless.
-          }
-        }
-        return (await stopDebug(ctx))
-          ? plainResult(
-              "debug: stopped — process killed and debug session closed"
-            )
-          : plainResult("debug: no debug session to stop");
+      const lifecycle = new Map<string, () => Promise<ReToolResult>>([
+        [
+          "start",
+          async () => {
+            const existing = getState(ctx).dbg;
+            if (existing && !existing.isClosed) {
+              const pc = await programCounter(existing, signal);
+              return plainResult(`debug: already running\n${pc}`);
+            }
+            const binary = requireBinary(getState(ctx));
+            // throws on a bad pid/URI, before anything starts
+            const debugTarget = buildDebugTarget(params.attach);
+            if (debugTarget !== undefined && params.run !== undefined) {
+              throw new Error(
+                "omp-re: debug: attach cannot be combined with run (there is no new process to configure)"
+              );
+            }
+            if (ctx.hasUI) {
+              ctx.ui.notify(`omp-re: ${DEBUG_LAUNCH_WARNING}`, "warning");
+            }
+            // throws on bad settings, before anything launches
+            const runDirectives = buildRunDirectives(params.run);
+            const dbg = await startDebug(ctx, {
+              debugTarget,
+              runDirectives,
+              signal,
+              // the debug process is a revertible effect on the session scope
+            });
+            const pc = await programCounter(dbg, signal);
+            if (debugTarget !== undefined) {
+              const how = /^\d+$/u.test(debugTarget)
+                ? `attached to PID ${debugTarget}`
+                : `connected to ${debugTarget}`;
+              return textResult(
+                `debug: ${how}`,
+                `${DEBUG_LAUNCH_WARNING}\nControlling the live process (${how}), symbols from ${binary}.${pc ? `\n${pc}` : ""}\nSet breakpoints (break_add), then continue or step.`
+              );
+            }
+            const runNote = runDirectives
+              ? ` Target env: ${runDirectives.join(", ")}.`
+              : "";
+            // Already surfaced as a warning by startDebug; repeat in the result so
+            // the text record carries it.
+            const bitsNote = (await rizinBitsMismatch(binary)) ?? "";
+            return textResult(
+              `debug: started ${binary}`,
+              `${DEBUG_LAUNCH_WARNING}\nStopped at entry.${runNote}${bitsNote ? `\n${bitsNote}` : ""}${pc ? `\n${pc}` : ""}\nSet breakpoints (break_add), then continue or step.`
+            );
+          },
+        ],
+        [
+          "stop",
+          async () => {
+            const { dbg } = getState(ctx);
+            if (dbg && !dbg.isClosed) {
+              try {
+                await dbg.cmd("dk 9", { signal, timeoutMs: 5000 });
+              } catch {
+                // Best effort: disposing the effect below kills the debuggee regardless.
+              }
+            }
+            return (await stopDebug(ctx))
+              ? plainResult(
+                  "debug: stopped — process killed and debug session closed"
+                )
+              : plainResult("debug: no debug session to stop");
+          },
+        ],
+      ]);
+      const lifecycleHandler = lifecycle.get(params.action);
+      if (lifecycleHandler) {
+        return await lifecycleHandler();
       }
 
       const dbg = requireDebug(ctx);
       const ea =
         params.addr === undefined ? undefined : validateAddr(params.addr);
 
-      switch (params.action) {
-        case "continue": {
-          const rawOut = await dbg.cmd("dc", { signal, timeoutMs: dbgTimeout });
-          const out = rawOut.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult("debug: continue", `${out || "(resumed)"}\n${pc}`);
-        }
-        case "continue_until": {
-          if (!ea) {
-            throw new Error("omp-re: debug continue_until needs addr");
-          }
-          const rawOut2 = await dbg.cmd(`dcu ${ea}`, {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut2.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult(
-            `debug: continue_until ${ea}`,
-            `${out || "(resumed)"}\n${pc}`
-          );
-        }
-        case "continue_to_syscall": {
-          const rawOut3 = await dbg.cmd("dcs", {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut3.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult(
-            "debug: continue_to_syscall",
-            `${out || "(resumed)"}\n${pc}`
-          );
-        }
-        case "continue_to_call": {
-          const rawOut4 = await dbg.cmd("dcc", {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut4.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult(
-            "debug: continue_to_call",
-            `${out || "(resumed)"}\n${pc}`
-          );
-        }
-        case "continue_to_ret": {
-          const rawOut5 = await dbg.cmd("dcr", {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut5.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult(
-            "debug: continue_to_ret",
-            `${out || "(resumed)"}\n${pc}`
-          );
-        }
-        case "step": {
-          const n = clampInt(params.count, 1, 100_000);
-          await dbg.cmd(`ds ${n}`, { signal, timeoutMs: dbgTimeout });
-          const pc = await programCounter(dbg, signal);
-          return textResult(`debug: step ${n}`, pc);
-        }
-        case "step_over": {
-          const n = clampInt(params.count, 1, 100_000);
-          await dbg.cmd(`dso ${n}`, { signal, timeoutMs: dbgTimeout });
-          const pc = await programCounter(dbg, signal);
-          return textResult(`debug: step_over ${n}`, pc);
-        }
+      const actions = new Map<string, () => Promise<ReToolResult>>([
+        [
+          "continue",
+          async () => {
+            const rawOut = await dbg.cmd("dc", {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut.trim();
+            const pc = await programCounter(dbg, signal);
+            return textResult(
+              "debug: continue",
+              `${out || "(resumed)"}\n${pc}`
+            );
+          },
+        ],
+        [
+          "continue_until",
+          async () => {
+            if (!ea) {
+              throw new Error("omp-re: debug continue_until needs addr");
+            }
+            const rawOut2 = await dbg.cmd(`dcu ${ea}`, {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut2.trim();
+            const pc = await programCounter(dbg, signal);
+            return textResult(
+              `debug: continue_until ${ea}`,
+              `${out || "(resumed)"}\n${pc}`
+            );
+          },
+        ],
+        [
+          "continue_to_syscall",
+          async () => {
+            const rawOut3 = await dbg.cmd("dcs", {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut3.trim();
+            const pc = await programCounter(dbg, signal);
+            return textResult(
+              "debug: continue_to_syscall",
+              `${out || "(resumed)"}\n${pc}`
+            );
+          },
+        ],
+        [
+          "continue_to_call",
+          async () => {
+            const rawOut4 = await dbg.cmd("dcc", {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut4.trim();
+            const pc = await programCounter(dbg, signal);
+            return textResult(
+              "debug: continue_to_call",
+              `${out || "(resumed)"}\n${pc}`
+            );
+          },
+        ],
+        [
+          "continue_to_ret",
+          async () => {
+            const rawOut5 = await dbg.cmd("dcr", {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut5.trim();
+            const pc = await programCounter(dbg, signal);
+            return textResult(
+              "debug: continue_to_ret",
+              `${out || "(resumed)"}\n${pc}`
+            );
+          },
+        ],
+        [
+          "step",
+          async () => {
+            const n = clampInt(params.count, 1, 100_000);
+            await dbg.cmd(`ds ${n}`, { signal, timeoutMs: dbgTimeout });
+            const pc = await programCounter(dbg, signal);
+            return textResult(`debug: step ${n}`, pc);
+          },
+        ],
+        [
+          "step_over",
+          async () => {
+            const n = clampInt(params.count, 1, 100_000);
+            await dbg.cmd(`dso ${n}`, { signal, timeoutMs: dbgTimeout });
+            const pc = await programCounter(dbg, signal);
+            return textResult(`debug: step_over ${n}`, pc);
+          },
+        ],
         // Reverse debugging (book: debugger/revdebug): record a trace with
         // trace_start, then step/continue backward through it. The reverse
         // actions error until a trace session exists — rizin's own message surfaces.
-        case "trace_start": {
-          const rawOut6 = await dbg.cmd("dts+", {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut6.trim();
-          return textResult(
-            "debug: trace_start",
-            `${out || "trace session started"}\nStep backward with step_back / continue_back; stop recording with trace_stop.`
-          );
-        }
-        case "trace_stop": {
-          await dbg.cmd("dts-", { signal });
-          return plainResult("debug: trace_stop — trace session ended");
-        }
-        case "trace_save": {
-          // `dtst <dir>` writes the trace session (registers/memory/checkpoints/session sdbs) into a directory.
-          const name =
-            params.file === undefined ? `trace_${Date.now()}` : params.file;
-          // validates the basename and makes the dir, before touching rizin
-          const dir = await outputSubdir(name, true);
-          // Quote the NATIVE path (not forward-slashed): `dtst` runs rizin's
-          // rz_sys_mkdirp, which on Windows chokes on a forward-slash drive
-          // prefix (`mkdirp fail 'C:'` on `C:/...`) but handles the native
-          // `C:\...` drive root. Quoting keeps the `~` 8.3 short-name literal.
-          const { stderr } = await dbg.cmdWithStderr(`dtst ${rzQuote(dir)}`, {
-            signal,
-          });
-          if (stderr.trim()) {
-            throw new Error(`omp-re: debug trace_save: ${stderr.trim()}`);
-          }
-          return textResult(
-            `debug: trace_save ${name}`,
-            `wrote the trace session to ${dir}\nRestore it later with trace_load file=${JSON.stringify(name)}.`,
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "trace_load": {
-          if (params.file === undefined) {
-            throw new Error(
-              "omp-re: debug trace_load needs file (a trace directory from a prior trace_save)"
+        [
+          "trace_start",
+          async () => {
+            const rawOut6 = await dbg.cmd("dts+", {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut6.trim();
+            return textResult(
+              "debug: trace_start",
+              `${out || "trace session started"}\nStep backward with step_back / continue_back; stop recording with trace_stop.`
             );
-          }
-          const dir = await outputSubdir(params.file, false);
-          if (!existsSync(dir)) {
-            throw new Error(
-              `omp-re: debug trace_load: no saved trace at ${dir} (save one first with trace_save)`
+          },
+        ],
+        [
+          "trace_stop",
+          async () => {
+            await dbg.cmd("dts-", { signal });
+            return plainResult("debug: trace_stop — trace session ended");
+          },
+        ],
+        [
+          "trace_save",
+          async () => {
+            // `dtst <dir>` writes the trace session (registers/memory/checkpoints/session sdbs) into a directory.
+            const name =
+              params.file === undefined ? `trace_${Date.now()}` : params.file;
+            // validates the basename and makes the dir, before touching rizin
+            const dir = await outputSubdir(name, true);
+            // Quote the NATIVE path (not forward-slashed): `dtst` runs rizin's
+            // rz_sys_mkdirp, which on Windows chokes on a forward-slash drive
+            // prefix (`mkdirp fail 'C:'` on `C:/...`) but handles the native
+            // `C:\...` drive root. Quoting keeps the `~` 8.3 short-name literal.
+            const { stderr } = await dbg.cmdWithStderr(`dtst ${rzQuote(dir)}`, {
+              signal,
+            });
+            if (stderr.trim()) {
+              throw new Error(`omp-re: debug trace_save: ${stderr.trim()}`);
+            }
+            return textResult(
+              `debug: trace_save ${name}`,
+              `wrote the trace session to ${dir}\nRestore it later with trace_load file=${JSON.stringify(name)}.`,
+              { ctx, tool: "rizin_debug" }
             );
-          }
-          const { stderr } = await dbg.cmdWithStderr(`dtsf ${rzQuote(dir)}`, {
-            signal,
-          });
-          if (stderr.trim()) {
-            throw new Error(`omp-re: debug trace_load: ${stderr.trim()}`);
-          }
-          return textResult(
-            `debug: trace_load ${params.file}`,
-            `loaded the trace session from ${dir}\nStep backward with step_back / continue_back.`,
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "step_back": {
-          const n = clampInt(params.count, 1, 100_000);
-          const rawOut7 = await dbg.cmd(`dsb ${n}`, {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut7.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult(
-            `debug: step_back ${n}`,
-            `${out ? `${out}\n` : ""}${pc || "(no trace session — run trace_start first)"}`
-          );
-        }
-        case "continue_back": {
-          const rawOut8 = await dbg.cmd("dcb", {
-            signal,
-            timeoutMs: dbgTimeout,
-          });
-          const out = rawOut8.trim();
-          const pc = await programCounter(dbg, signal);
-          return textResult(
-            "debug: continue_back",
-            `${out ? `${out}\n` : ""}${pc || "(no trace session — run trace_start first)"}`
-          );
-        }
-        case "registers": {
-          const rawOut9 = await dbg.cmd("drj", { signal });
-          const out = rawOut9.trim();
-          return textResult("debug: registers", out || "(no registers)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "registers_telescope": {
-          // `drr` resolves each register to what it points at (string/symbol/pointer chain) — far more informative than raw values.
-          const rawOut10 = await dbg.cmd("drr", { signal });
-          const out = rawOut10.trim();
-          return textResult(
-            "debug: registers_telescope",
-            out || "(no registers)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "write_register": {
-          if (params.reg === undefined || params.value === undefined) {
-            throw new Error("omp-re: debug write_register needs reg and value");
-          }
-          const reg = validateRegName(params.reg);
-          const value = validateRegValue(params.value);
-          await dbg.cmd(`dr ${reg}=${value}`, { signal });
-          const rawReadBack = await dbg.cmd(`dr ${reg}`, { signal });
-          const readBack = rawReadBack.trim();
-          return textResult(
-            `debug: write_register ${reg}=${value}`,
-            readBack || "(set)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "read_memory": {
-          if (!ea) {
-            throw new Error("omp-re: debug read_memory needs addr");
-          }
-          const n = clampInt(params.size, 64, 4096);
-          const rawOut11 = await dbg.cmd(`pxj ${n} @ ${ea}`, { signal });
-          const out = rawOut11.trim();
-          return textResult(
-            `debug: read_memory ${n} @ ${ea}`,
-            out || "(no output)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "dump_memory": {
-          if (!ea) {
-            throw new Error("omp-re: debug dump_memory needs addr");
-          }
-          if (
-            params.size === undefined ||
-            !Number.isFinite(params.size) ||
-            params.size <= 0
-          ) {
-            throw new Error(
-              "omp-re: debug dump_memory needs a positive size (bytes)"
+          },
+        ],
+        [
+          "trace_load",
+          async () => {
+            if (params.file === undefined) {
+              throw new Error(
+                "omp-re: debug trace_load needs file (a trace directory from a prior trace_save)"
+              );
+            }
+            const dir = await outputSubdir(params.file, false);
+            if (!existsSync(dir)) {
+              throw new Error(
+                `omp-re: debug trace_load: no saved trace at ${dir} (save one first with trace_save)`
+              );
+            }
+            const { stderr } = await dbg.cmdWithStderr(`dtsf ${rzQuote(dir)}`, {
+              signal,
+            });
+            if (stderr.trim()) {
+              throw new Error(`omp-re: debug trace_load: ${stderr.trim()}`);
+            }
+            return textResult(
+              `debug: trace_load ${params.file}`,
+              `loaded the trace session from ${dir}\nStep backward with step_back / continue_back.`,
+              { ctx, tool: "rizin_debug" }
             );
-          }
-          const size = Math.floor(params.size);
-          if (size > MAX_DUMP_BYTES) {
-            throw new Error(
-              `omp-re: debug dump_memory: ${size} bytes exceeds the ${MAX_DUMP_BYTES}-byte limit; dump a smaller region`
-            );
-          }
-          // Resolve a concrete numeric base so the generated filename and the reads agree even for a symbol/expression addr.
-          const rawBase = await dbg.cmd(`?v ${ea}`, { signal });
-          const base = rawBase.trim() || ea;
-          const name =
-            params.file === undefined
-              ? `dump_${base.replace(/^0x/u, "")}_${size}.bin`
-              : params.file;
-          // validates the basename; throws before any read on a bad name
-          const path = await prepareOutputPath(name);
-          const bytes = await readLiveBytes(dbg, ea, size, signal);
-          if (bytes.length === 0) {
-            throw new Error(
-              `omp-re: debug dump_memory: read nothing at ${ea} (unmapped or unreadable); no file written`
-            );
-          }
-          await writeFile(path, bytes);
-          const sha = createHash("sha256").update(bytes).digest("hex");
-          const preview = bytes.subarray(0, 32).toString("hex");
-          const short =
-            bytes.length < size
-              ? ` (short read: ${size} requested, memory ended)`
-              : "";
-          return textResult(
-            `debug: dump_memory ${bytes.length} bytes @ ${ea}`,
-            `wrote ${bytes.length} bytes${short} to ${path}\nsha256: ${sha}\nfirst bytes: ${preview}`,
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "write_memory": {
-          if (!ea) {
-            throw new Error("omp-re: debug write_memory needs addr");
-          }
-          if (params.bytes === undefined) {
-            throw new Error("omp-re: debug write_memory needs bytes (hex)");
-          }
-          const hex = validateHexBytes(params.bytes);
-          await dbg.cmd(`wx ${hex} @ ${ea}`, { signal });
-          const rawReadBack2 = await dbg.cmd(`p8 ${hex.length / 2} @ ${ea}`, {
-            signal,
-          });
-          const readBack = rawReadBack2.trim();
-          return textResult(
-            `debug: write_memory ${hex.length / 2} bytes @ ${ea}`,
-            `wrote ${hex}; now reads ${readBack}`,
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "disassemble": {
-          // Live memory: shows self-modified / unpacked code that the static view can't.
-          const n = clampInt(params.count, 16, 1024);
-          // Only ask for the program counter when no address was given.
-          let at = ea;
-          if (at === undefined) {
+          },
+        ],
+        [
+          "step_back",
+          async () => {
+            const n = clampInt(params.count, 1, 100_000);
+            const rawOut7 = await dbg.cmd(`dsb ${n}`, {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut7.trim();
             const pc = await programCounter(dbg, signal);
-            at = pc.split("=")[1]?.trim();
-          }
-          const rawOut12 = await dbg.cmd(`pdj ${n}${at ? ` @ ${at}` : ""}`, {
-            signal,
-          });
-          const out = rawOut12.trim();
-          return textResult(
-            `debug: disassemble ${n}${at ? ` @ ${at}` : " @ pc"}`,
-            out || "(no output)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "resolve_symbol": {
-          // `dmi [lib] <name>` resolves the live (post-ASLR) address of a loaded symbol, e.g. libc `system`.
-          if (params.name === undefined && params.lib === undefined) {
-            throw new Error(
-              "omp-re: debug resolve_symbol needs a name (and optionally a lib)"
+            return textResult(
+              `debug: step_back ${n}`,
+              `${out ? `${out}\n` : ""}${pc || "(no trace session — run trace_start first)"}`
             );
-          }
-          const parts = [params.lib, params.name]
-            .filter((p): p is string => p !== undefined)
-            .map(validateSymbolQuery);
-          const rawOut13 = await dbg.cmd(`dmi ${parts.join(" ")}`, { signal });
-          const out = rawOut13.trim();
-          return textResult(
-            `debug: resolve_symbol ${parts.join(" ")}`,
-            out ||
-              "(no match — the library may not be mapped yet; continue past the loader)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "break_add": {
-          if (!ea) {
-            throw new Error("omp-re: debug break_add needs addr");
-          }
-          await dbg.cmd(`db @ ${ea}`, { signal });
-          const rawList = await dbg.cmd("dblj", { signal });
-          const list = rawList.trim();
-          return textResult(
-            `debug: break_add ${ea}`,
-            list || "(no breakpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "break_remove": {
-          if (!ea) {
-            throw new Error("omp-re: debug break_remove needs addr");
-          }
-          await dbg.cmd(`db- @ ${ea}`, { signal });
-          const rawList2 = await dbg.cmd("dblj", { signal });
-          const list = rawList2.trim();
-          return textResult(
-            `debug: break_remove ${ea}`,
-            list || "(no breakpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "break_list": {
-          const rawList3 = await dbg.cmd("dblj", { signal });
-          const list = rawList3.trim();
-          return textResult("debug: break_list", list || "(no breakpoints)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "break_add_hw": {
-          // Hardware breakpoint (debug registers) — breaks on read-only / self-modifying / packed pages without patching int3 bytes.
-          if (!ea) {
-            throw new Error("omp-re: debug break_add_hw needs addr");
-          }
-          await dbg.cmd(`dbH @ ${ea}`, { signal });
-          const rawList4 = await dbg.cmd("dblj", { signal });
-          const list = rawList4.trim();
-          return textResult(
-            `debug: break_add_hw ${ea}`,
-            list || "(no breakpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "break_enable":
-        case "break_disable": {
-          if (!ea) {
-            throw new Error(`omp-re: debug ${params.action} needs addr`);
-          }
-          await dbg.cmd(
-            `${params.action === "break_enable" ? "dbe" : "dbd"} @ ${ea}`,
-            { signal }
-          );
-          const rawList5 = await dbg.cmd("dblj", { signal });
-          const list = rawList5.trim();
-          return textResult(
-            `debug: ${params.action} ${ea}`,
-            list || "(no breakpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "break_condition": {
-          // `dbC '<expr>'` conditions the breakpoint at ea — single-quoted so `>`/`<`/`==` in the expression are literal, not rizin redirects/compares.
-          if (!ea) {
-            throw new Error("omp-re: debug break_condition needs addr");
-          }
-          if (params.condition === undefined) {
-            throw new Error("omp-re: debug break_condition needs condition");
-          }
-          await dbg.cmd(`dbC ${rzQuote(params.condition)} @ ${ea}`, { signal });
-          const rawList6 = await dbg.cmd("dblj", { signal });
-          const list = rawList6.trim();
-          return textResult(
-            `debug: break_condition ${ea}`,
-            list || "(no breakpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "break_command": {
-          // Run a command each time the breakpoint hits (e.g. log registers). Gated through the read-only on-hit policy (vetted debugger-state reads + static print/info/search) so it can never reach `!` shell, writes, config, or debugger control.
-          if (!ea) {
-            throw new Error("omp-re: debug break_command needs addr");
-          }
-          if (params.command === undefined) {
-            throw new Error("omp-re: debug break_command needs command");
-          }
-          const check = checkDebugOnHitCommand(
-            await loadCatalog(),
-            params.command
-          );
-          if (!check.ok) {
-            throw new Error(`omp-re: debug break_command: ${check.reason}`);
-          }
-          await dbg.cmd(`dbc ${check.line} @ ${ea}`, { signal });
-          const rawList7 = await dbg.cmd("dblj", { signal });
-          const list = rawList7.trim();
-          return textResult(
-            `debug: break_command ${ea}`,
-            list || "(no breakpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "watch_add": {
-          // `dbw <perm> [<size>]` arms a hardware watchpoint at the seek; remove it with break_remove (it lives in the breakpoint list).
-          if (!ea) {
-            throw new Error("omp-re: debug watch_add needs addr");
-          }
-          const perm = validateWatchPerm(params.perm);
-          const sizeArg =
-            params.size === undefined ? "" : ` ${clampInt(params.size, 4, 8)}`;
-          await dbg.cmd(`dbw ${perm}${sizeArg} @ ${ea}`, { signal });
-          const rawList8 = await dbg.cmd("dblj", { signal });
-          const list = rawList8.trim();
-          return textResult(
-            `debug: watch_add ${perm} @ ${ea}`,
-            list || "(no watchpoints)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "backtrace": {
-          const rawBt = await dbg.cmd("dbtj", { signal });
-          const bt = rawBt.trim();
-          return textResult("debug: backtrace", bt || "(no backtrace)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
+          },
+        ],
+        [
+          "continue_back",
+          async () => {
+            const rawOut8 = await dbg.cmd("dcb", {
+              signal,
+              timeoutMs: dbgTimeout,
+            });
+            const out = rawOut8.trim();
+            const pc = await programCounter(dbg, signal);
+            return textResult(
+              "debug: continue_back",
+              `${out ? `${out}\n` : ""}${pc || "(no trace session — run trace_start first)"}`
+            );
+          },
+        ],
+        [
+          "registers",
+          async () => {
+            const rawOut9 = await dbg.cmd("drj", { signal });
+            const out = rawOut9.trim();
+            return textResult("debug: registers", out || "(no registers)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "registers_telescope",
+          async () => {
+            // `drr` resolves each register to what it points at (string/symbol/pointer chain) — far more informative than raw values.
+            const rawOut10 = await dbg.cmd("drr", { signal });
+            const out = rawOut10.trim();
+            return textResult(
+              "debug: registers_telescope",
+              out || "(no registers)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "write_register",
+          async () => {
+            if (params.reg === undefined || params.value === undefined) {
+              throw new Error(
+                "omp-re: debug write_register needs reg and value"
+              );
+            }
+            const reg = validateRegName(params.reg);
+            const value = validateRegValue(params.value);
+            await dbg.cmd(`dr ${reg}=${value}`, { signal });
+            const rawReadBack = await dbg.cmd(`dr ${reg}`, { signal });
+            const readBack = rawReadBack.trim();
+            return textResult(
+              `debug: write_register ${reg}=${value}`,
+              readBack || "(set)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "read_memory",
+          async () => {
+            if (!ea) {
+              throw new Error("omp-re: debug read_memory needs addr");
+            }
+            const n = clampInt(params.size, 64, 4096);
+            const rawOut11 = await dbg.cmd(`pxj ${n} @ ${ea}`, { signal });
+            const out = rawOut11.trim();
+            return textResult(
+              `debug: read_memory ${n} @ ${ea}`,
+              out || "(no output)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "dump_memory",
+          async () => {
+            if (!ea) {
+              throw new Error("omp-re: debug dump_memory needs addr");
+            }
+            if (
+              params.size === undefined ||
+              !Number.isFinite(params.size) ||
+              params.size <= 0
+            ) {
+              throw new Error(
+                "omp-re: debug dump_memory needs a positive size (bytes)"
+              );
+            }
+            const size = Math.floor(params.size);
+            if (size > MAX_DUMP_BYTES) {
+              throw new Error(
+                `omp-re: debug dump_memory: ${size} bytes exceeds the ${MAX_DUMP_BYTES}-byte limit; dump a smaller region`
+              );
+            }
+            // Resolve a concrete numeric base so the generated filename and the reads agree even for a symbol/expression addr.
+            const rawBase = await dbg.cmd(`?v ${ea}`, { signal });
+            const base = rawBase.trim() || ea;
+            const name =
+              params.file === undefined
+                ? `dump_${base.replace(/^0x/u, "")}_${size}.bin`
+                : params.file;
+            // validates the basename; throws before any read on a bad name
+            const path = await prepareOutputPath(name);
+            const bytes = await readLiveBytes(dbg, ea, size, signal);
+            if (bytes.length === 0) {
+              throw new Error(
+                `omp-re: debug dump_memory: read nothing at ${ea} (unmapped or unreadable); no file written`
+              );
+            }
+            await writeFile(path, bytes);
+            const sha = createHash("sha256").update(bytes).digest("hex");
+            const preview = bytes.subarray(0, 32).toString("hex");
+            const short =
+              bytes.length < size
+                ? ` (short read: ${size} requested, memory ended)`
+                : "";
+            return textResult(
+              `debug: dump_memory ${bytes.length} bytes @ ${ea}`,
+              `wrote ${bytes.length} bytes${short} to ${path}\nsha256: ${sha}\nfirst bytes: ${preview}`,
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "write_memory",
+          async () => {
+            if (!ea) {
+              throw new Error("omp-re: debug write_memory needs addr");
+            }
+            if (params.bytes === undefined) {
+              throw new Error("omp-re: debug write_memory needs bytes (hex)");
+            }
+            const hex = validateHexBytes(params.bytes);
+            await dbg.cmd(`wx ${hex} @ ${ea}`, { signal });
+            const rawReadBack2 = await dbg.cmd(`p8 ${hex.length / 2} @ ${ea}`, {
+              signal,
+            });
+            const readBack = rawReadBack2.trim();
+            return textResult(
+              `debug: write_memory ${hex.length / 2} bytes @ ${ea}`,
+              `wrote ${hex}; now reads ${readBack}`,
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "disassemble",
+          async () => {
+            // Live memory: shows self-modified / unpacked code that the static view can't.
+            const n = clampInt(params.count, 16, 1024);
+            // Only ask for the program counter when no address was given.
+            let at = ea;
+            if (at === undefined) {
+              const pc = await programCounter(dbg, signal);
+              at = pc.split("=")[1]?.trim();
+            }
+            const rawOut12 = await dbg.cmd(`pdj ${n}${at ? ` @ ${at}` : ""}`, {
+              signal,
+            });
+            const out = rawOut12.trim();
+            return textResult(
+              `debug: disassemble ${n}${at ? ` @ ${at}` : " @ pc"}`,
+              out || "(no output)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "resolve_symbol",
+          async () => {
+            // `dmi [lib] <name>` resolves the live (post-ASLR) address of a loaded symbol, e.g. libc `system`.
+            if (params.name === undefined && params.lib === undefined) {
+              throw new Error(
+                "omp-re: debug resolve_symbol needs a name (and optionally a lib)"
+              );
+            }
+            const parts = [params.lib, params.name]
+              .filter((p): p is string => p !== undefined)
+              .map(validateSymbolQuery);
+            const rawOut13 = await dbg.cmd(`dmi ${parts.join(" ")}`, {
+              signal,
+            });
+            const out = rawOut13.trim();
+            return textResult(
+              `debug: resolve_symbol ${parts.join(" ")}`,
+              out ||
+                "(no match — the library may not be mapped yet; continue past the loader)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "break_add",
+          async () => {
+            if (!ea) {
+              throw new Error("omp-re: debug break_add needs addr");
+            }
+            await dbg.cmd(`db @ ${ea}`, { signal });
+            const rawList = await dbg.cmd("dblj", { signal });
+            const list = rawList.trim();
+            return textResult(
+              `debug: break_add ${ea}`,
+              list || "(no breakpoints)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "break_remove",
+          async () => {
+            if (!ea) {
+              throw new Error("omp-re: debug break_remove needs addr");
+            }
+            await dbg.cmd(`db- @ ${ea}`, { signal });
+            const rawList2 = await dbg.cmd("dblj", { signal });
+            const list = rawList2.trim();
+            return textResult(
+              `debug: break_remove ${ea}`,
+              list || "(no breakpoints)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "break_list",
+          async () => {
+            const rawList3 = await dbg.cmd("dblj", { signal });
+            const list = rawList3.trim();
+            return textResult("debug: break_list", list || "(no breakpoints)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "break_add_hw",
+          async () => {
+            // Hardware breakpoint (debug registers) — breaks on read-only / self-modifying / packed pages without patching int3 bytes.
+            if (!ea) {
+              throw new Error("omp-re: debug break_add_hw needs addr");
+            }
+            await dbg.cmd(`dbH @ ${ea}`, { signal });
+            const rawList4 = await dbg.cmd("dblj", { signal });
+            const list = rawList4.trim();
+            return textResult(
+              `debug: break_add_hw ${ea}`,
+              list || "(no breakpoints)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        ...["break_enable", "break_disable"].map(
+          (name) =>
+            [
+              name,
+              async () => {
+                if (!ea) {
+                  throw new Error(`omp-re: debug ${params.action} needs addr`);
+                }
+                await dbg.cmd(
+                  `${params.action === "break_enable" ? "dbe" : "dbd"} @ ${ea}`,
+                  { signal }
+                );
+                const rawList5 = await dbg.cmd("dblj", { signal });
+                const list = rawList5.trim();
+                return textResult(
+                  `debug: ${params.action} ${ea}`,
+                  list || "(no breakpoints)",
+                  { ctx, tool: "rizin_debug" }
+                );
+              },
+            ] as const
+        ),
+        [
+          "break_condition",
+          async () => {
+            // `dbC '<expr>'` conditions the breakpoint at ea — single-quoted so `>`/`<`/`==` in the expression are literal, not rizin redirects/compares.
+            if (!ea) {
+              throw new Error("omp-re: debug break_condition needs addr");
+            }
+            if (params.condition === undefined) {
+              throw new Error("omp-re: debug break_condition needs condition");
+            }
+            await dbg.cmd(`dbC ${rzQuote(params.condition)} @ ${ea}`, {
+              signal,
+            });
+            const rawList6 = await dbg.cmd("dblj", { signal });
+            const list = rawList6.trim();
+            return textResult(
+              `debug: break_condition ${ea}`,
+              list || "(no breakpoints)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "break_command",
+          async () => {
+            // Run a command each time the breakpoint hits (e.g. log registers). Gated through the read-only on-hit policy (vetted debugger-state reads + static print/info/search) so it can never reach `!` shell, writes, config, or debugger control.
+            if (!ea) {
+              throw new Error("omp-re: debug break_command needs addr");
+            }
+            if (params.command === undefined) {
+              throw new Error("omp-re: debug break_command needs command");
+            }
+            const check = checkDebugOnHitCommand(
+              await loadCatalog(),
+              params.command
+            );
+            if (!check.ok) {
+              throw new Error(`omp-re: debug break_command: ${check.reason}`);
+            }
+            await dbg.cmd(`dbc ${check.line} @ ${ea}`, { signal });
+            const rawList7 = await dbg.cmd("dblj", { signal });
+            const list = rawList7.trim();
+            return textResult(
+              `debug: break_command ${ea}`,
+              list || "(no breakpoints)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "watch_add",
+          async () => {
+            // `dbw <perm> [<size>]` arms a hardware watchpoint at the seek; remove it with break_remove (it lives in the breakpoint list).
+            if (!ea) {
+              throw new Error("omp-re: debug watch_add needs addr");
+            }
+            const perm = validateWatchPerm(params.perm);
+            const sizeArg =
+              params.size === undefined
+                ? ""
+                : ` ${clampInt(params.size, 4, 8)}`;
+            await dbg.cmd(`dbw ${perm}${sizeArg} @ ${ea}`, { signal });
+            const rawList8 = await dbg.cmd("dblj", { signal });
+            const list = rawList8.trim();
+            return textResult(
+              `debug: watch_add ${perm} @ ${ea}`,
+              list || "(no watchpoints)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "backtrace",
+          async () => {
+            const rawBt = await dbg.cmd("dbtj", { signal });
+            const bt = rawBt.trim();
+            return textResult("debug: backtrace", bt || "(no backtrace)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
         // Inspection actions from the book's debugger chapters — each one
         // read-only command, no parameters, JSON where rizin offers it.
-        case "maps": {
-          const rawOut14 = await dbg.cmd("dmj", { signal });
-          const out = rawOut14.trim();
-          return textResult("debug: maps", out || "(no maps)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "modules": {
-          const rawOut15 = await dbg.cmd("dmmj", { signal });
-          const out = rawOut15.trim();
-          return textResult(
-            "debug: modules",
-            out || "(no modules — continue past the loader to see them)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "libraries": {
-          const rawOut16 = await dbg.cmd("dmij", { signal });
-          const out = rawOut16.trim();
-          return textResult("debug: libraries", out || "(no libraries)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "sections": {
-          const rawOut17 = await dbg.cmd("dmSj", { signal });
-          const out = rawOut17.trim();
-          return textResult("debug: sections", out || "(no sections)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "processes": {
-          const rawOut18 = await dbg.cmd("dpj", { signal });
-          const out = rawOut18.trim();
-          return textResult("debug: processes", out || "(no processes)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "threads": {
-          const rawOut19 = await dbg.cmd("dpTj", { signal });
-          const out = rawOut19.trim();
-          return textResult("debug: threads", out || "(no threads)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "fds": {
-          const rawOut20 = await dbg.cmd("ddlj", { signal });
-          const out = rawOut20.trim();
-          return textResult("debug: fds", out || "(no file descriptors)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "signals": {
-          const rawOut21 = await dbg.cmd("dklj", { signal });
-          const out = rawOut21.trim();
-          return textResult("debug: signals", out || "(no signal info)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "windows": {
-          const rawOut22 = await dbg.cmd("dW", { signal });
-          const out = rawOut22.trim();
-          return textResult("debug: windows", out || "(no windows)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
+        [
+          "maps",
+          async () => {
+            const rawOut14 = await dbg.cmd("dmj", { signal });
+            const out = rawOut14.trim();
+            return textResult("debug: maps", out || "(no maps)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "modules",
+          async () => {
+            const rawOut15 = await dbg.cmd("dmmj", { signal });
+            const out = rawOut15.trim();
+            return textResult(
+              "debug: modules",
+              out || "(no modules — continue past the loader to see them)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "libraries",
+          async () => {
+            const rawOut16 = await dbg.cmd("dmij", { signal });
+            const out = rawOut16.trim();
+            return textResult("debug: libraries", out || "(no libraries)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "sections",
+          async () => {
+            const rawOut17 = await dbg.cmd("dmSj", { signal });
+            const out = rawOut17.trim();
+            return textResult("debug: sections", out || "(no sections)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "processes",
+          async () => {
+            const rawOut18 = await dbg.cmd("dpj", { signal });
+            const out = rawOut18.trim();
+            return textResult("debug: processes", out || "(no processes)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "threads",
+          async () => {
+            const rawOut19 = await dbg.cmd("dpTj", { signal });
+            const out = rawOut19.trim();
+            return textResult("debug: threads", out || "(no threads)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "fds",
+          async () => {
+            const rawOut20 = await dbg.cmd("ddlj", { signal });
+            const out = rawOut20.trim();
+            return textResult("debug: fds", out || "(no file descriptors)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "signals",
+          async () => {
+            const rawOut21 = await dbg.cmd("dklj", { signal });
+            const out = rawOut21.trim();
+            return textResult("debug: signals", out || "(no signal info)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "windows",
+          async () => {
+            const rawOut22 = await dbg.cmd("dW", { signal });
+            const out = rawOut22.trim();
+            return textResult("debug: windows", out || "(no windows)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
         // Windows heap inspection (book: debugger/heap — dmhw* display
         // commands, no mutation subcommand). heaps lists the process heaps;
         // heap_blocks lists allocated blocks in a heap (optional addr).
-        case "heaps": {
-          const rawOut23 = await dbg.cmd("dmhwj", { signal });
-          const out = rawOut23.trim();
-          return textResult("debug: heaps", out || "(no heap info)", {
-            ctx,
-            tool: "rizin_debug",
-          });
-        }
-        case "heap_blocks": {
-          const rawOut24 = await dbg.cmd(`dmhwbj${ea ? ` @ ${ea}` : ""}`, {
-            signal,
-          });
-          const out = rawOut24.trim();
-          return textResult(
-            `debug: heap_blocks${ea ? ` @ ${ea}` : ""}`,
-            out || "(no blocks)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
+        [
+          "heaps",
+          async () => {
+            const rawOut23 = await dbg.cmd("dmhwj", { signal });
+            const out = rawOut23.trim();
+            return textResult("debug: heaps", out || "(no heap info)", {
+              ctx,
+              tool: "rizin_debug",
+            });
+          },
+        ],
+        [
+          "heap_blocks",
+          async () => {
+            const rawOut24 = await dbg.cmd(`dmhwbj${ea ? ` @ ${ea}` : ""}`, {
+              signal,
+            });
+            const out = rawOut24.trim();
+            return textResult(
+              `debug: heap_blocks${ea ? ` @ ${ea}` : ""}`,
+              out || "(no blocks)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
         // glibc heap inspection (book: debugger/heap — dmhg* display
         // commands). These report "Can't find glibc mapped in memory" until
         // the loader has run and something has allocated; continue first.
-        case "heap_arenas": {
-          const rawOut25 = await dbg.cmd("dmhga", { signal });
-          const out = rawOut25.trim();
-          return textResult(
-            "debug: heap_arenas",
-            out ||
-              "(no arenas — continue until glibc is mapped and has allocated)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "heap_chunks": {
-          const rawOut26 = await dbg.cmd(`dmhgj${ea ? ` @ ${ea}` : ""}`, {
-            signal,
-          });
-          const out = rawOut26.trim();
-          return textResult(
-            `debug: heap_chunks${ea ? ` @ ${ea}` : ""}`,
-            out ||
-              "(no chunks — continue until glibc is mapped and has allocated)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        case "heap_bins": {
-          // `dmhgd [<bin_type>]`: all bins, or one of tcache/fast/unsorted/small/large via `bin` (reuses addr as the bin selector).
-          const bin =
-            params.addr !== undefined &&
-            /^(?:tcache|fast|unsorted|small|large)$/u.test(params.addr)
-              ? ` ${params.addr}`
-              : "";
-          const rawOut27 = await dbg.cmd(`dmhgd${bin}`, { signal });
-          const out = rawOut27.trim();
-          return textResult(
-            `debug: heap_bins${bin}`,
-            out ||
-              "(no bin info — continue until glibc is mapped and has allocated)",
-            { ctx, tool: "rizin_debug" }
-          );
-        }
-        default: {
-          throw new Error(
-            `omp-re: debug: unknown action ${JSON.stringify(params.action)}`
-          );
-        }
+        [
+          "heap_arenas",
+          async () => {
+            const rawOut25 = await dbg.cmd("dmhga", { signal });
+            const out = rawOut25.trim();
+            return textResult(
+              "debug: heap_arenas",
+              out ||
+                "(no arenas — continue until glibc is mapped and has allocated)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "heap_chunks",
+          async () => {
+            const rawOut26 = await dbg.cmd(`dmhgj${ea ? ` @ ${ea}` : ""}`, {
+              signal,
+            });
+            const out = rawOut26.trim();
+            return textResult(
+              `debug: heap_chunks${ea ? ` @ ${ea}` : ""}`,
+              out ||
+                "(no chunks — continue until glibc is mapped and has allocated)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+        [
+          "heap_bins",
+          async () => {
+            // `dmhgd [<bin_type>]`: all bins, or one of tcache/fast/unsorted/small/large via `bin` (reuses addr as the bin selector).
+            const bin =
+              params.addr !== undefined &&
+              /^(?:tcache|fast|unsorted|small|large)$/u.test(params.addr)
+                ? ` ${params.addr}`
+                : "";
+            const rawOut27 = await dbg.cmd(`dmhgd${bin}`, { signal });
+            const out = rawOut27.trim();
+            return textResult(
+              `debug: heap_bins${bin}`,
+              out ||
+                "(no bin info — continue until glibc is mapped and has allocated)",
+              { ctx, tool: "rizin_debug" }
+            );
+          },
+        ],
+      ]);
+      const handler = actions.get(params.action);
+      if (!handler) {
+        throw new Error(
+          `omp-re: debug: unknown action ${JSON.stringify(params.action)}`
+        );
       }
+      return await handler();
     },
   });
 };

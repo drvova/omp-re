@@ -679,12 +679,12 @@ export const readBinaryBits = (path: string): 32 | 64 | undefined => {
     }
     const magic = buf.readUInt32LE(0);
     if (magic === 0xfe_ed_fa_cf) {
-      return 64;
       // Mach-O 64
+      return 64;
     }
     if (magic === 0xfe_ed_fa_ce) {
-      return 32;
       // Mach-O 32
+      return 32;
     }
     // fat/universal Mach-O and unknown formats: don't guess
     return undefined;

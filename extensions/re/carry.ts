@@ -219,6 +219,58 @@ const manifestArgs = (
     : { command: args.command };
 };
 
+/** One manifest `entries` row, or undefined when it has no evidence id (rows are untrusted; optional fields default). */
+const parseManifestEntry = (e: unknown): ManifestEntry | undefined => {
+  const row = e as Record<string, unknown> | null;
+  if (!row || typeof row !== "object" || typeof row.evidenceId !== "string") {
+    return undefined;
+  }
+  return {
+    anchor: parseAnchor(row.anchor),
+    args: manifestArgs(
+      row.args as { command?: unknown; addr?: unknown } | null | undefined
+    ),
+    binarySha256: str(row.binarySha256),
+    canonicalExcerpt: str(row.canonicalExcerpt),
+    claims: Array.isArray(row.claims)
+      ? row.claims.filter((c): c is string => typeof c === "string")
+      : [],
+    command: str(row.command),
+    commands: Array.isArray(row.commands)
+      ? row.commands.filter((c): c is string => typeof c === "string")
+      : null,
+    evidenceId: row.evidenceId,
+    reproHash: str(row.reproHash),
+    shiftHash: str(row.shiftHash),
+    tool: str(row.tool) ?? "unknown",
+  };
+};
+
+/** One manifest `findings` row, or undefined when it lacks an id, claim or evidence list. */
+const parseManifestFinding = (f: unknown): ManifestFinding | undefined => {
+  const row = f as Record<string, unknown> | null;
+  if (
+    !row ||
+    typeof row.id !== "string" ||
+    typeof row.claim !== "string" ||
+    !Array.isArray(row.evidenceIds)
+  ) {
+    return undefined;
+  }
+  return {
+    addr: str(row.addr),
+    claim: row.claim,
+    confidence:
+      row.confidence === "confirmed" || row.confidence === "speculative"
+        ? row.confidence
+        : "likely",
+    evidenceIds: row.evidenceIds.filter(
+      (x): x is string => typeof x === "string"
+    ),
+    id: row.id,
+  };
+};
+
 /** Parse and shape-check a manifest's JSON text. Throws a clear error on anything that isn't a manifest; tolerates missing optional fields per entry. */
 export const parseManifest = (text: string): CarryManifest => {
   let raw: unknown;
@@ -236,59 +288,13 @@ export const parseManifest = (text: string): CarryManifest => {
       "omp-re: carry: not a verification manifest (no `entries` array) — pass the <report>.manifest.json written by /re report <path>"
     );
   }
-  const entries: ManifestEntry[] = [];
-  for (const e of obj.entries as unknown[]) {
-    const row = e as Record<string, unknown> | null;
-    if (!row || typeof row !== "object" || typeof row.evidenceId !== "string") {
-      continue;
-    }
-    const args = row.args as
-      | { command?: unknown; addr?: unknown }
-      | null
-      | undefined;
-    entries.push({
-      anchor: parseAnchor(row.anchor),
-      args: manifestArgs(args),
-      binarySha256: str(row.binarySha256),
-      canonicalExcerpt: str(row.canonicalExcerpt),
-      claims: Array.isArray(row.claims)
-        ? row.claims.filter((c): c is string => typeof c === "string")
-        : [],
-      command: str(row.command),
-      commands: Array.isArray(row.commands)
-        ? row.commands.filter((c): c is string => typeof c === "string")
-        : null,
-      evidenceId: row.evidenceId,
-      reproHash: str(row.reproHash),
-      shiftHash: str(row.shiftHash),
-      tool: str(row.tool) ?? "unknown",
-    });
-  }
-  const findings: ManifestFinding[] = [];
+  const entries = (obj.entries as unknown[])
+    .map(parseManifestEntry)
+    .filter((e) => e !== undefined);
   const rawFindings = (raw as { findings?: unknown }).findings;
-  for (const f of Array.isArray(rawFindings) ? rawFindings : []) {
-    const row = f as Record<string, unknown> | null;
-    if (
-      !row ||
-      typeof row.id !== "string" ||
-      typeof row.claim !== "string" ||
-      !Array.isArray(row.evidenceIds)
-    ) {
-      continue;
-    }
-    findings.push({
-      addr: str(row.addr),
-      claim: row.claim,
-      confidence:
-        row.confidence === "confirmed" || row.confidence === "speculative"
-          ? row.confidence
-          : "likely",
-      evidenceIds: row.evidenceIds.filter(
-        (x): x is string => typeof x === "string"
-      ),
-      id: row.id,
-    });
-  }
+  const findings = (Array.isArray(rawFindings) ? rawFindings : [])
+    .map(parseManifestFinding)
+    .filter((f) => f !== undefined);
   return { binarySha256: str(obj.binarySha256), entries, findings };
 };
 
@@ -546,6 +552,198 @@ const tryRelocated = async (
   };
 };
 
+/** A carry row without its identity (evidence id and tool), which the caller adds. */
+type CarryRowFields = Omit<CarryEvidenceRow, "evidenceId" | "tool">;
+
+/** The read-only line `request` runs as, through rizin_command's own gate, or the "unchecked" row explaining why it can't run here. */
+const gateLine = async (request: {
+  command: string;
+  addr?: string;
+}): Promise<{ line: string } | CarryRowFields> => {
+  try {
+    const catalog = await loadCatalog();
+    const check = checkRizinCommand(
+      catalog,
+      request.command,
+      request.addr === undefined ? undefined : validateAddr(request.addr)
+    );
+    return check.ok
+      ? { line: check.line }
+      : {
+          command: request.command,
+          detail: `not runnable here: ${check.reason}`,
+          status: "unchecked",
+        };
+  } catch (error) {
+    return {
+      command: request.command,
+      detail: `not runnable here: ${error instanceof Error ? error.message : String(error)}`,
+      status: "unchecked",
+    };
+  }
+};
+
+/** The "broken" row for a command that now prints nothing (or only an error) where it used to print something; undefined when the output is fine. */
+const silentRow = (
+  line: string,
+  output: string,
+  stderr: string,
+  recordedExcerpt: string
+): CarryRowFields | undefined => {
+  if (output.trim() !== "") {
+    return;
+  }
+  const errors = cleanStderr(stderr);
+  if (!errors && recordedExcerpt.trim() === "") {
+    return;
+  }
+  const said = errors ? `: ${errors.split("\n").at(-1)}` : "";
+  return {
+    command: line,
+    detail: `command now produces no output${said}`,
+    status: "broken",
+  };
+};
+
+/** Whether a symbolic anchor (a symbol or flag name) no longer resolves to an address in the open build. */
+const symbolicAnchorGone = async (
+  rz: RzSession,
+  addr: string
+): Promise<boolean> => {
+  try {
+    await resolveNumericAddr(rz, addr);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+/** The "drifted" row: what changed (as a diff when the excerpt shows it) and, for a numeric anchor, why it wasn't relocated. */
+const driftRow = (
+  line: string,
+  recordedExcerpt: string,
+  output: string,
+  binaryPath: string,
+  anchor: { fingerprinted: boolean; numericAddr: string | undefined }
+): CarryRowFields => {
+  const diff = excerptDiff(recordedExcerpt, output, binaryPath);
+  const parts = [
+    diff
+      ? "output changed"
+      : "output changed beyond the recorded 20-line excerpt (re-run to see it)",
+  ];
+  if (anchor.numericAddr !== undefined) {
+    parts.push(
+      `pinned to numeric address ${anchor.numericAddr}${anchor.fingerprinted ? "; no function matching its fingerprint was found elsewhere" : " — the code it named may have moved in this build"}`
+    );
+  }
+  return {
+    command: line,
+    detail: parts.join("; "),
+    status: "drifted",
+    ...(diff ? { diff } : {}),
+  };
+};
+
+/** Re-run a gated entry and classify the result: holds, relocated, drifted, or broken. */
+const rerunEntry = async (
+  ctx: ExtensionContext,
+  entry: ManifestEntry,
+  request: { command: string; addr?: string },
+  line: string,
+  binaryPath: string
+): Promise<CarryRowFields> => {
+  const rz = await ensureRizin(ctx);
+  const catalog = await loadCatalog();
+  const fp = entry.anchor ?? undefined;
+  const relocate = async (): Promise<CarryRowFields | undefined> => {
+    if (!fp) {
+      return;
+    }
+    return await tryRelocated(rz, catalog, entry, request, fp, binaryPath);
+  };
+  // A symbolic anchor (sym.decrypt_config, a flag) that no longer resolves means the thing the
+  // claim is about is gone under that name; with a fingerprint it may just have been renamed,
+  // so look for it before calling it broken. A numeric anchor always "resolves", so it is
+  // judged by its output (and relocated by fingerprint below when that output changed).
+  const numericAnchor =
+    request.addr !== undefined && /^(?:0x[0-9a-f]+|\d+)$/iu.test(request.addr);
+  if (
+    request.addr !== undefined &&
+    !numericAnchor &&
+    (await symbolicAnchorGone(rz, request.addr))
+  ) {
+    return (
+      (await relocate()) ?? {
+        command: line,
+        detail: `anchor \`${request.addr}\` no longer resolves in this binary${fp ? " and no function matching its fingerprint was found" : ""}`,
+        status: "broken",
+      }
+    );
+  }
+  const { output, stderr } = await rz.cmdWithStderr(line, {
+    timeoutMs: CARRY_COMMAND_TIMEOUT_MS,
+  });
+  const recordedExcerpt = entry.canonicalExcerpt ?? "";
+  const silent = silentRow(line, output, stderr, recordedExcerpt);
+  if (silent) {
+    const moved = numericAnchor ? await relocate() : null;
+    return moved ?? silent;
+  }
+  const same = compareOutput(entry, output, binaryPath);
+  if (same) {
+    return { command: line, detail: same, rerun: request, status: "holds" };
+  }
+  // Drifted at a numeric anchor: the code it named may simply have moved. Relocate by
+  // fingerprint and re-run there; keep the drift only if the code isn't found elsewhere.
+  if (numericAnchor) {
+    const moved = await relocate();
+    if (
+      moved &&
+      request.addr !== undefined &&
+      moved.relocation?.addr !== normalizeAddr(request.addr)
+    ) {
+      return moved;
+    }
+  }
+  return driftRow(line, recordedExcerpt, output, binaryPath, {
+    fingerprinted: fp !== undefined,
+    numericAddr: numericAnchor ? request.addr : undefined,
+  });
+};
+
+/** Classify one manifest entry on the open build. Never throws: an infrastructure failure is "unchecked". */
+const carryEntry = async (
+  ctx: ExtensionContext,
+  entry: ManifestEntry,
+  binaryPath: string
+): Promise<CarryRowFields> => {
+  const request =
+    entry.tool === "rizin_command" ? entryRequest(entry) : undefined;
+  if (!request || !entry.reproHash) {
+    return {
+      command: entry.command ?? undefined,
+      detail: entry.commands?.length
+        ? "provenance-only: no reproducible hash to compare (re-run by hand)"
+        : "legacy: no reproducible hash recorded",
+      status: "unchecked",
+    };
+  }
+  const gated = await gateLine(request);
+  if (!("line" in gated)) {
+    return gated;
+  }
+  try {
+    return await rerunEntry(ctx, entry, request, gated.line, binaryPath);
+  } catch (error) {
+    return {
+      command: gated.line,
+      detail: `re-run failed: ${error instanceof Error ? error.message : String(error)}`,
+      status: "unchecked",
+    };
+  }
+};
+
 /**
  * Re-run every reproducible manifest entry against the currently-open binary and
  * classify it. Never throws for a single entry — any per-entry failure degrades
@@ -565,177 +763,15 @@ export const buildCarry = async (
   const toSha256 =
     state.binarySha256 ?? (await trySha256File(binaryPath)) ?? null;
 
-  let catalog: Awaited<ReturnType<typeof loadCatalog>> | undefined;
   const evidence: CarryEvidenceRow[] = [];
   const seen = new Set<string>();
-
   await inSequence(manifest.entries, async (entry) => {
     if (seen.has(entry.evidenceId)) {
       return;
     }
     seen.add(entry.evidenceId);
-    const request =
-      entry.tool === "rizin_command" ? entryRequest(entry) : undefined;
-    const base = { evidenceId: entry.evidenceId, tool: entry.tool };
-
-    if (!request || !entry.reproHash) {
-      const detail = entry.commands?.length
-        ? "provenance-only: no reproducible hash to compare (re-run by hand)"
-        : "legacy: no reproducible hash recorded";
-      evidence.push({
-        ...base,
-        command: entry.command ?? undefined,
-        detail,
-        status: "unchecked",
-      });
-      return;
-    }
-
-    let line: string;
-    try {
-      if (!catalog) {
-        catalog = await loadCatalog();
-      }
-      const check = checkRizinCommand(
-        catalog,
-        request.command,
-        request.addr === undefined ? undefined : validateAddr(request.addr)
-      );
-      if (!check.ok) {
-        evidence.push({
-          ...base,
-          command: request.command,
-          detail: `not runnable here: ${check.reason}`,
-          status: "unchecked",
-        });
-        return;
-      }
-      ({ line } = check);
-    } catch (error) {
-      evidence.push({
-        ...base,
-        command: request.command,
-        detail: `not runnable here: ${error instanceof Error ? error.message : String(error)}`,
-        status: "unchecked",
-      });
-      return;
-    }
-
-    try {
-      const rz = await ensureRizin(ctx);
-      const fp = entry.anchor ?? undefined;
-      // A symbolic anchor (sym.decrypt_config, a flag) that no longer resolves means the thing the
-      // claim is about is gone under that name; with a fingerprint it may just have been renamed,
-      // so look for it before calling it broken. A numeric anchor always "resolves", so it is
-      // judged by its output (and relocated by fingerprint below when that output changed).
-      const numericAnchor =
-        request.addr !== undefined &&
-        /^(?:0x[0-9a-f]+|\d+)$/iu.test(request.addr);
-      if (request.addr !== undefined && !numericAnchor) {
-        const resolves = await resolveNumericAddr(rz, request.addr).then(
-          () => true,
-          () => false
-        );
-        if (!resolves) {
-          const moved = fp
-            ? await tryRelocated(rz, catalog, entry, request, fp, binaryPath)
-            : undefined;
-          evidence.push(
-            moved
-              ? { ...base, ...moved }
-              : {
-                  ...base,
-                  command: line,
-                  detail: `anchor \`${request.addr}\` no longer resolves in this binary${fp ? " and no function matching its fingerprint was found" : ""}`,
-                  status: "broken",
-                }
-          );
-          return;
-        }
-      }
-      const { output, stderr } = await rz.cmdWithStderr(line, {
-        timeoutMs: CARRY_COMMAND_TIMEOUT_MS,
-      });
-      const recordedExcerpt = entry.canonicalExcerpt ?? "";
-      if (output.trim() === "") {
-        const errors = cleanStderr(stderr);
-        if (errors || recordedExcerpt.trim() !== "") {
-          const moved =
-            numericAnchor && fp
-              ? await tryRelocated(rz, catalog, entry, request, fp, binaryPath)
-              : undefined;
-          const said = errors ? `: ${errors.split("\n").at(-1)}` : "";
-          evidence.push(
-            moved
-              ? { ...base, ...moved }
-              : {
-                  ...base,
-                  command: line,
-                  detail: `command now produces no output${said}`,
-                  status: "broken",
-                }
-          );
-          return;
-        }
-      }
-      const same = compareOutput(entry, output, binaryPath);
-      if (same) {
-        evidence.push({
-          ...base,
-          command: line,
-          detail: same,
-          rerun: request,
-          status: "holds",
-        });
-        return;
-      }
-      // Drifted at a numeric anchor: the code it named may simply have moved. Relocate by
-      // fingerprint and re-run there; keep the drift only if the code isn't found elsewhere.
-      if (numericAnchor && fp) {
-        const moved = await tryRelocated(
-          rz,
-          catalog,
-          entry,
-          request,
-          fp,
-          binaryPath
-        );
-        if (
-          moved &&
-          request.addr !== undefined &&
-          moved.relocation?.addr !== normalizeAddr(request.addr)
-        ) {
-          evidence.push({ ...base, ...moved });
-          return;
-        }
-      }
-      const parts = [];
-      const diff = excerptDiff(recordedExcerpt, output, binaryPath);
-      parts.push(
-        diff
-          ? "output changed"
-          : "output changed beyond the recorded 20-line excerpt (re-run to see it)"
-      );
-      if (numericAnchor) {
-        parts.push(
-          `pinned to numeric address ${request.addr}${fp ? "; no function matching its fingerprint was found elsewhere" : " — the code it named may have moved in this build"}`
-        );
-      }
-      evidence.push({
-        ...base,
-        command: line,
-        detail: parts.join("; "),
-        status: "drifted",
-        ...(diff ? { diff } : {}),
-      });
-    } catch (error) {
-      evidence.push({
-        ...base,
-        command: line,
-        detail: `re-run failed: ${error instanceof Error ? error.message : String(error)}`,
-        status: "unchecked",
-      });
-    }
+    const row = await carryEntry(ctx, entry, binaryPath);
+    evidence.push({ evidenceId: entry.evidenceId, tool: entry.tool, ...row });
   });
 
   return {
@@ -1041,6 +1077,93 @@ export const formatAgendaPrompt = (
   return lines.join("\n");
 };
 
+/** Read and parse a manifest file, naming the file when it can't be read. */
+const readManifest = async (manifestPath: string): Promise<CarryManifest> => {
+  let text: string;
+  try {
+    text = await readFile(manifestPath, "utf-8");
+  } catch (error) {
+    throw new Error(
+      `omp-re: carry: could not read manifest ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+  return parseManifest(text);
+};
+
+/** Run `--inherit` and describe it: the summary line, and the agenda prompt when findings need another look. */
+const inheritAndSummarize = async (
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  manifest: CarryManifest,
+  result: CarryResult
+): Promise<{ line: string; agendaPrompt?: string }> => {
+  const inheritance = await inheritFindings(pi, ctx, manifest, result);
+  result.inheritance = inheritance;
+  const present = inheritance.alreadyPresent
+    ? `, ${inheritance.alreadyPresent} already present`
+    : "";
+  const none =
+    manifest.findings.length === 0
+      ? " (this manifest has no findings — record them with record_finding before /re report)"
+      : "";
+  return {
+    line: `inherit: ${inheritance.inherited.length} finding(s) re-proven on this build and recorded, ${inheritance.agenda.length} need another look${present}${none}`,
+    ...(inheritance.agenda.length > 0
+      ? { agendaPrompt: formatAgendaPrompt(inheritance, result.toSha256) }
+      : {}),
+  };
+};
+
+/** Write the Markdown carry report and its JSON sidecar; returns the summary line saying where (or why not). */
+const writeCarryFiles = async (
+  result: CarryResult,
+  manifestPath: string,
+  out: string
+): Promise<string> => {
+  try {
+    await writeFile(out, formatCarryMarkdown(result, manifestPath), "utf-8");
+    await writeFile(
+      `${out}.json`,
+      `${JSON.stringify(result, null, 2)}\n`,
+      "utf-8"
+    );
+    return `carry report written to ${out} (+ ${out}.json)`;
+  } catch (error) {
+    return `carry report not written: ${error instanceof Error ? error.message : String(error)}`;
+  }
+};
+
+/** Report a carry: notify in the UI (the agenda goes into the editor unless it was already sent), or print headless and set a failing exit code. */
+const deliverCarry = (
+  ctx: ExtensionContext,
+  summary: string,
+  outcome: { failed: boolean; drifted: boolean },
+  agenda: string | undefined
+): void => {
+  if (ctx.hasUI) {
+    ctx.ui.notify(summary, notifyLevel(outcome.failed, outcome.drifted));
+    if (agenda) {
+      ctx.ui.setEditorText(agenda);
+    }
+    return;
+  }
+  if (outcome.failed) {
+    console.error(summary);
+    // Same deliberate headless signal as /re verify and the report gate: a finding that no
+    // longer holds on the new build must fail the pipeline. process.exitCode, never process.exit.
+    process.exitCode = 1;
+    if (agenda) {
+      console.error(agenda);
+    }
+    return;
+  }
+  console.log(summary);
+  if (agenda) {
+    console.log(agenda);
+  }
+};
+
 export const carryManifest = async (
   ctx: ExtensionContext,
   manifestPath: string,
@@ -1051,16 +1174,7 @@ export const carryManifest = async (
     resolve?: boolean;
   } = {}
 ): Promise<CarryResult> => {
-  let text: string;
-  try {
-    text = await readFile(manifestPath, "utf-8");
-  } catch (error) {
-    throw new Error(
-      `omp-re: carry: could not read manifest ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error }
-    );
-  }
-  const manifest = parseManifest(text);
+  const manifest = await readManifest(manifestPath);
   const result = await buildCarry(ctx, manifest);
   const c = counts(result.claims);
   const failed =
@@ -1068,70 +1182,42 @@ export const carryManifest = async (
     (opts.strict === true &&
       (c.relocated > 0 || c.drifted > 0 || c.unchecked > 0));
 
-  let summary = formatCarrySummary(result);
+  const lines = [formatCarrySummary(result)];
   let agendaPrompt: string | undefined;
   if (opts.inherit) {
-    const inheritance = await inheritFindings(
+    const inherited = await inheritAndSummarize(
       opts.inherit,
       ctx,
       manifest,
       result
     );
-    result.inheritance = inheritance;
-    summary += `\ninherit: ${inheritance.inherited.length} finding(s) re-proven on this build and recorded, ${inheritance.agenda.length} need another look${inheritance.alreadyPresent ? `, ${inheritance.alreadyPresent} already present` : ""}${manifest.findings.length === 0 ? " (this manifest has no findings — record them with record_finding before /re report)" : ""}`;
-    if (inheritance.agenda.length > 0) {
-      agendaPrompt = formatAgendaPrompt(inheritance, result.toSha256);
-    }
+    lines.push(inherited.line);
+    ({ agendaPrompt } = inherited);
   }
   if (opts.out) {
-    try {
-      await writeFile(
-        opts.out,
-        formatCarryMarkdown(result, manifestPath),
-        "utf-8"
-      );
-      await writeFile(
-        `${opts.out}.json`,
-        `${JSON.stringify(result, null, 2)}\n`,
-        "utf-8"
-      );
-      summary += `\ncarry report written to ${opts.out} (+ ${opts.out}.json)`;
-    } catch (error) {
-      summary += `\ncarry report not written: ${error instanceof Error ? error.message : String(error)}`;
-    }
+    lines.push(await writeCarryFiles(result, manifestPath, opts.out));
   }
 
   // --resolve: hand the agenda straight to the model as a user turn (it has the RE tools and
   // record_finding in this session, where the fresh evidence lives). Otherwise it goes into the editor,
   // like /re cite, for the analyst to send or edit.
-  let resolving = false;
+  let unsentAgenda = agendaPrompt;
   if (
     opts.resolve === true &&
     agendaPrompt !== undefined &&
     opts.inherit !== undefined
   ) {
-    resolving = true;
     opts.inherit.sendUserMessage(agendaPrompt);
-    summary += `\nresolve: sent ${result.inheritance?.agenda.length ?? 0} finding(s) to the model to re-examine`;
+    lines.push(
+      `resolve: sent ${result.inheritance?.agenda.length ?? 0} finding(s) to the model to re-examine`
+    );
+    unsentAgenda = undefined;
   }
-  if (ctx.hasUI) {
-    ctx.ui.notify(summary, notifyLevel(failed, c.drifted > 0));
-    if (agendaPrompt && !resolving) {
-      ctx.ui.setEditorText(agendaPrompt);
-    }
-  } else if (failed) {
-    console.error(summary);
-    // Same deliberate headless signal as /re verify and the report gate: a finding that no
-    // longer holds on the new build must fail the pipeline. process.exitCode, never process.exit.
-    process.exitCode = 1;
-    if (agendaPrompt && !resolving) {
-      console.error(agendaPrompt);
-    }
-  } else {
-    console.log(summary);
-    if (agendaPrompt && !resolving) {
-      console.log(agendaPrompt);
-    }
-  }
+  deliverCarry(
+    ctx,
+    lines.join("\n"),
+    { drifted: c.drifted > 0, failed },
+    unsentAgenda
+  );
   return result;
 };
