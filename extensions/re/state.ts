@@ -9,7 +9,7 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 import type { RzSession, SpawnOptions } from "./rizin.ts";
-import { backend } from "./runtime.ts";
+import { backend, requireBinaryPath } from "./runtime.ts";
 import type { ReSessionState } from "./runtime.ts";
 
 export type { ReSessionState } from "./runtime.ts";
@@ -28,7 +28,7 @@ export const rekeyState = (fromId: string, toId: string): void => {
 };
 
 export const requireBinary = (state: ReSessionState): string =>
-  backend().requireBinary(state);
+  requireBinaryPath(state);
 
 /** Spawn and analyze a fresh rizin process, replaying this branch's annotations. Returns replay failures for the caller to surface. */
 export const spawnRizin = (

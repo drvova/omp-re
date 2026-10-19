@@ -77,7 +77,7 @@ import {
   showImportsPanel,
   showStringsPanel,
 } from "./ui.ts";
-import { sha256File, verifyEvidence } from "./verify.ts";
+import { trySha256File, verifyEvidence } from "./verify.ts";
 
 interface OpenOptions {
   signal?: AbortSignal;
@@ -131,7 +131,7 @@ const openBinary = async (
   // SHA-256 of the exact bytes, streamed with Node crypto (no rizin spawn). Bound into every
   // evidence record taken this session so `/re verify` confirms it is re-running against the same
   // binary. A hash failure must never block opening — degrade to an unbound (unverifiable) session.
-  const sha256 = await sha256File(resolved).catch(() => {});
+  const sha256 = await trySha256File(resolved);
   const { replayFailures } = await spawnRizin(ctx, resolved, options);
   if (sha256) {
     getState(ctx).binarySha256 = sha256;

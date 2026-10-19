@@ -19,6 +19,8 @@ import {
 import { access, realpath as fsRealpath } from "node:fs/promises";
 import { setImmediate as nextTick } from "node:timers/promises";
 
+import { AbortError } from "./abort-error.ts";
+import { RzProtocolError } from "./rz-protocol-error.ts";
 import { firstInSequence } from "./sequence.ts";
 
 /** Allowed characters in an address/expression interpolated after `@`: hex, flag names, and
@@ -127,19 +129,6 @@ export const validateText = (value: string): string => {
   }
   return value;
 };
-
-export class RzProtocolError extends Error {
-  override name = "RzProtocolError";
-}
-
-/** Thrown when the caller's AbortSignal fires. The rizin process is left alone for ordinary commands (their frames are still drained in order), so an aborted tool call never forces a respawn. */
-export class RzAbortError extends Error {
-  constructor(what: string) {
-    super(`omp-re: ${what} aborted`);
-    this.name = "AbortError";
-  }
-}
-
 const COMMAND_TIMEOUT_MS = 60_000;
 const STDERR_TAIL_MAX = 4096;
 
@@ -267,7 +256,7 @@ export interface SpawnOptions {
   debugTarget?: string;
 }
 
-/** Settle `task` normally, or reject early with RzAbortError when `signal` fires. The task itself keeps running. */
+/** Settle `task` normally, or reject early with AbortError when `signal` fires. The task itself keeps running. */
 export const raceAbort = async <T>(
   task: Promise<T>,
   signal: AbortSignal | undefined,
@@ -277,10 +266,10 @@ export const raceAbort = async <T>(
     return await task;
   }
   if (signal.aborted) {
-    throw new RzAbortError(what);
+    throw new AbortError(what);
   }
   const { promise: aborted, reject } = Promise.withResolvers<never>();
-  const onAbort = () => reject(new RzAbortError(what));
+  const onAbort = () => reject(new AbortError(what));
   signal.addEventListener("abort", onAbort, { once: true });
   try {
     return await Promise.race([task, aborted]);
@@ -302,11 +291,12 @@ export class RzSession {
   /** Total stderr characters seen, so a command can take exactly the stderr written while it ran. */
   private stderrSeen = 0;
   private cmdCounter = 0;
+  private readonly proc: ChildProcess;
+  readonly binaryPath: string;
 
-  private constructor(
-    private readonly proc: ChildProcess,
-    readonly binaryPath: string
-  ) {
+  private constructor(proc: ChildProcess, binaryPath: string) {
+    this.proc = proc;
+    this.binaryPath = binaryPath;
     this.proc.stdout?.on("data", (chunk: Buffer) => {
       this.buf = Buffer.concat([this.buf, chunk]);
       this.drain();
@@ -536,7 +526,7 @@ export class RzSession {
     options: SpawnOptions = {}
   ): Promise<RzSession> {
     if (options.signal?.aborted) {
-      throw new RzAbortError("rizin analysis");
+      throw new AbortError("rizin analysis");
     }
     const proc = spawn(
       rizinPath,
@@ -563,7 +553,7 @@ export class RzSession {
     } catch (error) {
       session.close();
       if (options.signal?.aborted) {
-        throw new RzAbortError("rizin analysis");
+        throw new AbortError("rizin analysis");
       }
       throw error;
     } finally {
@@ -591,7 +581,7 @@ export class RzSession {
     options: SpawnOptions = {}
   ): Promise<RzSession> {
     if (options.signal?.aborted) {
-      throw new RzAbortError("debug launch");
+      throw new AbortError("debug launch");
     }
     // -R directives go before -d: each is one argv element (no shell), so
     // values with spaces need no quoting.
@@ -621,7 +611,7 @@ export class RzSession {
     } catch (error) {
       session.close();
       if (options.signal?.aborted) {
-        throw new RzAbortError("debug launch");
+        throw new AbortError("debug launch");
       }
       throw error;
     } finally {
@@ -629,6 +619,12 @@ export class RzSession {
     }
   }
 }
+
+/** ELF `EI_CLASS` → word size. */
+const ELF_CLASS_BITS: ReadonlyMap<number, 32 | 64> = new Map([
+  [1, 32],
+  [2, 64],
+]);
 
 /**
  * The target's pointer width from its file header — no session needed, so
@@ -652,7 +648,7 @@ export const readBinaryBits = (path: string): 32 | 64 | undefined => {
       buf[3] === 0x46
     ) {
       // ELF: EI_CLASS — 1 = ELF32, 2 = ELF64.
-      return buf[4] === 1 ? 32 : buf[4] === 2 ? 64 : undefined;
+      return ELF_CLASS_BITS.get(buf[4]);
     }
     if (buf[0] === 0x4d && buf[1] === 0x5a) {
       // PE: MZ → e_lfanew (u32 LE at 0x3C) → "PE\0\0" → machine (u16 LE).
@@ -810,7 +806,6 @@ export const isExecutable = async (name: string): Promise<boolean> => {
       return true;
     } catch {
       // not executable: try the next candidate
-      return;
     }
   });
   return executable === true;

@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
+import { AbortError } from "../extensions/re/abort-error.ts";
 import {
   checkRizinCommand,
   isKnownCommand,
@@ -12,12 +13,8 @@ import {
 } from "../extensions/re/catalog.ts";
 import type { RzCatalog } from "../extensions/re/catalog.ts";
 import { resolveDecompiler } from "../extensions/re/decompile.ts";
-import {
-  RzAbortError,
-  RzProtocolError,
-  RzSession,
-  resolveBinaryPath,
-} from "../extensions/re/rizin.ts";
+import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
+import { RzProtocolError } from "../extensions/re/rz-protocol-error.ts";
 import { inSequence } from "../extensions/re/sequence.ts";
 import {
   ensureRizin,
@@ -108,7 +105,7 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
     const controller = new AbortController();
     const pending = session.cmd("aflj", { signal: controller.signal });
     controller.abort();
-    await expect(pending).rejects.toBeInstanceOf(RzAbortError);
+    await expect(pending).rejects.toBeInstanceOf(AbortError);
     expect(session.isClosed).toBe(false);
     const echoOutput3 = await session.cmd("echo after-abort");
     expect(echoOutput3.trim()).toBe("after-abort");
@@ -132,7 +129,7 @@ describe.skipIf(!canRunRizin)("RzSession (rizin integration)", () => {
     controller.abort();
     await expect(
       RzSession.spawn(rizinPath, TEST_BINARY, { signal: controller.signal })
-    ).rejects.toBeInstanceOf(RzAbortError);
+    ).rejects.toBeInstanceOf(AbortError);
   });
 
   test("spawn reports analysis progress through onProgress while aaa runs", async () => {
@@ -320,9 +317,7 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
       loadOptions: { arch: "x86", bits: 32, map: "0x400000" },
     });
     try {
-      const op = must(
-        await s.cmdj<{ opcode: string }[]>("pdj 1 @ 0x400000")
-      )[0];
+      const [op] = must(await s.cmdj<{ opcode: string }[]>("pdj 1 @ 0x400000"));
       expect(op.opcode).toContain("mov");
     } finally {
       s.close();
@@ -343,7 +338,7 @@ describe.skipIf(!canRunRizin)("load options: a raw/headerless target", () => {
       // force a respawn with no options passed — it must reuse the stored ones
       must(getState(ctx).rz).close();
       const rz = await ensureRizin(ctx);
-      const op = must(await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"))[0];
+      const [op] = must(await rz.cmdj<{ opcode: string }[]>("pdj 1 @ 0"));
       expect(op.opcode.split(" ")[0]).toBe("mov");
     } finally {
       shutdownState(ctx.sessionManager.getSessionId());
@@ -368,9 +363,9 @@ describe.skipIf(!canRunRizin)(
         type: "custom",
       });
       const { rz } = await spawnRizin(ctx, binaryPath);
-      const fn = must(
+      const [fn] = must(
         await rz.cmdj<{ offset: number; name: string }[]>("aflj")
-      )[0];
+      );
       fnEa = `0x${fn.offset.toString(16)}`;
       fnName = fn.name;
     });

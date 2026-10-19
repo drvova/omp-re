@@ -171,12 +171,18 @@ export const registerDeobfuscateTools = (pi: ExtensionAPI): void => {
           { ctx, tool: "deobfuscate" }
         );
       } finally {
-        // revert the cached transform — the file is never written
-        await rz.cmd("wc-", { signal }).catch(() => {});
-        await rz.cmd(`b ${oldBlock}`, { signal }).catch(() => {});
-        await rz
-          .cmd(`e io.cache=${oldCache || "false"}`, { signal })
-          .catch(() => {});
+        // revert the cached transform — the file is never written. Each step is best effort: a
+        // failed revert must not replace the result (or the error) the transform produced.
+        const bestEffort = async (line: string): Promise<void> => {
+          try {
+            await rz.cmd(line, { signal });
+          } catch {
+            // nothing more to undo here; the next step still runs
+          }
+        };
+        await bestEffort("wc-");
+        await bestEffort(`b ${oldBlock}`);
+        await bestEffort(`e io.cache=${oldCache || "false"}`);
       }
     },
   });

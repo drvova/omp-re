@@ -10,6 +10,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 import { checkRizinCommand, loadCatalog, searchCatalog } from "./catalog.ts";
 import {
+  ANSI_ESCAPE,
   canonicalExcerpt,
   canonicalHash,
   plainResult,
@@ -31,7 +32,7 @@ const RIZIN_COMMAND_TIMEOUT_MS = 120_000;
  */
 export const cleanStderr = (stderr: string): string =>
   stderr
-    .replaceAll(/\u001B\[[0-9;?]*[A-Za-z]/gu, "")
+    .replaceAll(ANSI_ESCAPE, "")
     .replaceAll("\r", "\n")
     .split("\n")
     .map((line) => line.trimEnd())

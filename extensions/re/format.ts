@@ -222,7 +222,14 @@ export const formatJson = (data: unknown): string => {
   return `[\n${data.map((row) => `  ${JSON.stringify(row)}`).join(",\n")}\n]`;
 };
 
-const ANSI_ESCAPE = /\u001B\[[0-9;?]*[A-Za-z]/gu;
+/** The escape character that starts an ANSI control sequence. */
+const ESC = "\u001B";
+/** An ANSI color/cursor control sequence (`ESC [ … letter`), which rizin and the rz-* tools emit around their output. */
+export const ANSI_ESCAPE = new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "gu");
+
+/** The integer at the start of `text` (after leading whitespace), read exactly as `Number.parseInt(text, 10)` does; NaN when there is none. */
+export const leadingInteger = (text: string): number =>
+  Number(/^\s*[+-]?\d+/u.exec(text)?.[0] ?? Number.NaN);
 
 /**
  * Normalize raw rizin output so an independent re-run on the same binary and the

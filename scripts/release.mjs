@@ -112,16 +112,20 @@ const levelOf = (message) => {
   return "none";
 };
 
+/** The integer at the start of `text`, read exactly as `Number.parseInt(text, 10)` does (so "1-rc" is 1); NaN when there is none. */
+const leadingInteger = (text) =>
+  Number(/^\s*[+-]?\d+/u.exec(text)?.[0] ?? Number.NaN);
+
 /** The level actually applied, capping a breaking change to minor while in 0.x. */
 const effectiveLevel = (version, level) => {
-  const maj = Number.parseInt(version.split(".")[0], 10);
+  const maj = leadingInteger(version.split(".")[0]);
   // a stray `!` shouldn't cut 1.0.0
   return level === "major" && maj === 0 ? "minor" : level;
 };
 
 /** Apply a (already-effective) bump level to a semver string. */
 const bump = (version, level) => {
-  const [maj, min, pat] = version.split(".").map((n) => Number.parseInt(n, 10));
+  const [maj, min, pat] = version.split(".").map(leadingInteger);
   if ([maj, min, pat].some(Number.isNaN)) {
     throw new Error(`unparseable version: ${version}`);
   }

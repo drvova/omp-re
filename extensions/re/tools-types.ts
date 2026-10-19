@@ -25,6 +25,13 @@ import {
   paginate,
 } from "./tools-read.ts";
 
+const FORBIDDEN_TYPE_DEF_CHARS: ReadonlySet<string> = new Set([
+  '"',
+  "`",
+  "$",
+  "\\",
+]);
+
 export interface RzTypeListRow {
   name: string;
   /** Structs: member map. Enums: value map. Typedefs: target type. Function defs: signature string. */
@@ -87,10 +94,14 @@ export const quoteTypeDefinition = (definition: string): string => {
   if (trimmed === "") {
     throw new Error("omp-re: define_types: empty definition");
   }
-  const bad = trimmed.match(/["`$\\\u0000-\u001F]/u);
-  if (bad) {
+  // quotes, `$` and backslashes would end or escape the double-quoted td argument; control
+  // characters (below U+0020) have no place in a C type definition
+  const bad = [...trimmed].find(
+    (ch) => FORBIDDEN_TYPE_DEF_CHARS.has(ch) || (ch.codePointAt(0) ?? 0) < 0x20
+  );
+  if (bad !== undefined) {
     throw new Error(
-      `omp-re: define_types: a C type definition may not contain ${JSON.stringify(bad[0])}`
+      `omp-re: define_types: a C type definition may not contain ${JSON.stringify(bad)}`
     );
   }
   return `td "${trimmed}"`;

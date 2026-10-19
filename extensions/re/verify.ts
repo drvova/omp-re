@@ -42,6 +42,17 @@ export const sha256File = async (path: string): Promise<string> => {
   return hash.digest("hex");
 };
 
+/** {@link sha256File}, or `undefined` when the file can't be read (a hash failure must never block opening or verifying). */
+export const trySha256File = async (
+  path: string
+): Promise<string | undefined> => {
+  try {
+    return await sha256File(path);
+  } catch {
+    // unreadable: no hash
+  }
+};
+
 /** Static status of a recorded evidence row, from its recorded fields alone (no re-run) — what the report manifest shows. */
 export type RecordedStatus =
   | "reproducible"
@@ -99,7 +110,7 @@ export const buildVerification = async (
   const binaryPath = state.binaryPath ?? undefined;
   const currentSha =
     state.binarySha256 ??
-    (binaryPath ? await sha256File(binaryPath).catch(() => {}) : undefined);
+    (binaryPath ? await trySha256File(binaryPath) : undefined);
 
   const records = collectEvidence(branchEntries(ctx));
   const rows: VerifyRow[] = [];

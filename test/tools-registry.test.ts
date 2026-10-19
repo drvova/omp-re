@@ -37,6 +37,12 @@ import {
   must,
 } from "./helpers.ts";
 
+/** The status symbols the stub theme renders (anything else is "*"). */
+const STATUS_SYMBOLS: ReadonlyMap<string, string> = new Map([
+  ["status.error", "x"],
+  ["status.success", "ok"],
+]);
+
 logSkip("tools-registry tests");
 
 /** An address string that fails validateAddr's allowlist (the ';' makes command-injection intent obvious). */
@@ -199,8 +205,12 @@ describe.skipIf(!canRunRizin)(
       const pdgHelp = rawPdgHelp.trim();
       const rawPddHelp = await session.cmd("pdd?");
       const pddHelp = rawPddHelp.trim();
-      expectedDecompiler =
-        pdgHelp.length > 0 ? "pdg" : pddHelp.length > 0 ? "pdd" : null;
+      expectedDecompiler = null;
+      if (pdgHelp.length > 0) {
+        expectedDecompiler = "pdg";
+      } else if (pddHelp.length > 0) {
+        expectedDecompiler = "pdd";
+      }
     });
 
     afterAll(() => {
@@ -429,7 +439,7 @@ describe.skipIf(!canRunRizin)(
         const text = textOf(
           await run("disassemble_function", { addr: "main" })
         );
-        const firstOp = groundPdf.ops[0];
+        const [firstOp] = groundPdf.ops;
         expect(
           text.startsWith(`${groundPdf.ops.length} instructions at ${mainEa}\n`)
         ).toBe(true);
@@ -650,7 +660,7 @@ describe.skipIf(!canRunRizin)(
         );
         expect(rows.every((r) => groundEas.has(r.ea))).toBe(true);
         // edges resolve to addresses (not raw ids): the entry block's successors match ground truth
-        const entry = ground.nodes[0];
+        const [entry] = ground.nodes;
         const expectedTo = (entry.out_nodes ?? []).map((id) =>
           eaFromOffset(must(ground.nodes.find((n) => n.id === id)).offset)
         );
@@ -672,7 +682,7 @@ describe.skipIf(!canRunRizin)(
 
     describe("long output", () => {
       test("get_function on a large function spills to a session artifact when truncated", async () => {
-        const biggest = [...groundFns].toSorted((a, b) => b.size - a.size)[0];
+        const [biggest] = [...groundFns].toSorted((a, b) => b.size - a.size);
         const result = await run("get_function", {
           target: eaFromOffset(must(addrOf(biggest))),
         });
@@ -699,8 +709,7 @@ describe("reRenderers", () => {
     bold: (text: string) => text,
     fg: (_color: string, text: string) => text,
     spinnerFrames: ["-", "\\"],
-    styledSymbol: (key: string) =>
-      key === "status.error" ? "x" : key === "status.success" ? "ok" : "*",
+    styledSymbol: (key: string) => STATUS_SYMBOLS.get(key) ?? "*",
   } as never;
   test("renderCall shows the title and the call's subject", () => {
     const { renderCall } = reRenderers({

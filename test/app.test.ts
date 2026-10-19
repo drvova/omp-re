@@ -18,13 +18,15 @@ describe("composeApp", () => {
     const seen: string[] = [];
     const subs: ReSubsystem[] = [
       {
-        apply: (pi) =>
-          void seen.push(`a:${(pi as unknown as { tag: string }).tag}`),
+        apply: (pi) => {
+          seen.push(`a:${(pi as unknown as { tag: string }).tag}`);
+        },
         name: "a",
       },
       {
-        apply: (pi) =>
-          void seen.push(`b:${(pi as unknown as { tag: string }).tag}`),
+        apply: (pi) => {
+          seen.push(`b:${(pi as unknown as { tag: string }).tag}`);
+        },
         name: "b",
       },
     ];
@@ -55,15 +57,17 @@ describe("composeApp", () => {
     const seenTwo: string[] = [];
     await composeApp(piOne, [
       {
-        apply: (pi) =>
-          void seenOne.push((pi as unknown as { tag: string }).tag),
+        apply: (pi) => {
+          seenOne.push((pi as unknown as { tag: string }).tag);
+        },
         name: "x",
       },
     ]);
     await composeApp(piTwo, [
       {
-        apply: (pi) =>
-          void seenTwo.push((pi as unknown as { tag: string }).tag),
+        apply: (pi) => {
+          seenTwo.push((pi as unknown as { tag: string }).tag);
+        },
         name: "x",
       },
     ]);

@@ -60,7 +60,7 @@ import type { RzSession } from "./rizin.ts";
 import { inSequence } from "./sequence.ts";
 import { ensureRizin, getState } from "./state.ts";
 import { cleanStderr, runRizinCommand } from "./tools-rizin.ts";
-import { sha256File } from "./verify.ts";
+import { trySha256File } from "./verify.ts";
 
 const CARRY_COMMAND_TIMEOUT_MS = 120_000;
 /** Cap on diff lines shown per drifted record — the excerpt is ≤20 lines a side, so this only bites on a total rewrite. */
@@ -182,9 +182,9 @@ const parseAnchor = (raw: unknown): AnchorFingerprint | null => {
     return null;
   }
   if (
-    !okNum(a.delta, 1 << 24) ||
-    !okNum(a.size, 1 << 30) ||
-    !okNum(a.nbbs, 1 << 24)
+    !okNum(a.delta, 2 ** 24) ||
+    !okNum(a.size, 2 ** 30) ||
+    !okNum(a.nbbs, 2 ** 24)
   ) {
     return null;
   }
@@ -206,6 +206,18 @@ const parseAnchor = (raw: unknown): AnchorFingerprint | null => {
   };
 };
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+/** A manifest entry's `args` as `{ command, addr? }`, or null when it carries no command string. */
+const manifestArgs = (
+  args: { command?: unknown; addr?: unknown } | null | undefined
+): { command: string; addr?: string } | null => {
+  if (!args || typeof args.command !== "string") {
+    return null;
+  }
+  return typeof args.addr === "string" && args.addr
+    ? { addr: args.addr, command: args.command }
+    : { command: args.command };
+};
 
 /** Parse and shape-check a manifest's JSON text. Throws a clear error on anything that isn't a manifest; tolerates missing optional fields per entry. */
 export const parseManifest = (text: string): CarryManifest => {
@@ -236,12 +248,7 @@ export const parseManifest = (text: string): CarryManifest => {
       | undefined;
     entries.push({
       anchor: parseAnchor(row.anchor),
-      args:
-        args && typeof args.command === "string"
-          ? typeof args.addr === "string" && args.addr
-            ? { addr: args.addr, command: args.command }
-            : { command: args.command }
-          : null,
+      args: manifestArgs(args),
       binarySha256: str(row.binarySha256),
       canonicalExcerpt: str(row.canonicalExcerpt),
       claims: Array.isArray(row.claims)
@@ -510,14 +517,14 @@ const tryRelocated = async (
   };
   const renamed = found.function !== fp.function;
   const moved = normalizeAddr(found.offset) !== normalizeAddr(fp.offset);
-  const how =
-    renamed && moved
-      ? `moved to ${found.function} @ ${found.offset}`
-      : renamed
-        ? `renamed to ${found.function}`
-        : moved
-          ? `moved from ${fp.offset} to ${found.offset}`
-          : `found at ${found.offset}`;
+  let how = `found at ${found.offset}`;
+  if (renamed && moved) {
+    how = `moved to ${found.function} @ ${found.offset}`;
+  } else if (renamed) {
+    how = `renamed to ${found.function}`;
+  } else if (moved) {
+    how = `moved from ${fp.offset} to ${found.offset}`;
+  }
   const where = `${fp.function} ${how} (code similarity ${found.similarity})`;
   const same = compareOutput(entry, folded, binaryPath);
   if (same) {
@@ -556,9 +563,7 @@ export const buildCarry = async (
     );
   }
   const toSha256 =
-    state.binarySha256 ??
-    (await sha256File(binaryPath).catch(() => {})) ??
-    null;
+    state.binarySha256 ?? (await trySha256File(binaryPath)) ?? null;
 
   let catalog: Awaited<ReturnType<typeof loadCatalog>> | undefined;
   const evidence: CarryEvidenceRow[] = [];
@@ -957,15 +962,13 @@ export const inheritFindings = async (
         : undefined;
     const id = randomUUID();
     const openSha = getState(ctx).binarySha256;
+    // the address follows its relocated anchor; otherwise the original one (when there was one)
+    const findingAddr = anchorMoved || finding.addr;
     const record: FindingRecord = {
       claim: finding.claim,
       evidenceIds: newEvidence,
       id,
-      ...(anchorMoved
-        ? { addr: anchorMoved }
-        : finding.addr
-          ? { addr: finding.addr }
-          : {}),
+      ...(findingAddr ? { addr: findingAddr } : {}),
       audit: {
         reason:
           "re-verified by /re carry; the report's support audit re-checks it",
@@ -998,6 +1001,17 @@ export const inheritFindings = async (
     });
   });
   return outcome;
+};
+
+/** The notify level for a carry summary: a failure is an error, drift a warning, anything else info. */
+const notifyLevel = (
+  failed: boolean,
+  drifted: boolean
+): "error" | "warning" | "info" => {
+  if (failed) {
+    return "error";
+  }
+  return drifted ? "warning" : "info";
 };
 
 /** The agenda as a prompt for the model: each finding that no longer holds as written, with the evidence change under it. */
@@ -1101,10 +1115,7 @@ export const carryManifest = async (
     summary += `\nresolve: sent ${result.inheritance?.agenda.length ?? 0} finding(s) to the model to re-examine`;
   }
   if (ctx.hasUI) {
-    ctx.ui.notify(
-      summary,
-      failed ? "error" : c.drifted > 0 ? "warning" : "info"
-    );
+    ctx.ui.notify(summary, notifyLevel(failed, c.drifted > 0));
     if (agendaPrompt && !resolving) {
       ctx.ui.setEditorText(agendaPrompt);
     }

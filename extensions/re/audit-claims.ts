@@ -101,6 +101,17 @@ export const buildAuditPrompt = (items: readonly AuditClaimInput[]): string => {
   return lines.join("\n");
 };
 
+/** The earlier of two `indexOf` results, ignoring a miss (-1); -1 when both missed. */
+const firstFound = (a: number, b: number): number => {
+  if (a === -1) {
+    return b;
+  }
+  if (b === -1) {
+    return a;
+  }
+  return Math.min(a, b);
+};
+
 /** Extract a JSON array/object from a free-text reply: a fenced ```json block first, else a balanced structure from the first `[`/`{`. Null when none is found. */
 const extractJson = (text: string): string | null => {
   const fenced = /```(?:json)?\s*(?<body>[\s\S]*?)```/iu.exec(text);
@@ -109,8 +120,7 @@ const extractJson = (text: string): string | null => {
   }
   const bracket = text.indexOf("[");
   const brace = text.indexOf("{");
-  const start =
-    bracket === -1 ? brace : brace === -1 ? bracket : Math.min(bracket, brace);
+  const start = firstFound(bracket, brace);
   if (start === -1) {
     return null;
   }

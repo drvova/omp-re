@@ -115,7 +115,7 @@ const decodeEntities = (text: string): string =>
         const isHex = body[1] === "x" || body[1] === "X";
         const codePoint = isHex
           ? Number.parseInt(body.slice(2), 16)
-          : Number.parseInt(body.slice(1), 10);
+          : Number(body.slice(1));
         return Number.isFinite(codePoint)
           ? String.fromCodePoint(codePoint)
           : whole;

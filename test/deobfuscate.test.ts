@@ -80,6 +80,8 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
   let dir: string;
   let blob: string;
   const PLAINTEXT = "http://evil.example/cfg";
+  // `${PLAINTEXT}\0`, every byte xored with 0x5a (the key the tests below decode with)
+  const XORED_PLAINTEXT = "322e2e2a6075753f2c3336743f223b372a363f75393c3d5a";
 
   registerDeobfuscateTools(harness.pi);
 
@@ -89,9 +91,7 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
     // 16 bytes of padding, then "http://evil.example/cfg\0" each byte xored
     // with 0x5a at offset 0x10 (a raw blob maps at base 0, and address 0x0
     // is rejected by the shared addr guard, so target a non-zero offset).
-    const payload = Buffer.from(
-      [...Buffer.from(`${PLAINTEXT}\0`)].map((b) => b ^ 0x5a)
-    );
+    const payload = Buffer.from(XORED_PLAINTEXT, "hex");
     writeFileSync(blob, Buffer.concat([Buffer.alloc(0x10, 0x90), payload]));
     const rz = await RzSession.spawn(rizinPath, blob);
     getState(ctx).binaryPath = blob;

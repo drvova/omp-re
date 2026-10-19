@@ -813,8 +813,8 @@ const pe = (machine: number): number[] => {
   b[0x40] = 0x50;
   // PE\0\0
   b[0x41] = 0x45;
-  b[0x44] = machine & 0xff;
-  b[0x45] = machine >> 8;
+  b[0x44] = machine % 256;
+  b[0x45] = Math.floor(machine / 256);
   return b;
 };
 const elf = (cls: number): number[] => [0x7f, 0x45, 0x4c, 0x46, cls, 0, 0, 0];

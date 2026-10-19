@@ -293,11 +293,12 @@ export const reRenderers = (spec: RenderSpec) => ({
     ].join(" ");
 
     const lines = bodyLines(spec.body, body, details, theme);
-    const limit = options.expanded
-      ? EXPANDED_LINES
-      : spec.body === "json"
-        ? 0
-        : COLLAPSED_LINES;
+    let limit = COLLAPSED_LINES;
+    if (options.expanded) {
+      limit = EXPANDED_LINES;
+    } else if (spec.body === "json") {
+      limit = 0;
+    }
     const shown = lines.slice(0, limit);
     const out = [headLine, ...shown];
     const hidden = lines.length - shown.length;

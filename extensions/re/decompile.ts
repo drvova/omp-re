@@ -18,7 +18,7 @@ import { firstInSequence, inSequence } from "./sequence.ts";
  * the display labels and tests; any other value is a user-configured plugin
  * command probed the same way.
  */
-export type DecompilerKind = "pdg" | "pdd" | (string & {});
+export type DecompilerKind = "pdg" | "pdd" | (string & Record<never, never>);
 
 export interface DecompileOutcome {
   /** The decompiler that produced `code`, or "disasm" when none did. */

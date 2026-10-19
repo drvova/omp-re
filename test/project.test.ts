@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 
+import { ANSI_ESCAPE } from "../extensions/re/format.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { getState, shutdownState } from "../extensions/re/state.ts";
 import { registerProjectTools } from "../extensions/re/tools-project.ts";
@@ -82,7 +83,7 @@ describe.skipIf(!canRunRizin)(
       const out = await new Response(proc.stdout).text();
       await proc.exited;
       const names = (
-        JSON.parse(out.replaceAll(/\u001B\[[0-9;]*[A-Za-z]/gu, "").trim()) as {
+        JSON.parse(out.replaceAll(ANSI_ESCAPE, "").trim()) as {
           name: string;
         }[]
       ).map((f) => f.name);

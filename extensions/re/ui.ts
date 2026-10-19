@@ -33,6 +33,7 @@ import { disassembleAt } from "./disasm.ts";
 import { branchEntries, customEntries } from "./entries.ts";
 import { findingNote, liveFindings } from "./findings.ts";
 import type { FindingRecord } from "./findings.ts";
+import { leadingInteger } from "./format.ts";
 import { addrOf, eaFromOffset } from "./rizin.ts";
 import type { RzSession } from "./rizin.ts";
 import { inSequence } from "./sequence.ts";
@@ -136,7 +137,7 @@ export const binaryFacts = async (
   }
 
   const catchResult = await rz.cmd("aflc").catch(() => "0");
-  facts.fnCount = Number.parseInt(catchResult.trim(), 10) || 0;
+  facts.fnCount = leadingInteger(catchResult.trim()) || 0;
   const { info, entry } = await loadBinInfo(rz);
   if (info?.bin) {
     const { bin } = info;
@@ -204,7 +205,9 @@ const renderBand = (f: BinaryFacts, theme: Theme, width: number): string[] => {
 const makeHud =
   (facts: BinaryFacts): ((tui: TUI, theme: Theme) => Component) =>
   (_tui: TUI, theme: Theme) => ({
-    invalidate() {},
+    invalidate() {
+      // stateless: nothing cached to invalidate
+    },
     render(width: number): string[] {
       return renderBand(facts, theme, width);
     },
@@ -411,7 +414,9 @@ const makeCodeView = (opts: {
       }
       clamp();
     },
-    invalidate() {},
+    invalidate() {
+      // stateless: nothing cached to invalidate
+    },
     render(width: number): string[] {
       const lines = current();
       const window = lines.slice(offset, offset + MAX_VISIBLE_ROWS);

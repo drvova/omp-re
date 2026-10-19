@@ -674,7 +674,7 @@ describe("checkRizinCommand (no rizin needed)", () => {
       ["px 16 < /etc/passwd", "redirection"],
       ["px `!id`", "backticks"],
       ["px $(id)", "substitution"],
-      ["px ${HOME}", "substitution"],
+      [`px \${HOME}`, "substitution"],
       ["izj~password", "`~`"],
       ["pdf @@ sym.*", "`@` modifiers"],
       ["pdf @ main", "`@` modifiers"],

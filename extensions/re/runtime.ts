@@ -112,6 +112,22 @@ const newScope = (): Scope => {
   };
 };
 
+/** The session's teardown scope, created on demand. Processes register their `close()` as effects on it. */
+const scopeOf = (rec: ReSessionState): Scope => {
+  rec._scope ??= newScope();
+  return rec._scope;
+};
+
+/** The open binary's path, or the error every RE tool reports when none is open. */
+export const requireBinaryPath = (rec: ReSessionState): string => {
+  if (!rec.binaryPath) {
+    throw new Error(
+      "omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first"
+    );
+  }
+  return rec.binaryPath;
+};
+
 const newState = (sessionId: string): ReSessionState => ({
   _disposeDbg: null,
   _disposeRz: null,
@@ -145,23 +161,6 @@ class RizinBackend {
       this.records.set(sessionId, rec);
     }
     return rec;
-  }
-
-  /** The session's teardown scope, created on demand. Processes register their `close()` as effects on it. */
-  private scope(rec: ReSessionState): Scope {
-    if (!rec._scope) {
-      rec._scope = newScope();
-    }
-    return rec._scope;
-  }
-
-  requireBinary(rec: ReSessionState): string {
-    if (!rec.binaryPath) {
-      throw new Error(
-        "omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first"
-      );
-    }
-    return rec.binaryPath;
   }
 
   /**
@@ -218,7 +217,7 @@ class RizinBackend {
       ...(await replayAnnotations(rz, live)),
     ];
 
-    const scope = this.scope(rec);
+    const scope = scopeOf(rec);
     const previous = rec._disposeRz;
     // The disposer closes exactly this process. Idempotent, so an explicit close elsewhere is harmless.
     rec._disposeRz = scope.effect(() => () => {
@@ -252,7 +251,7 @@ class RizinBackend {
     rec.spawning ??= this.respawn(
       ctx,
       rec,
-      this.requireBinary(rec),
+      requireBinaryPath(rec),
       options.onProgress
     );
     return await raceAbort(
@@ -294,7 +293,7 @@ class RizinBackend {
     if (rec.dbg && !rec.dbg.isClosed) {
       return rec.dbg;
     }
-    const binaryPath = this.requireBinary(rec);
+    const binaryPath = requireBinaryPath(rec);
     // When attaching to a pid or a remote stub, the target brings its own
     // arch and memory — the raw-load options and the bits-mismatch check
     // (which are about launching the open file) don't apply.
@@ -316,7 +315,7 @@ class RizinBackend {
       ...options,
       loadOptions,
     });
-    const scope = this.scope(rec);
+    const scope = scopeOf(rec);
     rec._disposeDbg = scope.effect(() => () => {
       if (!dbg.isClosed) {
         dbg.close();

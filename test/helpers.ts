@@ -8,12 +8,14 @@ import { existsSync, rmSync } from "node:fs";
 
 // The schema builder omp 18 injects as `pi.zod` (see pi-coding-agent extensions/loader.ts).
 import * as zod from "@oh-my-pi/omptype/zod";
+import type { ZodLikeSchema } from "@oh-my-pi/omptype/zod";
 import type {
   ExtensionAPI,
   ExtensionContext,
   ToolDefinition,
 } from "@oh-my-pi/pi-coding-agent";
 
+import type { ReToolDetails } from "../extensions/re/format.ts";
 import { resolveRizinPath, resolveRizinTool } from "../extensions/re/rizin.ts";
 
 /** Any readable binary works; /bin/ls exists on every Linux host and macOS. Override with OMPRE_TEST_BINARY. */
@@ -78,15 +80,20 @@ export interface Harness {
   entries: StubEntry[];
   artifacts: Map<string, string>;
   notifications: { message: string; type?: string }[];
-  tool: (name: string) => ToolDefinition<any, any>;
+  tool: (name: string) => ToolDefinition<ZodLikeSchema<unknown>, ReToolDetails>;
 }
-const noop = () => {};
+const noop = () => {
+  // the harness ignores omp's logger output
+};
 
 export const makeHarness = (sessionId: string): Harness => {
   const entries: StubEntry[] = [];
   const artifacts = new Map<string, string>();
   const notifications: { message: string; type?: string }[] = [];
-  const tools = new Map<string, ToolDefinition<any, any>>();
+  const tools = new Map<
+    string,
+    ToolDefinition<ZodLikeSchema<unknown>, ReToolDetails>
+  >();
   let counter = 0;
   const pi = {
     appendEntry: (customType: string, data?: unknown) => {
@@ -114,7 +121,9 @@ export const makeHarness = (sessionId: string): Harness => {
     },
     logger: { debug: noop, error: noop, info: noop, warn: noop },
     on: noop,
-    registerTool: (def: ToolDefinition<any, any>) => {
+    registerTool: (
+      def: ToolDefinition<ZodLikeSchema<unknown>, ReToolDetails>
+    ) => {
       tools.set(def.name, def);
     },
     zod,

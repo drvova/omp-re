@@ -81,9 +81,9 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
     const state = getState(ctx);
     state.binaryPath = binaryPath;
     state.rz = rz;
-    const main = must(
+    const [main] = must(
       await rz.cmdj<{ offset: number; name: string }[]>("afij @ main")
-    )[0];
+    );
     mainEa = eaFromOffset(must(addrOf(main)));
     mainName = main.name;
     const all = await vars();
@@ -92,7 +92,7 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
         `fixture ${TEST_BINARY}: main has no variables to rename`
       );
     }
-    firstVar = all[0];
+    [firstVar] = all;
   });
 
   afterAll(() => {
