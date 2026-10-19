@@ -201,6 +201,34 @@ a {
   filter: brightness(1.08);
 }
 
+/* Fig 1: the /re carry comparator (Anatomy kit, its own styles under .iso) */
+.showcase {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 8px 16px 8px;
+}
+
+.showcase .iso-figure {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.showcase .iso-caption {
+  font-size: 0.9rem;
+}
+
+/* On phones the plate's margins cost too much: scale the drawing up inside the card. */
+@media (max-width: 600px) {
+  .showcase .iso-plate {
+    overflow: hidden;
+  }
+
+  .showcase .iso-stage svg {
+    width: 118%;
+    margin: -5% -9% -7%;
+  }
+}
+
 /* Layout */
 .layout {
   display: grid;

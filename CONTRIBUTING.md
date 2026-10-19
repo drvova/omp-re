@@ -23,7 +23,7 @@ bash test/tui.sh   # fast tmux smoke test, ~30s
 bun run qa:tui     # full tmux QA pass, 99 assertions
 ```
 
-The website ([drvova.github.io/omp-re](https://drvova.github.io/omp-re/)) is generated from `README.md` and `docs/` by the Rust crate in `site/` and deployed from `main` by `.github/workflows/pages.yml`. Preview it with `cargo run --manifest-path site/Cargo.toml` and open `site/dist/index.html`; add a new doc page to `PAGES` in `site/src/main.rs`.
+The website ([drvova.github.io/omp-re](https://drvova.github.io/omp-re/)) is generated from `README.md` and `docs/` by the Rust crate in `site/` and deployed from `main` by `.github/workflows/pages.yml`. Preview it with `cargo run --manifest-path site/Cargo.toml` and open `site/dist/index.html`; add a new doc page to `PAGES` in `site/src/main.rs`. The home page's Fig 1 (the `/re carry` comparator) is drawn with the vendored [Anatomy](https://github.com/wheresryan22/anatomy) kit: edit `site/figure/carry/build.mjs` or `model.mjs`, then run `node site/figure/carry/build.mjs` and `node site/figure/carry/build.mjs --light` and commit the regenerated `*.generated.html` files (CI fails if they are stale).
 
 Run `bun test` with rizin installed before opening a PR that touches `extensions/re/` — CI cannot run the rizin suites. The last two need tmux, `omp`, rizin, a fixture (`OMPRE_TEST_BINARY`), and for `qa:tui` a working model. See [`docs/testing.md`](docs/testing.md) for what each tier actually needs and the exact PASS/SKIP matrix.
 

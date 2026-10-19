@@ -87,6 +87,9 @@ const TAGLINE: &str = "A reverse-engineering plugin for omp: rizin behind 64 age
 
 const TEMPLATE: &str = include_str!("../assets/template.html");
 const STYLE: &str = include_str!("../assets/style.css");
+/// Fig 1, the `/re carry` comparator: built by `node site/figure/carry/build.mjs`
+/// with the Anatomy kit and committed, so this crate needs no Node to build.
+const CARRY_FIGURE: &str = include_str!("../figure/carry/carry.fragment.generated.html");
 
 /// A heading kept for the page outline.
 struct OutlineEntry {
@@ -370,9 +373,10 @@ fn fill_template(page: &PageSpec, rendered: &Rendered, repo: &str) -> String {
         .replace("{{nav}}", &nav_html(page.output))
         .replace("{{repo_url}}", &format!("https://github.com/{repo}"))
         .replace("{{edit}}", &edit)
-        .replace("{{hero}}", &hero)
         .replace("{{outline}}", &outline_html(&rendered.outline))
         .replace("{{content}}", &rendered.body)
+        // Last, so the figure's script is never scanned for placeholders.
+        .replace("{{hero}}", &hero)
 }
 
 fn nav_html(current: &str) -> String {
@@ -419,8 +423,10 @@ fn hero_html(repo: &str) -> String {
 <pre class=\"install\"><code>omp plugin marketplace add {repo}\nomp plugin install omp-re@drvova</code></pre>\
 <p class=\"actions\"><a class=\"button primary\" href=\"install.html\">Get started</a>\
 <a class=\"button\" href=\"https://github.com/{repo}\">View on GitHub</a></p>\
-</section>",
+</section>\
+<section class=\"showcase\" aria-label=\"Figure: what /re carry decides\">{figure}</section>",
         tagline = escape(TAGLINE),
+        figure = CARRY_FIGURE,
     )
 }
 
