@@ -81,7 +81,9 @@ const readLiveBytes = async (
 
 /** Whether the debugger subsystem is enabled. Off unless the user opts in, because it executes the sample. */
 export const debuggerEnabled = (): boolean =>
-  /^(1|true|yes|on)$/iu.test((process.env.OMPRE_ENABLE_DEBUGGER ?? "").trim());
+  /^(?:1|true|yes|on)$/iu.test(
+    (process.env.OMPRE_ENABLE_DEBUGGER ?? "").trim()
+  );
 
 /** The loud banner shown when a debug session launches; the model (and the transcript) should never miss that a real process started. */
 export const DEBUG_LAUNCH_WARNING =
@@ -247,7 +249,7 @@ const validateWatchPerm = (perm: string | undefined): string => {
   return p;
 };
 
-const REMOTE_URI = /^(gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/u;
+const REMOTE_URI = /^(?:gdb|windbg):\/\/[A-Za-z0-9._:\-[\]/]+$/u;
 
 /**
  * Turn an `attach` object into the rizin `-d <target>` string: a pid
@@ -1270,7 +1272,7 @@ export const registerDebugTools = (pi: ExtensionAPI): void => {
           // `dmhgd [<bin_type>]`: all bins, or one of tcache/fast/unsorted/small/large via `bin` (reuses addr as the bin selector).
           const bin =
             params.addr !== undefined &&
-            /^(tcache|fast|unsorted|small|large)$/u.test(params.addr)
+            /^(?:tcache|fast|unsorted|small|large)$/u.test(params.addr)
               ? ` ${params.addr}`
               : "";
           const rawOut27 = await dbg.cmd(`dmhgd${bin}`, { signal });

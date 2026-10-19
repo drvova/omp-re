@@ -103,9 +103,9 @@ export const buildAuditPrompt = (items: readonly AuditClaimInput[]): string => {
 
 /** Extract a JSON array/object from a free-text reply: a fenced ```json block first, else a balanced structure from the first `[`/`{`. Null when none is found. */
 const extractJson = (text: string): string | null => {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text);
-  if (fenced?.[1]) {
-    return fenced[1].trim();
+  const fenced = /```(?:json)?\s*(?<body>[\s\S]*?)```/iu.exec(text);
+  if (fenced?.groups?.body) {
+    return fenced.groups.body.trim();
   }
   const bracket = text.indexOf("[");
   const brace = text.indexOf("{");

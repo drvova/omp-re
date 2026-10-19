@@ -43,8 +43,8 @@ const hitTotal = (result: {
 }): number => {
   const text =
     result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
-  const m = [...text.matchAll(/(\d+) hits/gu)].at(-1);
-  return m ? Number(m[1]) : -1;
+  const m = [...text.matchAll(/(?<hits>\d+) hits/gu)].at(-1);
+  return m?.groups ? Number(m.groups.hits) : -1;
 };
 
 /** A flat x86-32 blob with no header: `mov eax,1; add eax,2; ret`. */

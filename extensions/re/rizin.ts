@@ -164,7 +164,7 @@ export const debugTimeoutMs = (): number =>
 export const baseRizinFlags = (): string[] => {
   const flags = ["-q0", "-e", "scr.color=0", "-e", "scr.utf8=false"];
   if (
-    !/^(1|true|yes|on)$/iu.test(
+    !/^(?:1|true|yes|on)$/iu.test(
       (process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim()
     )
   ) {
@@ -709,9 +709,9 @@ export const resolveRizinPath = (
 
 /** The build's pointer width from `rizin -v`'s first line ("rizin 0.9.1 @ windows-x86-64"), or undefined when it doesn't say. */
 export const parseRizinVersionArch = (version: string): 32 | 64 | undefined => {
-  const m = /-(32|64)(?:\s|$)/u.exec(version);
-  if (m) {
-    return m[1] === "64" ? 64 : 32;
+  const m = /-(?<bits>32|64)(?:\s|$)/u.exec(version);
+  if (m?.groups) {
+    return m.groups.bits === "64" ? 64 : 32;
   }
   // 64-bit names checked before 32-bit ones: "x86_64" contains "x86".
   if (/x86_64|aarch64|arm64/u.test(version)) {
@@ -783,7 +783,7 @@ export const isExecutable = async (name: string): Promise<boolean> => {
     return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
   }
   for (const candidate of process.platform === "win32" &&
-  !/\.(exe|cmd|bat)$/iu.test(name)
+  !/\.(?:exe|cmd|bat)$/iu.test(name)
     ? [name, `${name}.exe`]
     : [name]) {
     try {

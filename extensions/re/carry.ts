@@ -303,9 +303,11 @@ export const entryRequest = (
   if (!line) {
     return undefined;
   }
-  const match = /^(.*\S)\s+@\s+([^!\s]\S*)$/u.exec(line.trim());
-  if (match) {
-    return { addr: match[2], command: match[1] };
+  const match = /^(?<command>.*\S)\s+@\s+(?<addr>[^!\s]\S*)$/u.exec(
+    line.trim()
+  );
+  if (match?.groups) {
+    return { addr: match.groups.addr, command: match.groups.command };
   }
   return { command: line.trim() };
 };
@@ -622,7 +624,7 @@ export const buildCarry = async (
       // judged by its output (and relocated by fingerprint below when that output changed).
       const numericAnchor =
         request.addr !== undefined &&
-        /^(0x[0-9a-f]+|\d+)$/iu.test(request.addr);
+        /^(?:0x[0-9a-f]+|\d+)$/iu.test(request.addr);
       if (request.addr !== undefined && !numericAnchor) {
         const resolves = await resolveNumericAddr(rz, request.addr).then(
           () => true,

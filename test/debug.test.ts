@@ -55,7 +55,7 @@ const restoreEnable = () => {
 // rizin (see docs/testing.md). The pure enable-gate tests below always run.
 const debuggerSupported =
   process.platform !== "darwin" ||
-  /^(1|true|yes|on)$/iu.test((process.env.OMPRE_FORCE_DEBUGGER ?? "").trim());
+  /^(?:1|true|yes|on)$/iu.test((process.env.OMPRE_FORCE_DEBUGGER ?? "").trim());
 
 describe("debuggerEnabled (no rizin needed)", () => {
   afterEach(restoreEnable);

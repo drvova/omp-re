@@ -500,7 +500,7 @@ describe("analysis passes", () => {
   test("every pass maps to an analysis command and isAnalysisPass recognizes exactly those names", () => {
     for (const [name, command] of Object.entries(ANALYSIS_PASSES)) {
       // aa* passes, plus avrr (RTTI class recovery)
-      expect(command).toMatch(/^(aa[a-z]+|avrr)$/u);
+      expect(command).toMatch(/^(?:aa[a-z]+|avrr)$/u);
       expect(isAnalysisPass(name)).toBe(true);
     }
     expect(isAnalysisPass("not_a_pass")).toBe(false);

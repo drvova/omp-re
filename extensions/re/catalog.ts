@@ -37,7 +37,7 @@ const catalogs = new Map<string, Promise<RzCatalog>>();
 
 const readCatalog = async (rizinPath: string): Promise<RzCatalog> => {
   // `-N` (skip user rizinrc) unless overridden, so the catalog reflects the same stock command set the session spawns with; plugins still load, so plugin commands (pdg, …) appear.
-  const noUserConfig = !/^(1|true|yes|on)$/iu.test(
+  const noUserConfig = !/^(?:1|true|yes|on)$/iu.test(
     (process.env.OMPRE_RIZIN_LOAD_USER_CONFIG ?? "").trim()
   );
   const proc = Bun.spawn(
@@ -367,7 +367,7 @@ export const NOARG_DUALS: ReadonlySet<string> = new Set([
  * checked by {@link isRunnable} and gated in {@link checkRizinCommand}.
  */
 const ALLOWED_COMMAND =
-  /^(p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(c[jd]?|cc|X[j]?|u([1248]?|d))$|avj?$|avxt?$|avrD$|avg(l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/u;
+  /^(?:p|i|\/|ag|ao|ab|ax[tf]|axl[jq]?|axgj?|aai[j]?|aau|afbr|afns[j]?|afsb[j]?|afcl[jlk]?|afcr[j]?|afd|afvf|afvc[j]?|id[jq]?|f(?:\.l[jq]?|l[jqt.]?|i[jqt]?|g|sl[jq]?|ssl[j]?|tl[jl]?|z\.[j]?|zl[j]?)|af(?:l|i|b|x|vl|vx|vR|vW|vd|o|M)|CC\.|CCl|CCf|fd|c(?:c[jd]?|cc|X[j]?|u(?:[1248]?|d))$|avj?$|avxt?$|avrD$|avg(?:l[jqt]?|p|x[jq]?|c[j]?)$|tp[vx]?$|ts[jlcd]?$|kj$|pmj?$|%(?:v|vi[1248]?|X|x|b64|b|o|u|lq?|h|f|s|btw|P|p|w|B[jqt]?|\$|j)$|y[jqxs]?$|as(?:lj?|n|r)?$|ol[jqt]?$|obl[jqt]?$|oml[jqQt]?$|md[jt]?$|mi[jqt]?$|ml[jqt]?$|C\.[jl]?$|shj?$|x[jc]?$|aL[jc]?$)/u;
 
 /**
  * Exceptions inside the allowed families, each from rizin's own summaries:
@@ -387,7 +387,7 @@ const ALLOWED_COMMAND =
  * still denied.
  */
 const DENIED_COMMAND =
-  /^(po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/u;
+  /^(?:po|pw|pkill|pr(?![xc])|p6d|pf(?![jq]?$|\.[jq]?$|c$|d$|s$|v$)|\/F|ag[enw]|afb[ce]|afii|ica|idp)|[+\-=!*]/u;
 
 /**
  * The `p=`/`p==` statistical-histogram family (book: print_modes) — entropy
@@ -512,7 +512,7 @@ export const checkRizinCommand = (
       reason: `omp-re: rizin_command: this rizin has no command ${JSON.stringify(checked)} — look it up with rizin_help`,
     };
   }
-  if (/(^|\s)interactive(\s|$)/u.test(trimmed)) {
+  if (/(?:^|\s)interactive(?:\s|$)/u.test(trimmed)) {
     return {
       ok: false,
       reason:

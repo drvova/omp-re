@@ -201,7 +201,7 @@ export const archHintCommands = (encoded: string, at: string): string[] => {
     if (key === "arch") {
       cmds.push(`aha ${validateIdent("arch", value ?? "")} ${at}`);
     } else if (key === "bits") {
-      if (!/^(8|16|32|64)$/u.test(value ?? "")) {
+      if (!/^(?:8|16|32|64)$/u.test(value ?? "")) {
         throw new Error(
           `omp-re: invalid arch hint bits: ${JSON.stringify(value)} — one of 8, 16, 32, 64`
         );

@@ -89,20 +89,20 @@ const resolveCommits = () => {
   return gitLog(head, "-1");
 };
 
-const TYPE_RE = /^([a-zA-Z]+)(?:\([^)]*\))?(!)?:/u;
+const TYPE_RE = /^(?<type>[a-zA-Z]+)(?:\([^)]*\))?(?<breaking>!)?:/u;
 
 /** The release level a single commit implies, or "none". */
 const levelOf = (message) => {
   const subject = message.split("\n")[0].trim();
   const m = TYPE_RE.exec(subject);
-  const breakingFooter = /(^|\n)BREAKING[ -]CHANGE:/u.test(message);
-  if ((m && m[2] === "!") || breakingFooter) {
+  const breakingFooter = /(?:^|\n)BREAKING[ -]CHANGE:/u.test(message);
+  if (m?.groups?.breaking === "!" || breakingFooter) {
     return "major";
   }
   if (!m) {
     return "none";
   }
-  const type = m[1].toLowerCase();
+  const type = m.groups.type.toLowerCase();
   if (type === "feat") {
     return "minor";
   }
@@ -144,10 +144,13 @@ const bump = (version, level) => {
 /** Replace the first `"version": "..."` value in a raw JSON string. */
 const setJsonVersion = (raw, next) => {
   let done = false;
-  const out = raw.replace(/("version":\s*")[^"]*(")/u, (_, pre, post) => {
-    done = true;
-    return `${pre}${next}${post}`;
-  });
+  const out = raw.replace(
+    /(?<pre>"version":\s*")[^"]*(?<post>")/u,
+    (_, pre, post) => {
+      done = true;
+      return `${pre}${next}${post}`;
+    }
+  );
   if (!done) {
     throw new Error('no "version" field found');
   }

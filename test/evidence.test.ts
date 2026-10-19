@@ -156,9 +156,9 @@ describe("the tool_result evidence hook", () => {
         })),
     });
     const tagged = await fire("rizin_command");
-    const id = /\[evidence ([0-9a-f]{8})/u.exec(
+    const id = /\[evidence (?<id>[0-9a-f]{8})/u.exec(
       tagged?.content?.[1]?.text ?? ""
-    )?.[1];
+    )?.groups?.id;
     const res = await h
       .tool("record_finding")
       .execute(

@@ -272,15 +272,18 @@ export const maskAddresses = (canonical: string): string =>
         ? line.replaceAll(/0x[0-9a-fA-F]+/gu, "<ADDR>")
         : line;
       return ripMasked
-        .replace(/^([\s|\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+/u, "$1<ADDR>")
+        .replace(
+          /^(?<gutter>[\s|\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+/u,
+          "$<gutter><ADDR>"
+        )
         .replaceAll(/@ 0x[0-9a-fA-F]+/gu, "@ <ADDR>")
         .replaceAll(
-          /\b(call|jmp|j[a-z]{1,4}|bl|b|b\.[a-z]{2}|cbn?z|tbn?z|loop[a-z]*)(\s+)0x[0-9a-fA-F]+/gu,
-          "$1$2<ADDR>"
+          /\b(?<mnemonic>call|jmp|j[a-z]{1,4}|bl|b|b\.[a-z]{2}|cbn?z|tbn?z|loop[a-z]*)(?<gap>\s+)0x[0-9a-fA-F]+/gu,
+          "$<mnemonic>$<gap><ADDR>"
         )
         .replaceAll(
-          /\b(fcn|sub|loc|case|switch|entry|section)\.[0-9a-fA-F]{4,}\b/gu,
-          "$1.<ADDR>"
+          /\b(?<prefix>fcn|sub|loc|case|switch|entry|section)\.[0-9a-fA-F]{4,}\b/gu,
+          "$<prefix>.<ADDR>"
         );
     })
     .join("\n");

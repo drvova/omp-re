@@ -107,7 +107,7 @@ const CHAR_TO_ENTITY: Record<string, string> = {
 
 const decodeEntities = (text: string): string =>
   text.replaceAll(
-    /&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z]+);/gu,
+    /&(?<body>#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z]+);/gu,
     (whole, body: string) => {
       if (body[0] === "#") {
         const isHex = body[1] === "x" || body[1] === "X";
@@ -148,7 +148,7 @@ const wrapTextRun = (text: string): string => {
 /** Splits `html` into tag/text tokens and wraps only the text tokens — tags (the ansi-to-html color spans) pass through untouched, so color survives. */
 const applyCellGrid = (html: string): string =>
   html
-    .split(/(<[^>]+>)/u)
+    .split(/(?<tag><[^>]+>)/u)
     .map((token) => (token.startsWith("<") ? token : wrapTextRun(token)))
     .join("");
 
