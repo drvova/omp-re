@@ -123,14 +123,14 @@ export const makeHarness = (sessionId: string): Harness => {
   const ctx = {
     hasUI: false,
     sessionManager: {
-      getArtifactPath: async () => null,
+      getArtifactPath: () => Promise.resolve(null),
       getBranch: () => entries,
       getEntries: () => entries,
       getSessionId: () => sessionId,
-      saveArtifact: async (content: string) => {
+      saveArtifact: (content: string) => {
         const id = String(artifacts.size);
         artifacts.set(id, content);
-        return id;
+        return Promise.resolve(id);
       },
     },
     ui: {

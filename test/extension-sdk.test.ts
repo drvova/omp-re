@@ -61,10 +61,10 @@ const noop = () => {};
 /** A minimal ExtensionUIContext: records what the extension tells the user, renders nothing. */
 const makeUi = (notes: string[], editor: { text: string }) => ({
   addAutocompleteProvider: noop,
-  confirm: async () => true,
+  confirm: () => Promise.resolve(true),
   custom: async () => {},
   editor: async () => {},
-  getAllThemes: async () => [],
+  getAllThemes: () => Promise.resolve([]),
   getEditorText: () => editor.text,
   getTheme: async () => {},
   getToolsExpanded: () => false,
@@ -81,7 +81,7 @@ const makeUi = (notes: string[], editor: { text: string }) => ({
   setFooter: noop,
   setHeader: noop,
   setStatus: noop,
-  setTheme: async () => ({ success: true }),
+  setTheme: () => Promise.resolve({ success: true }),
   setTitle: noop,
   setToolsExpanded: noop,
   setWidget: noop,
@@ -130,7 +130,7 @@ beforeAll(async () => {
   setAgentDir(agentDir);
 });
 
-afterAll(async () => {
+afterAll(() => {
   setAgentDir(originalAgentDir);
   rmDirSafe(agentDir);
 });

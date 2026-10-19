@@ -154,7 +154,7 @@ export const registerRizinTools = (pi: ExtensionAPI): void => {
     name: "rizin_command",
     parameters: commandParams,
     ...reRenderers({ body: "text", subject: "command", title: "rizin" }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
+    execute(_id, params, signal, _onUpdate, ctx) {
       return runRizinCommand(ctx, params.command, params.addr, signal);
     },
   });

@@ -148,12 +148,14 @@ describe("the tool_result evidence hook", () => {
   test("the tag's id is exactly what record_finding accepts", async () => {
     const { h, fire } = hooked("hook-roundtrip");
     registerFindingTools(h.pi, {
-      judge: () => async (items) =>
-        items.map((i) => ({
-          index: i.index,
-          reason: "",
-          verdict: "supported" as const,
-        })),
+      judge: () => (items) =>
+        Promise.resolve(
+          items.map((i) => ({
+            index: i.index,
+            reason: "",
+            verdict: "supported" as const,
+          }))
+        ),
     });
     const tagged = await fire("rizin_command");
     const id = /\[evidence (?<id>[0-9a-f]{8})/u.exec(

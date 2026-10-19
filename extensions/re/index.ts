@@ -457,20 +457,23 @@ const registerShell = (pi: ExtensionAPI): void => {
     state.binarySha256 = lastRecordedBinarySha256(branchEntries(ctx)) ?? null;
 
     if (opts.flag && opts.flag !== recorded) {
-      const onProgress = analysisStatus(ctx, nodePath.basename(opts.flag));
-      void openBinary(pi, ctx, opts.flag, { onProgress })
-        .then((result) => {
+      const { flag } = opts;
+      const onProgress = analysisStatus(ctx, nodePath.basename(flag));
+      void (async () => {
+        try {
+          const result = await openBinary(pi, ctx, flag, { onProgress });
           if (result.replayFailures.length > 0 && ctx.hasUI) {
             ctx.ui.notify(describeOpen(result), "warning");
           }
-        })
-        .catch((error) =>
+        } catch (error) {
           ctx.ui.notify(
             error instanceof Error ? error.message : String(error),
             "error"
-          )
-        )
-        .finally(() => clearAnalysisStatus(ctx));
+          );
+        } finally {
+          clearAnalysisStatus(ctx);
+        }
+      })();
       return;
     }
 
@@ -490,15 +493,19 @@ const registerShell = (pi: ExtensionAPI): void => {
       return;
     }
     const onProgress = analysisStatus(ctx, nodePath.basename(state.binaryPath));
-    void ensureRizin(ctx, { onProgress })
-      .then(() => refreshStatusBand(ctx))
-      .catch((error) =>
+    void (async () => {
+      try {
+        await ensureRizin(ctx, { onProgress });
+        await refreshStatusBand(ctx);
+      } catch (error) {
         ctx.ui.notify(
           error instanceof Error ? error.message : String(error),
           "error"
-        )
-      )
-      .finally(() => clearAnalysisStatus(ctx));
+        );
+      } finally {
+        clearAnalysisStatus(ctx);
+      }
+    })();
   };
 
   pi.on("session_start", (_event, ctx) => {

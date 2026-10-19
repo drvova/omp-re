@@ -22,7 +22,7 @@ const makeCtx = (
   ({
     hasUI: false,
     sessionManager: {
-      getArtifactPath: async () => null,
+      getArtifactPath: () => Promise.resolve(null),
       getBranch: () => entries,
       getSessionId: () => "test-session",
     },
@@ -247,23 +247,26 @@ const groundedEntries = (): StubEntry[] => [
     type: "custom",
   },
 ];
-const supportedAll: ClaimJudge = async (items) =>
-  items.map((it): ClaimAudit => ({
-    index: it.index,
-    reason: "ok",
-    verdict: "supported",
-  }));
-const unsupportedAll =
-  (reason: string): ClaimJudge =>
-  async (items) =>
+const supportedAll: ClaimJudge = (items) =>
+  Promise.resolve(
     items.map((it): ClaimAudit => ({
       index: it.index,
-      reason,
-      verdict: "unsupported",
-    }));
-const throwingJudge: ClaimJudge = async () => {
-  throw new Error("no active model");
-};
+      reason: "ok",
+      verdict: "supported",
+    }))
+  );
+const unsupportedAll =
+  (reason: string): ClaimJudge =>
+  (items) =>
+    Promise.resolve(
+      items.map((it): ClaimAudit => ({
+        index: it.index,
+        reason,
+        verdict: "unsupported",
+      }))
+    );
+const throwingJudge: ClaimJudge = () =>
+  Promise.reject(new Error("no active model"));
 
 describe("writeReport — claim↔evidence support audit", () => {
   test("no model / no judge: audit degrades to 'unaudited', report still written, exit 0", async () => {
@@ -345,15 +348,15 @@ describe("writeReport — claim↔evidence support audit", () => {
         }
       | undefined;
     (ctx as unknown as { model: unknown }).model = { id: "test-model" };
-    (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = async (
+    (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = (
       opts: typeof captured
     ) => {
       captured = opts;
-      return {
+      return Promise.resolve({
         assistantMessage: {},
         replyText:
           '```json\n[{"index":0,"verdict":"overreach","reason":"too strong"}]\n```',
-      };
+      });
     };
     const outputPath = nodePath.join(tempDir, "audit-eph.md");
     await writeReport(ctx, outputPath, { audit: "advisory" });
@@ -374,18 +377,20 @@ describe("writeReport — claim↔evidence support audit", () => {
     const calls: unknown[] = [];
     (ctx as unknown as { model: unknown }).model = { id: "test-model" };
     (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn =
-      async (opts: { tools?: unknown }) => {
+      (opts: { tools?: unknown }) => {
         calls.push(opts.tools);
         if (opts.tools === false) {
-          throw new Error(
-            "Model x cannot support tools: false with historical tool calls."
+          return Promise.reject(
+            new Error(
+              "Model x cannot support tools: false with historical tool calls."
+            )
           );
         }
-        return {
+        return Promise.resolve({
           assistantMessage: {},
           replyText:
             '[{"index":0,"verdict":"overreach","reason":"too strong"}]',
-        };
+        });
       };
     const outputPath = nodePath.join(tempDir, "audit-retry.md");
     await writeReport(ctx, outputPath, { audit: "advisory" });
@@ -399,11 +404,10 @@ describe("writeReport — claim↔evidence support audit", () => {
     const ctx = makeCtx(groundedEntries(), []);
     let calls = 0;
     (ctx as unknown as { model: unknown }).model = { id: "test-model" };
-    (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn =
-      async () => {
-        calls += 1;
-        throw new Error("provider overloaded");
-      };
+    (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = () => {
+      calls += 1;
+      return Promise.reject(new Error("provider overloaded"));
+    };
     const outputPath = nodePath.join(tempDir, "audit-noretry.md");
     await writeReport(ctx, outputPath, { audit: "advisory" });
     expect(calls).toBe(1);
@@ -413,8 +417,8 @@ describe("writeReport — claim↔evidence support audit", () => {
   test("default judge: an unparseable reply degrades to 'unaudited' and fails open even in strict", async () => {
     const ctx = makeCtx(groundedEntries(), []);
     (ctx as unknown as { model: unknown }).model = { id: "test-model" };
-    (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn =
-      async () => ({
+    (ctx as unknown as { runEphemeralTurn: unknown }).runEphemeralTurn = () =>
+      Promise.resolve({
         assistantMessage: {},
         replyText: "I cannot produce JSON, sorry.",
       });
@@ -427,13 +431,15 @@ describe("writeReport — claim↔evidence support audit", () => {
 
   test("the existence gate runs before the audit: an ungrounded claim withholds and the judge is never called", async () => {
     let calls = 0;
-    const judge: ClaimJudge = async (items) => {
+    const judge: ClaimJudge = (items) => {
       calls += 1;
-      return items.map((it): ClaimAudit => ({
-        index: it.index,
-        reason: "",
-        verdict: "supported",
-      }));
+      return Promise.resolve(
+        items.map((it): ClaimAudit => ({
+          index: it.index,
+          reason: "",
+          verdict: "supported",
+        }))
+      );
     };
     const entries: StubEntry[] = [
       {

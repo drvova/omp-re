@@ -248,34 +248,41 @@ class RizinBackend {
     if (rec.rz && !rec.rz.isClosed) {
       return rec.rz;
     }
-    if (rec.spawning) {
-      return raceAbort(
-        rec.spawning,
-        options.signal,
-        "waiting for rizin analysis"
-      );
-    }
-    const binaryPath = this.requireBinary(rec);
-    rec.spawning = this.spawn(ctx, binaryPath, {
-      onProgress: options.onProgress,
-    })
-      .then(({ rz, replayFailures }) => {
-        if (replayFailures.length > 0 && ctx.hasUI) {
-          ctx.ui.notify(
-            `omp-re: ${replayFailures.length} annotation(s) could not be replayed:\n${replayFailures.join("\n")}`,
-            "warning"
-          );
-        }
-        return rz;
-      })
-      .finally(() => {
-        rec.spawning = null;
-      });
-    return raceAbort(
+    // One respawn, shared by every caller that arrives while it runs.
+    rec.spawning ??= this.respawn(
+      ctx,
+      rec,
+      this.requireBinary(rec),
+      options.onProgress
+    );
+    return await raceAbort(
       rec.spawning,
       options.signal,
       "waiting for rizin analysis"
     );
+  }
+
+  /** Spawn and analyze, warn about annotations that could not be replayed, and clear the shared in-flight marker once it settles. */
+  private async respawn(
+    ctx: ExtensionContext,
+    rec: ReSessionState,
+    binaryPath: string,
+    onProgress: SpawnOptions["onProgress"]
+  ): Promise<RzSession> {
+    try {
+      const { rz, replayFailures } = await this.spawn(ctx, binaryPath, {
+        onProgress,
+      });
+      if (replayFailures.length > 0 && ctx.hasUI) {
+        ctx.ui.notify(
+          `omp-re: ${replayFailures.length} annotation(s) could not be replayed:\n${replayFailures.join("\n")}`,
+          "warning"
+        );
+      }
+      return rz;
+    } finally {
+      rec.spawning = null;
+    }
   }
 
   /** Launch the debug session (rizin -d) as a second effect on the same scope. Returns the existing one if already running. */

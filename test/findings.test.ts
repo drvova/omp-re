@@ -56,8 +56,8 @@ if (!canRunLive) {
 const SHA_A = "a".repeat(64);
 const judgeSaying =
   (verdict: ClaimAudit["verdict"], reason = "because"): ClaimJudge =>
-  async (items) =>
-    items.map((i) => ({ index: i.index, reason, verdict }));
+  (items) =>
+    Promise.resolve(items.map((i) => ({ index: i.index, reason, verdict })));
 
 let originalLog: typeof console.log;
 let originalError: typeof console.error;
@@ -297,12 +297,14 @@ describe.skipIf(!canRunLive)(
       const h = makeHarness("adopt-live");
       let verdict: ClaimAudit["verdict"] = "supported";
       registerFindingTools(h.pi, {
-        judge: () => async (items) =>
-          items.map((i) => ({
-            index: i.index,
-            reason: verdict === "supported" ? "shown" : "a loop, not a hash",
-            verdict,
-          })),
+        judge: () => (items) =>
+          Promise.resolve(
+            items.map((i) => ({
+              index: i.index,
+              reason: verdict === "supported" ? "shown" : "a loop, not a hash",
+              verdict,
+            }))
+          ),
       });
       const v1Sha = await sha256File(v1);
       getState(h.ctx).binaryPath = v1;

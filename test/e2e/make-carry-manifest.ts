@@ -23,12 +23,14 @@ if (!v1 || !reportPath) {
 
 const h = makeHarness("tui-carry-fixture");
 registerFindingTools(h.pi, {
-  judge: () => async (items) =>
-    items.map((i) => ({
-      index: i.index,
-      reason: "fixture",
-      verdict: "supported" as const,
-    })),
+  judge: () => (items) =>
+    Promise.resolve(
+      items.map((i) => ({
+        index: i.index,
+        reason: "fixture",
+        verdict: "supported" as const,
+      }))
+    ),
 });
 const sha = await sha256File(v1);
 getState(h.ctx).binaryPath = v1;

@@ -4,6 +4,7 @@
  * before composition resolves, and each call is independent. No rizin needed.
  */
 import { describe, expect, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
@@ -36,9 +37,7 @@ describe("composeApp", () => {
     const subs: ReSubsystem[] = [
       {
         apply: async () => {
-          await new Promise((resolve) => {
-            setTimeout(resolve, 20);
-          });
+          await sleep(20);
           done = true;
         },
         name: "slow",

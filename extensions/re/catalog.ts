@@ -68,14 +68,21 @@ const readCatalog = async (rizinPath: string): Promise<RzCatalog> => {
 export const loadCatalog = (
   rizinPath = resolveRizinPath()
 ): Promise<RzCatalog> => {
-  let cached = catalogs.get(rizinPath);
-  if (!cached) {
-    cached = readCatalog(rizinPath);
-    catalogs.set(rizinPath, cached);
-    // A failed read (rizin missing) must not be cached: installing rizin mid-session should work.
-    cached.catch(() => catalogs.delete(rizinPath));
+  const cached = catalogs.get(rizinPath);
+  if (cached) {
+    return cached;
   }
-  return cached;
+  const read = readCatalog(rizinPath);
+  catalogs.set(rizinPath, read);
+  // A failed read (rizin missing) must not be cached: installing rizin mid-session should work.
+  void (async () => {
+    try {
+      await read;
+    } catch {
+      catalogs.delete(rizinPath);
+    }
+  })();
+  return read;
 };
 
 /** Whether `name` is a command in the catalog, or a command group whose subcommands are (rizin lists `iz` only as `izj`, `izq`, …). */

@@ -17,6 +17,7 @@ import {
   closeSync as fsCloseSync,
 } from "node:fs";
 import { access, realpath as fsRealpath } from "node:fs/promises";
+import { setImmediate as nextTick } from "node:timers/promises";
 
 import { firstInSequence } from "./sequence.ts";
 
@@ -267,24 +268,25 @@ export interface SpawnOptions {
 }
 
 /** Settle `task` normally, or reject early with RzAbortError when `signal` fires. The task itself keeps running. */
-export const raceAbort = <T>(
+export const raceAbort = async <T>(
   task: Promise<T>,
   signal: AbortSignal | undefined,
   what: string
 ): Promise<T> => {
   if (!signal) {
-    return task;
+    return await task;
   }
   if (signal.aborted) {
-    return Promise.reject(new RzAbortError(what));
+    throw new RzAbortError(what);
   }
-  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  const { promise: aborted, reject } = Promise.withResolvers<never>();
   const onAbort = () => reject(new RzAbortError(what));
   signal.addEventListener("abort", onAbort, { once: true });
-  task
-    .then(resolve, reject)
-    .finally(() => signal.removeEventListener("abort", onAbort));
-  return promise;
+  try {
+    return await Promise.race([task, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 };
 
 /** One rizin subprocess speaking the NUL-framed pipe protocol. */
@@ -429,7 +431,9 @@ export class RzSession {
     options: CmdOptions
   ): Promise<{ output: string; stderr: string }> {
     const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
-    const task = this.queue.then(async () => {
+    const previous = this.queue;
+    const task = (async () => {
+      await previous;
       if (this.closedFlag) {
         throw new RzProtocolError("omp-re: rizin process exited");
       }
@@ -461,9 +465,7 @@ export class RzSession {
           remaining
         );
         if (frame.trim() === marker) {
-          await new Promise((resolve) => {
-            setImmediate(resolve);
-          });
+          await nextTick();
           const written = this.stderrSeen - stderrStart;
           const stderr =
             written > 0
@@ -485,11 +487,14 @@ export class RzSession {
       throw new RzProtocolError(
         `omp-re: rizin protocol desync waiting for sync marker after: ${command}${detail ? ` (stderr: ${detail})` : ""}`
       );
-    });
-    this.queue = task.then(
-      () => {},
-      () => {}
-    );
+    })();
+    this.queue = (async () => {
+      try {
+        await task;
+      } catch {
+        // a failed command must not stall the commands queued behind it
+      }
+    })();
     return raceAbort(
       task,
       options.signal,

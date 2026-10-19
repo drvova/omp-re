@@ -36,12 +36,9 @@ const VERIFY_COMMAND_TIMEOUT_MS = 120_000;
 /** SHA-256 hex of a file, streamed (no rizin spawn). Used at open time (index.ts) and to re-hash the currently-open binary at verify time. */
 export const sha256File = async (path: string): Promise<string> => {
   const hash = createHash("sha256");
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(path);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve());
-    stream.on("error", reject);
-  });
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+  }
   return hash.digest("hex");
 };
 

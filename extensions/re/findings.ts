@@ -399,7 +399,7 @@ export const registerFindingTools = (
     name: "record_finding",
     parameters: recordFindingParams,
     ...reRenderers({ body: "text", subject: "claim", title: "record_finding" }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    execute(_id, params, _signal, _onUpdate, ctx) {
       const entries = branchEntries(ctx);
       const evidence = collectEvidence(entries);
       const resolved: EvidenceRecord[] = [];
@@ -413,8 +413,10 @@ export const registerFindingTools = (
         }
       }
       if (problems.length > 0) {
-        throw new Error(
-          `omp-re: record_finding: evidence not found — ${problems.join("; ")}. Cite ids from RE tool results on this branch (/re evidence lists them).`
+        return Promise.reject(
+          new Error(
+            `omp-re: record_finding: evidence not found — ${problems.join("; ")}. Cite ids from RE tool results on this branch (/re evidence lists them).`
+          )
         );
       }
 
@@ -426,8 +428,10 @@ export const registerFindingTools = (
           )
         : [];
       if (foreign.length > 0) {
-        throw new Error(
-          `omp-re: record_finding: evidence ${foreign.map((ev) => ev.id.slice(0, 8)).join(", ")} was taken against a different binary than the one open — re-gather it on this binary.`
+        return Promise.reject(
+          new Error(
+            `omp-re: record_finding: evidence ${foreign.map((ev) => ev.id.slice(0, 8)).join(", ")} was taken against a different binary than the one open — re-gather it on this binary.`
+          )
         );
       }
 
@@ -435,8 +439,8 @@ export const registerFindingTools = (
       if (params.supersedes) {
         const r = resolveId(collectFindings(entries), params.supersedes.trim());
         if (!r.ok) {
-          throw new Error(
-            `omp-re: record_finding: cannot supersede — ${r.reason}`
+          return Promise.reject(
+            new Error(`omp-re: record_finding: cannot supersede — ${r.reason}`)
           );
         }
         supersedes = r.item.id;
@@ -530,20 +534,24 @@ export const registerFindingTools = (
     name: "retract_finding",
     parameters: retractFindingParams,
     ...reRenderers({ body: "text", subject: "id", title: "retract_finding" }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    execute(_id, params, _signal, _onUpdate, ctx) {
       const r = resolveId(
         collectFindings(branchEntries(ctx)),
         params.id.trim()
       );
       if (!r.ok) {
-        throw new Error(`omp-re: retract_finding: ${r.reason}`);
+        return Promise.reject(
+          new Error(`omp-re: retract_finding: ${r.reason}`)
+        );
       }
       pi.appendEntry("re.finding.retract", {
         id: r.item.id,
         reason: params.reason,
       });
-      return plainResult(
-        `retract_finding: withdrew ${r.item.id.slice(0, 8)} — ${r.item.claim}\nreason: ${params.reason}`
+      return Promise.resolve(
+        plainResult(
+          `retract_finding: withdrew ${r.item.id.slice(0, 8)} — ${r.item.claim}\nreason: ${params.reason}`
+        )
       );
     },
   });
