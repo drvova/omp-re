@@ -1,48 +1,40 @@
-# Capability reference
+# Tool reference
 
-omp-re advertises **one tool, `run`**, which executes TypeScript/JavaScript in
-a persistent per-session namespace (see the README's
-[One tool: `run`](../README.md#one-tool-run)). The 64 operations below are
-methods on `re` inside it — `await re.<name>({ ...params })`, or with a single
-required parameter, `await re.<name>(value)`. Grouped by tier. Triage
-capabilities exist only when their backing binary is on PATH at load time, so
-your own list may legitimately show fewer than 64 (the debugger needs
-OMPRE_ENABLE_DEBUGGER too); `describe(re)` shows the live set, and
-`describe(re.<name>)` one capability's parameters with their docs.
+All 64 `omp-re` tools, grouped by tier. Triage tools register only when their
+backing binary is on PATH at load time, so your own tool list may legitimately
+show fewer than 64 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
-| `run` parameter | Type | Meaning |
-| --- | --- | --- |
-| `code` | `string` | TypeScript or JavaScript; top-level `await` works; the last expression is returned along with anything printed. Empty returns the manual. |
-| `strings` | `Record<string, string>`, optional | Named literal strings, read in the code as `strings.<name>` — for YARA rules, C declarations, payloads, without escaping. |
+Every tool is registered `discoverable`, so omp presents it as an `xd://<name>`
+device rather than a top-level tool: `read xd://<name>` shows its
+documentation, `write xd://<name>` calls it, and omp's `eval` calls it as
+`await tool.<name>({ ...params })`, which returns `{ text, details }` and
+throws on failure. The parameter tables below are the same on every path.
 
-Each capability keeps its omp `ToolDefinition` — its parameter schema
-validates every call, and its `approval` tier is shown by `describe(re)` —
-but omp approves the `run` call as a whole (tier `exec`), since it runs code.
-Every call is audited, and every read-tier and `rizin_command` call that
-succeeds becomes a `re.evidence` entry whose `[evidence xxxxxxxx]` id ends the
-method's result and is listed at the end of the `run` result — see
-[`workflow.md`](workflow.md). A failing capability rejects with the error the
-tool used to return, so code can `try`/`catch` it. All capabilities honor
-cancellation of the `run` call.
+Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
+whether omp prompts before running it (`tools.approvalMode` /
+`tools.approval.<name>` in your omp config), every tool has its own
+transcript renderer, and every read-tier and `rizin_command` call also
+becomes a `re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor
+cancellation.
 
 Output larger than the context cap (2000 lines or 50 KB) is truncated for the
 model and saved in full to the session's artifact store; the result ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
 that artifact. List results are JSON arrays with one compact row per line.
 
-## Session (3 capabilities)
+## Session (3 tools)
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 | `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
 | `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable — reopen to drop the map. |
 
-## Read tier (31 capabilities)
+## Read tier (31 tools)
 
 Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `list_functions` | `read` | `offset?, limit?, sort?` | Functions as `{ea, name, size, blocks, callers, callees, signature}`. `sort` is `address` (default), `size`, or `callers`. |
 | `search_functions` | `read` | `query, offset?, limit?` | Same rows, filtered by name substring. |
@@ -85,7 +77,7 @@ is restricted to that function's extent (rizin's `search.in=range` plus
 `search.from`/`search.to`), and the previous scope is always restored
 afterward. Omit it to search the whole binary.
 
-## Mutate tier (15 capabilities)
+## Mutate tier (15 tools)
 
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
@@ -96,7 +88,7 @@ fresh rizin process on resume or respawn. Each approval prompt states the
 exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 /re undo.`).
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rename_function` | `write` | `addr, new` | Rename a function. |
 | `rename_variable` | `write` | `addr, old, new` | Rename a local variable or argument; an unknown `old` lists the variables that exist. |
@@ -114,7 +106,7 @@ exact change (e.g. `Rename function "main" to "parse_args". Reversible with
 | `set_string` | `write` | `addr, size?` | Mark bytes as a string (`Cs`); omit `size` to autodetect. Correctly no-ops on non-string bytes. `/re undo` removes it. |
 | `set_format` | `write` | `addr, size, format` | Overlay a pf struct format (with field names) on a region (`Cf`) so disassembly shows named fields. Display-only. `/re undo` removes it. |
 
-## Findings (3 capabilities)
+## Findings (3 tools)
 
 The model's own conclusions, recorded as report claims (`re.finding` entries).
 A finding is gated when it is recorded, while the model can still act on the
@@ -123,20 +115,20 @@ section and in the verification manifest, and `/re carry --inherit` re-proves
 it on the next build. Neither tool reads the binary, and neither records
 evidence.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `record_finding` | `read` | `claim, evidence[], addr?, confidence?, supersedes?, override_audit?` | Records a conclusion backed by evidence ids (exact or a ≥6-character prefix). It is refused when an id doesn't resolve on this branch or was taken against a different binary than the one open. The claim then goes to the same side-turn support audit `/re report` uses. An `unsupported` or `overreach` verdict refuses the finding with the auditor's reason, unless `override_audit` gives a justification, which is kept and shown beside the finding. With no model available the finding is recorded as `unaudited` (fails open). The result says how much of its evidence is machine-reproducible: only `rizin_command` evidence carries to the next build. `supersedes` revises an earlier finding. `confidence` is `confirmed`, `likely` (the default) or `speculative`. |
 | `adopt_finding` | `read` | `claim, commands[{command, addr?}], addr?, confidence?, source?, expect_sha256?, override_audit?` | Adopts a finding made somewhere else, typically by the `re-analyst` subagent, whose evidence lives in its own session. Each command is re-run read-only on the open binary through `rizin_command`'s own gate and recorded as evidence in this session, then the claim goes through the same checks as `record_finding`. It is refused if `expect_sha256` (the subagent's `sha256`) doesn't match the open binary, or if a command fails here. If the auditor refuses the claim, the re-run evidence stays recorded so a narrower claim can cite it. The finding is marked "adopted from <source>, re-proven in this session". |
 | `retract_finding` | `read` | `id, reason` | Withdraws a finding, which then leaves the report. The reason is kept in the session log. |
 
-## rizin REPL (2 capabilities)
+## rizin REPL (2 tools)
 
 For everything the dedicated tools don't cover. Both read the catalog the
 installed rizin publishes about itself (`rizin -qc '?*j'`, read once per
 process with no binary open), so they match the user's rizin version and
 plugins exactly.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rizin_help` | `read` | `query: string` | A command or prefix (`ph`, `afv`, `/R`) lists that family; an exact match adds its typed arguments (required/optional, defaults, choices) and description. Anything else is a keyword search over summaries and descriptions (`entropy`, `rop gadgets`). Entries `rizin_command` would refuse are marked `[not runnable via rizin_command]`. |
 | `rizin_command` | `exec` (reason names the command) | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
@@ -160,7 +152,7 @@ anything reaches rizin:
   `@!<n>` (a temporary block size, e.g. `ph entropy @!4096`). Seek with `addr`.
 - **In this rizin's catalog**, and not an `interactive` output mode.
 
-## rizin CLI suite (1 capability)
+## rizin CLI suite (1 tool)
 
 `rizin_cli` fronts the standalone `rz-*` executables that ship beside rizin,
 for analysis the in-core commands don't cover. It registers only when those
@@ -168,7 +160,7 @@ binaries are found next to the configured rizin (or on PATH). Invoked by argv
 through omp's `exec` — no shell — so there is no `;`/`|`/`$()` surface; the
 gating is on the flags.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rizin_cli` | `exec` (reason is the full command line) | `tool: enum`, `args: string[]` | Runs one of `rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` with the given arguments. `@binary` in `args` is the open binary's path (auto-appended for `rz-bin`). `args: ["-h"]` returns that tool's own help. Output, or `(no output)`; the tool's stderr comes back as an error result. |
 
@@ -195,7 +187,7 @@ analyzes. rz-run is not exposed as a CLI tool either, but its directives
 environment through `rizin_debug`'s `run` option — the one place omp-re
 executes a sample.
 
-## Signatures (2 capabilities)
+## Signatures (2 tools)
 
 FLIRT signatures name library functions from a signature database (book:
 analysis/signatures). `open_binary`'s analysis (`aaa`) already applies rizin's
@@ -204,12 +196,12 @@ applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't, because
 it refuses file arguments — and creating a new signature from the analyzed
 functions. List the built-in database with `rizin_command Flt`.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `apply_signatures` | `exec` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions, so it is exec-tier. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
 | `create_signature` | `exec` | `file?` | Builds a FLIRT signature (`Fc`) from the current binary's analyzed functions — to recognize them in other samples (tracking a routine across a malware family) — written to omp-re's output directory as `.pat` (text patterns, default) or `.sig` (compiled). Reads the analysis, modifies nothing. Apply it elsewhere with `apply_signatures` (`source: file`). |
 
-## Analysis passes — `analyze` (1 capability)
+## Analysis passes — `analyze` (1 tool)
 
 `open_binary`'s `aaa` is the analysis baseline. `analyze` re-runs the deeper
 or format-specific passes it skips (book: analysis/code_analysis), each
@@ -218,11 +210,11 @@ is recorded and re-run on resume/respawn (before signatures and annotations,
 so each layer sees the one before it), not as an undoable annotation —
 reopen the binary to return to the baseline.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `all_functions` (`aaf`), `data_refs` (`aad`), `autoname` (`aan`), `types` (`aaft`), `struct_offsets` (`aat`), `golang` (`aalg`), `objc` (`aalor`), `rtti_classes` (`avrr` — C++ classes from RTTI), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
 
-## Dynamic analysis — `rizin_debug` (1 capability, opt-in)
+## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 
 `rizin_debug` launches the open binary under rizin's debugger and drives it.
 It **executes the sample**, so it registers only when `OMPRE_ENABLE_DEBUGGER`
@@ -230,7 +222,7 @@ is set, runs in a debug session separate from the static one (which never
 executes the file), and is killed with its debuggee on `stop` or session
 shutdown. Run untrusted samples only in an isolated, disposable environment.
 
-| Capability | Approval | Parameters | What it does |
+| Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?`, `file?` | Drives one debug action (below). `addr` is validated like every other address. |
 
@@ -294,12 +286,12 @@ unset — under a bare filename it validates; it never writes to a path the
 model chose, so it can't traverse out of that directory or clobber an
 arbitrary file.
 
-## Triage tier (up to 4 capabilities, conditional on PATH)
+## Triage tier (up to 4 tools, conditional on PATH)
 
 Each runs against the currently open binary via omp's `exec`, so cancelling
 the tool call stops the scanner.
 
-| Capability | Approval | Requires on PATH | Parameters | What it does |
+| Tool | Approval | Requires on PATH | Parameters | What it does |
 | --- | --- | --- | --- | --- |
 | `triage_capa` | `exec` | `capa` | (none) | Run capa rules to detect capabilities and ATT&CK techniques. |
 | `triage_floss` | `exec` | `floss` | (none) | Extract obfuscated strings (stack, decoded, static) via FLOSS. |

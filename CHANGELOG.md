@@ -8,51 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- **BREAKING: one code tool, `run`, replaces the 64-tool catalog.** omp-re now
-  advertises exactly one tool. `run` executes TypeScript/JavaScript in a
-  long-lived namespace per omp session (a worker of its own), so the model
-  builds its own tooling on a live API instead of picking from a fixed menu
-  that every rizin build, install, and model supports differently.
-  - **`re` is the workspace.** Every former tool is a method on it, with the
-    same name and parameters: `await re.decompile_function({ addr: "main" })`,
-    or with one required parameter `await re.decompile_function("main")`.
-    `describe(re)` lists the live capability set (triage only when its binary
-    is installed, the debugger only when enabled) with signatures from each
-    parameter schema; `describe(x)` introspects anything; `re.rz()` is the raw
-    rizin session (unrecorded).
-  - **Same guarantees.** A method call is validated against the capability's
-    schema (unknown keys refused), audit-logged, run through the capability's
-    own `execute`, and — for an observation — recorded as `re.evidence` with
-    its `[evidence xxxxxxxx]` id, which every `run` result also lists. The
-    report, verify, and carry gates are unchanged.
-  - **Definitions persist.** Top-level declarations survive across calls; the
-    last expression is returned with anything printed. After a successful
-    call, each top-level function, class, and static `const` is kept in
-    `~/.omp/agent/re/kept/<name>.ts` (`OMPRE_KEPT_DIR` overrides) and loaded
-    into every new session, each unit checked to be one definition and loaded
-    in isolation. Statements that do work are never kept. `kept()` lists,
-    `forget(name)` removes.
-  - **Discovery in-language.** Empty `code` returns the manual (`man()` from
-    inside); `strings` passes long literal text as `strings.<name>`.
-  - **Stoppable.** Each session's namespace runs in a Bun Worker. Cancelling a
-    call terminates it — even mid-loop — and passes the cancellation to any
-    capability in flight; `process.exit()` or a crash in a cell ends only the
-    worker; a timer's late exception is printed, not fatal. The next call
-    starts a fresh worker with the kept definitions reloaded.
-  - **Other tools as code.** External programs are `exec(bin, argv)`, HTTP is
-    `fetch`, libraries are `require`/`import`; `exec` and raw rizin commands
-    are audited per call. omp's built-in tools stay out of reach: omp allows
-    an extension to delegate only to the built-in of its own tool's name.
-  - **Security is the deployment's.** `run` executes code with omp's
-    authority (`exec` approval tier, the code's first line as its reason).
-    There is no enable/disable switch or restricted mode; run omp sandboxed
-    for untrusted samples. See `SECURITY.md#the-run-tool`.
-  - **Kept, not advertised.** The capability modules still register through
-    `pi.registerTool`; `index.ts` hands them a host whose `registerTool`
-    records each definition in a capability registry (`capabilities.ts`)
-    instead. `/re off`/`/re on` now toggle `run`. The `re-analyst` agent, the
-    `re-triage` skill, and the TUI/live-model test prompts call `re.*`
-    through `run`. The evidence tag reads `cite it in re.record_finding`.
+- **The RE tools are `xd://` devices, driven from omp's own `eval`.** Every
+  tool is registered `discoverable` (`RE_LOAD_MODE` in `render.ts`) instead of
+  `essential`, so omp mounts it as an `xd://<name>` device rather than putting
+  64 schemas in the model's top-level tool list. The model reads a tool's docs
+  with `read xd://<name>`, calls one with `write xd://<name>`, and composes
+  them in omp's `eval` as `await tool.<name>({ ... })`, defining helpers that
+  persist for the session (and across sessions with `%load`). Every path goes
+  through omp's tool wrapper: approval tiers, the audit log, and evidence
+  recording behave exactly as before. The `re-triage` skill and the
+  `re-analyst` agent say how to reach the tools.
+- **`/re off` blocks RE tool calls instead of deactivating the tools.** It
+  sets a per-session gate checked on omp's `tool_call` event, so it covers
+  top-level, `xd://`, and `eval` calls alike and leaves the devices mounted;
+  deactivating and re-activating through `setActiveTools` would have pinned
+  the tools top-level on `/re on`.
 
 ## [0.6.0] - 2026-10-18
 

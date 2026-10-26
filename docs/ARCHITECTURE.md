@@ -5,76 +5,6 @@ for reverse engineering. It has **no third-party runtime dependencies** — an
 installed omp plugin can only resolve the host's own `@oh-my-pi/*` packages, so
 everything below is hand-rolled on top of them.
 
-## The run tool
-
-omp-re advertises one tool, `run` (`tools-run.ts`), which executes
-TypeScript/JavaScript; every RE operation is a method on `re` inside it. The
-pieces:
-
-```
-index.ts       composeApp(registry.host(pi), [...subsystems])   then registerRunTool(pi, registry)
-                 │  every pi.registerTool({...}) lands in the registry, not in omp
-capabilities.ts  CapabilityRegistry: name → definition, tier, evidence flag, JSON Schema
-                 invokeCapability: validate → audit line → definition.execute → evidence record + tag
-namespace.ts   host side: one worker per omp session (on the session record in runtime.ts);
-                 queues cells, collects output, answers the worker's calls (capabilities,
-                 raw rizin, evidence, exec), terminates the worker on cancel
-namespace-worker.ts
-               the worker: its global IS the namespace, seeded with re, describe, man, kept,
-                 forget, strings, print, exec, require; loads kept units; evaluates
-                 cells; saves definitions
-namespace-protocol.ts
-               the messages between them: run/done/failed, print, call/reply
-cell.ts        compileCell: Babel parse (omp's own parser) → strip TS (Bun.Transpiler)
-                 → top-level declarations become assignments on the realm's global,
-                   functions hoisted, last expression returned, `import` → await import()
-                 findDefinitions: functions, classes, consts with static initializers
-kept.ts        <OMPRE_KEPT_DIR or agent dir>/re/kept/<name>.ts, one definition per file
-describe.ts    describe(x) and the manual: signatures from schemas and introspection
-```
-
-**Why nothing stays a wrapper local.** A cell runs as
-`(async (g, import) => { … })`, so its own `const`/`function` would die with
-the call — or worse, a helper defined in it would keep calling its sibling
-from that cell after a later cell redefined the sibling. Every top-level
-binding is instead written to the realm's global (`g["name"] = …`), so every
-name a helper uses is read late, from the namespace — the same resolution a
-helper gets when it is reloaded alone after a restart. The wrapper is strict,
-so assigning to a namespace name that is read-only (`re`, `describe`, …)
-throws instead of silently doing nothing.
-
-**Why only definitions persist.** A function, class, or a `const` bound to a
-literal, function, class, or plain data built from them can only define
-something when it is evaluated again; anything with a call, `await`, or `new`
-of a non-builtin does work. Only the former are saved, so a restart rebuilds
-the model's tools and never re-runs its analysis. On load each file is
-re-parsed and must be exactly one such definition of the name it is filed
-under; a unit that throws (it may name one loaded later) is retried after the
-rest, and one that still fails is reported in the manual and `kept()`.
-
-**Why a worker.** Cells must not define names on omp's own global object,
-each session needs its own namespace, and a call must be stoppable. A Bun
-Worker gives all three: its global is a fresh realm, and terminating it ends
-even a loop that never yields — something no in-thread realm (`node:vm`
-included) can do once the loop has started. A cell that calls `process.exit()`
-or crashes ends only the worker; a timer's late exception is caught by the
-worker's own `uncaughtException`/`unhandledRejection` handlers and printed.
-After a stop the host starts a fresh worker on the next call, which reloads
-the kept definitions. Everything that needs omp crosses as a message
-(structured clone): the worker asks, the host performs the operation with the
-running call's context and signal and replies, so killing a worker never
-leaves omp half-way through an operation — and the signal reaches whatever
-the host was doing — including a program `exec` started, which the host kills
-rather than orphaning it with the worker. The worker is unreferenced while idle, so it never keeps omp alive. It is a
-naming and lifetime boundary, not a security boundary; the tool runs with
-omp's authority, and the sandbox is the deployment's (see `SECURITY.md`).
-
-**What did not change.** The operations' code and tests: each tool module
-still builds its definitions with `pi.registerTool`, and the unit tests drive
-those definitions directly through a stub host. The evidence and audit hooks
-still exist for any tool that is registered for real; `invokeCapability` calls
-the same `recordAndTag` and `appendAuditLine` they do.
-
 ## Process lifecycle (`runtime.ts`)
 
 A rizin process is a resource with a lifetime: spawn, respawn on death or
@@ -132,6 +62,29 @@ Each subsystem's registration stays a plain `(pi) => …` function (see
 `registerShell` in `index.ts`), so it is unit-testable in isolation; `app.ts`
 only sequences them.
 
+## Presentation: `xd://` devices and `eval`
+
+Every RE tool is registered with `loadMode: RE_LOAD_MODE` (`"discoverable"`,
+`render.ts`). omp mounts discoverable tools as `xd://<name>` devices instead of
+listing their schemas top-level, and its `eval` tool reaches every enabled tool
+— mounted ones included — through its tool bridge as `tool.<name>()`. omp-re
+therefore needs no code tool, dispatcher, or tool catalog of its own: the
+model discovers the tools with `read xd://…` and composes them in omp's own
+`eval` kernel, whose state persists for the session and whose `%load` keeps
+helper scripts across sessions.
+
+Every path into a tool — top-level, `write xd://…`, `tool.<name>()` from
+`eval` — goes through omp's tool wrapper, so the tool's approval tier applies
+and omp fires the `tool_call`/`tool_result` events `audit.ts` and
+`evidence.ts` hook. A call made from `eval` is recorded and tagged exactly
+like a top-level one (`test/extension-sdk.test.ts` drives that path).
+
+`/re off` is a gate rather than a change of presentation: a `tool_call`
+handler in `registerShell` blocks RE tools while the session's `toolsOff`
+flag is set. Turning tools off and on through `setActiveTools` would not round
+trip — re-selecting a tool through it pins the tool top-level, so `/re on`
+would undo omp's mounting.
+
 ## Teardown, honestly
 
 omp's `ExtensionAPI` returns no handle from `on()`, `registerTool()`,
@@ -140,29 +93,20 @@ exposes no extension-unload hook. So a listener or tool, once registered,
 cannot be removed — those subsystems are **register-once by the host's
 design** — with no unregister call, there is nothing to undo. The teardown
 that is real is the per-session process lifecycle above;
-omp's one supported toggle, `setActiveTools`, is what `/re off` uses. There is
+`/re off` blocks calls on the `tool_call` event instead (see above). There is
 no host-level hot-unload — the host does not offer one.
 
 ## Module map
 
 | File | Responsibility |
 | --- | --- |
-| `index.ts` | Extension entry; `registerShell` (renderers, `open_binary`, `--binary`, session-lifecycle handlers, completions, the `/re` command); the `composeApp` call and `registerRunTool` |
-| `tools-run.ts` | `run`, the one advertised tool: description, approval, result shape |
-| `capabilities.ts` | The capability registry (the `registerTool` shim) and `invokeCapability`, the one path a `re.<name>` call takes |
-| `namespace.ts` | The per-session namespace, host side: the worker's lifetime, the cell queue, cancellation, answering the worker's calls |
-| `namespace-worker.ts` | The worker the cells run in: vocabulary, evaluation, kept-unit loading and saving, output |
-| `namespace-protocol.ts` | The host↔worker messages |
-| `values.ts` | How printed and returned values read (JSON), error text |
-| `cell.ts` | The cell compiler (top-level declarations → namespace globals) and definition detection |
-| `kept.ts` | Kept definitions on disk, one file per name |
-| `describe.ts` | `describe(x)` and the manual |
+| `index.ts` | Extension entry; `registerShell` (renderers, `open_binary`, `--binary`, session-lifecycle handlers, completions, the `/re` command); the `composeApp` call |
 | `app.ts` | Composition root (`composeApp`): applies each subsystem in order with the host |
 | `runtime.ts` | `RizinBackend`: per-session teardown scopes that own the rizin/debug process lifecycle |
 | `state.ts` | Thin facade over `RizinBackend` |
 | `rizin.ts` | `RzSession` transport (`-q0` pipe), spawn flags, validators, `rz-*` tool resolution |
 | `catalog.ts` | rizin's self-described command catalog (`?*j`) and the `rizin_command` policy |
-| `tools-read.ts` / `tools-mutate.ts` | The 14 read-tier and 15 mutate-tier capabilities |
+| `tools-read.ts` / `tools-mutate.ts` | The 14 read-tier and 15 mutate-tier tools |
 | `tools-rizin.ts` | `rizin_help` / `rizin_command` (the REPL bridge) |
 | `tools-rzcli.ts` | `rizin_cli` (the standalone `rz-*` tools) |
 | `tools-debug.ts` | `rizin_debug` (opt-in dynamic analysis) |
@@ -175,7 +119,7 @@ no host-level hot-unload — the host does not offer one.
 | `verify.ts` / `audit-claims.ts` | `/re verify` (reproducibility) and the side-turn claim-support auditor |
 | `findings.ts` | `record_finding` / `retract_finding`: the model's conclusions as gated `re.finding` claims |
 | `carry.ts` / `anchor.ts` | `/re carry` (replay a manifest on another build, `--inherit`) and anchor fingerprints/relocation |
-| `audit.ts` | The RE capability-name sets (the audit gate, the evidence tier) + signed audit log |
+| `audit.ts` | The RE tool-name sets (the audit gate) + signed audit log |
 | `preserve.ts` | Compaction preservation (`session.compacting`) |
 | `ui.ts` | Status band, overlay panels, evidence helpers |
 | `report.ts` / `annotations.ts` / `entries.ts` / `disasm.ts` / `format.ts` / `render.ts` | Report gate, annotation replay, branch entry helpers, disassembly, result formatting, tool renderers |

@@ -17,7 +17,6 @@
  * attaches lazily the first time a process is spawned.
  */
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import type { ReNamespace } from "./namespace.ts";
 import { annotationFingerprint, liveAnnotations, replayAnnotations } from "./annotations.ts";
 import { branchEntries, recordedAnalysisPasses, recordedMapFiles, recordedSignatures } from "./entries.ts";
 import { replayMapFiles } from "./mapfiles.ts";
@@ -44,8 +43,8 @@ export interface ReSessionState {
 	evidenceCount: number;
 	/** normalized addr -> most recent evidence id observed at that address (used by mutate tools to ground annotations, and by report anchors) */
 	evidenceByAddr: Map<string, string>;
-	/** The `run` tool's namespace for this session (namespace.ts), created on first use; it follows the record through a rekey and is dropped with it. */
-	namespace: Promise<ReNamespace> | null;
+	/** `/re off`: every RE tool call in this session is refused until `/re on`. A gate, not a change of tool presentation, so the `xd://` devices stay mounted. */
+	toolsOff: boolean;
 	/** Internals: the session's teardown scope and the live disposers that own each process's teardown. Not read outside the backend. */
 	_scope: Scope | null;
 	_disposeRz: Disposer | null;
@@ -104,7 +103,7 @@ function newState(sessionId: string): ReSessionState {
 		auditHmacWarned: false,
 		evidenceCount: 0,
 		evidenceByAddr: new Map(),
-		namespace: null,
+		toolsOff: false,
 		_scope: null,
 		_disposeRz: null,
 		_disposeDbg: null,
@@ -137,7 +136,7 @@ class RizinBackend {
 
 	requireBinary(rec: ReSessionState): string {
 		if (!rec.binaryPath) {
-			throw new Error("omp-re: no binary open — use /re open <path>, re.open_binary({ path }), or --binary <path> first");
+			throw new Error("omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first");
 		}
 		return rec.binaryPath;
 	}
@@ -281,8 +280,6 @@ class RizinBackend {
 		if (!rec) return;
 		rec.rz?.close();
 		rec.dbg?.close();
-		// The run namespace's worker ends with the session too.
-		void rec.namespace?.then((ns) => ns.dispose(), () => {});
 		void rec._scope?.dispose();
 		this.records.delete(sessionId);
 	}

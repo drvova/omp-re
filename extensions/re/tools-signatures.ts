@@ -21,7 +21,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { branchEntries, recordedSignatures } from "./entries.ts";
 import { textResult } from "./format.ts";
 import { rizinOutputPath, rizinPathArg } from "./output.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "./signatures.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
@@ -44,7 +44,7 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
 			}
 			return { tier: "exec" as const, reason: "Re-apply rizin's built-in signature database — this renames matched functions." };
 		},
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: applyParams,
 		...reRenderers({ title: "Apply signatures", subject: "source", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -85,7 +85,7 @@ export function registerSignatureTools(pi: ExtensionAPI): void {
 		description:
 			"Build a FLIRT signature file (`Fc`) from the current binary's analyzed functions, to recognize those same functions in other samples (e.g. tracking a routine across a malware family). Written to omp-re's output directory as a `.pat` (text patterns) or `.sig` (compiled). Apply it elsewhere with apply_signatures (source 'file'). Reads the analysis and writes a file — it does not modify the analysis or the sample.",
 		approval: () => ({ tier: "exec" as const, reason: "Create a FLIRT signature file from the current analysis in omp-re's output directory — the analysis and the sample are not modified." }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: createParams,
 		...reRenderers({ title: "create_signature", subject: "file", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

@@ -64,7 +64,7 @@ function truncateUtf8Safe(text: string, maxBytes: number): string {
 const EVIDENCE_SUMMARY_MAX_BYTES = 512;
 
 /** Join every text content block into one string; image blocks contribute nothing. */
-export function extractText(content: readonly { type: string; text?: string }[]): string {
+function extractText(content: readonly { type: string; text?: string }[]): string {
 	return content
 		.filter((part) => part.type === "text" && typeof part.text === "string")
 		.map((part) => part.text)
@@ -153,44 +153,29 @@ export async function recordEvidence(
 
 /** The trailing tag appended to every evidence-tier tool result: the id prefix record_finding accepts. */
 export function evidenceTag(id: string): string {
-	return `[evidence ${id.slice(0, 8)} — cite it in re.record_finding]`;
-}
-
-/**
- * Record one evidence-tier result and return its content with the evidence tag
- * appended, or undefined when recording failed. A blob-store failure (disk
- * full, EACCES, ...) is reported, never thrown: it degrades to "no evidence
- * recorded" for that call. Shared by the `tool_result` hook and the `run`
- * tool's capability calls (capabilities.ts), so both record and tag the same way.
- */
-export async function recordAndTag(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	toolName: string,
-	input: unknown,
-	content: readonly { type: string; text?: string }[],
-	details: unknown,
-): Promise<{ id: string; content: { type: string; text?: string }[] } | undefined> {
-	try {
-		const id = await recordEvidence(pi, ctx, toolName, input, content, details);
-		// Tag the result the model sees with its evidence id: the record itself goes to the session
-		// via appendEntry, which never reaches the model, so without this tag record_finding would ask
-		// for ids the model has no way to learn. A separate trailing block, so the tool's own text
-		// (and the hashes taken over it above) are untouched.
-		return { id, content: [...content, { type: "text" as const, text: evidenceTag(id) }] };
-	} catch (err) {
-		const msg = `omp-re: evidence recording failed: ${err instanceof Error ? err.message : String(err)}`;
-		if (ctx.hasUI) ctx.ui.notify(msg, "error");
-		else pi.logger.error(msg);
-		return undefined;
-	}
+	return `[evidence ${id.slice(0, 8)} — cite it in record_finding]`;
 }
 
 export function registerEvidenceStore(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.isError) return undefined;
 		if (RE_EVIDENCE_TOOL_NAMES[event.toolName] !== true) return undefined;
-		const tagged = await recordAndTag(pi, ctx, event.toolName, event.input, event.content, event.details);
-		return tagged ? { content: tagged.content as typeof event.content } : undefined;
+
+		try {
+			const id = await recordEvidence(pi, ctx, event.toolName, event.input, event.content, event.details);
+			// Tag the result the model sees with its evidence id: the record itself goes to the session
+			// via appendEntry, which never reaches the model, so without this tag record_finding would ask
+			// for ids the model has no way to learn. A separate trailing block, so the tool's own text
+			// (and the hashes taken over it above) are untouched.
+			return { content: [...event.content, { type: "text" as const, text: evidenceTag(id) }] };
+		} catch (err) {
+			// A blob-store failure (disk full, EACCES, ...) must degrade to "no evidence
+			// recorded" for this call, not crash the tool_result pipeline.
+			const msg = `omp-re: evidence recording failed: ${err instanceof Error ? err.message : String(err)}`;
+			if (ctx.hasUI) ctx.ui.notify(msg, "error");
+			else pi.logger.error(msg);
+		}
+
+		return undefined;
 	});
 }

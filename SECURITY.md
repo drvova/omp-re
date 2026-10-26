@@ -8,44 +8,6 @@ for an unpatched vulnerability. Include a minimal reproduction and the
 `omp`/`rizin`/`omp-re` versions involved; expect an initial response
 within a few business days.
 
-## The run tool
-
-**omp-re's only tool, `run`, executes the TypeScript/JavaScript the model
-sends, inside omp's own process, with omp's full authority**: it can read and
-write any file omp can, start processes (`exec`, `require("node:child_process")`),
-and reach the network (`fetch`). That is what the tool is — a code tool, so
-the model can build its own tooling on top of rizin — not a side effect, and
-there is **no setting that turns it into something narrower**: no
-enable/disable flag, no "safe" mode, no restricted subset. The code runs in a
-worker of its own (one per session), so its definitions don't collide with
-omp's and a cancelled, crashed, or exiting cell ends only that worker — but a
-worker shares omp's process and privileges and is not a security boundary.
-
-So the security of an omp-re deployment is the sandbox omp runs in:
-
-- **Run omp in a container or a disposable VM** whenever the model, the
-  sample, or anything it reads is untrusted — which, for malware analysis, is
-  always. Give that sandbox only the files and network it needs.
-- omp's approval gate still applies: `run` declares the `exec` tier, with the
-  code's first line in its reason, so `tools.approvalMode` can require you to
-  approve each call. Approving a call approves running that code.
-- The guarantees about **what reaches the report** are unchanged: every RE
-  operation reached through `re` is validated, audited, and recorded exactly
-  as when it was a tool of its own, and `/re report` still refuses ungrounded
-  claims. Output obtained any other way (`re.rz()`, `exec`, reading files)
-  has no evidence id and cannot ground a finding.
-- The read-only gates below (`rizin_command`, `rizin_cli`) still apply to
-  `re.rizin_command` and `re.rizin_cli`, so *evidence* is only ever produced
-  by read-only commands. They do not limit the code around those calls, which
-  can drive rizin directly through `re.rz()`.
-- `exec` and raw rizin commands (`re.rz()`) are audit-logged per call, like
-  capability calls. omp's built-in tools cannot be called from code at all.
-- Kept definitions (`~/.omp/agent/re/kept/`, or `OMPRE_KEPT_DIR`) are code
-  that every new session loads. Each file is checked to be a single
-  function/class/static-const definition before it is evaluated, so a file
-  edited into doing work is refused — but treat the directory as you would
-  any code on your `PATH`: writable only by you.
-
 ## Analysis hygiene — this is not a sandbox
 
 `omp-re` is a dual-use tool: it runs rizin against binaries you feed it,
@@ -69,6 +31,10 @@ provides any isolation:
 - Triage tools (`triage_capa`, `triage_yara`, etc.) shell out to real
   external binaries you installed yourself. Their own security posture is
   out of scope for this document — keep them updated.
+- omp-re adds no code-execution tool. When the model composes RE tools in
+  omp's `eval`, the code runs in omp's own eval kernel under omp's approval of
+  `eval`; each RE tool it calls is still a separate tool call with its own
+  approval tier, audit line, and (for `/re off`) block.
 
 ## Mutations never touch the file on disk
 

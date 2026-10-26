@@ -27,8 +27,7 @@ so the host APIs under test are the ones users run. Tests that need a real
 | `audit.test.ts` | No | 5 |
 | `report.test.ts` | No | 4 |
 | `decompile.test.ts` | No | 5 |
-| `extension-sdk.test.ts` | Only its rizin tests | 11 |
-| `run.test.ts` | No | 18 |
+| `extension-sdk.test.ts` | Only its rizin tests | 9 |
 | `rizin-integration.test.ts` | Yes (one test runs without) | 13 |
 | `tools-registry.test.ts` | Yes (the renderer and native-view tests run without) | 35 |
 | `tools-mutate-registry.test.ts` | Yes | 15 |
@@ -38,29 +37,11 @@ so the host APIs under test are the ones users run. Tests that need a real
 | **Total** | | **184** |
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
-extension runner (no model is called) and drives `/re` commands and the `run`
-tool the way a session does — it asserts that `run` is the only tool the
-extension advertises, and drives every capability through code. It is the suite that catches host API drift: omp 18
+extension runner (no model is called) and drives `/re` commands and tools
+the way a session does — the tools through omp's own `eval` (`tool.<name>()`),
+since they are `xd://` devices rather than top-level tools. It is the suite that catches host API drift: omp 18
 changed `getAllTools()` to return tool objects, which broke `/re on` while
 every stub-based test stayed green. It runs in CI.
-
-`run.test.ts` covers the `run` tool's machinery without rizin: the cell
-compiler and its definition rules, the namespace (late binding, output,
-strings, the cell queue), capability dispatch (schema validation, evidence,
-audit), and kept definitions — including a test that spawns a **fresh
-process** booting omp's SDK (`test/e2e/run-cell.ts`) to prove a definition
-kept by one process is loaded in the next, and that `forget` removes it.
-It also covers stopping a call (a busy loop cancelled mid-statement, the
-cancellation reaching a capability in flight, `process.exit()` in a cell, a
-timer's late exception). Every test points `OMPRE_KEPT_DIR` and omp's agent
-dir at throwaway paths.
-
-Assert a failing `run` with `captureError(...)`, never
-`await expect(promise).rejects`: under `bun test`, the latter can stop
-delivering the namespace worker's messages while the promise is pending, and
-the test hangs. Likewise, bun test installs its own uncaught-error handling in
-workers, so behaviour that depends on the worker's own handlers (a timer's
-late exception) is tested in a child process (`test/e2e/run-cell.ts`).
 
 **The default fixture is `/bin/ls`**, which exists on every Linux host and on
 macOS, so the integration suites need nothing but rizin. Point them at

@@ -89,7 +89,7 @@ describe("the tool_result evidence hook", () => {
 		expect(ev?.tool).toBe("rizin_command");
 		// the tool's own text is untouched; the tag is a separate trailing block
 		expect(result?.content?.[0]?.text).toBe("rizin> pdf @ sym.f\nimul eax, eax, 0x21");
-		expect(result?.content?.[1]?.text).toBe(`[evidence ${ev!.id.slice(0, 8)} — cite it in re.record_finding]`);
+		expect(result?.content?.[1]?.text).toBe(`[evidence ${ev!.id.slice(0, 8)} — cite it in record_finding]`);
 		// and the summary/blob were taken over the untagged output
 		expect(ev?.summary).not.toContain("[evidence");
 	});

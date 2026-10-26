@@ -13,7 +13,7 @@ import { access, realpath as fsRealpath } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, textResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { isExecutable } from "./rizin.ts";
 import { getState, requireBinary } from "./state.ts";
 
@@ -143,7 +143,7 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 			label: `Triage: ${def.name}`,
 			description: def.description,
 			approval: { tier: "exec", reason: `Run ${def.bin} against the open binary.` },
-			loadMode: "essential",
+			loadMode: RE_LOAD_MODE,
 			parameters: noParams,
 			...reRenderers({ title: `Triage: ${def.name}`, body: "json" }),
 			async execute(_id, _params, signal, _onUpdate, ctx) {
@@ -180,7 +180,7 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 				tier: "exec",
 				reason: `Run yara with rules ${JSON.stringify((args as { rules_path?: unknown })?.rules_path ?? "?")} against the open binary.`,
 			}),
-			loadMode: "essential",
+			loadMode: RE_LOAD_MODE,
 			parameters: yaraParams,
 			...reRenderers({ title: "Triage: yara", subject: "rules_path", body: "json" }),
 			async execute(_id, params, signal, _onUpdate, ctx) {

@@ -19,7 +19,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { branchEntries, recordedMapFiles } from "./entries.ts";
 import { textResult } from "./format.ts";
 import { mapFileCommand, validateMapPerm } from "./mapfiles.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { resolveBinaryPath, validateAddr } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
@@ -42,7 +42,7 @@ export function registerMapFileTools(pi: ExtensionAPI): void {
 			const addr = typeof record.addr === "string" ? record.addr : "?";
 			return { tier: "exec" as const, reason: `Map ${path} into the session's address space at ${addr} (read-only; re-applied on respawn). The file on disk is not modified.` };
 		},
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: mapFileParams,
 		...reRenderers({ title: "Map file", subject: "path", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

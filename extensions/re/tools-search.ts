@@ -16,7 +16,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { forbiddenSyntaxReason } from "./catalog.ts";
 import { jsonResult, type ReToolResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { eaFromOffset, type RzSession, validateAddr } from "./rizin.ts";
 import { ensureRizin } from "./state.ts";
 import { DEFAULT_LIMIT, MAX_LIMIT, knownAddr, markEmpty, pageHeader, paginate } from "./tools-read.ts";
@@ -191,7 +191,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		description:
 			"Search the open binary's raw bytes for a hex pattern (rizin /xj). '..' masks one nibble for wildcard matching. Returns each hit's address, length, and flag name.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchBytesParams,
 		...reRenderers({ title: "Search bytes", subject: "pattern", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -207,7 +207,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		description:
 			"Search the open binary's raw bytes for a literal string (hex-encoded client-side, then rizin /xj). Finds matches everywhere, including code pages — unlike list_strings, which only reports rizin's detected string metadata.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchStringParams,
 		...reRenderers({ title: "Search string", subject: "pattern", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -223,7 +223,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		description:
 			"Search the open binary's raw bytes with a rizin /xr regex over bytes. Use for shaped patterns (e.g. an instruction encoding with a variable displacement).",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchRegexParams,
 		...reRenderers({ title: "Search regex", subject: "pattern", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -238,7 +238,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		description:
 			"Assemble instruction text with the binary's arch config and search for the resulting bytes (rizin /aj). Same {ea, size, flag} rows as search_bytes.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchAsmParams,
 		...reRenderers({ title: "Search asm", subject: "instructions", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -254,7 +254,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		description:
 			"Search for immediate values (rizin /v1j../v8j exact, /V1j../V8j range). Finds hardcoded constants, magic numbers, and pointer-sized immediates. Pass value for exact, or min+max for a range.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchValueParams,
 		...reRenderers({ title: "Search value", subject: "value", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -274,7 +274,7 @@ export function registerSearchTools(pi: ExtensionAPI): void {
 		description:
 			"Search ROP (return-oriented) or COP (call-oriented) gadgets natively (rizin /R + /Rj, /C + /Cj). Rows carry the gadget's entry address, size, and disassembled instruction chain. Optional filter string (rizin's own gadget filter, e.g. \"pop rdi; ret\" or a regex-free substring).",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchGadgetsParams,
 		...reRenderers({ title: "Search gadgets", subject: "kind", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

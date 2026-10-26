@@ -144,11 +144,6 @@ export const RE_SESSION_TOOL_NAMES: Record<string, true> = {
 	map_file: true,
 };
 
-/** The one tool omp-re advertises (tools-run.ts): every operation above is reached through it as a method on `re`. Its calls are audited with the code they ran; each capability call inside gets its own line. */
-export const RE_RUN_TOOL_NAMES: Record<string, true> = {
-	run: true,
-};
-
 /** Every RE-suite tool name (read + mutate + triage + rizin REPL + rizin CLI + debugger + emulator + session-setup) — the gate for the audit log, the status band, and `/re off`/`/re on`. `debug` is counted here even though it registers only when enabled, so turning it on never bypasses the log. */
 export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_READ_TOOL_NAMES,
@@ -162,7 +157,6 @@ export const RE_ALL_TOOL_NAMES: Record<string, true> = {
 	...RE_ANALYZE_TOOL_NAMES,
 	...RE_SESSION_TOOL_NAMES,
 	...RE_FINDING_TOOL_NAMES,
-	...RE_RUN_TOOL_NAMES,
 };
 
 interface AuditLine {
@@ -187,7 +181,7 @@ interface AuditLine {
  * log is a mirror for operator review, not the source of truth — it must
  * never abort the tool call being audited.
  */
-export async function appendAuditLine(
+async function appendAuditLine(
 	ctx: ExtensionContext,
 	line: Omit<AuditLine, "ts" | "sessionId" | "hmac">,
 	logger?: ExtensionAPI["logger"],

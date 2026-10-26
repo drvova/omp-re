@@ -19,7 +19,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { plainResult, textResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { isExecutable, resolveRizinTool } from "./rizin.ts";
 import { getState, requireBinary } from "./state.ts";
 
@@ -212,7 +212,7 @@ export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
 			const shown = `${tool} ${list.join(" ")}`.trim();
 			return { tier: "exec", reason: `Run ${JSON.stringify(shown.length > 160 ? `${shown.slice(0, 157)}...` : shown)}.` };
 		},
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: cliParams,
 		...reRenderers({ title: "rizin CLI", subject: "tool", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

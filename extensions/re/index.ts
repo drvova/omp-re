@@ -12,7 +12,6 @@ import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { liveAnnotations } from "./annotations.ts";
 import { composeApp } from "./app.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
-import { CapabilityRegistry } from "./capabilities.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
@@ -24,7 +23,7 @@ import { registerSignatureTools } from "./tools-signatures.ts";
 import { branchEntries, lastRecordedBinaryPath, lastRecordedBinarySha256, lastRecordedLoadOptions } from "./entries.ts";
 import { rebuildEvidenceIndex, registerEvidenceStore } from "./evidence.ts";
 import { plainResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { writeReport } from "./report.ts";
 import { sha256File, verifyEvidence } from "./verify.ts";
 import { carryManifest } from "./carry.ts";
@@ -43,8 +42,6 @@ import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
 import { liveFindings, registerFindingTools } from "./findings.ts";
-import { keptDir, listKept } from "./kept.ts";
-import { registerRunTool, RUN_TOOL_NAME } from "./tools-run.ts";
 import {
 	citeEvidence,
 	evidenceRecords,
@@ -209,7 +206,6 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 	const findings = liveFindings(ctx);
 	const inherited = findings.filter((f) => f.inherited).length;
 	lines.push(`findings on this branch: ${findings.length}${inherited ? ` (${inherited} inherited)` : ""}`);
-	lines.push(`kept definitions (${RUN_TOOL_NAME} tool): ${(await listKept(keptDir())).length} in ${keptDir()}`);
 	lines.push(`audit log signing: ${process.env.OMPRE_AUDIT_HMAC_KEY ? "HMAC-SHA256" : "unsigned (set OMPRE_AUDIT_HMAC_KEY)"}`);
 	return lines.join("\n");
 }
@@ -245,7 +241,7 @@ function registerShell(pi: ExtensionAPI): void {
 		description:
 			"Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (hash_binary, list_functions, decompile_function, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open. For a raw/headerless target (flat shellcode, firmware, a ROM dump) pass arch/bits/base/format so rizin loads it correctly instead of autodetecting from a header it doesn't have.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: openBinaryParams,
 		...reRenderers({ title: "Open binary", subject: "path", body: "text" }),
 		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
@@ -331,6 +327,13 @@ function registerShell(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		shutdownState(ctx.sessionManager.getSessionId());
+	});
+
+	// `/re off`: refuse RE tool calls, whichever path they come by — top-level, `write xd://<name>`,
+	// or `tool.<name>()` from omp's eval — since all of them pass through omp's tool_call event.
+	pi.on("tool_call", (event, ctx) => {
+		if (RE_ALL_TOOL_NAMES[event.toolName] !== true || !getState(ctx).toolsOff) return undefined;
+		return { block: true, reason: "omp-re: RE tools are off for this session — the user can re-enable them with /re on" };
 	});
 
 	function completeArguments(prefix: string): AutocompleteItem[] | null {
@@ -458,19 +461,15 @@ function registerShell(pi: ExtensionAPI): void {
 					case "status":
 						ctx.ui.notify(await statusText(ctx), "info");
 						return;
+					// A gate on the tool_call event (above), not setActiveTools: re-selecting a tool through
+					// setActiveTools pins it top-level, which would undo omp's xd:// mounting on /re on.
 					case "off": {
-						const active = pi.getActiveTools();
-						await pi.setActiveTools(active.filter((name) => !RE_ALL_TOOL_NAMES[name]));
+						getState(ctx).toolsOff = true;
 						ctx.ui.notify("omp-re: RE tools disabled for this session — /re on to re-enable", "info");
 						return;
 					}
 					case "on": {
-						const all = new Set(pi.getAllTools().map((tool) => tool.name));
-						const active = new Set(pi.getActiveTools());
-						for (const name of Object.keys(RE_ALL_TOOL_NAMES)) {
-							if (all.has(name)) active.add(name);
-						}
-						await pi.setActiveTools([...active]);
+						getState(ctx).toolsOff = false;
 						ctx.ui.notify("omp-re: RE tools enabled for this session", "info");
 						return;
 					}
@@ -489,20 +488,13 @@ function registerShell(pi: ExtensionAPI): void {
 }
 
 /**
- * Extension entry: apply every omp-re subsystem in order, then advertise the
- * one tool. The tool groups, evidence, audit, UI, and the command shell each
- * take the host; `composeApp` awaits their registration (the triage/CLI
- * probes are async) before init completes. See app.ts.
- *
- * They get `registry.host(pi)`, not `pi`: the same host, except that a
- * `registerTool` call records the operation in the capability registry
- * instead of advertising it (capabilities.ts). The only tool omp sees is
- * `run`, registered on the real host last; every recorded operation is a
- * method on `re` inside it.
+ * Extension entry: apply every omp-re subsystem in order. The tool groups,
+ * evidence, audit, UI, and the command shell each take the host (`pi`);
+ * `composeApp` awaits their registration (the triage/CLI probes are async)
+ * before init completes. See app.ts.
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
-	const registry = new CapabilityRegistry();
-	await composeApp(registry.host(pi), [
+	await composeApp(pi, [
 		{ name: "re:read-tools", apply: registerReadTools },
 		{ name: "re:info-tools", apply: registerInfoTools },
 		{ name: "re:search-tools", apply: registerSearchTools },
@@ -526,5 +518,4 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:ui", apply: registerUI },
 		{ name: "re:shell", apply: registerShell },
 	]);
-	registerRunTool(pi, registry);
 }

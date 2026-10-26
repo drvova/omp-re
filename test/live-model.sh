@@ -58,11 +58,11 @@ sed -e 's/h \* 33u/h * 31u/' -e 's/\bfib\b/fibonacci/g' "$REPO_DIR/test/fixtures
 OMP=(omp -e "$REPO_DIR/extensions/re" --model "$MODEL" --approval-mode yolo)
 
 # --- A: analyse v1, record findings, try an overreach, write the report -------
-PROMPT_A="You are reverse engineering the open binary with omp-re's run tool (re.* methods). Work only with tools; keep prose short.
-1. Call re.rizin_command({ command: \"pdf\", addr: \"sym.checksum\" }) and print the result. Work out exactly what the function computes.
-2. Call re.record_finding with that conclusion (addr sym.checksum, confidence confirmed), citing the 8-character id from the [evidence ...] tag at the end of that result.
-3. Do the same for sym.fib: re.rizin_command pdf @ sym.fib, then re.record_finding.
-4. Then call re.record_finding once more with exactly this claim, citing the checksum evidence: \"checksum authenticates the program's network traffic to a C2 server.\" Do not override the auditor if it refuses. Report what it answered."
+PROMPT_A="You are reverse engineering the open binary with the omp-re tools. Work only with tools; keep prose short.
+1. Call rizin_command with command \"pdf\" and addr \"sym.checksum\". Work out exactly what the function computes.
+2. Call record_finding with that conclusion (addr sym.checksum, confidence confirmed), citing the 8-character id from the [evidence ...] tag at the end of that tool result.
+3. Do the same for sym.fib: rizin_command pdf @ sym.fib, then record_finding.
+4. Then call record_finding once more with exactly this claim, citing the checksum evidence: \"checksum authenticates the program's network traffic to a C2 server.\" Do not override the auditor if it refuses. Report what the tool answered."
 rm -rf "$WORK/s1" "$WORK/s2" "$WORK"/v1.md* "$WORK"/v2.md*
 timeout 900 "${OMP[@]}" --binary "$WORK/v1" --session-dir "$WORK/s1" -p "$PROMPT_A" "/re report $WORK/v1.md" </dev/null >"$WORK/a.log" 2>&1
 log "phase A exit: $?"

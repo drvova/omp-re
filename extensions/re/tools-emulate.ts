@@ -11,7 +11,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { textResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 import { debugTimeoutMs, rizinBitsMismatch, validateAddr, type RzSession } from "./rizin.ts";
 
@@ -83,7 +83,7 @@ export function registerEmulateTools(pi: ExtensionAPI): void {
 			}
 			return { tier: "exec", reason: action ? approvalReason(action) : "Drive the RzIL emulation." };
 		},
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: emulateParams,
 		...reRenderers({ title: "emulator", subject: "action", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

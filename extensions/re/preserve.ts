@@ -35,7 +35,7 @@ export function preservedStateLines(ctx: ExtensionContext): string[] {
 	if (!state.binaryPath && evidence.length === 0) return [];
 
 	const lines = ["omp-re reverse-engineering session (preserve — the model must not lose this):"];
-	lines.push(`- Open binary: ${state.binaryPath ? `${basename(state.binaryPath)} (${state.binaryPath})` : "none currently open — reopen with re.open_binary (in the run tool) before anything else"}`);
+	lines.push(`- Open binary: ${state.binaryPath ? `${basename(state.binaryPath)} (${state.binaryPath})` : "none currently open — reopen with open_binary before using other RE tools"}`);
 	lines.push(`- Recorded: ${evidence.length} evidence item(s), ${annotations} annotation(s) in effect. They persist on the session branch; list them with \`/re evidence\` and recall one with \`/re cite <id>\`.`);
 	if (evidence.length > 0) {
 		lines.push(`- Most recent evidence (id · tool · where):`);
@@ -47,7 +47,7 @@ export function preservedStateLines(ctx: ExtensionContext): string[] {
 	// re-deriving (or contradicting) what it already established and recorded.
 	const findings = liveFindings(ctx);
 	if (findings.length > 0) {
-		lines.push(`- Recorded findings (${findings.length}; already in the report — revise with re.record_finding supersedes, withdraw with re.retract_finding, don't re-record):`);
+		lines.push(`- Recorded findings (${findings.length}; already in the report — revise with record_finding supersedes, withdraw with retract_finding, don't re-record):`);
 		for (const f of findings.slice(-PRESERVED_FINDINGS)) {
 			lines.push(`  · ${f.id.slice(0, 8)} [${f.confidence}${f.inherited ? ", inherited" : ""}] ${f.claim}${f.addr ? ` (at ${f.addr})` : ""}`);
 		}

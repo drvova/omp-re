@@ -45,25 +45,19 @@ system binary like `/bin/ls` is enough to learn the flow.
 
 ## How the evidence chain actually works
 
-The model works through one tool, `run`, which executes code against the
-`re` workspace. Every successful call to a **read-tier capability** —
-`re.list_functions`, `re.search_functions`, `re.get_function`,
-`re.decompile_function`, `re.disassemble_function`, `re.get_xrefs_to`,
-`re.get_xrefs_from`, `re.list_imports`, `re.list_strings`, `re.hash_binary`,
-and the rest of the read tier — and to `re.rizin_command` is automatically
-recorded as a `re.evidence` session entry (`invokeCapability` in
-`extensions/re/capabilities.ts`, through `recordAndTag` in
-`extensions/re/evidence.ts`), content-addressed and hashed. Its id ends the
-method's result as `[evidence xxxxxxxx]`, and every `run` result lists the
-evidence it recorded, so the id reaches the model even when its code never
-printed the result. Mutations (`re.rename_function`, `re.set_comment`, etc.)
-similarly record `re.annotation` entries.
+Every successful call to one of the **12 read-tier tools** —
+`list_functions`, `search_functions`, `get_function`, `decompile_function`,
+`disassemble_function`, `get_xrefs_to`, `get_xrefs_from`, `list_imports`,
+`list_exports`, `list_strings`, `list_segments`, `hash_binary` — and to
+`rizin_command` is automatically recorded as a `re.evidence` session entry via a `tool_result`
+hook (`extensions/re/evidence.ts`), content-addressed and hashed. Mutations
+(`rename_function`, `set_comment`, etc.) similarly record `re.annotation`
+entries.
 
 **This is the single most useful thing to know about this suite: work done
-outside these capabilities produces no evidence.** If the model reads a file
-with `bash`/`cat`, drives rizin raw through `re.rz()`, greps a disassembly
-dump you pasted in, or reasons from something it already knew, none of that
-is backed by an evidence id — and
+outside these tools produces no evidence.** If the model reads a file with
+`bash`/`cat`, greps a disassembly dump you pasted in, or reasons from
+something it already knew, none of that is backed by an evidence id — and
 `/re report`'s write gate is hard: if *any* claim in the built report has
 zero evidence ids, the **entire report is withheld**, not just the
 ungrounded parts. Headless failure is loud (`console.error` plus a non-zero
@@ -72,7 +66,9 @@ ungrounded report never reaches a ticket — a partial, quietly-trimmed report
 would be worse than an obvious failure, because it would look complete.
 
 In practice: if you want something in the final report, get it through a
-`re` capability, not a shell command, raw rizin, or a paraphrase. `/re evidence` and `/re cite
+tool call, not a shell command or a paraphrase. A call the model makes from
+omp's `eval` (`await tool.decompile_function({ ... })`) is a tool call too, and
+is recorded and tagged the same way. `/re evidence` and `/re cite
 <id>` exist specifically so the model (and you) can look back at exactly
 what was actually observed, in its own words, before writing a claim that
 depends on it.
@@ -180,8 +176,8 @@ Two constraints:
   no self-review guard — setting both to the same model is silently allowed
   and defeats the point of a second reviewer.
 - **The `tools:` grant is restricted to omp's built-in tool names.** This
-  suite's one tool (`run`) is extension-registered, not built-in, so listing
-  it here does nothing —
+  suite's own tools (`list_strings`, `decompile_function`, etc.) are
+  extension-registered, not built-in, so listing them here does nothing —
   the advisor gets `read`/`grep`/`glob` regardless, which is enough to read
   evidence blobs and session entries directly. Never grant a mutating tool
   to an advisor even experimentally: advisor tool grants bypass the primary
@@ -198,8 +194,7 @@ default.
 **Delegating to the `re-analyst` agent.** omp forwards extension-registered
 tools to `task` subagents, so the plugin ships `agents/re-analyst.md`. Ask
 for it by name with a binary path and a question; it opens the binary in its
-own rizin process and its own `run` namespace (its first call always opens
-the binary with `re.open_binary`; the kept helpers are there too), follows the
+own rizin process (its first call is always `open_binary`), follows the
 `re-triage` skill's order of work, and returns structured findings — a
 summary plus a list of `{claim, ea, evidence, confidence}` — where every
 `ea` is copied from tool output. Two properties to keep in mind: its

@@ -10,7 +10,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, type ReToolResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { resolveNumericAddr, validateAddr, type RzSession } from "./rizin.ts";
 import { ensureRizin } from "./state.ts";
 import { DEFAULT_LIMIT, MAX_LIMIT, markEmpty, pageHeader, paginate } from "./tools-read.ts";
@@ -116,7 +116,7 @@ export function registerTypeTools(pi: ExtensionAPI): void {
 		description:
 			"List types loaded in rizin's type database (structs via tsj, enums via tej, typedefs via ttj, function definitions via tfj). Includes rizin's built-in Windows type base plus debug-info and user-defined types. Filter by name substring; page through large lists.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: listTypesParams,
 		...reRenderers({ title: "List types", subject: "kind", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -131,7 +131,7 @@ export function registerTypeTools(pi: ExtensionAPI): void {
 		description:
 			"Define types from C definitions (rizin td). Each statement is one C declaration ending in ';' — structs, unions, enums, typedefs. Type names used but not yet defined must be defined first (td processes statements in order).",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: defineTypesParams,
 		...reRenderers({ title: "Define types", subject: "count", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -146,7 +146,7 @@ export function registerTypeTools(pi: ExtensionAPI): void {
 		description:
 			"Print memory at an address interpreted as a named type (rizin tp). The type must exist — define it with define_types first, or list existing ones with list_types.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: castMemoryParams,
 		...reRenderers({ title: "Cast memory", subject: "addr", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {

@@ -10,7 +10,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, type ReToolResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { eaFromOffset, type RzSession } from "./rizin.ts";
 import { ensureRizin } from "./state.ts";
 import { DEFAULT_LIMIT, MAX_LIMIT, knownAddr, markEmpty, pageHeader, paginate } from "./tools-read.ts";
@@ -134,7 +134,7 @@ export function registerInfoTools(pi: ExtensionAPI): void {
 		description:
 			"Binary identity: architecture, bits, base address, format, class, compiler, sizes and checksums (rizin iIj). Useful immediately after open_binary as the ground-truth anchor for later claims.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: noParams,
 		...reRenderers({ title: "Binary info", subject: "binary", body: "json" }),
 		async execute(_id, _params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -148,7 +148,7 @@ export function registerInfoTools(pi: ExtensionAPI): void {
 		label: "List Entrypoints",
 		description: "Binary entry points with their addresses and types (rizin iej).",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: noParams,
 		...reRenderers({ title: "Entrypoints", subject: "binary", body: "json" }),
 		async execute(_id, _params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -162,7 +162,7 @@ export function registerInfoTools(pi: ExtensionAPI): void {
 		label: "List Relocations",
 		description: "Relocations applied at load time (rizin irj) — relevant when analysing a rebased or patched image.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: relocationsParams,
 		...reRenderers({ title: "Relocations", subject: "binary", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -177,7 +177,7 @@ export function registerInfoTools(pi: ExtensionAPI): void {
 		description:
 			"Named flags/labels rizin knows about (rizin flj) — analysis flags, reloc.*, section and function labels. Filter by name substring; page through large lists.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: listFlagsParams,
 		...reRenderers({ title: "List flags", subject: "filter", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -192,7 +192,7 @@ export function registerInfoTools(pi: ExtensionAPI): void {
 		description:
 			"Classes recovered from binary metadata — C++ RTTI, Objective-C, Swift metadata (rizin icj). Empty on plain C binaries. Rows can carry methods and fields.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: listClassesParams,
 		...reRenderers({ title: "List classes", subject: "filter", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
