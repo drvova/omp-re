@@ -1024,7 +1024,7 @@ EXPECTED_SHA256="$(sha256sum "$PE_BINARY" | awk '{print $1}')"
 [ -n "$EXPECTED_SHA256" ] || { echo 'FAIL: could not compute the fixture digest'; exit 1; }
 
 if model_step 'G1 model calls hash_binary and reports the real digest' \
-	'Call hash_binary on the open binary and report only the SHA-256.' \
+	'Use the run tool to call re.hash_binary() on the open binary and report only the SHA-256.' \
 	"$EXPECTED_SHA256" 1 180; then
 
 	# The audit HMAC warning fires on the first RE tool call, not at startup
@@ -1188,7 +1188,7 @@ if [ "$ALT_OK" -eq 1 ]; then
 fi
 
 if [ "$MODEL_OK" -eq 1 ]; then
-	say 'Call hash_binary on the open binary and report only the SHA-256. If you have no such tool, reply exactly NOTOOL.'
+	say 'Use the run tool to call re.hash_binary() on the open binary and report only the SHA-256. If you have no run tool, reply exactly NOTOOL.'
 	# Completion must be a real turn boundary, not the reply's wording: with the
 	# RE tools gated off the model may decline in prose instead of emitting the
 	# literal NOTOOL, and that is still a correct gating outcome. wait_turn
@@ -1211,7 +1211,7 @@ if [ "$MODEL_OK" -eq 1 ]; then
 	expect 'K3 /re on re-enables the RE tools' 'omp-re: RE tools enabled for this session' 20
 
 	if model_step 'K4 hash_binary runs again once the RE tools are back on' \
-		'Call hash_binary on the open binary and report only the SHA-256.' \
+		'Use the run tool to call re.hash_binary() on the open binary and report only the SHA-256.' \
 		"$ALT_SHA256" 1 180; then
 
 		# K5: triage tools self-register only when their backing binary is on
@@ -1225,7 +1225,7 @@ if [ "$MODEL_OK" -eq 1 ]; then
 		# there is nothing cheap to observe.
 		if command -v yara >/dev/null 2>&1; then
 			model_step 'K5 triage_yara is registered because yara is on PATH' \
-				'Call the tool named triage_yara with rules_path set to /tmp/omp-re-no-such-rules.yar and report the exact error text you get back.' \
+				'Use the run tool to call re.triage_yara({ rules_path: "/tmp/omp-re-no-such-rules.yar" }) and report the exact error text you get back.' \
 				'omp-re: invalid rules_path' 1 180 || true
 		else
 			skip 'K5 triage_yara is registered because yara is on PATH' 'yara not on PATH'

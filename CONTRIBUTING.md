@@ -33,6 +33,13 @@ TypeScript infer `params` from a schema declared outside the call. Give every
 tool both renderer pairs via `reRenderers(...)` (`renderCall`/`renderResult`
 for the ANSI transcript, `describeCall`/`describeResult` for Tern).
 
+omp-re advertises exactly one tool, `run`. Tool modules still call
+`pi.registerTool({...})`, but at load they receive the capability registry's
+host (`extensions/re/capabilities.ts`), so each definition becomes a
+`re.<name>` method inside `run` rather than an advertised tool. Add new
+operations the same way; never register a second tool on the real host, and
+don't add a flag that would advertise the capabilities as tools.
+
 Every rizin command an RE tool sends goes through `validateAddr`,
 `validateIdent`, or `rzQuote` (`extensions/re/rizin.ts`); annotation commands
 are built only by `annotationCommands` (`extensions/re/annotations.ts`),

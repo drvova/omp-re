@@ -8,6 +8,10 @@
  * This is the suite that catches host API drift (e.g. omp 18 changing
  * getAllTools() from names to ToolInfo objects broke `/re on` while every
  * stub-based test stayed green). The rizin-free half runs in CI.
+ *
+ * omp-re advertises exactly one tool, `run`; every RE operation is a method
+ * on `re` inside it, so these tests drive the operations through code the
+ * way a model does.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
@@ -15,15 +19,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
+import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_FINDING_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
 import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
 import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
 const EXTENSION = resolve(import.meta.dir, "../extensions/re");
-/** The tools registered unconditionally in every session. Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
-const ALWAYS_REGISTERED = [
+/** The capabilities present in every session (methods on `re`). Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
+const ALWAYS_PRESENT = [
 	...Object.keys(RE_READ_TOOL_NAMES),
 	...Object.keys(RE_MUTATE_TOOL_NAMES),
 	...Object.keys(RE_RIZIN_TOOL_NAMES),
@@ -31,6 +35,7 @@ const ALWAYS_REGISTERED = [
 	...Object.keys(RE_SIGNATURE_TOOL_NAMES),
 	...Object.keys(RE_ANALYZE_TOOL_NAMES),
 	...Object.keys(RE_SESSION_TOOL_NAMES),
+	...Object.keys(RE_FINDING_TOOL_NAMES),
 ];
 
 interface Harness {
@@ -101,17 +106,29 @@ async function boot(sessionManager: unknown): Promise<Harness> {
 
 const activeRe = (session: AgentSession) => session.getActiveToolNames().filter((name) => RE_ALL_TOOL_NAMES[name]);
 
+/** Run one cell through the `run` tool, as a model's tool call would. Returns the result text; a failing cell rejects. */
+async function run(session: AgentSession, code: string, strings?: Record<string, string>): Promise<string> {
+	const result = await session.getToolByName("run")!.execute(`t-run-${Math.random().toString(36).slice(2)}`, strings ? { code, strings } : { code });
+	const block = result.content[0];
+	return block?.type === "text" ? block.text : "";
+}
+
 let agentDir: string;
 let originalAgentDir: string;
+const originalKeptDir = process.env.OMPRE_KEPT_DIR;
 
 beforeAll(async () => {
 	originalAgentDir = getAgentDir();
 	agentDir = await mkdtemp(join(tmpdir(), "omp-re-sdk-test-"));
 	setAgentDir(agentDir);
+	// Kept definitions go to a throwaway directory, never a real user's.
+	process.env.OMPRE_KEPT_DIR = join(agentDir, "kept");
 });
 
 afterAll(async () => {
 	setAgentDir(originalAgentDir);
+	if (originalKeptDir === undefined) delete process.env.OMPRE_KEPT_DIR;
+	else process.env.OMPRE_KEPT_DIR = originalKeptDir;
 	rmDirSafe(agentDir);
 });
 
@@ -127,16 +144,42 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 		await h.shutdown();
 	});
 
-	test("registers every non-triage RE tool, all active", () => {
-		for (const name of ALWAYS_REGISTERED) expect(h.session.getToolByName(name)).toBeDefined();
-		expect(activeRe(h.session).sort()).toEqual(expect.arrayContaining(ALWAYS_REGISTERED.sort()));
+	test("advertises exactly one tool, run, and it is active", () => {
+		// Filtered to this extension: omp's own built-in extensions register tools through the same runner.
+		const registered = h.session.extensionRunner!
+			.getAllRegisteredTools()
+			.filter((tool) => resolve(tool.extensionPath).startsWith(EXTENSION))
+			.map((tool) => tool.definition.name);
+		expect(registered).toEqual(["run"]);
+		expect(activeRe(h.session)).toEqual(["run"]);
+		for (const name of ALWAYS_PRESENT) expect(h.session.getToolByName(name)).toBeUndefined();
 	});
 
-	test("/re off deactivates every RE tool and /re on brings them all back", async () => {
+	test("empty code returns the manual: the namespace vocabulary, the security note, and what the project offers", async () => {
+		const text = await run(h.session, "");
+		for (const word of ["re ", "describe(x)", "man()", "kept(name?)", "forget(name)", "strings", "SECURITY", "sandbox", "open_binary"]) expect(text).toContain(word);
+		expect(text).toMatch(/capabilities: \d+ live/);
+	});
+
+	test("describe(re) lists every always-present capability with a signature", async () => {
+		const text = await run(h.session, "describe(re)");
+		for (const name of ALWAYS_PRESENT) expect(text).toContain(`  ${name}(`);
+		expect(text).toContain("decompile_function({ addr: string })");
+		expect(await run(h.session, "describe(re.rename_function)")).toContain("new: string");
+	});
+
+	test("a helper defined in one call is reusable in the next without being redefined", async () => {
+		expect(await run(h.session, "function sdkTwice(x: number): number { return x * 2 }\nconst sdkBase = 20")).toContain("kept sdkTwice, sdkBase");
+		expect(await run(h.session, "sdkTwice(sdkBase) + 2")).toContain("42");
+		const rule = 'rule x { strings: $a = "\\x41`${}" condition: $a }';
+		expect(await run(h.session, "strings.rule", { rule })).toBe(`ran\n${rule}`);
+	});
+
+	test("/re off deactivates the run tool and /re on brings it back", async () => {
 		await h.session.prompt("/re off");
 		expect(activeRe(h.session)).toEqual([]);
 		await h.session.prompt("/re on");
-		expect(activeRe(h.session).sort()).toEqual(expect.arrayContaining(ALWAYS_REGISTERED.sort()));
+		expect(activeRe(h.session)).toEqual(["run"]);
 		expect(h.notes.at(-1)).toBe("[info] omp-re: RE tools enabled for this session");
 	});
 
@@ -157,8 +200,9 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 		expect(h.notes.at(-1)).toBe("[error] omp-re: no annotation left to undo");
 	});
 
-	test("a tool called with no binary open fails with omp-re's guidance", async () => {
-		await expect(h.session.getToolByName("list_functions")!.execute("t-nobin", {})).rejects.toThrow("omp-re: no binary open");
+	test("a capability called with no binary open fails with omp-re's guidance, and the code can catch it", async () => {
+		await expect(run(h.session, "await re.list_functions()")).rejects.toThrow("omp-re: no binary open");
+		expect(await run(h.session, "try { await re.list_functions() } catch (e) { print('caught:', e.message) }")).toContain("caught: omp-re: no binary open");
 	});
 });
 
@@ -171,17 +215,15 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		const sessionDir = join(agentDir, "sessions");
 		const first = await boot(SessionManager.create(tmpdir(), sessionDir));
 		await first.session.sessionManager.ensureOnDisk();
-		const run = (h: Harness, name: string, params: Record<string, unknown>) => h.session.getToolByName(name)!.execute(`t-${name}`, params);
-
-		await run(first, "open_binary", { path: TEST_BINARY });
-		await run(first, "rename_function", { addr: "main", new: "omp_re_sdk_main" });
+		await run(first.session, `await re.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`);
+		await run(first.session, 'await re.rename_function({ addr: "main", new: "omp_re_sdk_main" })');
 		const file = first.session.sessionManager.getSessionFile()!;
 		await first.shutdown();
 
 		const second = await boot(await SessionManager.open(file));
 		try {
-			const result = await run(second, "get_function", { target: "omp_re_sdk_main" });
-			expect(result.content[0]?.type === "text" && result.content[0].text.startsWith("omp_re_sdk_main at 0x")).toBe(true);
+			const result = await run(second.session, 'await re.get_function("omp_re_sdk_main")');
+			expect(result).toMatch(/^ran · 1 re call · 1 evidence\nomp_re_sdk_main at 0x/);
 			expect(second.notes.filter((n) => n.startsWith("[runtime]"))).toEqual([]);
 		} finally {
 			await second.shutdown();
@@ -192,15 +234,16 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 		const h = await boot(SessionManager.inMemory());
 		try {
-			await h.session.getToolByName("open_binary")!.execute("t-open", { path: TEST_BINARY });
+			await run(h.session, `await re.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`);
 			await h.session.prompt("/re status");
 			// The count is REQUIRED_COMMANDS.length, which grows as tool families
 			// are added; assert the shape, not a frozen number.
 			expect(h.notes.at(-1)).toContain(`rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present`);
-			const result = await h.session.getToolByName("rizin_command")!.execute("t-rz", { command: "pdsf", addr: "main" });
-			expect(result.content[0]?.type === "text" && result.content[0].text.startsWith("rizin> pdsf @ main\n")).toBe(true);
+			const result = await run(h.session, 'await re.rizin_command({ command: "pdsf", addr: "main" })');
+			expect(result).toContain("\nrizin> pdsf @ main\n");
+			expect(result).toMatch(/evidence recorded \(cite in re\.record_finding\): [0-9a-f]{8} rizin_command/);
 			// rizin_cli registers through the real runner when the rz-* tools are present (they ship with rizin).
-			expect(h.session.getToolByName("rizin_cli")).toBeDefined();
+			expect(await run(h.session, "typeof re.rizin_cli")).toContain("function");
 		} finally {
 			await h.shutdown();
 		}
@@ -210,7 +253,7 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 		const off = await boot(SessionManager.inMemory());
 		try {
-			expect(off.session.getToolByName("rizin_debug")).toBeUndefined();
+			expect(await run(off.session, "typeof re.rizin_debug")).toContain("undefined");
 		} finally {
 			await off.shutdown();
 		}
@@ -219,11 +262,10 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		process.env.OMPRE_ENABLE_DEBUGGER = "1";
 		const on = await boot(SessionManager.inMemory());
 		try {
-			expect(on.session.getToolByName("rizin_debug")).toBeDefined();
-			await on.session.getToolByName("open_binary")!.execute("t-open", { path: TEST_BINARY });
-			const started = await on.session.getToolByName("rizin_debug")!.execute("t-dbg", { action: "start" });
-			expect(started.content[0]?.type === "text" && started.content[0].text).toContain("RUNNING under a debugger");
-			await on.session.getToolByName("rizin_debug")!.execute("t-dbg-stop", { action: "stop" });
+			expect(await run(on.session, "describe(re.rizin_debug)")).toContain("action:");
+			await run(on.session, `await re.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`);
+			expect(await run(on.session, 'await re.rizin_debug({ action: "start" })')).toContain("RUNNING under a debugger");
+			await run(on.session, 'await re.rizin_debug({ action: "stop" })');
 		} finally {
 			await on.shutdown();
 			if (prev === undefined) delete process.env.OMPRE_ENABLE_DEBUGGER;

@@ -461,7 +461,7 @@ export async function showCodeView(ctx: ExtensionContext, addr: string, name?: s
 				},
 				onAsk: () => {
 					ctx.ui.setEditorText(
-						`Analyze function ${name ?? addr} at ${addr}. Use the RE tools to gather evidence first; report only what the evidence supports.`,
+						`Analyze function ${name ?? addr} at ${addr}. Use the RE tools to gather evidence first (the re.* methods in the run tool); report only what the evidence supports.`,
 					);
 					done(undefined);
 				},

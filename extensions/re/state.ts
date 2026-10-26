@@ -54,7 +54,7 @@ export function stopDebug(ctx: ExtensionContext): Promise<boolean> {
 export function requireDebug(ctx: ExtensionContext): RzSession {
 	const rz = getState(ctx).dbg;
 	if (!rz || rz.isClosed) {
-		throw new Error("omp-re: no debug session — run the debug tool with action 'start' first (it launches the process).");
+		throw new Error("omp-re: no debug session — call re.rizin_debug({ action: 'start' }) first (it launches the process).");
 	}
 	return rz;
 }

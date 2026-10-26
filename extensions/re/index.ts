@@ -12,6 +12,7 @@ import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { liveAnnotations } from "./annotations.ts";
 import { composeApp } from "./app.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
+import { CapabilityRegistry } from "./capabilities.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
@@ -42,6 +43,8 @@ import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
 import { liveFindings, registerFindingTools } from "./findings.ts";
+import { keptDir, listKept } from "./kept.ts";
+import { registerRunTool, RUN_TOOL_NAME } from "./tools-run.ts";
 import {
 	citeEvidence,
 	evidenceRecords,
@@ -206,6 +209,7 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 	const findings = liveFindings(ctx);
 	const inherited = findings.filter((f) => f.inherited).length;
 	lines.push(`findings on this branch: ${findings.length}${inherited ? ` (${inherited} inherited)` : ""}`);
+	lines.push(`kept definitions (${RUN_TOOL_NAME} tool): ${(await listKept()).length} in ${keptDir()}`);
 	lines.push(`audit log signing: ${process.env.OMPRE_AUDIT_HMAC_KEY ? "HMAC-SHA256" : "unsigned (set OMPRE_AUDIT_HMAC_KEY)"}`);
 	return lines.join("\n");
 }
@@ -485,13 +489,20 @@ function registerShell(pi: ExtensionAPI): void {
 }
 
 /**
- * Extension entry: apply every omp-re subsystem in order. The tool groups,
- * evidence, audit, UI, and the command shell each take the host (`pi`);
- * `composeApp` awaits their registration (the triage/CLI probes are async)
- * before init completes. See app.ts.
+ * Extension entry: apply every omp-re subsystem in order, then advertise the
+ * one tool. The tool groups, evidence, audit, UI, and the command shell each
+ * take the host; `composeApp` awaits their registration (the triage/CLI
+ * probes are async) before init completes. See app.ts.
+ *
+ * They get `registry.host(pi)`, not `pi`: the same host, except that a
+ * `registerTool` call records the operation in the capability registry
+ * instead of advertising it (capabilities.ts). The only tool omp sees is
+ * `run`, registered on the real host last; every recorded operation is a
+ * method on `re` inside it.
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
-	await composeApp(pi, [
+	const registry = new CapabilityRegistry();
+	await composeApp(registry.host(pi), [
 		{ name: "re:read-tools", apply: registerReadTools },
 		{ name: "re:info-tools", apply: registerInfoTools },
 		{ name: "re:search-tools", apply: registerSearchTools },
@@ -515,4 +526,5 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		{ name: "re:ui", apply: registerUI },
 		{ name: "re:shell", apply: registerShell },
 	]);
+	registerRunTool(pi, registry);
 }

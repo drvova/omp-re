@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "omp-re",
-      "description": "Reverse-engineering suite: rizin tools, re-analyst subagent, evidence store, audit log, RE status band, report generator",
+      "description": "Reverse-engineering suite: rizin behind one code tool (run), re-analyst subagent, evidence store, audit log, RE status band, report generator",
       "version": "0.6.0",
       "homepage": "https://github.com/drvova/omp-re",
       "repository": "https://github.com/drvova/omp-re",

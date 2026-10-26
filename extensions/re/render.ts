@@ -29,6 +29,8 @@ export interface RenderSpec {
 	title: string;
 	/** Which argument names the call's subject (address, query, path), shown after the title. */
 	subject?: string;
+	/** Show only the subject's first non-blank line, clipped (for a multi-line subject such as `run`'s code). */
+	subjectFirstLine?: boolean;
 	body: BodyStyle;
 }
 
@@ -50,9 +52,21 @@ function firstText(result: RenderableResult): string {
 	return block?.text ?? "";
 }
 
+const SUBJECT_LINE_CHARS = 80;
+
+/** The call's subject as displayed: the named argument, or its first line when the spec asks for that. */
+function subjectOf(spec: RenderSpec, args: RenderArgs | undefined): unknown {
+	const subject = spec.subject ? args?.[spec.subject] : undefined;
+	if (!spec.subjectFirstLine || typeof subject !== "string") return subject;
+	const lines = subject.split("\n").filter((line) => line.trim() !== "");
+	const first = (lines[0] ?? "").trim();
+	const clipped = first.length > SUBJECT_LINE_CHARS ? `${first.slice(0, SUBJECT_LINE_CHARS - 1)}…` : first;
+	return lines.length > 1 ? `${clipped} (+${lines.length - 1} lines)` : clipped;
+}
+
 function callLine(spec: RenderSpec, args: RenderArgs | undefined, theme: Theme): string {
 	const parts = [theme.fg("toolTitle", theme.bold(spec.title))];
-	const subject = spec.subject ? args?.[spec.subject] : undefined;
+	const subject = subjectOf(spec, args);
 	if (typeof subject === "string" && subject.length > 0) parts.push(theme.fg("accent", subject));
 	const meta: string[] = [];
 	for (const key of ["offset", "limit", "filter"]) {
@@ -95,7 +109,7 @@ function bodyLines(style: BodyStyle, body: string, details: ReToolDetails | unde
 }
 
 function nativeHead(spec: RenderSpec, args: RenderArgs | undefined, meta: NativeToolHead["meta"] = []): NativeToolHead {
-	const subject = spec.subject ? args?.[spec.subject] : undefined;
+	const subject = subjectOf(spec, args);
 	return {
 		title: spec.title,
 		...(typeof subject === "string" && subject.length > 0 ? { target: subject } : {}),
@@ -140,7 +154,7 @@ export function reRenderers(spec: RenderSpec) {
 			if (details?.decompiler === "disasm") meta.push(theme.fg("warning", "disassembly only"));
 			if (details?.truncated) meta.push(theme.fg("warning", "truncated"));
 			if (details?.artifactId) meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
-			const subject = spec.subject ? args?.[spec.subject] : undefined;
+			const subject = subjectOf(spec, args);
 			const headLine = [
 				theme.styledSymbol("status.success", "success"),
 				theme.fg("toolTitle", header),

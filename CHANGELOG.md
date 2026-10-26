@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: one code tool, `run`, replaces the 64-tool catalog.** omp-re now
+  advertises exactly one tool. `run` executes TypeScript/JavaScript in a
+  long-lived namespace per omp session (a `node:vm` realm), so the model
+  builds its own tooling on a live API instead of picking from a fixed menu
+  that every rizin build, install, and model supports differently.
+  - **`re` is the workspace.** Every former tool is a method on it, with the
+    same name and parameters: `await re.decompile_function({ addr: "main" })`,
+    or with one required parameter `await re.decompile_function("main")`.
+    `describe(re)` lists the live capability set (triage only when its binary
+    is installed, the debugger only when enabled) with signatures from each
+    parameter schema; `describe(x)` introspects anything; `re.rz()` is the raw
+    rizin session (unrecorded).
+  - **Same guarantees.** A method call is validated against the capability's
+    schema (unknown keys refused), audit-logged, run through the capability's
+    own `execute`, and — for an observation — recorded as `re.evidence` with
+    its `[evidence xxxxxxxx]` id, which every `run` result also lists. The
+    report, verify, and carry gates are unchanged.
+  - **Definitions persist.** Top-level declarations survive across calls; the
+    last expression is returned with anything printed. After a successful
+    call, each top-level function, class, and static `const` is kept in
+    `~/.omp/agent/re/kept/<name>.ts` (`OMPRE_KEPT_DIR` overrides) and loaded
+    into every new session, each unit checked to be one definition and loaded
+    in isolation. Statements that do work are never kept. `kept()` lists,
+    `forget(name)` removes.
+  - **Discovery in-language.** Empty `code` returns the manual (`man()` from
+    inside); `strings` passes long literal text as `strings.<name>`.
+  - **Security is the deployment's.** `run` executes code with omp's
+    authority (`exec` approval tier, the code's first line as its reason).
+    There is no enable/disable switch or restricted mode; run omp sandboxed
+    for untrusted samples. See `SECURITY.md#the-run-tool`.
+  - **Kept, not advertised.** The capability modules still register through
+    `pi.registerTool`; `index.ts` hands them a host whose `registerTool`
+    records each definition in a capability registry (`capabilities.ts`)
+    instead. `/re off`/`/re on` now toggle `run`. The `re-analyst` agent, the
+    `re-triage` skill, and the TUI/live-model test prompts call `re.*`
+    through `run`. The evidence tag reads `cite it in re.record_finding`.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added

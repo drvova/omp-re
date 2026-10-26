@@ -4,17 +4,24 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![64 tools](https://img.shields.io/badge/tools-64-informational)
+![1 tool, 64 capabilities](https://img.shields.io/badge/tools-1%20(64%20capabilities)-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 64 agent tools, a `/re` slash
-command, five overlay panels, a packaged `re-analyst` subagent, a
+it drives [rizin](https://rizin.re) behind **one code tool, `run`** — the
+model writes TypeScript against a live `re` workspace with 64 capabilities and
+builds its own helpers on top — plus a `/re` slash command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
-gathers facts through the tools; the evidence store remembers exactly what it
+gathers facts through `re`; the evidence store remembers exactly what it
 observed; the report writer will not let it claim more than that.
+
+> **Security: `run` executes code with omp's full authority** — files,
+> processes, network. That is what the tool is; there is no restricted mode
+> and no switch to turn it into one. Run omp inside a sandbox (a container or
+> a disposable VM) whenever you analyse anything untrusted. See
+> [`SECURITY.md`](SECURITY.md#the-run-tool).
 
 ## Install
 
@@ -66,10 +73,73 @@ a                # hand the function off to the model with a grounding prompt
 /re carry report.md.manifest.json --against ./v2 --inherit   # re-prove what survives on the next build
 ```
 
+What the model sends is code, in one persistent namespace:
+
+```ts
+// run({ code })
+await re.open_binary({ path: "/bin/ls" })
+/** Biggest functions first. */
+async function biggest(n: number) {
+  const rz = await re.rz()
+  const fns = (await rz.cmdj("aflj")) as { name: string; size: number }[]
+  return fns.sort((a, b) => b.size - a.size).slice(0, n)
+}
+for (const f of await biggest(3)) print(await re.decompile_function(f.name))
+```
+
+`biggest` is still there on the next call — and, because it is a top-level
+definition, in the next session too.
+
 Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a
 binary path. It opens the binary in its own rizin process, follows the triage
 order, and returns structured findings that each cite the tool output and
 address behind them.
+
+## One tool: `run`
+
+A fixed catalog of typed tools is the wrong interface for reverse
+engineering. Every rizin build, platform, and install supports a different
+subset of operations, and different models use a given menu differently
+well — so a hand-picked menu biases the plugin toward some models and some
+targets, and every new capability needs new glue. omp-re advertises exactly
+one tool instead, `run`, which executes TypeScript/JavaScript, and lets the
+model build its own tooling on a live API: discover what is there, write
+helpers, reuse and refine them.
+
+- **One namespace per session.** Each omp session (and each task subagent,
+  like its rizin process) has one long-lived JavaScript realm. Whatever a call
+  declares at the top level is there for the next call; `await` works at the
+  top level; the last expression is returned along with anything printed.
+- **`re` is the workspace.** Every RE operation is a method:
+  `await re.list_functions({ sort: "size" })`, `await re.decompile_function("main")`,
+  `await re.record_finding({...})`. `describe(re)` lists the live capability
+  set — triage methods exist only when their binaries are installed,
+  `re.rizin_debug` only when enabled — with each method's signature (from its
+  parameter schema) and one-line doc; `describe(x)` introspects anything else.
+  `re.rz()` is the raw rizin session for exploration (unrecorded).
+- **Same guarantees as before.** A method call takes the same path a tool
+  call did: params validated against the operation's schema, one audit-log
+  line, the operation's own code, and for an observation a `re.evidence`
+  record and an `[evidence xxxxxxxx]` id — listed again at the end of every
+  `run` result, so the model can cite it in `re.record_finding` even when the
+  code never printed it.
+- **Helpers persist across restarts.** After a successful call, each top-level
+  function, class, and static `const` it defined is written to its own file in
+  `~/.omp/agent/re/kept/` (or `OMPRE_KEPT_DIR`) and loaded into every new
+  session's namespace — each unit checked to be a single definition and
+  loaded in isolation, so a broken one cannot stop the rest. Statements that
+  do work are never saved, so a restart rebuilds the model's tools without
+  replaying its analysis. `kept()` lists them, `forget(name)` deletes one.
+- **Discovery is in the language.** `run` with empty `code` returns the
+  manual (`man()` from inside): the namespace vocabulary, the security note,
+  the session's binary, and what is kept. Long literal text (a YARA rule, C
+  declarations) goes in the `strings` argument and is read as `strings.<name>`.
+
+The operations' code is unchanged and still registered through
+`pi.registerTool` — the tests drive it directly — but `index.ts` hands those
+modules a host whose `registerTool` records each definition in the capability
+registry instead of advertising it (`extensions/re/capabilities.ts`). See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#the-run-tool).
 
 ## What's omp-native
 
@@ -77,16 +147,16 @@ address behind them.
 
 | omp feature | What omp-re does with it |
 | --- | --- |
-| Tool renderers (`renderCall`/`renderResult`) | Every RE tool renders a compact call line and a collapsible result; decompiled code is syntax-highlighted as C with omp's highlighter. |
-| Native tool views (`describeCall`/`describeResult`) | In Tern and other TSP terminals, each RE tool is a native tool card — title, target, and facts in the head; C, JSON, or disassembly as a `code` node the terminal highlights and clamps — instead of a generic text card. |
-| Streaming updates + `AbortSignal` | `open_binary` streams analysis progress; cancelling a tool call stops waiting without killing rizin (and its annotations); cancelling analysis kills the half-analyzed process. |
+| Tool renderers (`renderCall`/`renderResult`) | `run` renders a compact call line (the code's first line) and a collapsible result headed by what the call did (`ran · 3 re calls · 2 evidence · kept biggest`). |
+| Native tool views (`describeCall`/`describeResult`) | In Tern and other TSP terminals, `run` is a native tool card — title, the code's first line, and facts in the head; the output as a `code` node the terminal clamps — instead of a generic text card. |
+| Streaming updates + `AbortSignal` | `re.open_binary` streams analysis progress through `run`; cancelling a `run` call stops waiting without killing rizin (and its annotations); cancelling analysis kills the half-analyzed process. |
 | Session artifacts (`artifact://`) | Output past the context cap is saved in full to the session's artifact store and linked from the result, never discarded. |
 | Session branches (`getBranch`) | Evidence, annotations, and the open binary follow the active branch: after `/tree` navigation or a branch, an abandoned branch's renames are rolled back and its evidence no longer grounds claims. |
 | Session lifecycle events | `--continue`/`/resume` reopen the branch's binary in the background and **replay its annotations** into the fresh rizin process; a crashed or timed-out rizin respawns the same way. |
 | Compaction preservation (`session.compacting`) | When omp compacts the conversation, omp-re folds a snapshot of the RE session — open binary, evidence and annotation counts, the most recent evidence ids — into the summary, so the post-compaction model stays grounded and knows it can recall detail with `/re evidence` / `/re cite`. |
 | process lifecycle | The rizin/debug processes a session owns are tracked on a small per-session teardown scope: a respawn closes just the previous process, session shutdown closes them all. Subsystems are applied in order with the host handed to each. No third-party runtime dependencies — the plugin resolves only the host's own packages. See `extensions/re/{runtime,app}.ts`. |
-| Approval tiers with reasons | Read tools (and `rizin_help`) are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); `rizin_command` is `exec` with the exact command in its reason; triage tools are `exec`. omp's `tools.approvalMode` decides. |
-| Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
+| Approval tiers with reasons | `run` is `exec`, with the code's first line in its reason; omp's `tools.approvalMode` decides. The approval covers the whole call — it runs code — so the per-operation tiers (`read`/`write`/`exec`) are now descriptive (`describe(re)` groups by them) and the audit log still records every operation. |
+| Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. A subagent gets its own namespace and the kept helpers. |
 | Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the evidence ids on this branch. |
 | Footer status, widgets, logger | Analysis progress shows in the footer; the binary-facts band is a widget; headless warnings go to omp's log. |
 
@@ -339,14 +409,16 @@ records no evidence.
 
 `omp --binary <path>` opens a binary at startup.
 
-## Tool reference
+## Capability reference
 
-All 64 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
-tables. Triage tools appear only when their backing binary is on PATH, and
-`rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
+omp advertises one tool, `run`. These are the 64 capabilities on `re` inside
+it — call each as `await re.<name>({ ...params })`; `describe(re)` lists the
+ones your install has, and [`docs/tools.md`](docs/tools.md) has full parameter
+tables. Triage capabilities exist only when their backing binary is on PATH,
+and `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own list
 may legitimately show fewer than 64.
 
-| Tool | Tier | What it does |
+| Capability | Tier | What it does |
 | --- | --- | --- |
 | `open_binary` | session | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. |
 | `export_project` | session (exec) | Save the analysis as a rizin project (`.rzdb`, `Ps`) to open in rizin or Cutter. |
@@ -410,7 +482,7 @@ may legitimately show fewer than 64.
 | `triage_die` | triage | Detect packers/compilers/file types (Detect It Easy). |
 | `triage_yara` | triage | Scan with user-supplied YARA rules. |
 
-Every mutate tool follows resolve → read-old → write → read-back → verify,
+Every annotate capability follows resolve → read-old → write → read-back → verify,
 and throws with what rizin actually stored rather than reporting success when
 the mutation did not land as requested. `/re undo` reverses the most recently
 applied annotation. Every free-text and type argument reaches rizin as a
@@ -419,7 +491,7 @@ run.
 
 ## Configuration
 
-Three environment variables, all optional:
+Environment variables, all optional:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -427,16 +499,17 @@ Three environment variables, all optional:
 | `OMPRE_RIZIN_LOAD_USER_CONFIG` | unset | By default omp-re spawns rizin with `-N` so your `rizinrc` can't change the output it parses. Set (`1`/`true`) to load your rizinrc (e.g. for a custom `dir.plugins`). |
 | `OMPRE_ANALYSIS_TIMEOUT_MS` | `300000` | Budget for the one-time `aaa` analysis run on open. |
 | `OMPRE_DECOMPILER` | `pdg,pdd` | Comma-separated decompiler command priority; names a plugin's command. Built-ins stay as a fallback. |
-| `OMPRE_ENABLE_DEBUGGER` | unset | Set (`1`/`true`) to register `rizin_debug`, which **executes** the sample under rizin's debugger. Off by default. |
+| `OMPRE_ENABLE_DEBUGGER` | unset | Set (`1`/`true`) to add `re.rizin_debug`, which **executes** the sample under rizin's debugger. Off by default. |
 | `OMPRE_DEBUG_TIMEOUT_MS` | `60000` | Budget for one debugger continue/step before the stuck debuggee is killed. |
 | `OMPRE_AUDIT_HMAC_KEY` | unset | HMAC-SHA256 key for signing audit log lines. Unset → lines are written unsigned plus a one-time warning. |
+| `OMPRE_KEPT_DIR` | `~/.omp/agent/re/kept` | Where `run` keeps the model's definitions across restarts, one file per name. |
 
 ## Docs
 
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 64 tools.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the `run` tool and its namespace, process lifecycle (the per-session teardown scope), and subsystem composition.
+- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 64 capabilities.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.
@@ -456,7 +529,11 @@ Three environment variables, all optional:
 - **Renaming a function can change rizin's idea of its prototype.** rizin
   drops a known library prototype (e.g. `int main(int argc, char **argv,
   char **envp)`) once the function no longer carries that name; set it back
-  with `set_prototype` if it matters.
+  with `re.set_prototype` if it matters.
+- **A `run` call cannot be killed mid-statement.** Cancelling stops waiting
+  and stops any rizin wait in flight, but a synchronous loop in the model's
+  code runs to completion inside omp's process. Calls in one session run one
+  at a time.
 
 ## License
 
