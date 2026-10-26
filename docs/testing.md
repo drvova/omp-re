@@ -28,7 +28,7 @@ so the host APIs under test are the ones users run. Tests that need a real
 | `report.test.ts` | No | 4 |
 | `decompile.test.ts` | No | 5 |
 | `extension-sdk.test.ts` | Only its rizin tests | 11 |
-| `run.test.ts` | No | 20 |
+| `run.test.ts` | No | 18 |
 | `rizin-integration.test.ts` | Yes (one test runs without) | 13 |
 | `tools-registry.test.ts` | Yes (the renderer and native-view tests run without) | 35 |
 | `tools-mutate-registry.test.ts` | Yes | 15 |
@@ -51,9 +51,8 @@ audit), and kept definitions — including a test that spawns a **fresh
 process** booting omp's SDK (`test/e2e/run-cell.ts`) to prove a definition
 kept by one process is loaded in the next, and that `forget` removes it.
 It also covers stopping a call (a busy loop cancelled mid-statement, the
-cancellation reaching a capability in flight, `process.exit()` in a cell) and
-MCP servers as functions, against a minimal stdio server
-(`test/e2e/mcp-echo.ts`). Every test points `OMPRE_KEPT_DIR` and omp's agent
+cancellation reaching a capability in flight, `process.exit()` in a cell, a
+timer's late exception). Every test points `OMPRE_KEPT_DIR` and omp's agent
 dir at throwaway paths.
 
 Assert a failing `run` with `captureError(...)`, never

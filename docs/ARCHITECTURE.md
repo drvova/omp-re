@@ -18,14 +18,13 @@ capabilities.ts  CapabilityRegistry: name → definition, tier, evidence flag, J
                  invokeCapability: validate → audit line → definition.execute → evidence record + tag
 namespace.ts   host side: one worker per omp session (on the session record in runtime.ts);
                  queues cells, collects output, answers the worker's calls (capabilities,
-                 raw rizin, evidence, exec, MCP), terminates the worker on cancel
+                 raw rizin, evidence, exec), terminates the worker on cancel
 namespace-worker.ts
                the worker: its global IS the namespace, seeded with re, describe, man, kept,
-                 forget, strings, print, exec, mcp, require; loads kept units; evaluates
+                 forget, strings, print, exec, require; loads kept units; evaluates
                  cells; saves definitions
 namespace-protocol.ts
                the messages between them: run/done/failed, print, call/reply
-mcp.ts         MCP servers as functions: omp's MCP client and config, connections owned by the host
 cell.ts        compileCell: Babel parse (omp's own parser) → strip TS (Bun.Transpiler)
                  → top-level declarations become assignments on the realm's global,
                    functions hoisted, last expression returned, `import` → await import()
@@ -65,9 +64,8 @@ the kept definitions. Everything that needs omp crosses as a message
 (structured clone): the worker asks, the host performs the operation with the
 running call's context and signal and replies, so killing a worker never
 leaves omp half-way through an operation — and the signal reaches whatever
-the host was doing. MCP connections live on the host for the same reason: a
-stdio server is a child process a terminated worker must not orphan. The
-worker is unreferenced while idle, so it never keeps omp alive. It is a
+the host was doing — including a program `exec` started, which the host kills
+rather than orphaning it with the worker. The worker is unreferenced while idle, so it never keeps omp alive. It is a
 naming and lifetime boundary, not a security boundary; the tool runs with
 omp's authority, and the sandbox is the deployment's (see `SECURITY.md`).
 
@@ -155,7 +153,6 @@ no host-level hot-unload — the host does not offer one.
 | `namespace.ts` | The per-session namespace, host side: the worker's lifetime, the cell queue, cancellation, answering the worker's calls |
 | `namespace-worker.ts` | The worker the cells run in: vocabulary, evaluation, kept-unit loading and saving, output |
 | `namespace-protocol.ts` | The host↔worker messages |
-| `mcp.ts` | MCP servers as functions, through omp's own MCP client |
 | `values.ts` | How printed and returned values read (JSON), error text |
 | `cell.ts` | The cell compiler (top-level declarations → namespace globals) and definition detection |
 | `kept.ts` | Kept definitions on disk, one file per name |

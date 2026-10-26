@@ -125,14 +125,11 @@ helpers, reuse and refine them.
   `re.rizin_debug` only when enabled — with each method's signature (from its
   parameter schema) and one-line doc; `describe(x)` introspects anything else.
   `re.rz()` is the raw rizin session for exploration (unrecorded, audited).
-- **MCP servers are functions too.** `await mcp.servers()` lists the MCP
-  servers omp is configured with; `const gh = await mcp.connect("github")`
-  (or `mcp.connect({ command, args })` / `{ url }`) returns an object whose
-  methods are the server's tools, with signatures from their schemas, through
-  omp's own MCP client. Each tool call is audited; connections close when the
-  namespace is reset or the session ends. omp's own built-in tools are not
-  reachable from code: omp lets an extension delegate only to the built-in of
-  its own tool's name, so it cannot get past the approval omp gave the call.
+- **Other tools are code too.** External programs are `await exec(bin, argv)`
+  (argv, no shell; audited), HTTP APIs are `fetch`, libraries are
+  `require`/`import`. omp's own built-in tools are not reachable from code:
+  omp lets an extension delegate only to the built-in of its own tool's name,
+  so it cannot get past the approval omp gave the call.
 - **Same guarantees as before.** A method call takes the same path a tool
   call did: params validated against the operation's schema, one audit-log
   line, the operation's own code, and for an observation a `re.evidence`

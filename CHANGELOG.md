@@ -39,12 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     capability in flight; `process.exit()` or a crash in a cell ends only the
     worker; a timer's late exception is printed, not fatal. The next call
     starts a fresh worker with the kept definitions reloaded.
-  - **MCP servers as functions.** `mcp.servers()` lists omp's configured MCP
-    servers; `mcp.connect(name | { command, args } | { url })` returns an
-    object whose methods are the server's tools (omp's own MCP client),
-    audited per call and closed with the namespace. omp's built-in tools stay
-    out of reach: omp allows an extension to delegate only to the built-in of
-    its own tool's name.
+  - **Other tools as code.** External programs are `exec(bin, argv)`, HTTP is
+    `fetch`, libraries are `require`/`import`; `exec` and raw rizin commands
+    are audited per call. omp's built-in tools stay out of reach: omp allows
+    an extension to delegate only to the built-in of its own tool's name.
   - **Security is the deployment's.** `run` executes code with omp's
     authority (`exec` approval tier, the code's first line as its reason).
     There is no enable/disable switch or restricted mode; run omp sandboxed

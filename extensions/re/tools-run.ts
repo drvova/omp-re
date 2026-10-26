@@ -30,7 +30,7 @@ const DESCRIPTION = [
 	"`re` is the RE workspace bound to this session (rizin behind it): every operation is `await re.<name>({ ...params })` — open_binary, list_functions, decompile_function, get_xrefs_to, rizin_command, rename_function, record_finding, and the rest. `describe(re)` lists what this install actually supports with signatures; `describe(re.<name>)` shows one in full.",
 	"Top-level declarations persist across calls, and top-level functions, classes, and static consts are kept across restarts — build helpers once and reuse them. The last expression is returned; print() / console.log() output is returned too. Pass long literal text (rules, payloads) in `strings` and read it as strings.<name>.",
 	"Results of observing operations end with an [evidence xxxxxxxx] id (each call's result also lists them); cite those ids in re.record_finding — /re report includes only grounded findings.",
-	"MCP servers are functions too: `await mcp.servers()`, then `const s = await mcp.connect(\"name\")` and `await s.<tool>({ ... })`. A cancelled call stops at once and resets the namespace (kept definitions reload).",
+	"A cancelled call stops at once and resets the namespace (kept definitions reload).",
 	"",
 	"SECURITY: this tool executes code with omp's full authority (files, processes, network). There is no restricted mode; run omp inside a sandbox (container/VM) when analysing untrusted samples.",
 ].join("\n");

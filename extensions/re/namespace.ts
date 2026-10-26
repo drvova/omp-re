@@ -9,13 +9,13 @@
  * what a cell prints, and answers the worker's requests — every `re`
  * capability (through {@link invokeCapability}, so it is validated, audited,
  * and recorded exactly as a tool call was), the session's rizin process,
- * evidence and findings, `exec`, and MCP servers (mcp.ts).
+ * evidence and findings, and `exec`.
  *
  * The worker is what makes a call stoppable. Cancelling the `run` call
  * terminates it, which ends even a loop that never yields; a cell that calls
  * `process.exit()` or crashes the worker ends only the worker. Either way the
- * call fails with a message saying the namespace was reset, any MCP
- * connections it held are closed, and the next call starts a fresh worker,
+ * call fails with a message saying the namespace was reset, and the next call
+ * starts a fresh worker,
  * which reloads the kept definitions. The namespace hangs off the session's
  * record in runtime.ts, so it follows a branch and is disposed with it.
  */
@@ -26,7 +26,6 @@ import { branchEntries, collectEvidence } from "./entries.ts";
 import { liveFindings } from "./findings.ts";
 import { manual } from "./describe.ts";
 import { keptDir } from "./kept.ts";
-import { McpBridge } from "./mcp.ts";
 import type { BinaryInfo, FromWorker, HostOp, KeptFailure, ToWorker } from "./namespace-protocol.ts";
 import { ensureRizin, getState } from "./state.ts";
 import { errorText } from "./values.ts";
@@ -80,10 +79,6 @@ function binaryOf(ctx: ExtensionContext): BinaryInfo | null {
 	return state.binaryPath ? { path: state.binaryPath, sha256: state.binarySha256 } : null;
 }
 
-function cwdOf(ctx: ExtensionContext): string {
-	return (ctx as { cwd?: string }).cwd ?? process.cwd();
-}
-
 export class ReNamespace {
 	private live: LiveWorker | null = null;
 	private current: Running | null = null;
@@ -93,7 +88,6 @@ export class ReNamespace {
 	private sideCalls = 0;
 	private kept: string[] = [];
 	private failures: KeptFailure[] = [];
-	private readonly mcp = new McpBridge();
 	private disposed = false;
 
 	private constructor(
@@ -164,7 +158,6 @@ export class ReNamespace {
 		if (live !== this.live) return; // stopped deliberately by kill(), which already reported it
 		this.live = null;
 		notReady(new Error(`omp-re: the ${this.toolName} namespace's worker ${how} while starting`));
-		void this.mcp.closeAll();
 		const running = this.current;
 		this.current = null;
 		running?.reject(new CellError(`omp-re: the ${this.toolName} namespace's worker ${how}; ${RESET}`, running.output, running.scope));
@@ -175,7 +168,6 @@ export class ReNamespace {
 		const live = this.live;
 		this.live = null;
 		void live?.worker.terminate();
-		void this.mcp.closeAll();
 		const running = this.current;
 		this.current = null;
 		running?.reject(new CellError(reason, running.output, running.scope));
@@ -204,7 +196,7 @@ export class ReNamespace {
 		}
 	}
 
-	/** One audit line for a call the namespace makes outside the capability registry (raw rizin, MCP). */
+	/** One audit line for a call the namespace makes outside the capability registry (raw rizin, exec). */
 	private audit(scope: CallScope, tool: string, args: unknown): Promise<void> {
 		return appendAuditLine(scope.ctx, { toolCallId: `${scope.toolCallId}.x${++this.sideCalls}`, tool, args }, scope.pi.logger);
 	}
@@ -237,16 +229,6 @@ export class ReNamespace {
 			case "exec":
 				await this.audit(scope, "exec", { bin: op.bin, argv: op.argv });
 				return scope.pi.exec(op.bin, op.argv, { signal, ...(op.timeout ? { timeout: op.timeout } : {}) });
-			case "mcp.servers":
-				return this.mcp.servers(cwdOf(ctx));
-			case "mcp.connect":
-				await this.audit(scope, "mcp.connect", { target: op.target });
-				return this.mcp.connect(op.target, cwdOf(ctx), signal);
-			case "mcp.call":
-				await this.audit(scope, `mcp:${this.mcp.nameOf(op.connection)}/${op.tool}`, op.args);
-				return this.mcp.call(op.connection, op.tool, op.args, signal);
-			case "mcp.close":
-				return this.mcp.close(op.connection);
 		}
 	}
 
@@ -296,7 +278,7 @@ export class ReNamespace {
 		}
 	}
 
-	/** Shut the namespace down with its session: stop the worker, close MCP connections, fail a running call. */
+	/** Shut the namespace down with its session: stop the worker and fail a running call. */
 	dispose(): void {
 		this.disposed = true;
 		this.kill(`omp-re: the session ended; ${RESET}`);

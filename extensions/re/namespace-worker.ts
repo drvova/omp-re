@@ -4,7 +4,7 @@
  * One Bun Worker per omp session (namespace.ts starts it). Its global object
  * IS the namespace — a realm of its own, apart from omp's — seeded with the
  * vocabulary (`re`, `describe`, `man`, `kept`, `forget`, `strings`, `print`,
- * `exec`, `mcp`, `require`). Cells compiled by cell.ts are evaluated here one at
+ * `exec`, `require`). Cells compiled by cell.ts are evaluated here one at
  * a time, so whatever a cell defines is there for the next.
  *
  * Running in a worker is what makes a call stoppable: the host terminates the
@@ -20,9 +20,9 @@
 import { createRequire } from "node:module";
 import { parentPort } from "node:worker_threads";
 import { checkUnit, compileCell } from "./cell.ts";
-import { CAPABILITY, type CapabilityInfo, DESCRIBERS, describeMcpServer, describeValue, describeWorkspace, leadingDoc, manual, shorthandParam } from "./describe.ts";
+import { CAPABILITY, type CapabilityInfo, DESCRIBERS, describeValue, describeWorkspace, leadingDoc, manual } from "./describe.ts";
 import { forgetKept, isUnitName, listKept, saveDefinitions } from "./kept.ts";
-import type { AdHocMcpServer, BinaryInfo, FromWorker, HostOp, KeptFailure, McpConnectionInfo, ToWorker } from "./namespace-protocol.ts";
+import type { BinaryInfo, FromWorker, HostOp, KeptFailure, ToWorker } from "./namespace-protocol.ts";
 import { errorText, show } from "./values.ts";
 
 const port = parentPort;
@@ -88,18 +88,18 @@ class RzSession {
 	}
 }
 
-/** An operation method: async, with its metadata attached for describe(). */
-function operation(owner: string, cap: CapabilityInfo, call: (params: unknown) => Promise<unknown>): (params?: unknown) => Promise<unknown> {
+/** A capability method: async, with its metadata attached for describe(). */
+function operation(cap: CapabilityInfo, call: (params: unknown) => Promise<unknown>): (params?: unknown) => Promise<unknown> {
 	const method = async (params?: unknown) => call(params);
 	Object.defineProperty(method, "name", { value: cap.name });
-	CAPABILITY.set(method, { cap, owner });
+	CAPABILITY.set(method, cap);
 	return method;
 }
 
 function buildWorkspace(): Record<string, unknown> {
 	const re: Record<string, unknown> = {};
 	for (const cap of capabilities) {
-		re[cap.name] = operation("re", cap, (params) => host(`re.${cap.name}`, { kind: "capability", name: cap.name, params }));
+		re[cap.name] = operation(cap, (params) => host(`re.${cap.name}`, { kind: "capability", name: cap.name, params }));
 	}
 	Object.defineProperties(re, {
 		rz: { enumerable: true, value: async () => new RzSession((await host("re.rz", { kind: "rz", method: "open" })) as string) },
@@ -109,35 +109,6 @@ function buildWorkspace(): Record<string, unknown> {
 	});
 	DESCRIBERS.set(re, () => describeWorkspace(capabilities, binary));
 	return Object.freeze(re);
-}
-
-/** A connected MCP server: one async method per tool, plus close(). Named after the server so describe() reads naturally. */
-function mcpServer(info: McpConnectionInfo): Record<string, unknown> {
-	const server: Record<string, unknown> = {};
-	const tools: CapabilityInfo[] = info.tools.map((tool) => ({ name: tool.name, description: tool.description ?? "", tier: "exec", evidence: false, schema: tool.inputSchema ?? {} }));
-	for (const tool of tools) {
-		const only = shorthandParam(tool);
-		server[tool.name] = operation(info.name, tool, (args) => {
-			// The same shorthand as re.*: a bare value fills the tool's one required (or only) parameter.
-			const params = only && args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args)) ? { [only]: args } : args;
-			return host(`${info.name}.${tool.name}`, { kind: "mcp.call", connection: info.id, tool: tool.name, args: params });
-		});
-	}
-	Object.defineProperties(server, {
-		name: { enumerable: true, value: info.name },
-		close: { enumerable: true, value: () => host(`${info.name}.close`, { kind: "mcp.close", connection: info.id }) },
-	});
-	DESCRIBERS.set(server, () => describeMcpServer(info.name, tools, info.instructions));
-	return Object.freeze(server);
-}
-
-function buildMcp(): Record<string, unknown> {
-	const mcp = {
-		servers: () => host("mcp.servers", { kind: "mcp.servers" }),
-		connect: async (target: string | AdHocMcpServer) => mcpServer((await host("mcp.connect", { kind: "mcp.connect", target })) as McpConnectionInfo),
-	};
-	DESCRIBERS.set(mcp, () => ["mcp — MCP servers as functions (omp's own MCP client; servers come from omp's configuration, or inline).", "  servers(): Promise<Record<string, { type, target, enabled }>> — the configured servers", "  connect(server: string | { command, args?, env?, cwd? } | { url, headers? }): Promise<McpServer> — its tools become async methods; describe() the result to list them"].join("\n"));
-	return Object.freeze(mcp);
 }
 
 function docFor(name: string): string | undefined {
@@ -193,7 +164,6 @@ function seed(): void {
 		console: Object.freeze({ log: write, info: write, warn: write, error: write, debug: write, dir: write, table: write }),
 		exec: (bin: string, argv: string[] = [], options: { timeout?: number } = {}) =>
 			host("exec", { kind: "exec", bin: String(bin), argv: argv.map(String), ...(options.timeout ? { timeout: options.timeout } : {}) }),
-		mcp: buildMcp(),
 		require: createRequire(import.meta.url),
 	};
 	for (const [key, value] of Object.entries(names)) {

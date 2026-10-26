@@ -310,46 +310,6 @@ describe("stopping a call", () => {
 	}, 60_000);
 });
 
-describe("MCP servers as functions", () => {
-	beforeEach(() => {
-		freshKeptDir();
-	});
-
-	const echoServer = JSON.stringify({ name: "echo", command: process.execPath, args: [resolve(import.meta.dir, "e2e/mcp-echo.ts")] });
-
-	test("a connected server's tools are async methods with signatures from their schemas; results, errors, and audit lines", async () => {
-		const { run, h } = setup(newSession());
-		await run(`var echo = await mcp.connect(${echoServer})`);
-		expect((await run("describe(echo)")).value).toBe(
-			[
-				"echo — a connected MCP server; each tool is an async method taking one params object. describe(echo.<tool>) shows its parameters; close() disconnects.",
-				"",
-				"A test server.",
-				"",
-				"tools",
-				"  echo({ text: string }) — Return the text you send.",
-				"  add({ a: number, b: number }) — Add two numbers.",
-				"  fail() — Always fails.",
-			].join("\n"),
-		);
-		expect((await run("describe(echo.echo)")).value).toContain("echo.echo({ text: string }) → Promise<unknown>");
-		expect((await run("await echo.echo({ text: 'hi' })")).value).toBe("hi");
-		expect((await run("await echo.echo('shorthand')")).value).toBe("shorthand");
-		expect((await run("await echo.add({ a: 2, b: 3 })")).value).toEqual({ sum: 5 });
-		expect((await captureError(run("await echo.fail()"))).message).toContain("echo.fail: deliberate failure");
-		const audit = await readFile(join(getAgentDir(), "re", "audit", `${h.ctx.sessionManager.getSessionId()}.log`), "utf8");
-		expect(audit.trim().split("\n").map((line) => JSON.parse(line).tool)).toEqual(["mcp.connect", "mcp:echo/echo", "mcp:echo/echo", "mcp:echo/add", "mcp:echo/fail"]);
-		await run("await echo.close()");
-		expect((await captureError(run("await echo.echo({ text: 'x' })"))).message).toContain("this server connection is closed");
-	}, 30_000);
-
-	test("mcp.servers() lists omp's configured servers, and an unknown name says how to find them", async () => {
-		const { run } = setup(newSession());
-		expect(typeof (await run("await mcp.servers()")).value).toBe("object");
-		expect((await captureError(run("await mcp.connect('no-such-server-anywhere')"))).message).toContain('no MCP server named "no-such-server-anywhere" is configured');
-	}, 30_000);
-});
-
 describe("restart persistence (a fresh process)", () => {
 	test("a definition kept by one process is loaded and usable in a fresh process pointed at the same directory, and forget removes it there too", async () => {
 		const dir = freshKeptDir();

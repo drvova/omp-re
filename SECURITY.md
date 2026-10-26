@@ -38,12 +38,8 @@ So the security of an omp-re deployment is the sandbox omp runs in:
   `re.rizin_command` and `re.rizin_cli`, so *evidence* is only ever produced
   by read-only commands. They do not limit the code around those calls, which
   can drive rizin directly through `re.rz()`.
-- `mcp.connect(...)` speaks to MCP servers directly with omp's MCP client
-  (omp's configured servers, or one described inline, which starts a
-  process). Those calls go through the `run` call's approval, not through
-  any per-tool approval omp would apply to the same server's tools as model
-  tools; each is audit-logged as `mcp:<server>/<tool>`. omp's built-in tools
-  cannot be called from code at all.
+- `exec` and raw rizin commands (`re.rz()`) are audit-logged per call, like
+  capability calls. omp's built-in tools cannot be called from code at all.
 - Kept definitions (`~/.omp/agent/re/kept/`, or `OMPRE_KEPT_DIR`) are code
   that every new session loads. Each file is checked to be a single
   function/class/static-const definition before it is evaluated, so a file
