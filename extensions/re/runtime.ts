@@ -281,6 +281,8 @@ class RizinBackend {
 		if (!rec) return;
 		rec.rz?.close();
 		rec.dbg?.close();
+		// The run namespace's worker and its MCP connections end with the session too.
+		void rec.namespace?.then((ns) => ns.dispose(), () => {});
 		void rec._scope?.dispose();
 		this.records.delete(sessionId);
 	}

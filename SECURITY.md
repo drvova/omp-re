@@ -17,8 +17,9 @@ and reach the network (`fetch`). That is what the tool is — a code tool, so
 the model can build its own tooling on top of rizin — not a side effect, and
 there is **no setting that turns it into something narrower**: no
 enable/disable flag, no "safe" mode, no restricted subset. The code runs in a
-separate JavaScript realm (`node:vm`) so its definitions don't collide with
-omp's, but a realm is not a security boundary.
+worker of its own (one per session), so its definitions don't collide with
+omp's and a cancelled, crashed, or exiting cell ends only that worker — but a
+worker shares omp's process and privileges and is not a security boundary.
 
 So the security of an omp-re deployment is the sandbox omp runs in:
 
@@ -37,6 +38,12 @@ So the security of an omp-re deployment is the sandbox omp runs in:
   `re.rizin_command` and `re.rizin_cli`, so *evidence* is only ever produced
   by read-only commands. They do not limit the code around those calls, which
   can drive rizin directly through `re.rz()`.
+- `mcp.connect(...)` speaks to MCP servers directly with omp's MCP client
+  (omp's configured servers, or one described inline, which starts a
+  process). Those calls go through the `run` call's approval, not through
+  any per-tool approval omp would apply to the same server's tools as model
+  tools; each is audit-logged as `mcp:<server>/<tool>`. omp's built-in tools
+  cannot be called from code at all.
 - Kept definitions (`~/.omp/agent/re/kept/`, or `OMPRE_KEPT_DIR`) are code
   that every new session loads. Each file is checked to be a single
   function/class/static-const definition before it is evaluated, so a file

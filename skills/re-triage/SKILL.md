@@ -19,7 +19,11 @@ when you find yourself repeating a sequence (page through every string,
 decompile every caller of an import, pull a field out of JSON output), make
 it a function once and reuse it. `kept()` lists what is kept;
 `forget(name)` drops one. Raw rizin is `await re.rz()` (`cmd`, `cmdj`) —
-fine for exploring, but nothing it returns is evidence.
+fine for exploring, but nothing it returns is evidence. MCP servers omp is
+configured with are reachable as functions: `await mcp.servers()`, then
+`const s = await mcp.connect("name")` and `await s.<tool>({ ... })`. If a
+call is cancelled the namespace resets: kept definitions reload, other
+variables are gone.
 
 The `re` methods are the only source of recorded evidence in this session.
 Anything learned another way — `bash`, `cat`, a pasted dump, prior knowledge,

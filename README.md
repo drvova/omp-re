@@ -107,16 +107,32 @@ model build its own tooling on a live API: discover what is there, write
 helpers, reuse and refine them.
 
 - **One namespace per session.** Each omp session (and each task subagent,
-  like its rizin process) has one long-lived JavaScript realm. Whatever a call
-  declares at the top level is there for the next call; `await` works at the
-  top level; the last expression is returned along with anything printed.
+  like its rizin process) has one long-lived JavaScript realm, in a worker of
+  its own. Whatever a call declares at the top level is there for the next
+  call; `await` works at the top level; the last expression is returned along
+  with anything printed.
+- **Every call can be stopped.** Cancelling a `run` call terminates its
+  worker, so even a loop that never yields stops at once, and any capability
+  in flight gets the cancellation too. A cell that calls `process.exit()` or
+  crashes ends only its worker, never omp; an exception a timer throws later is
+  printed, not fatal. After a stop the namespace is reset: the next call starts
+  a fresh worker with the kept definitions reloaded, and other variables are
+  gone (the error says so).
 - **`re` is the workspace.** Every RE operation is a method:
   `await re.list_functions({ sort: "size" })`, `await re.decompile_function("main")`,
   `await re.record_finding({...})`. `describe(re)` lists the live capability
   set — triage methods exist only when their binaries are installed,
   `re.rizin_debug` only when enabled — with each method's signature (from its
   parameter schema) and one-line doc; `describe(x)` introspects anything else.
-  `re.rz()` is the raw rizin session for exploration (unrecorded).
+  `re.rz()` is the raw rizin session for exploration (unrecorded, audited).
+- **MCP servers are functions too.** `await mcp.servers()` lists the MCP
+  servers omp is configured with; `const gh = await mcp.connect("github")`
+  (or `mcp.connect({ command, args })` / `{ url }`) returns an object whose
+  methods are the server's tools, with signatures from their schemas, through
+  omp's own MCP client. Each tool call is audited; connections close when the
+  namespace is reset or the session ends. omp's own built-in tools are not
+  reachable from code: omp lets an extension delegate only to the built-in of
+  its own tool's name, so it cannot get past the approval omp gave the call.
 - **Same guarantees as before.** A method call takes the same path a tool
   call did: params validated against the operation's schema, one audit-log
   line, the operation's own code, and for an observation a `re.evidence`
@@ -530,10 +546,9 @@ Environment variables, all optional:
   drops a known library prototype (e.g. `int main(int argc, char **argv,
   char **envp)`) once the function no longer carries that name; set it back
   with `re.set_prototype` if it matters.
-- **A `run` call cannot be killed mid-statement.** Cancelling stops waiting
-  and stops any rizin wait in flight, but a synchronous loop in the model's
-  code runs to completion inside omp's process. Calls in one session run one
-  at a time.
+- **Stopping a `run` call resets its namespace.** The worker is terminated, so
+  variables that were not kept are lost; kept definitions reload on the next
+  call. Calls in one session run one at a time.
 
 ## License
 

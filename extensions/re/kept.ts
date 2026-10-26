@@ -12,7 +12,8 @@
  * The directory is `OMPRE_KEPT_DIR` when set, else `<omp agent dir>/re/kept`
  * (next to the evidence blobs and audit logs). It is shared by every session
  * and subagent on this machine, so a helper one session writes is there for
- * the next.
+ * the next. The host resolves it (`keptDir()`) and hands it to the namespace
+ * worker, which does the reading and writing; every function here takes it.
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
@@ -39,19 +40,18 @@ export function isUnitName(name: string): boolean {
 	return IDENTIFIER.test(name);
 }
 
-function unitPath(name: string): string {
+function unitPath(dir: string, name: string): string {
 	if (!isUnitName(name)) throw new Error(`omp-re: ${JSON.stringify(name)} is not a definition name`);
-	return join(keptDir(), `${name}${UNIT_EXT}`);
+	return join(dir, `${name}${UNIT_EXT}`);
 }
 
 /** Write each definition to its unit file (temp file then rename, so a reader never sees half a unit). Returns the names written. */
-export async function saveDefinitions(definitions: readonly Definition[]): Promise<string[]> {
+export async function saveDefinitions(dir: string, definitions: readonly Definition[]): Promise<string[]> {
 	if (definitions.length === 0) return [];
-	const dir = keptDir();
 	await mkdir(dir, { recursive: true, mode: 0o700 });
 	const saved: string[] = [];
 	for (const def of definitions) {
-		const target = unitPath(def.name);
+		const target = unitPath(dir, def.name);
 		const tmp = join(dir, `.${def.name}.${process.pid}.${randomUUID()}.tmp`);
 		await writeFile(tmp, `${def.source}\n`, { mode: 0o600 });
 		await rename(tmp, target);
@@ -61,8 +61,7 @@ export async function saveDefinitions(definitions: readonly Definition[]): Promi
 }
 
 /** Every kept unit, by name (a unit that names another loads on the namespace's retry pass, so order does not matter). An unreadable directory is an empty one. */
-export async function listKept(): Promise<KeptUnit[]> {
-	const dir = keptDir();
+export async function listKept(dir: string): Promise<KeptUnit[]> {
 	let names: string[];
 	try {
 		names = await readdir(dir);
@@ -85,9 +84,9 @@ export async function listKept(): Promise<KeptUnit[]> {
 }
 
 /** Delete one kept unit. Returns whether there was one. */
-export async function forgetKept(name: string): Promise<boolean> {
+export async function forgetKept(dir: string, name: string): Promise<boolean> {
 	try {
-		await unlink(unitPath(name));
+		await unlink(unitPath(dir, name));
 		return true;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;

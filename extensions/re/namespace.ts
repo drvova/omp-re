@@ -1,32 +1,35 @@
 /**
- * The `run` tool's namespace: one long-lived JavaScript realm per omp session.
+ * The `run` tool's namespace, host side: one long-lived JavaScript realm per
+ * omp session, running in a worker (namespace-worker.ts).
  *
  * Each session (the main one and every task subagent, like its rizin process)
- * gets a `node:vm` context seeded with the namespace vocabulary — `re`,
- * `describe`, `man`, `kept`, `forget`, `strings`, `print`, `exec`, and the
- * usual Node conveniences. Cells compiled by cell.ts run in it one at a time,
- * so whatever a cell defines is there for the next. The context hangs off the
- * session's record in runtime.ts, so it follows a branch and is dropped on
- * shutdown with the rizin process.
+ * gets its own worker, started on first use; its global object is the
+ * namespace. Cells run there one at a time, so whatever a cell defines is
+ * there for the next. This side starts the worker, queues the calls, collects
+ * what a cell prints, and answers the worker's requests — every `re`
+ * capability (through {@link invokeCapability}, so it is validated, audited,
+ * and recorded exactly as a tool call was), the session's rizin process,
+ * evidence and findings, `exec`, and MCP servers (mcp.ts).
  *
- * When a namespace is created, every kept unit (kept.ts) is loaded into it,
- * each checked to be a single definition and evaluated on its own; a unit
- * that throws is retried after the rest (it may name one loaded later), and
- * one that still fails is reported in the manual instead of stopping the
- * others. After a successful cell its definitions are saved.
+ * The worker is what makes a call stoppable. Cancelling the `run` call
+ * terminates it, which ends even a loop that never yields; a cell that calls
+ * `process.exit()` or crashes the worker ends only the worker. Either way the
+ * call fails with a message saying the namespace was reset, any MCP
+ * connections it held are closed, and the next call starts a fresh worker,
+ * which reloads the kept definitions. The namespace hangs off the session's
+ * record in runtime.ts, so it follows a branch and is disposed with it.
  */
-import { createRequire } from "node:module";
-import vm from "node:vm";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { appendAuditLine } from "./audit.ts";
 import { type CallScope, type CapabilityRegistry, invokeCapability } from "./capabilities.ts";
-import { checkUnit, compileCell } from "./cell.ts";
-import { CAPABILITY, describeValue, describeWorkspace, leadingDoc, manual } from "./describe.ts";
 import { branchEntries, collectEvidence } from "./entries.ts";
 import { liveFindings } from "./findings.ts";
-import { formatJson } from "./format.ts";
-import { forgetKept, isUnitName, keptDir, listKept, saveDefinitions } from "./kept.ts";
-import { raceAbort } from "./rizin.ts";
+import { manual } from "./describe.ts";
+import { keptDir } from "./kept.ts";
+import { McpBridge } from "./mcp.ts";
+import type { BinaryInfo, FromWorker, HostOp, KeptFailure, ToWorker } from "./namespace-protocol.ts";
 import { ensureRizin, getState } from "./state.ts";
+import { errorText } from "./values.ts";
 
 /** What a `run` call brings to the namespace. */
 export interface RunCall extends Omit<CallScope, "calls" | "evidence"> {
@@ -36,14 +39,16 @@ export interface RunCall extends Omit<CallScope, "calls" | "evidence"> {
 export interface CellOutcome {
 	/** Everything the cell printed, one entry per print/console call. */
 	output: string[];
-	/** The last expression's value, or undefined. */
+	/** A structured-clone copy of the last expression's value, or undefined (no value, or one that cannot be copied, like a function). */
 	value: unknown;
+	/** The last expression's value as the result shows it (strings verbatim, other values as JSON), or undefined when there was none. */
+	shown: string | undefined;
 	/** Names whose definitions this cell saved. */
 	kept: string[];
 	scope: CallScope;
 }
 
-/** A cell that threw, with what it printed and recorded before it did. */
+/** A cell that threw or was stopped, with what it printed and recorded before it did. */
 export class CellError extends Error {
 	constructor(
 		message: string,
@@ -54,242 +59,206 @@ export class CellError extends Error {
 	}
 }
 
-const requireFromHere = createRequire(import.meta.url);
-const importModule = (specifier: string) => import(specifier);
+const WORKER_URL = new URL("./namespace-worker.ts", import.meta.url).href;
+const RESET = "the namespace was reset — kept definitions reload on the next call; other variables are gone";
 
-/** `Name: message` for anything thrown, including errors from the cell's realm (where `instanceof Error` is false). */
-export function errorText(err: unknown): string {
-	if (err && typeof err === "object" && "message" in err) {
-		const name = (err as { name?: unknown }).name;
-		const message = String((err as { message: unknown }).message);
-		return typeof name === "string" && name !== "Error" && !message.startsWith(`${name}:`) ? `${name}: ${message}` : message;
-	}
-	return String(err);
+interface LiveWorker {
+	worker: Worker;
+	ready: Promise<void>;
 }
 
-/** A value as plain JSON-able data: Map/Set/bigint/functions/cycles made printable. Works on the cell realm's objects. */
-function toPlain(value: unknown, seen: WeakSet<object>): unknown {
-	if (typeof value === "bigint") return `${value}n`;
-	if (typeof value === "function") return `[function ${value.name || "anonymous"}]`;
-	if (typeof value === "symbol") return value.toString();
-	if (value === undefined) return null;
-	if (value === null || typeof value !== "object") return value;
-	if (seen.has(value)) return "[circular]";
-	seen.add(value);
-	try {
-		if (typeof (value as { then?: unknown }).then === "function") return "[Promise — await it]";
-		const tag = Object.prototype.toString.call(value);
-		if (tag === "[object Map]") return Object.fromEntries([...(value as Map<unknown, unknown>)].map(([k, v]) => [String(k), toPlain(v, seen)]));
-		if (tag === "[object Set]") return [...(value as Set<unknown>)].map((v) => toPlain(v, seen));
-		if (tag === "[object Error]") return errorText(value);
-		if (Array.isArray(value)) return value.map((v) => toPlain(v, seen));
-		if (ArrayBuffer.isView(value)) return Array.from(value as unknown as ArrayLike<number>);
-		const out: Record<string, unknown> = {};
-		for (const key of Object.keys(value)) out[key] = toPlain((value as Record<string, unknown>)[key], seen);
-		return out;
-	} finally {
-		seen.delete(value);
-	}
+interface Running {
+	runId: number;
+	scope: CallScope;
+	output: string[];
+	resolve: (outcome: CellOutcome) => void;
+	reject: (err: CellError) => void;
 }
 
-/** How a printed argument or the call's value reads in the result: strings verbatim, everything else as JSON (arrays one row per line). */
-export function show(value: unknown): string {
-	if (typeof value === "string") return value;
-	if (value === undefined) return "undefined";
-	const plain = toPlain(value, new WeakSet());
-	return typeof plain === "string" ? plain : formatJson(plain);
+function binaryOf(ctx: ExtensionContext): BinaryInfo | null {
+	const state = getState(ctx);
+	return state.binaryPath ? { path: state.binaryPath, sha256: state.binarySha256 } : null;
+}
+
+function cwdOf(ctx: ExtensionContext): string {
+	return (ctx as { cwd?: string }).cwd ?? process.cwd();
 }
 
 export class ReNamespace {
-	private readonly global: Record<string, unknown>;
-	private readonly context: vm.Context;
-	/** The running cell, read by `re.*` and `print` while it runs; null between calls. */
-	private current: { scope: CallScope; output: string[] } | null = null;
+	private live: LiveWorker | null = null;
+	private current: Running | null = null;
 	/** Cells run one at a time: each waits for the one before it. */
 	private tail: Promise<unknown> = Promise.resolve();
-	private cells = 0;
-	private loaded = new Set<string>();
-	private failures: { name: string; error: string }[] = [];
-	/** Source of each kept unit this namespace knows (loaded, or saved by one of its cells), for describe() docs. */
-	private readonly unitSource = new Map<string, string>();
-	/** The namespace's own names (`re`, `describe`, …), which a cell may not redeclare. `strings` is replaced per call. */
-	private readonly vocabulary = new Set<string>();
+	private runs = 0;
+	private sideCalls = 0;
+	private kept: string[] = [];
+	private failures: KeptFailure[] = [];
+	private readonly mcp = new McpBridge();
+	private disposed = false;
 
 	private constructor(
 		private readonly registry: CapabilityRegistry,
 		private readonly toolName: string,
-	) {
-		this.global = {};
-		this.context = vm.createContext(this.global, { name: "omp-re run" });
-		this.seed();
-	}
+	) {}
 
-	/** A namespace with every kept definition loaded. */
-	static async create(registry: CapabilityRegistry, toolName: string): Promise<ReNamespace> {
+	/** A namespace whose worker is up, with every kept definition loaded. */
+	static async create(registry: CapabilityRegistry, toolName: string, ctx: ExtensionContext): Promise<ReNamespace> {
 		const ns = new ReNamespace(registry, toolName);
-		await ns.loadKept();
+		const live = ns.start(ctx);
+		await live.ready;
+		// Idle now: unreferenced, so it never keeps omp alive. A cell references it while it runs (execute).
+		if (ns.live === live) live.worker.unref();
 		return ns;
 	}
 
-	private scope(what: string): CallScope {
-		if (!this.current) throw new Error(`omp-re: ${what} can only be used while a ${this.toolName} call is running — await it inside the cell`);
-		return this.current.scope;
-	}
-
-	private print(args: unknown[]): void {
-		this.current?.output.push(args.map(show).join(" "));
-	}
-
-	private seed(): void {
-		const re: Record<string, unknown> = {};
-		for (const cap of this.registry.list()) {
-			// async, so a call outside a running cell rejects instead of throwing synchronously (inside a timer that would be an uncaught exception in omp's process).
-			const method = async (params?: unknown) => invokeCapability(cap, params, this.scope(`re.${cap.name}`));
-			Object.defineProperty(method, "name", { value: cap.name });
-			CAPABILITY.set(method, cap);
-			re[cap.name] = method;
-		}
-		Object.defineProperties(re, {
-			rz: {
-				enumerable: true,
-				value: async () => {
-					const s = this.scope("re.rz");
-					return ensureRizin(s.ctx, { signal: s.signal });
-				},
-			},
-			binary: { enumerable: true, get: () => this.binary(this.scope("re.binary").ctx) },
-			evidence: { enumerable: true, value: () => collectEvidence(branchEntries(this.scope("re.evidence").ctx)) },
-			findings: { enumerable: true, value: () => liveFindings(this.scope("re.findings").ctx) },
+	private start(ctx: ExtensionContext): LiveWorker {
+		const worker = new Worker(WORKER_URL);
+		let settle!: { resolve: () => void; reject: (err: Error) => void };
+		const ready = new Promise<void>((resolve, reject) => {
+			settle = { resolve, reject };
 		});
-		Object.freeze(re);
+		const live: LiveWorker = { worker, ready };
+		this.live = live;
+		worker.addEventListener("message", (event) => this.onMessage(live, event.data as FromWorker, settle.resolve));
+		worker.addEventListener("error", (event) => {
+			// Handled here: an error the worker could not catch ends only the worker, never omp.
+			event.preventDefault();
+			this.onDeath(live, `crashed (${event.message})`, settle.reject);
+		});
+		worker.addEventListener("close", (event) => this.onDeath(live, `exited (code ${(event as CloseEvent).code})`, settle.reject));
+		const init: ToWorker = { type: "init", capabilities: this.registry.infos(), keptDir: keptDir(), toolName: this.toolName, binary: binaryOf(ctx) };
+		worker.postMessage(init);
+		return live;
+	}
 
-		const write = (...args: unknown[]) => this.print(args);
-		const vocabulary: Record<string, unknown> = {
-			re,
-			describe: (x: unknown = re) => (x === re ? describeWorkspace(this.registry.list(), this.binary(this.scope("describe").ctx)) : describeValue(x, (name) => this.docFor(name))),
-			man: () => this.manual(this.scope("man").ctx),
-			kept: (name?: string) => this.keptText(name),
-			forget: (name: string) => this.forget(name),
-			strings: Object.freeze({}),
-			print: write,
-			console: Object.freeze({ log: write, info: write, warn: write, error: write, debug: write, dir: write, table: write }),
-			exec: async (bin: string, argv: string[] = [], options: { timeout?: number } = {}) => {
-				const s = this.scope("exec");
-				return s.pi.exec(bin, argv, { signal: s.signal, ...options });
-			},
-			require: requireFromHere,
-			setTimeout: (fn: (...a: unknown[]) => unknown, ms?: number, ...args: unknown[]) => setTimeout(this.guarded(fn), ms, ...args),
-			clearTimeout,
-			setInterval: (fn: (...a: unknown[]) => unknown, ms?: number, ...args: unknown[]) => setInterval(this.guarded(fn), ms, ...args),
-			clearInterval,
-			queueMicrotask,
-			structuredClone,
-			Buffer,
-			TextEncoder,
-			TextDecoder,
-			URL,
-			URLSearchParams,
-			fetch,
-			AbortController,
-		};
-		for (const [key, value] of Object.entries(vocabulary)) {
-			Object.defineProperty(this.global, key, { value, writable: key === "strings", enumerable: false, configurable: true });
-			this.vocabulary.add(key);
+	private onMessage(live: LiveWorker, message: FromWorker, ready: () => void): void {
+		if (live !== this.live) return; // a worker already replaced
+		switch (message.type) {
+			case "ready":
+				this.kept = message.kept;
+				this.failures = message.failures;
+				ready();
+				return;
+			case "print":
+				if (this.current?.runId === message.runId) this.current.output.push(message.text);
+				return;
+			case "call":
+				void this.answer(live, message.callId, message.runId, message.op);
+				return;
+			case "done":
+			case "failed": {
+				this.kept = message.kept;
+				this.failures = message.failures;
+				const running = this.current;
+				if (!running || running.runId !== message.runId) return;
+				this.current = null;
+				if (message.type === "failed") running.reject(new CellError(message.error, running.output, running.scope));
+				else running.resolve({ output: [...running.output, ...message.notes], value: message.value, shown: message.shown, kept: message.saved, scope: running.scope });
+				return;
+			}
 		}
 	}
 
-	/** A timer callback that cannot throw into omp's event loop: what it throws is printed into the running call's output, or dropped between calls. */
-	private guarded(fn: (...args: unknown[]) => unknown): (...args: unknown[]) => void {
-		return (...args) => {
+	/** The worker stopped on its own (process.exit, a crash): the running call fails, and the next one starts a fresh worker. */
+	private onDeath(live: LiveWorker, how: string, notReady: (err: Error) => void): void {
+		if (live !== this.live) return; // stopped deliberately by kill(), which already reported it
+		this.live = null;
+		notReady(new Error(`omp-re: the ${this.toolName} namespace's worker ${how} while starting`));
+		void this.mcp.closeAll();
+		const running = this.current;
+		this.current = null;
+		running?.reject(new CellError(`omp-re: the ${this.toolName} namespace's worker ${how}; ${RESET}`, running.output, running.scope));
+	}
+
+	/** Stop the worker now — mid-statement if need be — and fail the running call with `reason`. */
+	private kill(reason: string): void {
+		const live = this.live;
+		this.live = null;
+		void live?.worker.terminate();
+		void this.mcp.closeAll();
+		const running = this.current;
+		this.current = null;
+		running?.reject(new CellError(reason, running.output, running.scope));
+	}
+
+	private async answer(live: LiveWorker, callId: number, runId: number, op: HostOp): Promise<void> {
+		const running = this.current;
+		let reply: ToWorker;
+		if (!running || running.runId !== runId) {
+			reply = { type: "reply", callId, ok: false, error: { name: "Error", message: `omp-re: the ${this.toolName} call this belonged to has finished — await it inside the cell` }, binary: null };
+		} else {
 			try {
-				fn(...args);
+				const value = await this.perform(op, running.scope);
+				reply = { type: "reply", callId, ok: true, value, binary: binaryOf(running.scope.ctx) };
 			} catch (err) {
-				this.print([`(timer callback threw: ${errorText(err)})`]);
+				const name = err && typeof err === "object" && typeof (err as { name?: unknown }).name === "string" ? (err as { name: string }).name : "Error";
+				const message = err && typeof err === "object" && "message" in err ? String((err as { message: unknown }).message) : String(err);
+				reply = { type: "reply", callId, ok: false, error: { name, message }, binary: binaryOf(running.scope.ctx) };
 			}
-		};
+		}
+		if (live !== this.live) return;
+		try {
+			live.worker.postMessage(reply);
+		} catch (err) {
+			live.worker.postMessage({ type: "reply", callId, ok: false, error: { name: "DataCloneError", message: `omp-re: the result could not be passed to the namespace: ${errorText(err)}` }, binary: reply.binary });
+		}
 	}
 
-	private binary(ctx: ExtensionContext): { path: string; sha256: string | null } | null {
-		const state = getState(ctx);
-		return state.binaryPath ? { path: state.binaryPath, sha256: state.binarySha256 } : null;
+	/** One audit line for a call the namespace makes outside the capability registry (raw rizin, MCP). */
+	private audit(scope: CallScope, tool: string, args: unknown): Promise<void> {
+		return appendAuditLine(scope.ctx, { toolCallId: `${scope.toolCallId}.x${++this.sideCalls}`, tool, args }, scope.pi.logger);
 	}
 
-	private docFor(name: string): string | undefined {
-		const source = this.unitSource.get(name);
-		return source === undefined ? undefined : leadingDoc(source);
+	private async perform(op: HostOp, scope: CallScope): Promise<unknown> {
+		const { ctx, signal } = scope;
+		switch (op.kind) {
+			case "capability": {
+				const cap = this.registry.get(op.name);
+				if (!cap) throw new Error(`omp-re: re.${op.name} is not available in this session — describe(re) lists what is`);
+				return invokeCapability(cap, op.params, scope);
+			}
+			case "rz": {
+				if (op.method === "close") {
+					getState(ctx).rz?.close();
+					return undefined;
+				}
+				const rz = await ensureRizin(ctx, { signal });
+				if (op.method === "open") return rz.binaryPath;
+				const command = op.command ?? "";
+				await this.audit(scope, `rz.${op.method}`, { command });
+				if (op.method === "cmd") return rz.cmd(command, { signal });
+				if (op.method === "cmdj") return rz.cmdj(command, { signal });
+				return rz.cmdWithStderr(command, { signal });
+			}
+			case "evidence":
+				return collectEvidence(branchEntries(ctx));
+			case "findings":
+				return liveFindings(ctx);
+			case "exec":
+				await this.audit(scope, "exec", { bin: op.bin, argv: op.argv });
+				return scope.pi.exec(op.bin, op.argv, { signal, ...(op.timeout ? { timeout: op.timeout } : {}) });
+			case "mcp.servers":
+				return this.mcp.servers(cwdOf(ctx));
+			case "mcp.connect":
+				await this.audit(scope, "mcp.connect", { target: op.target });
+				return this.mcp.connect(op.target, cwdOf(ctx), signal);
+			case "mcp.call":
+				await this.audit(scope, `mcp:${this.mcp.nameOf(op.connection)}/${op.tool}`, op.args);
+				return this.mcp.call(op.connection, op.tool, op.args, signal);
+			case "mcp.close":
+				return this.mcp.close(op.connection);
+		}
 	}
 
 	async manual(ctx: ExtensionContext): Promise<string> {
 		return manual({
 			toolName: this.toolName,
-			binary: this.binary(ctx),
+			binary: binaryOf(ctx),
 			capabilityCount: this.registry.list().length,
 			keptDir: keptDir(),
-			kept: [...this.loaded],
+			kept: this.kept,
 			keptFailures: this.failures,
 		});
-	}
-
-	private async keptText(name?: string): Promise<string> {
-		const units = await listKept();
-		if (name !== undefined) {
-			const unit = units.find((u) => u.name === name);
-			if (!unit) throw new Error(`omp-re: nothing kept as ${JSON.stringify(name)} — kept() lists what is`);
-			return unit.source;
-		}
-		if (units.length === 0) return `nothing kept yet (${keptDir()}): top-level functions, classes, and static consts a successful call defines are kept automatically`;
-		const failed = new Map(this.failures.map((f) => [f.name, f.error]));
-		return [
-			`${units.length} kept in ${keptDir()}:`,
-			...units.map((u) => {
-				const doc = leadingDoc(u.source);
-				const head = u.source.replace(/^\s*(\/\*[\s\S]*?\*\/|\/\/.*\n)\s*/g, "").split("\n")[0]!.replace(/\s*\{\s*$/, "");
-				return `  ${u.name} — ${head}${doc ? ` — ${doc}` : ""}${failed.has(u.name) ? ` (NOT LOADED: ${failed.get(u.name)})` : ""}`;
-			}),
-		].join("\n");
-	}
-
-	private async forget(name: string): Promise<string> {
-		if (typeof name !== "string" || !isUnitName(name)) throw new TypeError("omp-re: forget(name) takes a definition name");
-		const existed = await forgetKept(name);
-		const live = Object.hasOwn(this.global, name) && Object.getOwnPropertyDescriptor(this.global, name)?.enumerable !== false;
-		if (live) delete this.global[name];
-		this.loaded.delete(name);
-		this.unitSource.delete(name);
-		this.failures = this.failures.filter((f) => f.name !== name);
-		if (!existed && !live) return `${name} was neither kept nor defined`;
-		return `forgot ${name}${existed ? "" : " (it was defined, not kept)"}`;
-	}
-
-	/** Compile and evaluate a cell in this realm, returning its value and definitions. */
-	private async evaluate(code: string, signal?: AbortSignal): Promise<{ value: unknown; definitions: Awaited<ReturnType<typeof compileCell>>["definitions"] }> {
-		const cell = await compileCell(code, this.vocabulary);
-		const fn = vm.runInContext(cell.source, this.context, { filename: `${this.toolName}-${++this.cells}.ts` }) as (g: unknown, imp: unknown) => Promise<unknown>;
-		const value = await raceAbort(Promise.resolve(fn(this.global, importModule)), signal, `${this.toolName} cell`);
-		return { value, definitions: cell.definitions };
-	}
-
-	private async loadKept(): Promise<void> {
-		let pending = await listKept();
-		const errors = new Map<string, string>();
-		while (pending.length > 0) {
-			const retry = [];
-			for (const unit of pending) {
-				try {
-					await checkUnit(unit.name, unit.source);
-					await this.evaluate(unit.source);
-					this.loaded.add(unit.name);
-					this.unitSource.set(unit.name, unit.source);
-					errors.delete(unit.name);
-				} catch (err) {
-					errors.set(unit.name, errorText(err));
-					retry.push(unit);
-				}
-			}
-			if (retry.length === pending.length) break;
-			pending = retry;
-		}
-		this.failures = [...errors].map(([name, error]) => ({ name, error }));
 	}
 
 	/** Run one cell. Calls queue behind each other: one namespace, one cell at a time. */
@@ -302,38 +271,43 @@ export class ReNamespace {
 	private async execute(code: string, call: RunCall): Promise<CellOutcome> {
 		const { strings, ...rest } = call;
 		const scope: CallScope = { ...rest, calls: [], evidence: [] };
-		const output: string[] = [];
-		this.current = { scope, output };
-		this.global.strings = Object.freeze({ ...strings });
+		if (this.disposed) throw new CellError(`omp-re: this session's ${this.toolName} namespace was shut down`, [], scope);
+		if (call.signal?.aborted) throw new CellError("cancelled before it started", [], scope);
+		const live = this.live ?? this.start(call.ctx);
+		// Referenced while a caller waits on it; unreferenced again when the cell ends, so an idle worker never keeps omp alive.
+		live.worker.ref();
+		const onAbort = () => this.kill(`omp-re: cancelled — the call was stopped where it was; ${RESET}`);
 		try {
-			let result: Awaited<ReturnType<ReNamespace["evaluate"]>>;
 			try {
-				result = await this.evaluate(code, call.signal);
+				await live.ready;
 			} catch (err) {
-				throw new CellError(errorText(err), output, scope);
+				throw new CellError(errorText(err), [], scope);
 			}
-			let kept: string[] = [];
-			try {
-				kept = await saveDefinitions(result.definitions);
-				for (const def of result.definitions) {
-					this.loaded.add(def.name);
-					this.unitSource.set(def.name, def.source);
-				}
-			} catch (err) {
-				output.push(`(omp-re: could not keep this call's definitions: ${errorText(err)})`);
-			}
-			return { output, value: result.value, kept, scope };
+			const runId = ++this.runs;
+			return await new Promise<CellOutcome>((resolve, reject) => {
+				this.current = { runId, scope, output: [], resolve, reject };
+				call.signal?.addEventListener("abort", onAbort, { once: true });
+				const message: ToWorker = { type: "run", runId, code, strings, binary: binaryOf(call.ctx) };
+				live.worker.postMessage(message);
+			});
 		} finally {
-			this.current = null;
+			call.signal?.removeEventListener("abort", onAbort);
+			if (this.live === live) live.worker.unref();
 		}
+	}
+
+	/** Shut the namespace down with its session: stop the worker, close MCP connections, fail a running call. */
+	dispose(): void {
+		this.disposed = true;
+		this.kill(`omp-re: the session ended; ${RESET}`);
 	}
 }
 
-/** This session's namespace, created (and its kept definitions loaded) on first use. */
+/** This session's namespace, created (worker started, kept definitions loaded) on first use. */
 export function namespaceFor(ctx: ExtensionContext, registry: CapabilityRegistry, toolName: string): Promise<ReNamespace> {
 	const state = getState(ctx);
 	if (!state.namespace) {
-		state.namespace = ReNamespace.create(registry, toolName).catch((err) => {
+		state.namespace = ReNamespace.create(registry, toolName, ctx).catch((err) => {
 			state.namespace = null;
 			throw err;
 		});

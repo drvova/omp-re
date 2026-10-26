@@ -16,9 +16,16 @@ index.ts       composeApp(registry.host(pi), [...subsystems])   then registerRun
                  │  every pi.registerTool({...}) lands in the registry, not in omp
 capabilities.ts  CapabilityRegistry: name → definition, tier, evidence flag, JSON Schema
                  invokeCapability: validate → audit line → definition.execute → evidence record + tag
-namespace.ts   one node:vm realm per omp session (on the session record in runtime.ts)
-                 seeded with re, describe, man, kept, forget, strings, print, exec, require, …
-                 loads every kept unit on creation; runs cells one at a time; saves definitions
+namespace.ts   host side: one worker per omp session (on the session record in runtime.ts);
+                 queues cells, collects output, answers the worker's calls (capabilities,
+                 raw rizin, evidence, exec, MCP), terminates the worker on cancel
+namespace-worker.ts
+               the worker: its global IS the namespace, seeded with re, describe, man, kept,
+                 forget, strings, print, exec, mcp, require; loads kept units; evaluates
+                 cells; saves definitions
+namespace-protocol.ts
+               the messages between them: run/done/failed, print, call/reply
+mcp.ts         MCP servers as functions: omp's MCP client and config, connections owned by the host
 cell.ts        compileCell: Babel parse (omp's own parser) → strip TS (Bun.Transpiler)
                  → top-level declarations become assignments on the realm's global,
                    functions hoisted, last expression returned, `import` → await import()
@@ -46,13 +53,23 @@ re-parsed and must be exactly one such definition of the name it is filed
 under; a unit that throws (it may name one loaded later) is retried after the
 rest, and one that still fails is reported in the manual and `kept()`.
 
-**Why a separate realm.** Cells must not define names on omp's own global
-object, and each session needs its own namespace. A `node:vm` context gives
-both — it is a naming boundary, not a security boundary; the tool runs with
+**Why a worker.** Cells must not define names on omp's own global object,
+each session needs its own namespace, and a call must be stoppable. A Bun
+Worker gives all three: its global is a fresh realm, and terminating it ends
+even a loop that never yields — something no in-thread realm (`node:vm`
+included) can do once the loop has started. A cell that calls `process.exit()`
+or crashes ends only the worker; a timer's late exception is caught by the
+worker's own `uncaughtException`/`unhandledRejection` handlers and printed.
+After a stop the host starts a fresh worker on the next call, which reloads
+the kept definitions. Everything that needs omp crosses as a message
+(structured clone): the worker asks, the host performs the operation with the
+running call's context and signal and replies, so killing a worker never
+leaves omp half-way through an operation — and the signal reaches whatever
+the host was doing. MCP connections live on the host for the same reason: a
+stdio server is a child process a terminated worker must not orphan. The
+worker is unreferenced while idle, so it never keeps omp alive. It is a
+naming and lifetime boundary, not a security boundary; the tool runs with
 omp's authority, and the sandbox is the deployment's (see `SECURITY.md`).
-Values cross realms, so parameters are copied into this realm
-(`structuredClone`) before validation, and results are shown as JSON rather
-than with `inspect`.
 
 **What did not change.** The operations' code and tests: each tool module
 still builds its definitions with `pi.registerTool`, and the unit tests drive
@@ -135,7 +152,11 @@ no host-level hot-unload — the host does not offer one.
 | `index.ts` | Extension entry; `registerShell` (renderers, `open_binary`, `--binary`, session-lifecycle handlers, completions, the `/re` command); the `composeApp` call and `registerRunTool` |
 | `tools-run.ts` | `run`, the one advertised tool: description, approval, result shape |
 | `capabilities.ts` | The capability registry (the `registerTool` shim) and `invokeCapability`, the one path a `re.<name>` call takes |
-| `namespace.ts` | The per-session `node:vm` namespace: vocabulary, cell queue, kept-unit loading, output capture |
+| `namespace.ts` | The per-session namespace, host side: the worker's lifetime, the cell queue, cancellation, answering the worker's calls |
+| `namespace-worker.ts` | The worker the cells run in: vocabulary, evaluation, kept-unit loading and saving, output |
+| `namespace-protocol.ts` | The host↔worker messages |
+| `mcp.ts` | MCP servers as functions, through omp's own MCP client |
+| `values.ts` | How printed and returned values read (JSON), error text |
 | `cell.ts` | The cell compiler (top-level declarations → namespace globals) and definition detection |
 | `kept.ts` | Kept definitions on disk, one file per name |
 | `describe.ts` | `describe(x)` and the manual |

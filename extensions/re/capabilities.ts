@@ -23,35 +23,15 @@
  */
 import type { AgentToolUpdateCallback, ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { appendAuditLine, RE_EVIDENCE_TOOL_NAMES } from "./audit.ts";
+import { type CapabilityInfo, type JsonSchema, shorthandParam } from "./describe.ts";
 import { extractText, recordAndTag } from "./evidence.ts";
 
 type AnyTool = ToolDefinition<any, any>;
-type Tier = "read" | "write" | "exec";
+type Tier = CapabilityInfo["tier"];
 
-export interface Capability {
-	name: string;
-	/** The definition's full description, as the tool used to present it to the model. */
-	description: string;
-	/** omp's approval tier the definition declares; now descriptive only — the `run` call is what omp approves. */
-	tier: Tier;
-	/** Whether a successful call becomes a `re.evidence` record (evidence.ts). */
-	evidence: boolean;
-	/** JSON Schema of the parameters (omp's schema builder emits it), for signatures and validation messages. */
-	schema: JsonSchema;
+/** A capability: its describable metadata (which the namespace worker receives) plus the definition only the host can run. */
+export interface Capability extends CapabilityInfo {
 	definition: AnyTool;
-}
-
-export interface JsonSchema {
-	type?: string;
-	description?: string;
-	properties?: Record<string, JsonSchema>;
-	required?: string[];
-	items?: JsonSchema;
-	enum?: unknown[];
-	const?: unknown;
-	anyOf?: JsonSchema[];
-	oneOf?: JsonSchema[];
-	additionalProperties?: JsonSchema | boolean;
 }
 
 /** What one `run` call lends its capability calls: the host, the call's context and signal, and the tallies its result reports. */
@@ -126,22 +106,21 @@ export class CapabilityRegistry {
 	list(): Capability[] {
 		return [...this.byName.values()];
 	}
+
+	/** The describable metadata of every capability, as plain data for the namespace worker. */
+	infos(): CapabilityInfo[] {
+		return this.list().map(({ definition: _definition, ...info }) => info);
+	}
 }
 
-/** The parameter a bare (non-object) argument fills: the only required one, or the only one there is. */
-export function shorthandParam(cap: Capability): string | undefined {
-	const required = cap.schema.required ?? [];
-	if (required.length === 1) return required[0];
-	const props = Object.keys(cap.schema.properties ?? {});
-	return required.length === 0 && props.length === 1 ? props[0] : undefined;
-}
 
 /**
  * Turn what the code passed into the definition's params: a plain object, or —
  * for an operation with one required parameter (or only one parameter) — that
- * parameter's value alone (`re.decompile_function("main")`). Copied into this realm
- * (cells run in their own), then checked against the schema, including
- * unknown keys, which the schema would otherwise drop silently.
+ * parameter's value alone (`re.decompile_function("main")`). The params arrive
+ * as a structured-clone copy from the namespace worker, and are checked against
+ * the schema, including unknown keys, which the schema would otherwise drop
+ * silently.
  */
 function toParams(cap: Capability, raw: unknown): Record<string, unknown> {
 	let value = raw ?? {};
@@ -153,12 +132,7 @@ function toParams(cap: Capability, raw: unknown): Record<string, unknown> {
 		}
 		value = { [only]: value };
 	}
-	let params: Record<string, unknown>;
-	try {
-		params = structuredClone(value) as Record<string, unknown>;
-	} catch {
-		throw new TypeError(`re.${cap.name}: params must be plain data (strings, numbers, booleans, arrays, objects)`);
-	}
+	const params = value as Record<string, unknown>;
 	const known = Object.keys(cap.schema.properties ?? {});
 	const unknown = Object.keys(params).filter((key) => !known.includes(key));
 	if (unknown.length > 0) {

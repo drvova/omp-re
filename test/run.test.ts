@@ -17,10 +17,12 @@ import { CapabilityRegistry } from "../extensions/re/capabilities.ts";
 import { compileCell } from "../extensions/re/cell.ts";
 import { collectEvidence } from "../extensions/re/entries.ts";
 import { listKept } from "../extensions/re/kept.ts";
-import { type CellOutcome, type ReNamespace, namespaceFor } from "../extensions/re/namespace.ts";
+import { CellError, type CellOutcome, type ReNamespace, namespaceFor } from "../extensions/re/namespace.ts";
 import { plainResult } from "../extensions/re/format.ts";
 import { shutdownState } from "../extensions/re/state.ts";
-import { makeHarness, rmDirSafe } from "./helpers.ts";
+// Failing runs are asserted through captureError, never `expect(promise).rejects`: under bun test that
+// form can stop delivering the namespace worker's messages while the promise is still pending.
+import { captureError, makeHarness, rmDirSafe } from "./helpers.ts";
 
 let root: string;
 const originalAgentDir = getAgentDir();
@@ -106,12 +108,39 @@ function setup(sessionId: string) {
 			return plainResult(`flagged ${params.addr} as ${params.name}`);
 		},
 	});
+	// A slow operation that waits until its call is cancelled, like a long rizin analysis.
+	const slow = { started: false, aborted: false };
+	host.registerTool({
+		name: "analyze",
+		label: "Slow",
+		description: "Fake slow pass.",
+		approval: "exec",
+		parameters: z.object({}),
+		async execute(_id, _params, signal) {
+			slow.started = true;
+			await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+			slow.aborted = signal?.aborted === true;
+			return plainResult("never seen");
+		},
+	});
 	let ns: ReNamespace | undefined;
-	const run = async (code: string, strings: Record<string, string> = {}): Promise<CellOutcome> => {
+	const run = async (code: string, strings: Record<string, string> = {}, signal?: AbortSignal): Promise<CellOutcome> => {
 		ns ??= await namespaceFor(h.ctx, registry, "run");
-		return ns.run(code, { pi: h.pi, ctx: h.ctx, signal: undefined, onUpdate: undefined, toolCallId: "call", strings });
+		return ns.run(code, { pi: h.pi, ctx: h.ctx, signal, onUpdate: undefined, toolCallId: "call", strings });
 	};
-	return { h, registry, run, namespace: () => namespaceFor(h.ctx, registry, "run") };
+	return { h, registry, run, slow, namespace: () => namespaceFor(h.ctx, registry, "run") };
+}
+
+/** Run one cell through the real `run` tool in a fresh process booting omp's SDK (test/e2e/run-cell.ts), with `keptDir` as its kept directory. */
+async function child(keptDir: string, code: string): Promise<{ ok: boolean; text: string }> {
+	const proc = Bun.spawn([process.execPath, resolve(import.meta.dir, "e2e/run-cell.ts"), join(root, "child-agent"), code], {
+		env: { ...process.env, OMPRE_KEPT_DIR: keptDir },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+	if ((await proc.exited) !== 0) throw new Error(`child failed: ${stderr}`);
+	return JSON.parse(stdout.trim().split("\n").at(-1)!) as { ok: boolean; text: string };
 }
 
 let sessionCounter = 0;
@@ -142,9 +171,9 @@ describe("the namespace", () => {
 
 	test("the namespace's own vocabulary cannot be overwritten by accident", async () => {
 		const { run } = setup(newSession());
-		await expect(run("const re = 1")).rejects.toThrow("`re` is part of the namespace (see man()) and cannot be redeclared");
-		await expect(run("function describe() {}")).rejects.toThrow("`describe` is part of the namespace");
-		await expect(run("re = 1")).rejects.toThrow(/read.?only/i);
+		expect((await captureError(run("const re = 1"))).message).toContain("`re` is part of the namespace (see man()) and cannot be redeclared");
+		expect((await captureError(run("function describe() {}"))).message).toContain("`describe` is part of the namespace");
+		expect((await captureError(run("re = 1"))).message).toMatch(/read.?only/i);
 		expect((await run("typeof re.hash_binary")).value).toBe("function");
 	});
 
@@ -159,9 +188,9 @@ describe("the namespace", () => {
 		const audit = await readFile(join(getAgentDir(), "re", "audit", `${h.ctx.sessionManager.getSessionId()}.log`), "utf8");
 		expect(audit.trim().split("\n").map((line) => JSON.parse(line).tool)).toEqual(["hash_binary", "set_flag"]);
 
-		await expect(run("await re.set_flag({ addr: '0x10' })")).rejects.toThrow("re.set_flag: name must be");
-		await expect(run("await re.set_flag({ addr: '0x10', name: 'x', nmae: 'y' })")).rejects.toThrow("re.set_flag: unknown parameter nmae — expected addr, name");
-		await expect(run("await re.set_flag('0x10')")).rejects.toThrow("re.set_flag takes one params object (required: addr, name)");
+		expect((await captureError(run("await re.set_flag({ addr: '0x10' })"))).message).toContain("re.set_flag: name must be");
+		expect((await captureError(run("await re.set_flag({ addr: '0x10', name: 'x', nmae: 'y' })"))).message).toContain("re.set_flag: unknown parameter nmae — expected addr, name");
+		expect((await captureError(run("await re.set_flag('0x10')"))).message).toContain("re.set_flag takes one params object (required: addr, name)");
 		expect((await run("(await re.hash_binary('salt-')).split('\\n')[0]")).value).toBe("sha256 salt-deadbeef");
 		expect((await run("let msg\ntry { await re.set_flag({ addr: 'bad', name: 'n' }) } catch (e) { msg = e.message }\nmsg")).value).toBe('omp-re: invalid address or expression: "bad"');
 	});
@@ -184,21 +213,21 @@ describe("the namespace", () => {
 		const { run } = setup(newSession());
 		const outcome = await run("/** Square. */\nfunction sq(x: number) { return x * x }\nconst SCALE = 3\nconst result = sq(SCALE)");
 		expect(outcome.kept).toEqual(["sq", "SCALE"]);
-		expect((await listKept()).map((u) => [u.name, u.source])).toEqual([
+		expect((await listKept(process.env.OMPRE_KEPT_DIR!)).map((u) => [u.name, u.source])).toEqual([
 			["SCALE", "const SCALE = 3;"],
 			["sq", "/** Square. */\nfunction sq(x: number) { return x * x }"],
 		]);
 		expect((await run("kept()")).value).toMatch(/2 kept in .*:\n {2}SCALE — const SCALE = 3;\n {2}sq — function sq\(x: number\) \{ return x \* x \} — Square\./);
 		expect((await run("forget('sq')")).value).toBe("forgot sq");
-		expect((await listKept()).map((u) => u.name)).toEqual(["SCALE"]);
-		await expect(run("sq(2)")).rejects.toThrow("sq is not defined");
+		expect((await listKept(process.env.OMPRE_KEPT_DIR!)).map((u) => u.name)).toEqual(["SCALE"]);
+		expect((await captureError(run("sq(2)"))).message).toContain("sq is not defined");
 		expect((await run("forget('result')")).value).toBe("forgot result (it was defined, not kept)");
 	});
 
 	test("a failed call keeps nothing", async () => {
 		const { run } = setup(newSession());
-		await expect(run("function half(x: number) { return x / 2 }\nthrow new Error('boom')")).rejects.toThrow("boom");
-		expect(await listKept()).toEqual([]);
+		expect((await captureError(run("function half(x: number) { return x / 2 }\nthrow new Error('boom')"))).message).toContain("boom");
+		expect(await listKept(process.env.OMPRE_KEPT_DIR!)).toEqual([]);
 	});
 
 	test("a new session's namespace loads kept units — in dependency order, each isolated — and refuses a unit that does work", async () => {
@@ -235,26 +264,101 @@ describe("the namespace", () => {
 	});
 });
 
+describe("stopping a call", () => {
+	beforeEach(() => {
+		freshKeptDir();
+	});
+
+	test("cancelling stops a cell mid-statement — even a loop that never yields — and resets the namespace", async () => {
+		const { run } = setup(newSession());
+		await run("function survivor() { return 'still here' }\nvar scratch = 1");
+		const controller = new AbortController();
+		const looping = run("print('looping')\nfor (;;) {}", {}, controller.signal);
+		setTimeout(() => controller.abort(), 150);
+		const err = (await looping.catch((e) => e)) as CellError;
+		expect(err).toBeInstanceOf(CellError);
+		expect(err.message).toBe("omp-re: cancelled — the call was stopped where it was; the namespace was reset — kept definitions reload on the next call; other variables are gone");
+		expect(err.output).toEqual(["looping"]);
+		// A fresh worker: kept definitions are back, plain variables are gone.
+		expect((await run("survivor()")).value).toBe("still here");
+		expect((await captureError(run("scratch"))).message).toContain("scratch is not defined");
+	});
+
+	test("cancelling while a capability runs hands the cancellation to the capability too", async () => {
+		const { run, slow } = setup(newSession());
+		const controller = new AbortController();
+		const waiting = run("await re.analyze()", {}, controller.signal);
+		while (!slow.started) await new Promise((r) => setTimeout(r, 5));
+		controller.abort();
+		expect((await captureError(waiting)).message).toContain("omp-re: cancelled");
+		while (!slow.aborted) await new Promise((r) => setTimeout(r, 5));
+		expect(slow.aborted).toBe(true);
+	});
+
+	test("process.exit() in a cell ends only the namespace's worker, never omp", async () => {
+		const { run } = setup(newSession());
+		expect((await captureError(run("process.exit(7)"))).message).toContain("omp-re: the run namespace's worker exited (code 7); the namespace was reset");
+		expect((await run("6 * 7")).value).toBe(42);
+	});
+
+	// In a child process booting omp's SDK: bun test installs its own uncaught-error handling in
+	// workers, which would end the worker before the namespace's own handler sees the error.
+	test("an exception a timer throws later is printed into the running call, not fatal", async () => {
+		const dir = freshKeptDir();
+		expect(await child(dir, "setTimeout(() => { throw new Error('late') }, 0)\nawait new Promise((r) => setTimeout(r, 30))\n'alive'")).toEqual({ ok: true, text: "ran\n(uncaught: late)\nalive" });
+		expect(await child(dir, "setTimeout(() => Promise.reject(new Error('later')), 0)\nawait new Promise((r) => setTimeout(r, 30))\n'alive'")).toEqual({ ok: true, text: "ran\n(unhandled rejection: later)\nalive" });
+	}, 60_000);
+});
+
+describe("MCP servers as functions", () => {
+	beforeEach(() => {
+		freshKeptDir();
+	});
+
+	const echoServer = JSON.stringify({ name: "echo", command: process.execPath, args: [resolve(import.meta.dir, "e2e/mcp-echo.ts")] });
+
+	test("a connected server's tools are async methods with signatures from their schemas; results, errors, and audit lines", async () => {
+		const { run, h } = setup(newSession());
+		await run(`var echo = await mcp.connect(${echoServer})`);
+		expect((await run("describe(echo)")).value).toBe(
+			[
+				"echo — a connected MCP server; each tool is an async method taking one params object. describe(echo.<tool>) shows its parameters; close() disconnects.",
+				"",
+				"A test server.",
+				"",
+				"tools",
+				"  echo({ text: string }) — Return the text you send.",
+				"  add({ a: number, b: number }) — Add two numbers.",
+				"  fail() — Always fails.",
+			].join("\n"),
+		);
+		expect((await run("describe(echo.echo)")).value).toContain("echo.echo({ text: string }) → Promise<unknown>");
+		expect((await run("await echo.echo({ text: 'hi' })")).value).toBe("hi");
+		expect((await run("await echo.echo('shorthand')")).value).toBe("shorthand");
+		expect((await run("await echo.add({ a: 2, b: 3 })")).value).toEqual({ sum: 5 });
+		expect((await captureError(run("await echo.fail()"))).message).toContain("echo.fail: deliberate failure");
+		const audit = await readFile(join(getAgentDir(), "re", "audit", `${h.ctx.sessionManager.getSessionId()}.log`), "utf8");
+		expect(audit.trim().split("\n").map((line) => JSON.parse(line).tool)).toEqual(["mcp.connect", "mcp:echo/echo", "mcp:echo/echo", "mcp:echo/add", "mcp:echo/fail"]);
+		await run("await echo.close()");
+		expect((await captureError(run("await echo.echo({ text: 'x' })"))).message).toContain("this server connection is closed");
+	}, 30_000);
+
+	test("mcp.servers() lists omp's configured servers, and an unknown name says how to find them", async () => {
+		const { run } = setup(newSession());
+		expect(typeof (await run("await mcp.servers()")).value).toBe("object");
+		expect((await captureError(run("await mcp.connect('no-such-server-anywhere')"))).message).toContain('no MCP server named "no-such-server-anywhere" is configured');
+	}, 30_000);
+});
+
 describe("restart persistence (a fresh process)", () => {
 	test("a definition kept by one process is loaded and usable in a fresh process pointed at the same directory, and forget removes it there too", async () => {
 		const dir = freshKeptDir();
 		const { run } = setup(newSession());
 		await run("/** Answer helper. */\nfunction restartAnswer(x: number): number { return x + 2 }\nconst RESTART_BASE = 40");
 
-		const child = async (code: string) => {
-			const proc = Bun.spawn(["bun", resolve(import.meta.dir, "e2e/run-cell.ts"), join(root, "child-agent"), code], {
-				env: { ...process.env, OMPRE_KEPT_DIR: dir },
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-			if ((await proc.exited) !== 0) throw new Error(`child failed: ${stderr}`);
-			return JSON.parse(stdout.trim().split("\n").at(-1)!) as { ok: boolean; text: string };
-		};
-
-		expect(await child("restartAnswer(RESTART_BASE)")).toEqual({ ok: true, text: "ran\n42" });
-		expect((await child("forget('restartAnswer')")).text).toBe("ran\nforgot restartAnswer");
-		const after = await child("restartAnswer(1)");
+		expect(await child(dir, "restartAnswer(RESTART_BASE)")).toEqual({ ok: true, text: "ran\n42" });
+		expect((await child(dir, "forget('restartAnswer')")).text).toBe("ran\nforgot restartAnswer");
+		const after = await child(dir, "restartAnswer(1)");
 		expect(after.ok).toBe(false);
 		expect(after.text).toContain("restartAnswer is not defined");
 	}, 60_000);

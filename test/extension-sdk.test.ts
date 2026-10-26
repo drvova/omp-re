@@ -21,7 +21,7 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
 import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_FINDING_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
 import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
-import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
+import { canRunRizin, captureError, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
@@ -201,7 +201,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 	});
 
 	test("a capability called with no binary open fails with omp-re's guidance, and the code can catch it", async () => {
-		await expect(run(h.session, "await re.list_functions()")).rejects.toThrow("omp-re: no binary open");
+		// captureError, not `.rejects`: under bun test that form can stop delivering the namespace worker's messages.
+		expect((await captureError(run(h.session, "await re.list_functions()"))).message).toContain("omp-re: no binary open");
 		expect(await run(h.session, "try { await re.list_functions() } catch (e) { print('caught:', e.message) }")).toContain("caught: omp-re: no binary open");
 	});
 });

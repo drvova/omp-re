@@ -209,7 +209,7 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 	const findings = liveFindings(ctx);
 	const inherited = findings.filter((f) => f.inherited).length;
 	lines.push(`findings on this branch: ${findings.length}${inherited ? ` (${inherited} inherited)` : ""}`);
-	lines.push(`kept definitions (${RUN_TOOL_NAME} tool): ${(await listKept()).length} in ${keptDir()}`);
+	lines.push(`kept definitions (${RUN_TOOL_NAME} tool): ${(await listKept(keptDir())).length} in ${keptDir()}`);
 	lines.push(`audit log signing: ${process.env.OMPRE_AUDIT_HMAC_KEY ? "HMAC-SHA256" : "unsigned (set OMPRE_AUDIT_HMAC_KEY)"}`);
 	return lines.join("\n");
 }

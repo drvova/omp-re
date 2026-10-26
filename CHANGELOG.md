@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **BREAKING: one code tool, `run`, replaces the 64-tool catalog.** omp-re now
   advertises exactly one tool. `run` executes TypeScript/JavaScript in a
-  long-lived namespace per omp session (a `node:vm` realm), so the model
+  long-lived namespace per omp session (a worker of its own), so the model
   builds its own tooling on a live API instead of picking from a fixed menu
   that every rizin build, install, and model supports differently.
   - **`re` is the workspace.** Every former tool is a method on it, with the
@@ -34,6 +34,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     `forget(name)` removes.
   - **Discovery in-language.** Empty `code` returns the manual (`man()` from
     inside); `strings` passes long literal text as `strings.<name>`.
+  - **Stoppable.** Each session's namespace runs in a Bun Worker. Cancelling a
+    call terminates it — even mid-loop — and passes the cancellation to any
+    capability in flight; `process.exit()` or a crash in a cell ends only the
+    worker; a timer's late exception is printed, not fatal. The next call
+    starts a fresh worker with the kept definitions reloaded.
+  - **MCP servers as functions.** `mcp.servers()` lists omp's configured MCP
+    servers; `mcp.connect(name | { command, args } | { url })` returns an
+    object whose methods are the server's tools (omp's own MCP client),
+    audited per call and closed with the namespace. omp's built-in tools stay
+    out of reach: omp allows an extension to delegate only to the built-in of
+    its own tool's name.
   - **Security is the deployment's.** `run` executes code with omp's
     authority (`exec` approval tier, the code's first line as its reason).
     There is no enable/disable switch or restricted mode; run omp sandboxed
