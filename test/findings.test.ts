@@ -10,7 +10,7 @@
  * and follows the rename, the one about the unchanged `clamp` is re-proven, and
  * the one about the edited `checksum` lands on the agenda with its diff.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -238,7 +238,16 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		getState(b.ctx).binaryPath = v2;
 		getState(b.ctx).binarySha256 = v2Sha;
 		b.entries.push({ type: "custom", id: "b", customType: "re.binary", data: { path: v2, sha256: v2Sha } });
+		// omp writes a session lazily, on its first model turn; inheriting must write it now, or a headless
+		// `omp -p "/re carry --inherit"` run drops the findings it just re-proved.
+		// And name it: `omp -c` skips a session with no model turn and no title.
+		let persisted = 0;
+		let sessionName: string | undefined;
+		(b.ctx.sessionManager as unknown as { ensureOnDisk: () => Promise<void> }).ensureOnDisk = async () => void persisted++;
+		Object.assign(b.pi, { getSessionName: () => sessionName, setSessionName: async (n: string) => void (sessionName = n) });
 		const result = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi });
+		expect(persisted).toBe(1);
+		expect(sessionName).toBe("re carry v1.md.manifest.json → v2");
 		const inh = result.inheritance!;
 		expect(inh.inherited.map((i) => [i.claim.split(" ")[0], i.status]).sort()).toEqual([
 			["clamp", "holds"],
@@ -267,11 +276,35 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		expect(md).toContain("re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd)");
 		expect(md).not.toContain("checksum is a djb2");
 
-		// --resolve hands the agenda to the model as a user turn instead of printing it.
+		// --resolve headless: print mode starts no model turn after a command, so the agenda is printed
+		// for the next prompt instead of being sent into a turn that would never run.
 		const sent: string[] = [];
 		(b.pi as unknown as { sendUserMessage: (m: string) => void }).sendUserMessage = (m) => sent.push(m);
-		const resolved = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi, resolve: true });
-		expect(resolved.inheritance?.agenda.map((i) => i.claim)).toEqual(["checksum is a djb2 hash (h * 33 + c)."]);
+		const out: string[] = [];
+		const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void out.push(args.join(" ")));
+		try {
+			const headless = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi, resolve: true });
+			expect(headless.inheritance?.agenda.map((i) => i.claim)).toEqual(["checksum is a djb2 hash (h * 33 + c)."]);
+		} finally {
+			log.mockRestore();
+		}
+		expect(sent).toHaveLength(0);
+		expect(out.join("\n")).toContain("a headless run cannot start a model turn");
+		expect(out.join("\n")).toContain("[drifted] checksum is a djb2 hash");
+
+		// --resolve with a UI hands the agenda to the model as a user turn instead of the editor.
+		const editor: string[] = [];
+		const ui = b.ctx.ui as unknown as { notify: (m: string) => void; setEditorText: (t: string) => void };
+		ui.notify = () => {};
+		ui.setEditorText = (t) => editor.push(t);
+		(b.ctx as { hasUI: boolean }).hasUI = true;
+		try {
+			const resolved = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi, resolve: true });
+			expect(resolved.inheritance?.agenda.map((i) => i.claim)).toEqual(["checksum is a djb2 hash (h * 33 + c)."]);
+		} finally {
+			(b.ctx as { hasUI: boolean }).hasUI = false;
+		}
+		expect(editor).toHaveLength(0);
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toContain("[drifted] checksum is a djb2 hash");
 		expect(sent[0]).toContain("+ |      :|   0x0000126c      sub   eax, edx");
@@ -280,6 +313,7 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		const again = await carryManifest(b.ctx, `${reportPath}.manifest.json`, { inherit: b.pi });
 		expect(again.inheritance?.inherited).toHaveLength(0);
 		expect(again.inheritance?.alreadyPresent).toBe(2);
+		expect(persisted).toBe(1); // nothing new inherited, nothing to write
 		shutdownState("inherit-v2");
 	}, 120_000);
 });

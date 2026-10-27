@@ -45,6 +45,8 @@ export interface ReSessionState {
 	evidenceByAddr: Map<string, string>;
 	/** `/re off`: every RE tool call in this session is refused until `/re on`. A gate, not a change of tool presentation, so the `xd://` devices stay mounted. */
 	toolsOff: boolean;
+	/** A background open in flight (`--binary` at startup), settling when it finishes or fails. RE tool calls and the `/re` subcommands that need a binary wait on it, so they see the binary instead of failing with "no binary open". Null when nothing is opening. */
+	opening: Promise<void> | null;
 	/** Internals: the session's teardown scope and the live disposers that own each process's teardown. Not read outside the backend. */
 	_scope: Scope | null;
 	_disposeRz: Disposer | null;
@@ -104,6 +106,7 @@ function newState(sessionId: string): ReSessionState {
 		evidenceCount: 0,
 		evidenceByAddr: new Map(),
 		toolsOff: false,
+		opening: null,
 		_scope: null,
 		_disposeRz: null,
 		_disposeDbg: null,

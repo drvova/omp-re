@@ -119,10 +119,11 @@ fixture:
 1. **v1.** It reads `checksum` and `fib` with `rizin_command`, records a
    finding for each by citing the `[evidence …]` tags, and then attempts an
    overreaching claim, which the support auditor should refuse.
-2. **v2.** `/re carry … --resolve` re-proves what holds and sends the drifted
-   checksum finding to the model as a turn.
-3. **v2 report.** The script writes it, then reports how many findings the
-   model recorded while resolving.
+2. **v2.** `/re carry … --resolve` re-proves what holds and, headless, prints
+   the agenda for the drifted checksum finding.
+3. **v2 report.** In the same session (`omp -c`), the script passes that agenda
+   to the model as the prompt, writes the report, and reports how many findings
+   the model recorded while resolving.
 
 Assertions are on recorded state only (session entries and report files),
 never on model prose. Logs and sessions stay in the work directory (set

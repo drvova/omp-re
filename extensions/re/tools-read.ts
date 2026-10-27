@@ -12,7 +12,7 @@ import { decompileAt } from "./decompile.ts";
 import { disassembleAt } from "./disasm.ts";
 import { jsonResult, plainResult, prefixedTextResult, textResult, type ReToolResult } from "./format.ts";
 import { RE_LOAD_MODE, reRenderers } from "./render.ts";
-import { addrOf, eaFromOffset, resolveNumericAddr, resolveRizinTool, validateAddr, type RzSession } from "./rizin.ts";
+import { addrOf, codeSize, eaFromOffset, resolveNumericAddr, resolveRizinTool, validateAddr, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
 export const DEFAULT_LIMIT = 200;
@@ -69,6 +69,8 @@ interface RzFunc {
 	offset?: number;
 	name: string;
 	size: number;
+	/** Bytes actually in the function's basic blocks; `size` is the linear span from its lowest to highest address. */
+	realsz?: number;
 	nbbs?: number;
 	nargs?: number;
 	nlocals?: number;
@@ -78,13 +80,15 @@ interface RzFunc {
 	[key: string]: unknown;
 }
 
-/** One function list row: what an analyst scans a function list for, with `callers` (rizin's indegree) as the cheapest "what matters" signal. */
+/** One function list row: what an analyst scans a function list for, with `callers` (rizin's indegree) as the cheapest "what matters" signal. `span` appears only when the linear extent differs from the code size — a hint that the function's blocks are scattered. */
 function functionRow(fn: RzFunc): Record<string, unknown> {
 	const addr = knownAddr(addrOf(fn));
+	const size = codeSize(fn);
 	return {
 		...(addr === undefined ? {} : { ea: eaFromOffset(addr) }),
 		name: fn.name,
-		size: fn.size,
+		size,
+		...(fn.size !== size ? { span: fn.size } : {}),
 		...(fn.nbbs === undefined ? {} : { blocks: fn.nbbs }),
 		...(fn.indegree === undefined ? {} : { callers: fn.indegree }),
 		...(fn.outdegree === undefined ? {} : { callees: fn.outdegree }),
@@ -94,7 +98,7 @@ function functionRow(fn: RzFunc): Record<string, unknown> {
 
 const SORTERS: Record<string, (a: RzFunc, b: RzFunc) => number> = {
 	address: (a, b) => (addrOf(a) ?? 0) - (addrOf(b) ?? 0),
-	size: (a, b) => b.size - a.size,
+	size: (a, b) => codeSize(b) - codeSize(a),
 	callers: (a, b) => (b.indegree ?? 0) - (a.indegree ?? 0),
 };
 
@@ -244,7 +248,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 	const pageParams = z.object(offsetLimit);
 	const listFunctionsParams = z.object({
 		...offsetLimit,
-		sort: z.enum(["address", "size", "callers"]).optional().describe("Row order (default address)."),
+		sort: z.enum(["address", "size", "callers"]).optional().describe("Row order (default address). `size` is bytes of code (rizin's realsz), biggest first."),
 	});
 	const searchParams = z.object({
 		query: z.string().describe("Substring to match against function names."),
@@ -341,7 +345,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 			const addr = fn ? knownAddr(addrOf(fn)) : undefined;
 			if (!fn || addr === undefined) throw new Error(`omp-re: function not found: ${params.target}`);
 			const ea = eaFromOffset(addr);
-			return jsonResult(`${fn.name} at ${ea} (size ${fn.size})`, await functionSummary(rz, fn, ea, signal), { ea, ctx, tool: "get_function" });
+			return jsonResult(`${fn.name} at ${ea} (size ${codeSize(fn)})`, await functionSummary(rz, fn, ea, signal), { ea, ctx, tool: "get_function" });
 		},
 	});
 

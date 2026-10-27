@@ -23,7 +23,7 @@ import { decompileAt } from "./decompile.ts";
 import { disassembleAt } from "./disasm.ts";
 import { branchEntries, customEntries } from "./entries.ts";
 import { type FindingRecord, findingNote, liveFindings } from "./findings.ts";
-import { addrOf, eaFromOffset, type RzSession } from "./rizin.ts";
+import { addrOf, codeSize, eaFromOffset, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
 
 /** The live rizin session for UI use, or null (with the reason already shown) when there is none. Respawns transparently like the tools do, so a panel opened after a branch change still works. */
@@ -267,13 +267,15 @@ export async function showFunctionsPanel(ctx: ExtensionContext): Promise<void> {
 		offset?: number;
 		name: string;
 		size?: number;
+		realsz?: number;
 	}
 	const fns = (await rz.cmdj<Fn[]>("aflj").catch(() => null)) ?? [];
 	const items: SelectItem[] = fns.flatMap((fn) => {
 		const addr = addrOf(fn);
 		if (addr === undefined) return [];
 		const value = eaFromOffset(addr);
-		return [{ value, label: fn.name, description: fn.size !== undefined ? `${value} · ${fn.size}b` : value }];
+		const size = codeSize(fn);
+		return [{ value, label: fn.name, description: size !== undefined ? `${value} · ${size}b` : value }];
 	});
 	await showPanel(ctx, {
 		title: "omp-re: functions",

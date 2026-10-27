@@ -56,6 +56,19 @@ export function addrOf(item: { addr?: number; offset?: number }): number | undef
 }
 
 /**
+ * A function's size in bytes of code: rizin's `realsz` (the bytes in its basic
+ * blocks), not `size`, which is the linear span from its lowest to highest
+ * address. The span swallows whatever lies between non-contiguous blocks —
+ * other functions included — so on real binaries it can overstate a function
+ * many times over (75 534 "bytes" for a function with 2 380 bytes of code).
+ */
+export function codeSize(fn: { size: number; realsz?: unknown }): number;
+export function codeSize(fn: { size?: number; realsz?: unknown }): number | undefined;
+export function codeSize(fn: { size?: number; realsz?: unknown }): number | undefined {
+	return typeof fn.realsz === "number" ? fn.realsz : fn.size;
+}
+
+/**
  * Wrap a value as a single-quoted rizin argument. Inside single quotes rizin's
  * shell parser treats `;`, `@`, `~`, `|`, `>`, `` ` ``, `$(...)`, and `#` as
  * literal text; only `\'` and `\\` are escapes. Every free-text or type value

@@ -36,7 +36,7 @@ Every read-tier call that succeeds is recorded as a `re.evidence` entry.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `list_functions` | `read` | `offset?, limit?, sort?` | Functions as `{ea, name, size, blocks, callers, callees, signature}`. `sort` is `address` (default), `size`, or `callers`. |
+| `list_functions` | `read` | `offset?, limit?, sort?` | Functions as `{ea, name, size, span?, blocks, callers, callees, signature}`. `size` is bytes of code (rizin's `realsz`); `span`, rizin's linear extent, appears only when it differs — a sign of scattered blocks. `sort` is `address` (default), `size`, or `callers`. |
 | `search_functions` | `read` | `query, offset?, limit?` | Same rows, filtered by name substring. |
 | `get_function` | `read` | `target` (name or address) | One function: signature, size and complexity metrics, `args`/`locals` with types and storage, `calls` (unique call targets, named via rizin's flags), `callers` (call sites that reach it), and `refCounts`. Raw jump/data reference arrays are reduced to counts. |
 | `decompile_function` | `read` | `addr` (address or name) | Decompile with rz-ghidra (`pdg`) or jsdec (`pdd`), header `decompiled <ea> (<kind>)`. With neither — or when the decompiler returns nothing for this function — returns annotated disassembly whose output begins `(disassembly only — …) `. |

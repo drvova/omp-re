@@ -14,7 +14,7 @@
  * it from omp's own `eval` tool as `await tool.<name>({ ... })`. These tests go
  * through that same path.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -77,7 +77,11 @@ function makeUi(notes: string[], editor: { text: string }) {
 	};
 }
 
-async function boot(sessionManager: unknown): Promise<Harness> {
+/**
+ * Boot a session with the extension loaded. `headless` boots without a UI, as `omp -p` runs; `flags` sets
+ * extension flags (like `--binary`) before session_start fires.
+ */
+async function boot(sessionManager: unknown, options: { headless?: boolean; flags?: Record<string, string> } = {}): Promise<Harness> {
 	const sdk = await import("@oh-my-pi/pi-coding-agent");
 	const { initializeExtensions } = await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
 	const notes: string[] = [];
@@ -90,11 +94,12 @@ async function boot(sessionManager: unknown): Promise<Harness> {
 		sessionManager: sessionManager as never,
 	});
 	expect(extensionsResult.errors).toEqual([]);
-	setToolUIContext(ui as never, false);
+	for (const [name, value] of Object.entries(options.flags ?? {})) session.extensionRunner!.setFlagValue(name, value);
+	if (!options.headless) setToolUIContext(ui as never, false);
 	await initializeExtensions(session, {
 		reportSendError: () => {},
 		reportRuntimeError: (error: { error: string }) => notes.push(`[runtime] ${error.error}`),
-		uiContext: ui as never,
+		...(options.headless ? {} : { uiContext: ui as never }),
 	});
 	return {
 		session,
@@ -180,6 +185,28 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 		expect(h.notes.at(-1)).toBe("[error] omp-re: no annotation left to undo");
 	});
 
+	test("headless (omp -p), a /re error goes to stderr with a non-zero exit code instead of vanishing", async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		const headless = await boot(SessionManager.inMemory(), { headless: true });
+		const errors: string[] = [];
+		const logs: string[] = [];
+		const error = spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")));
+		const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")));
+		const exitCode = process.exitCode;
+		try {
+			await headless.session.prompt("/re bogus");
+			expect(errors).toContain('omp-re: unknown /re subcommand "bogus" — try /re help');
+			expect(process.exitCode).toBe(1);
+			await headless.session.prompt("/re on");
+			expect(logs).toContain("omp-re: RE tools enabled for this session");
+		} finally {
+			error.mockRestore();
+			log.mockRestore();
+			process.exitCode = exitCode; // this test's deliberate failure must not fail the test run
+			await headless.shutdown();
+		}
+	});
+
 	test("a tool called with no binary open fails with omp-re's guidance", async () => {
 		await expect(h.session.getToolByName("list_functions")!.execute("t-nobin", {})).rejects.toThrow("omp-re: no binary open");
 	});
@@ -219,6 +246,18 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 			expect(second.notes.filter((n) => n.startsWith("[runtime]"))).toEqual([]);
 		} finally {
 			await second.shutdown();
+		}
+	}, 30_000);
+
+	test("a tool call made while --binary is still analyzing waits for that open instead of failing", async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		// session_start opens the binary in the background; the call below is made before that open can have finished.
+		const h = await boot(SessionManager.inMemory(), { flags: { binary: TEST_BINARY } });
+		try {
+			const result = await evalJs(h.session, "(await tool.hash_binary({})).text");
+			expect(result.text).toMatch(/^sha256=[0-9a-f]{64}$/m);
+		} finally {
+			await h.shutdown();
 		}
 	}, 30_000);
 
