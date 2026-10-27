@@ -14,7 +14,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { branchEntries, recordedAnalysisPasses } from "./entries.ts";
 import { textResult } from "./format.ts";
 import { ANALYSIS_PASSES, type AnalysisPass } from "./passes.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { analysisTimeoutMs } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
@@ -43,7 +43,7 @@ export function registerAnalyzeTools(pi: ExtensionAPI): void {
 			const pass = args && typeof args === "object" ? (args as { pass?: unknown }).pass : undefined;
 			return { tier: "exec" as const, reason: `Run rizin analysis pass ${typeof pass === "string" ? JSON.stringify(pass) : "?"} — this changes the analysis (it adds functions, xrefs, names, or types).` };
 		},
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: analyzeParams,
 		...reRenderers({ title: "analyze", subject: "pass", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

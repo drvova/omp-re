@@ -62,6 +62,29 @@ Each subsystem's registration stays a plain `(pi) => …` function (see
 `registerShell` in `index.ts`), so it is unit-testable in isolation; `app.ts`
 only sequences them.
 
+## Presentation: `xd://` devices and `eval`
+
+Every RE tool is registered with `loadMode: RE_LOAD_MODE` (`"discoverable"`,
+`render.ts`). omp mounts discoverable tools as `xd://<name>` devices instead of
+listing their schemas top-level, and its `eval` tool reaches every enabled tool
+— mounted ones included — through its tool bridge as `tool.<name>()`. omp-re
+therefore needs no code tool, dispatcher, or tool catalog of its own: the
+model discovers the tools with `read xd://…` and composes them in omp's own
+`eval` kernel, whose state persists for the session and whose `%load` keeps
+helper scripts across sessions.
+
+Every path into a tool — top-level, `write xd://…`, `tool.<name>()` from
+`eval` — goes through omp's tool wrapper, so the tool's approval tier applies
+and omp fires the `tool_call`/`tool_result` events `audit.ts` and
+`evidence.ts` hook. A call made from `eval` is recorded and tagged exactly
+like a top-level one (`test/extension-sdk.test.ts` drives that path).
+
+`/re off` is a gate rather than a change of presentation: a `tool_call`
+handler in `registerShell` blocks RE tools while the session's `toolsOff`
+flag is set. Turning tools off and on through `setActiveTools` would not round
+trip — re-selecting a tool through it pins the tool top-level, so `/re on`
+would undo omp's mounting.
+
 ## Teardown, honestly
 
 omp's `ExtensionAPI` returns no handle from `on()`, `registerTool()`,
@@ -70,7 +93,7 @@ exposes no extension-unload hook. So a listener or tool, once registered,
 cannot be removed — those subsystems are **register-once by the host's
 design** — with no unregister call, there is nothing to undo. The teardown
 that is real is the per-session process lifecycle above;
-omp's one supported toggle, `setActiveTools`, is what `/re off` uses. There is
+`/re off` blocks calls on the `tool_call` event instead (see above). There is
 no host-level hot-unload — the host does not offer one.
 
 ## Module map

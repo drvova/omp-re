@@ -15,7 +15,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { textResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { eaFromOffset, resolveNumericAddr } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
@@ -66,7 +66,7 @@ export function registerDeobfuscateTools(pi: ExtensionAPI): void {
 		description:
 			"Reveal obfuscated bytes in place: apply a byte transform (xor/add/sub/or/and with a key), an endian swap, or a cipher decrypt (decrypt with algo+key[+iv]) to a window and show the result as hex and as a string. Common for unmasking xor-hidden strings and decrypting embedded configs (RC4/AES). The transform runs under rizin's write cache and is reset immediately — the file on disk is never modified. Read-only and recorded as evidence.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: params,
 		...reRenderers({ title: "Deobfuscate", subject: "op", body: "text" }),
 		async execute(_id, p, signal, _onUpdate, ctx) {

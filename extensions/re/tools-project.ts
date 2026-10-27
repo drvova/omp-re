@@ -18,7 +18,7 @@ import { statSync } from "node:fs";
 import { basename } from "node:path";
 import { textResult } from "./format.ts";
 import { rizinOutputPath, rizinPathArg } from "./output.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
 export function registerProjectTools(pi: ExtensionAPI): void {
@@ -36,7 +36,7 @@ export function registerProjectTools(pi: ExtensionAPI): void {
 		description:
 			"Save the current analysis as a rizin project (.rzdb) — functions, names, comments, flags, and types, including every annotation omp-re has applied — so it can be opened in interactive rizin or Cutter (`Po <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re does not load projects (it manages analysis state through its own session log). Returns the file path and size.",
 		approval: () => ({ tier: "exec" as const, reason: "Write the current analysis to a rizin project file in omp-re's output directory — the sample and the analysis are not modified." }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: exportProjectParams,
 		...reRenderers({ title: "export_project", subject: "file", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

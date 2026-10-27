@@ -13,7 +13,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { annotationCommands, HINT_KINDS, HINT_SPEC, type HintKind, liveAnnotations, type AnnotationData, type AnnotationKind } from "./annotations.ts";
 import { branchEntries } from "./entries.ts";
 import { plainResult, type ReToolResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { addrOf, eaFromOffset, normalizeAddr, resolveNumericAddr, validateIdent, validateText, validateTypeLike, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState, markAnnotationsApplied } from "./state.ts";
 
@@ -209,7 +209,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		label: "Rename Function",
 		description: "Rename the function at an address, verifying the rename actually landed before reporting success.",
 		approval: (args) => ({ tier: "write", reason: `Rename function ${describeArg(args, "addr")} to ${describeArg(args, "new")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: renameFunctionParams,
 		...reRenderers({ title: "Rename function", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -237,7 +237,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			tier: "write",
 			reason: `Rename variable ${describeArg(args, "old")} to ${describeArg(args, "new")} in ${describeArg(args, "addr")}. ${undoNote}`,
 		}),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: renameVariableParams,
 		...reRenderers({ title: "Rename variable", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -267,7 +267,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		label: "Set Comment",
 		description: "Set (or clear, with empty text) the comment at an address, replacing any existing comment, and verify it landed before reporting success.",
 		approval: (args) => ({ tier: "write", reason: `Set the comment at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setCommentParams,
 		...reRenderers({ title: "Comment", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -294,7 +294,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Set a function's C prototype, e.g. `int parse_config(const char *path, int flags)`. The name in the prototype becomes the function's name. Verifies what rizin stored and reports it if rizin's C parser normalized it differently.",
 		approval: (args) => ({ tier: "write", reason: `Set the prototype of ${describeArg(args, "addr")} to ${describeArg(args, "sig")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setPrototypeParams,
 		...reRenderers({ title: "Prototype", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -323,7 +323,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 			tier: "write",
 			reason: `Set the type of ${describeArg(args, "var")} in ${describeArg(args, "addr")} to ${describeArg(args, "type")}. ${undoNote}`,
 		}),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setVariableTypeParams,
 		...reRenderers({ title: "Variable type", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -354,7 +354,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Define a local variable or argument in a function that rizin's analysis didn't recover — a stack slot (`afvs`, by frame delta) or a register variable (`afvr`, by register) — so the decompiler and disassembly name it instead of showing a raw offset. Refuses when a variable of that name already exists, verifies the new one landed, and is reversible with /re undo (which runs `afv-`).",
 		approval: (args) => ({ tier: "write", reason: `Define ${describeArg(args, "storage")} variable ${describeArg(args, "name")} in ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: defineVariableParams,
 		...reRenderers({ title: "Define variable", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -383,7 +383,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Define a global variable at a data address (`avga`), giving it a name and a C type so disassembly, xrefs, and the decompiler show the name and typed accesses instead of a raw address. Refuses when a global of that name already exists, verifies it landed, and is reversible with /re undo (which runs `avgm`).",
 		approval: (args) => ({ tier: "write", reason: `Define global ${describeArg(args, "name")} at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: defineGlobalParams,
 		...reRenderers({ title: "Define global", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -409,7 +409,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Define a function at an address rizin's auto-analysis missed (obfuscated call targets, hand-written stubs, code reached only indirectly). Runs `af`, then verifies a function now begins exactly there. Reversible with /re undo (which runs `af-`).",
 		approval: (args) => ({ tier: "write", reason: `Define a function at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: defineFunctionParams,
 		...reRenderers({ title: "Define function", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -435,7 +435,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Set a function's calling convention (how arguments and the return value are passed), which corrects argument recovery in the decompiler and call sites. Verifies what rizin stored; an unknown convention is rejected with rizin's own error (list them with rizin_command afcl). Reversible with /re undo.",
 		approval: (args) => ({ tier: "write", reason: `Set the calling convention of ${describeArg(args, "addr")} to ${describeArg(args, "cc")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setCallingConventionParams,
 		...reRenderers({ title: "Calling convention", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -462,7 +462,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Name an address with a flag (rizin's named label), so disassembly, xrefs, and your own commands can refer to it by name. Replaces any flag already at that address. Verifies the flag landed. Reversible with /re undo.",
 		approval: (args) => ({ tier: "write", reason: `Flag ${describeArg(args, "addr")} as ${describeArg(args, "name")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setFlagParams,
 		...reRenderers({ title: "Flag", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -489,7 +489,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Hint the architecture and/or word size to disassemble from an address, for a region that differs from the file's default — most often ARM/Thumb switches (bits 16) or mixed-arch firmware. Sets `aha`/`ahb`, verifies the hint landed, and is reversible with /re undo (which deletes it).",
 		approval: (args) => ({ tier: "write", reason: `Hint arch/bits at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setArchHintParams,
 		...reRenderers({ title: "Arch hint", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -521,7 +521,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Set an analysis hint at an instruction that corrects how rizin reads it: the display base of an immediate (hex/decimal/char/string/syscall/IP-relative), the opcode type, the opcode byte-length (to realign disassembly), the real target of an indirect jump/call, or a function's return value. Verifies the hint landed and records what rizin stored; reversible with /re undo (which deletes it or restores the prior hint).",
 		approval: (args) => ({ tier: "write", reason: `Set the ${describeArg(args, "hint")} hint at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setHintParams,
 		...reRenderers({ title: "Hint", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -549,7 +549,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Mark bytes as a data element (or an array, with `count`) so disassembly and xrefs stop rendering data as code. Verifies the mark landed; reversible with /re undo.",
 		approval: (args) => ({ tier: "write", reason: `Mark data at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setDataParams,
 		...reRenderers({ title: "Data", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -574,7 +574,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Mark bytes as a string where rizin's auto-analysis missed one, so it shows in the disassembly and string views. Omit `size` to autodetect encoding and length. Verifies it landed; reversible with /re undo.",
 		approval: (args) => ({ tier: "write", reason: `Mark a string at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setStringParams,
 		...reRenderers({ title: "String", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -599,7 +599,7 @@ export function registerMutateTools(pi: ExtensionAPI): void {
 		description:
 			"Overlay a struct format (a pf format string, optionally with field names) on a memory region, so the disassembly shows named, typed fields instead of raw bytes — one of the highest-leverage annotations for data structures. Display-only (doesn't perturb analysis). Verifies it landed; reversible with /re undo.",
 		approval: (args) => ({ tier: "write", reason: `Overlay a format at ${describeArg(args, "addr")}. ${undoNote}` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: setFormatParams,
 		...reRenderers({ title: "Format", subject: "addr", body: "none" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

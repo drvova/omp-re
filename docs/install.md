@@ -23,9 +23,25 @@ brew install rizin
 ### Linux
 
 Arch (`pacman -S rizin`) and Fedora (`dnf install rizin`) package it.
-Ubuntu 24.04's apt has **no** rizin package; use a release build from
-[rizin's GitHub releases](https://github.com/rizinorg/rizin/releases). As a
-last resort, build it from source (Meson + Ninja, a few minutes on 4 cores):
+Ubuntu 24.04's apt has **no** rizin package. The portable static build on
+[rizin's GitHub releases](https://github.com/rizinorg/rizin/releases)
+(`rizin-v0.9.1-static-x86_64.tar.xz`) runs omp-re's tools, but **it cannot
+load plugins** — it is a fully static executable with no shared `librz` to
+load a `.so` into — so it can never use rz-ghidra, and decompilation falls back
+to labeled disassembly. For a decompiler, build rizin from source instead.
+
+`scripts/install-rizin.sh` does both builds below — rizin as shared libraries,
+then rz-ghidra against it — in one step (about 6 minutes on 4 cores). It
+is idempotent, exiting at once when the right versions are already installed,
+so it also works as a container setup script or a session start hook:
+
+```bash
+scripts/install-rizin.sh                   # into /usr/local (sudo if needed)
+PREFIX=$HOME/.local scripts/install-rizin.sh
+INSTALL_DEPS=1 scripts/install-rizin.sh    # apt-get the build tools first
+```
+
+By hand, build rizin from source (Meson + Ninja, a few minutes on 4 cores):
 
 ```bash
 git clone --depth 1 --branch v0.9.1 https://github.com/rizinorg/rizin.git
@@ -68,7 +84,9 @@ prefer jsdec; `OMPRE_DECOMPILER=mydec` for a plugin omp-re doesn't know).
 `pdg` and `pdd` stay as a fallback, and `/re status` reports what it found.
 
 Build rz-ghidra against the rizin you installed (its tag tracks rizin's minor
-version; v0.9.0 builds against rizin 0.9.1):
+version; v0.9.0 builds against rizin 0.9.1). It needs a shared rizin — a
+package, or the source build above, not the static release build.
+`scripts/install-rizin.sh` runs these steps for you:
 
 ```bash
 git clone --depth 1 --branch v0.9.0 --recurse-submodules --shallow-submodules https://github.com/rizinorg/rz-ghidra.git

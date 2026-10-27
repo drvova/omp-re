@@ -43,6 +43,8 @@ export interface ReSessionState {
 	evidenceCount: number;
 	/** normalized addr -> most recent evidence id observed at that address (used by mutate tools to ground annotations, and by report anchors) */
 	evidenceByAddr: Map<string, string>;
+	/** `/re off`: every RE tool call in this session is refused until `/re on`. A gate, not a change of tool presentation, so the `xd://` devices stay mounted. */
+	toolsOff: boolean;
 	/** Internals: the session's teardown scope and the live disposers that own each process's teardown. Not read outside the backend. */
 	_scope: Scope | null;
 	_disposeRz: Disposer | null;
@@ -101,6 +103,7 @@ function newState(sessionId: string): ReSessionState {
 		auditHmacWarned: false,
 		evidenceCount: 0,
 		evidenceByAddr: new Map(),
+		toolsOff: false,
 		_scope: null,
 		_disposeRz: null,
 		_disposeDbg: null,

@@ -9,7 +9,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { checkRizinCommand, loadCatalog, searchCatalog } from "./catalog.ts";
 import { canonicalExcerpt, canonicalHash, plainResult, type ReToolResult, shiftHash, textResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { eaFromOffset, resolveNumericAddr } from "./rizin.ts";
 import { ensureRizin, getState } from "./state.ts";
 
@@ -58,7 +58,7 @@ export function registerRizinTools(pi: ExtensionAPI): void {
 		description:
 			"Look up rizin commands in the installed rizin's own help: the usage, typed arguments, and summary of a command or command family, or a keyword search across every command. Each entry says whether rizin_command can run it. Use before rizin_command when unsure of a command or its arguments.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: helpParams,
 		...reRenderers({ title: "rizin help", subject: "query", body: "text" }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -74,7 +74,7 @@ export function registerRizinTools(pi: ExtensionAPI): void {
 		description:
 			"Run one read-only rizin command against the open binary, for anything the dedicated tools don't cover: function summaries (pdsf), call and block graphs (agc, agf), hexdumps (px), entropy (ph entropy), byte/string/ROP searches (/x, /, /R), ESIL (aoe), headers (iH), and the rest of rizin's print, info, search, graph, and listing commands. Also reads config (e asm.arch, el, elj), analysis hints (ahl), metadata and strings (C, Csl), classes (acl, aci), address info (ai), unions and type cross-references (tu, tx), calling-convention lists (tcc), and plugin lists (Ll, La, LD). Commands that write, set config (e key=value), open files, run shell commands, or change analysis are refused; annotate with the dedicated tools instead. If rizin rejects the arguments, its own error and usage text are returned. Check syntax with rizin_help first.",
 		approval: (args) => ({ tier: "exec", reason: `Run the rizin command ${describeCommand(args)} on the open binary.` }),
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: commandParams,
 		...reRenderers({ title: "rizin", subject: "command", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

@@ -5,6 +5,35 @@ description: First-pass reverse engineering of a binary using omp-re's rizin too
 
 # RE with omp-re
 
+## How you reach the tools
+
+The RE tools are `xd://` devices, not top-level tools: `read xd://<name>`
+shows a tool's description and parameters, and `write xd://<name>` with the
+parameters as JSON calls it. To do more than one call — loop over functions,
+filter strings, follow xrefs, build helpers — use the `eval` tool, where every
+RE tool is `await tool.<name>({ ... })`:
+
+```js
+await tool.open_binary({ path: "/path/to/binary" });
+const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
+for (const f of rows(await tool.list_functions({ sort: "callers", limit: 10 }))) print((await tool.get_function({ target: f.ea })).text.split("\n")[0]);
+```
+
+- A tool returns `{ text, details }` to `eval`; read `.text`. Its first line is
+  the header and, for an observing tool, its last line is the
+  `[evidence xxxxxxxx]` tag; a list tool's lines in between are JSON, as
+  `rows` above parses them. Output cut short by the size cap ends with an
+  `[Output truncated …]` note and is not valid JSON: page with
+  `offset`/`limit` instead. A failing tool throws; `try`/`catch` it.
+- End statements with `;` in `eval`: it rewrites top-level destructuring, and
+  without the semicolon the line can join the one before it.
+- Functions you define in `eval` persist for the session (across compaction).
+  To keep RE helpers across sessions, write them to a script and `%load` it.
+- `eval`, `xd://`, and top-level calls are the same tool calls: each is
+  recorded as evidence, audited, and approved the same way.
+
+## Evidence
+
 These tools are the only source of recorded evidence in this session. Anything
 learned another way — `bash`, `cat`, a pasted dump, prior knowledge — has no
 evidence id behind it, and `/re report` withholds the **entire** report if any

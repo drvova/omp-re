@@ -4,6 +4,12 @@ All 64 `omp-re` tools, grouped by tier. Triage tools register only when their
 backing binary is on PATH at load time, so your own tool list may legitimately
 show fewer than 64 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
 
+Every tool is registered `discoverable`, so omp presents it as an `xd://<name>`
+device rather than a top-level tool: `read xd://<name>` shows its
+documentation, `write xd://<name>` calls it, and omp's `eval` calls it as
+`await tool.<name>({ ...params })`, which returns `{ text, details }` and
+throws on failure. The parameter tables below are the same on every path.
+
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
 `tools.approval.<name>` in your omp config), every tool has its own

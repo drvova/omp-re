@@ -7,7 +7,7 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { jsonResult, type ReToolResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { ensureRizin } from "./state.ts";
 import type { RzSession } from "./rizin.ts";
 import { DEFAULT_LIMIT, MAX_LIMIT, markEmpty, pageHeader, paginate } from "./tools-read.ts";
@@ -68,7 +68,7 @@ export function registerSyscallTools(pi: ExtensionAPI): void {
 		description:
 			"List the active syscall profile's syscalls (rizin aslj) — on a PE binary this is the Windows Nt* profile. Rows carry the syscall name and its number (num) within the OS module id (swi). Filter by name substring; page through large lists.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: listSyscallsParams,
 		...reRenderers({ title: "List syscalls", subject: "filter", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {
@@ -83,7 +83,7 @@ export function registerSyscallTools(pi: ExtensionAPI): void {
 		description:
 			"Resolve one syscall: by name to its number (rizin asn) or by number to its name (rizin asr). Supply exactly one of name or number.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: syscallLookupParams,
 		...reRenderers({ title: "Syscall lookup", subject: "name", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx): Promise<ReToolResult> {

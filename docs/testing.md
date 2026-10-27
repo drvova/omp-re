@@ -27,7 +27,7 @@ so the host APIs under test are the ones users run. Tests that need a real
 | `audit.test.ts` | No | 5 |
 | `report.test.ts` | No | 4 |
 | `decompile.test.ts` | No | 5 |
-| `extension-sdk.test.ts` | Only its rizin tests | 8 |
+| `extension-sdk.test.ts` | Only its rizin tests | 9 |
 | `rizin-integration.test.ts` | Yes (one test runs without) | 13 |
 | `tools-registry.test.ts` | Yes (the renderer and native-view tests run without) | 35 |
 | `tools-mutate-registry.test.ts` | Yes | 15 |
@@ -38,7 +38,8 @@ so the host APIs under test are the ones users run. Tests that need a real
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
 extension runner (no model is called) and drives `/re` commands and tools
-the way a session does. It is the suite that catches host API drift: omp 18
+the way a session does — the tools through omp's own `eval` (`tool.<name>()`),
+since they are `xd://` devices rather than top-level tools. It is the suite that catches host API drift: omp 18
 changed `getAllTools()` to return tool objects, which broke `/re on` while
 every stub-based test stayed green. It runs in CI.
 

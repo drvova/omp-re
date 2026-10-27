@@ -21,6 +21,20 @@ import { code, span, text } from "@oh-my-pi/pi-tui/native/describe";
 import type { NativeToolHead, NativeToolView } from "@oh-my-pi/pi-tui/tools";
 import type { ReToolDetails } from "./format.ts";
 
+/**
+ * How every RE tool is presented: `discoverable`, never `essential`. omp mounts
+ * a discoverable tool as an `xd://<name>` device instead of putting its schema
+ * in the model's top-level tool list, so 64 RE tools cost the context nothing
+ * until they are used. The model reads a device's documentation with
+ * `read xd://<name>`, calls it directly with `write xd://<name>`, or — to
+ * compose, loop, and build its own helpers — from omp's `eval` tool as
+ * `await tool.<name>({ ... })`. Every one of those paths goes through omp's own
+ * tool wrapper: the tool's approval tier, and the `tool_call` / `tool_result`
+ * events the audit log and the evidence store hook. (With omp's `tools.xdev`
+ * setting off, omp lists discoverable tools top-level instead.)
+ */
+export const RE_LOAD_MODE = "discoverable" as const;
+
 /** How a result body is shown: "code" highlights C (decompiler output), "json" highlights JSON and stays collapsed, "text" shows plain lines, "none" shows only the header. */
 export type BodyStyle = "code" | "json" | "text" | "none";
 

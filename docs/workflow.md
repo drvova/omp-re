@@ -66,7 +66,9 @@ ungrounded report never reaches a ticket — a partial, quietly-trimmed report
 would be worse than an obvious failure, because it would look complete.
 
 In practice: if you want something in the final report, get it through a
-tool call, not a shell command or a paraphrase. `/re evidence` and `/re cite
+tool call, not a shell command or a paraphrase. A call the model makes from
+omp's `eval` (`await tool.decompile_function({ ... })`) is a tool call too, and
+is recorded and tagged the same way. `/re evidence` and `/re cite
 <id>` exist specifically so the model (and you) can look back at exactly
 what was actually observed, in its own words, before writing a claim that
 depends on it.

@@ -31,6 +31,10 @@ provides any isolation:
 - Triage tools (`triage_capa`, `triage_yara`, etc.) shell out to real
   external binaries you installed yourself. Their own security posture is
   out of scope for this document — keep them updated.
+- omp-re adds no code-execution tool. When the model composes RE tools in
+  omp's `eval`, the code runs in omp's own eval kernel under omp's approval of
+  `eval`; each RE tool it calls is still a separate tool call with its own
+  approval tier, audit line, and (for `/re off`) block.
 
 ## Mutations never touch the file on disk
 

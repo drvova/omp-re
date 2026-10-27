@@ -9,8 +9,9 @@
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 64 agent tools, a `/re` slash
-command, five overlay panels, a packaged `re-analyst` subagent, a
+it drives [rizin](https://rizin.re) behind 64 agent tools — presented the
+omp-native way, as `xd://` devices the model calls from omp's own `eval` — a
+`/re` slash command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
 gathers facts through the tools; the evidence store remembers exactly what it
@@ -71,6 +72,40 @@ binary path. It opens the binary in its own rizin process, follows the triage
 order, and returns structured findings that each cite the tool output and
 address behind them.
 
+## Host-native: `xd://` devices and omp's `eval`
+
+omp-re adds no code tool or tool menu of its own. Every RE tool is registered
+as an ordinary omp tool with `loadMode: "discoverable"`, so omp mounts it as an
+`xd://<name>` device instead of putting 64 schemas in the model's top-level
+tool list; the model gets them from omp's own tooling:
+
+- **Discover:** omp's system prompt lists the mounted devices;
+  `read xd://decompile_function` shows one tool's description and parameters.
+- **Call one:** `write xd://hash_binary` with the parameters as JSON.
+- **Compose:** in omp's `eval` tool, every RE tool is
+  `await tool.<name>({ ... })` — loop over functions, filter strings, chain
+  xrefs, and define helpers that persist for the session (`eval` state
+  survives compaction). A tool's result comes back as `{ text, details }`:
+  `.text` is the header line, the body (JSON for list tools), and, for an
+  observing tool, the `[evidence xxxxxxxx]` tag on the last line. Failures
+  throw, so the code can `try`/`catch`. To keep helpers across
+  sessions, write them to a script and `%load` it — omp's own setup mechanism.
+
+```js
+// eval — the three biggest functions, first line of each decompile
+await tool.open_binary({ path: "/bin/ls" });
+const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
+for (const f of rows(await tool.list_functions({ sort: "size", limit: 3 }))) print((await tool.decompile_function({ addr: f.ea })).text.split("\n")[0]);
+```
+
+Because these are real omp tools on every path, nothing about them is
+reimplemented: each call — top-level, `write xd://…`, or `tool.<name>()` from
+`eval` — goes through omp's tool wrapper, so it gets its own approval tier and
+reason, fires the `tool_call`/`tool_result` events the audit log and the
+evidence store hook, and comes back tagged with its `[evidence xxxxxxxx]` id
+for `record_finding`. (With omp's `tools.xdev` setting off, omp lists the same
+tools top-level instead; nothing else changes.)
+
 ## What's omp-native
 
 `omp-re` uses omp's own extension surfaces rather than working around them:
@@ -86,6 +121,8 @@ address behind them.
 | Compaction preservation (`session.compacting`) | When omp compacts the conversation, omp-re folds a snapshot of the RE session — open binary, evidence and annotation counts, the most recent evidence ids — into the summary, so the post-compaction model stays grounded and knows it can recall detail with `/re evidence` / `/re cite`. |
 | process lifecycle | The rizin/debug processes a session owns are tracked on a small per-session teardown scope: a respawn closes just the previous process, session shutdown closes them all. Subsystems are applied in order with the host handed to each. No third-party runtime dependencies — the plugin resolves only the host's own packages. See `extensions/re/{runtime,app}.ts`. |
 | Approval tiers with reasons | Read tools (and `rizin_help`) are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); `rizin_command` is `exec` with the exact command in its reason; triage tools are `exec`. omp's `tools.approvalMode` decides. |
+| `xd://` devices (`loadMode: "discoverable"`) and the `eval` tool bridge | All 64 RE tools are mounted as devices, not top-level tools; the model reads `xd://<name>` for a tool's docs and drives the tools from omp's `eval` as `tool.<name>()`. See [Host-native](#host-native-xd-devices-and-omps-eval). |
+| `tool_call` blocking | `/re off` refuses every RE tool call on every path (top-level, `xd://`, `eval`) until `/re on`, without unmounting the devices. |
 | Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
 | Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the evidence ids on this branch. |
 | Footer status, widgets, logger | Analysis progress shows in the footer; the binary-facts band is a widget; headless warnings go to omp's log. |
@@ -334,7 +371,7 @@ records no evidence.
 /re carry <manifest>  replay a report on another build (--against, --inherit, --resolve, --strict, --out)
 /re status           rizin, decompiler, and session status
 /re on               enable RE tools
-/re off              disable RE tools (quick toggle, no restart)
+/re off              refuse RE tool calls (quick toggle, no restart)
 ```
 
 `omp --binary <path>` opens a binary at startup.
@@ -342,9 +379,12 @@ records no evidence.
 ## Tool reference
 
 All 64 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
-tables. Triage tools appear only when their backing binary is on PATH, and
-`rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own tool list
-may legitimately show fewer than 64.
+tables. Each is an `xd://<name>` device (see
+[Host-native](#host-native-xd-devices-and-omps-eval)): `read` it for its
+docs, `write` it to call it, or call it from `eval` as `tool.<name>()`.
+Triage tools appear only when their backing binary is on PATH, and
+`rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own device
+list may legitimately show fewer than 64.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |

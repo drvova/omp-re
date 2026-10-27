@@ -31,7 +31,7 @@ import { branchEntries, collectEvidence, type EvidenceRecord } from "./entries.t
 import { plainResult, type ReToolResult } from "./format.ts";
 import { recordEvidence } from "./evidence.ts";
 import { runRizinCommand } from "./tools-rizin.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { getState } from "./state.ts";
 import { recordedStatus } from "./verify.ts";
 
@@ -237,7 +237,7 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 		description:
 			"Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it — each RE tool result ends with an `[evidence xxxxxxxx]` tag; cite those ids. Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: recordFindingParams,
 		...reRenderers({ title: "record_finding", subject: "claim", body: "text" }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -276,7 +276,7 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 		description:
 			"Adopt a finding made elsewhere — typically one returned by the re-analyst subagent, whose evidence lives in its own session — by re-proving it here: each given rizin command is re-run read-only on the open binary and recorded as evidence in THIS session, then the claim passes the same gates as record_finding (support audit included). Refused if expect_sha256 doesn't match the open binary or a command fails. Use the subagent's `reproduce` lines as the commands.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: adoptFindingParams,
 		...reRenderers({ title: "adopt_finding", subject: "claim", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -304,7 +304,7 @@ export function registerFindingTools(pi: ExtensionAPI, options: FindingToolOptio
 		label: "Retract Finding",
 		description: "Withdraw a finding recorded earlier with record_finding (it leaves the report). Give the reason; to revise rather than withdraw, call record_finding with supersedes instead.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: retractFindingParams,
 		...reRenderers({ title: "retract_finding", subject: "id", body: "text" }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {

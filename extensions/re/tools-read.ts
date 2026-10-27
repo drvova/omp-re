@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { decompileAt } from "./decompile.ts";
 import { disassembleAt } from "./disasm.ts";
 import { jsonResult, plainResult, prefixedTextResult, textResult, type ReToolResult } from "./format.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { addrOf, eaFromOffset, resolveNumericAddr, resolveRizinTool, validateAddr, type RzSession } from "./rizin.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 
@@ -288,7 +288,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"List the functions rizin detected in the open binary: ea, name, size, basic blocks, callers/callees counts, and signature. Sort by `callers` to find the most-used helpers or by `size` to find the biggest logic first.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: listFunctionsParams,
 		...reRenderers({ title: "Functions", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -307,7 +307,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "Search Functions",
 		description: "Search functions in the open binary by substring match on name.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: searchParams,
 		...reRenderers({ title: "Search functions", subject: "query", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -330,7 +330,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"Get one function by name or address: signature, size and complexity metrics, arguments and locals, the functions it calls (by name), and the call sites that reach it.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: targetParams,
 		...reRenderers({ title: "Function", subject: "target", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -351,7 +351,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"Decompile a function to pseudo-C with the best decompiler plugin loaded in rizin (rz-ghidra's pdg, then jsdec's pdd). When none is available — or it produces nothing for this function — returns annotated disassembly instead, labeled `(disassembly only — …)` at the very start of the output.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: addrParams,
 		...reRenderers({ title: "Decompile", subject: "addr", body: "code" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -371,7 +371,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"Disassemble a function to annotated instructions: comments, flags/labels, and incoming cross-references are folded in where rizin reports them.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: addrParams,
 		...reRenderers({ title: "Disassemble", subject: "addr", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -388,7 +388,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "Get Xrefs To",
 		description: "List cross-references pointing to an address (calls, jumps, and data reads/writes that target it).",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: xrefParams,
 		...reRenderers({ title: "Xrefs to", subject: "addr", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -410,7 +410,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"List cross-references originating from the instruction at an address (what it calls, jumps to, or reads/writes). This is per-instruction: at a function's entry it only covers the first instruction — use get_function's callrefs/datarefs for a whole function.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: xrefParams,
 		...reRenderers({ title: "Xrefs from", subject: "addr", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -431,7 +431,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "List Imports",
 		description: "List imported symbols in the open binary.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: pageParams,
 		...reRenderers({ title: "Imports", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -448,7 +448,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "List Exports",
 		description: "List exported symbols in the open binary.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: pageParams,
 		...reRenderers({ title: "Exports", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -466,7 +466,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"List the binary's full symbol table (`is`) — local/internal functions and data symbols with name, type, bind, size, and address. A superset of list_imports/list_exports; optionally filter by name substring.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: symbolsParams,
 		...reRenderers({ title: "Symbols", subject: "filter", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -485,7 +485,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "List Strings",
 		description: "List strings found in the open binary's data sections, optionally filtered by substring.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: stringsParams,
 		...reRenderers({ title: "Strings", subject: "filter", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -504,7 +504,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "List Segments",
 		description: "List sections of the open binary with their permissions, sizes, and addresses.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: pageParams,
 		...reRenderers({ title: "Sections", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -520,7 +520,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		label: "Hash Binary",
 		description: "Compute SHA-256, SHA-1, and MD5 digests of the session's open binary.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: noParams,
 		...reRenderers({ title: "Hash", body: "text" }),
 		async execute(_id, _params, signal, _onUpdate, ctx) {
@@ -556,7 +556,7 @@ export function registerReadTools(pi: ExtensionAPI): void {
 		description:
 			"Rizin's analysis graphs as JSON (book: analysis/graphs): a function's control-flow graph (basic blocks and the branches between them), the callgraph from a function, the cross-reference graph around an address, or the program's import graph. Returns nodes (each with its address and label) and the edges between them (resolved to addresses) — the structure for reasoning about control flow and call relationships without reading the raw disassembly.",
 		approval: "read",
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: graphParams,
 		...reRenderers({ title: "Graph", subject: "kind", body: "json" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

@@ -20,7 +20,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { checkDebugOnHitCommand, loadCatalog } from "./catalog.ts";
 import { plainResult, textResult } from "./format.ts";
 import { outputSubdir, prepareOutputPath } from "./output.ts";
-import { reRenderers } from "./render.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { debugTimeoutMs, rizinBitsMismatch, rzQuote, validateAddr, type RzSession } from "./rizin.ts";
 import { getState, requireBinary, requireDebug, startDebug, stopDebug } from "./state.ts";
 
@@ -367,7 +367,7 @@ export function registerDebugTools(pi: ExtensionAPI): void {
 			}
 			return { tier: "exec", reason: action ? approvalReason(action) : "Drive the debugged process." };
 		},
-		loadMode: "essential",
+		loadMode: RE_LOAD_MODE,
 		parameters: debugParams,
 		...reRenderers({ title: "debugger", subject: "action", body: "text" }),
 		async execute(_id, params, signal, _onUpdate, ctx) {

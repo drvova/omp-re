@@ -25,13 +25,18 @@ Run `bun test` with rizin installed before opening a PR that touches
 `extensions/re/` — CI cannot run the rizin suites. The last two need tmux,
 `omp`, rizin, a fixture (`OMPRE_TEST_BINARY`), and for `qa:tui` a working
 model. See [`docs/testing.md`](docs/testing.md) for what each tier actually
-needs and the exact PASS/SKIP matrix.
+needs and the exact PASS/SKIP matrix. On a Linux box without a current rizin
+package, `scripts/install-rizin.sh` builds rizin 0.9.1 and rz-ghidra (see
+[`docs/install.md`](docs/install.md)).
 
 Declare each tool's parameter schema as a named `const` before
 `pi.registerTool({...})`, never inline: omp 18's `pi.zod` builder only lets
 TypeScript infer `params` from a schema declared outside the call. Give every
 tool both renderer pairs via `reRenderers(...)` (`renderCall`/`renderResult`
-for the ANSI transcript, `describeCall`/`describeResult` for Tern).
+for the ANSI transcript, `describeCall`/`describeResult` for Tern), and
+`loadMode: RE_LOAD_MODE` (never `"essential"`): omp then mounts it as an
+`xd://` device the model reaches from `eval`, instead of adding its schema to
+the top-level tool list. See `docs/ARCHITECTURE.md`.
 
 Every rizin command an RE tool sends goes through `validateAddr`,
 `validateIdent`, or `rzQuote` (`extensions/re/rizin.ts`); annotation commands
