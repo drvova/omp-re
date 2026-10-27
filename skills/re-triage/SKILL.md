@@ -15,13 +15,16 @@ RE tool is `await tool.<name>({ ... })`:
 
 ```js
 await tool.open_binary({ path: "/path/to/binary" });
-const { text } = await tool.list_functions({ sort: "callers", limit: 10 });
-for (const [, ea] of text.matchAll(/"ea":"(0x[0-9a-f]+)"/g)) print((await tool.get_function({ target: ea })).text.split("\n")[0]);
+const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
+for (const f of rows(await tool.list_functions({ sort: "callers", limit: 10 }))) print((await tool.get_function({ target: f.ea })).text.split("\n")[0]);
 ```
 
-- A tool returns `{ text, details }` to `eval`; read `.text` — it ends with the
-  `[evidence xxxxxxxx]` tag, so pull JSON fields out with a pattern, not
-  `JSON.parse`. A failing tool throws; `try`/`catch` it.
+- A tool returns `{ text, details }` to `eval`; read `.text`. Its first line is
+  the header and, for an observing tool, its last line is the
+  `[evidence xxxxxxxx]` tag; a list tool's lines in between are JSON, as
+  `rows` above parses them. Output cut short by the size cap ends with an
+  `[Output truncated …]` note and is not valid JSON: page with
+  `offset`/`limit` instead. A failing tool throws; `try`/`catch` it.
 - End statements with `;` in `eval`: it rewrites top-level destructuring, and
   without the semicolon the line can join the one before it.
 - Functions you define in `eval` persist for the session (across compaction).

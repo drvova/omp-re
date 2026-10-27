@@ -166,8 +166,10 @@ export function registerEvidenceStore(pi: ExtensionAPI): void {
 			// Tag the result the model sees with its evidence id: the record itself goes to the session
 			// via appendEntry, which never reaches the model, so without this tag record_finding would ask
 			// for ids the model has no way to learn. A separate trailing block, so the tool's own text
-			// (and the hashes taken over it above) are untouched.
-			return { content: [...event.content, { type: "text" as const, text: evidenceTag(id) }] };
+			// (and the hashes taken over it above) are untouched. It starts on its own line because omp's
+			// eval bridge joins a result's text blocks with no separator: without the newline the tag is
+			// glued to a list tool's JSON, and `tool.<name>()` code could not parse the body.
+			return { content: [...event.content, { type: "text" as const, text: `\n${evidenceTag(id)}` }] };
 		} catch (err) {
 			// A blob-store failure (disk full, EACCES, ...) must degrade to "no evidence
 			// recorded" for this call, not crash the tool_result pipeline.

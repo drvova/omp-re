@@ -18,11 +18,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   through omp's tool wrapper: approval tiers, the audit log, and evidence
   recording behave exactly as before. The `re-triage` skill and the
   `re-analyst` agent say how to reach the tools.
+- **The evidence tag starts on its own line.** omp's `eval` joins a tool
+  result's text blocks with no separator, which glued the
+  `[evidence xxxxxxxx]` tag onto a list tool's JSON, so
+  `JSON.parse` of the body failed in `tool.<name>()` code. `.text` now reads
+  header line, body, tag line.
 - **`/re off` blocks RE tool calls instead of deactivating the tools.** It
   sets a per-session gate checked on omp's `tool_call` event, so it covers
   top-level, `xd://`, and `eval` calls alike and leaves the devices mounted;
   deactivating and re-activating through `setActiveTools` would have pinned
   the tools top-level on `/re on`.
+
+### Added
+
+- **`scripts/install-rizin.sh`** builds rizin (shared libraries) and rz-ghidra
+  from source on Linux, as `docs/install.md` describes, and exits at once when
+  both are already installed, so it doubles as a container setup script.
+  `docs/install.md` now warns that rizin's static release build cannot load
+  plugins, so it can never use rz-ghidra.
 
 ## [0.6.0] - 2026-10-18
 

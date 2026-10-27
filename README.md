@@ -85,15 +85,17 @@ tool list; the model gets them from omp's own tooling:
 - **Compose:** in omp's `eval` tool, every RE tool is
   `await tool.<name>({ ... })` — loop over functions, filter strings, chain
   xrefs, and define helpers that persist for the session (`eval` state
-  survives compaction). A tool's result comes back as `{ text, details }`;
-  failures throw, so the code can `try`/`catch`. To keep helpers across
+  survives compaction). A tool's result comes back as `{ text, details }`:
+  `.text` is the header line, the body (JSON for list tools), and, for an
+  observing tool, the `[evidence xxxxxxxx]` tag on the last line. Failures
+  throw, so the code can `try`/`catch`. To keep helpers across
   sessions, write them to a script and `%load` it — omp's own setup mechanism.
 
 ```js
 // eval — the three biggest functions, first line of each decompile
 await tool.open_binary({ path: "/bin/ls" });
-const { text } = await tool.list_functions({ sort: "size", limit: 3 });
-for (const [, ea] of text.matchAll(/"ea":"(0x[0-9a-f]+)"/g)) print((await tool.decompile_function({ addr: ea })).text.split("\n")[0]);
+const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
+for (const f of rows(await tool.list_functions({ sort: "size", limit: 3 }))) print((await tool.decompile_function({ addr: f.ea })).text.split("\n")[0]);
 ```
 
 Because these are real omp tools on every path, nothing about them is

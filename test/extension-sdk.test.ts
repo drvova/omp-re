@@ -213,6 +213,9 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 				.filter((e) => e.type === "custom" && (e as { customType?: string }).customType === "re.evidence")
 				.map((e) => (e as { data?: { id: string; tool: string } }).data!);
 			expect(recorded).toContainEqual(expect.objectContaining({ tool: "get_function", id: expect.stringMatching(new RegExp(`^${tag![1]}`)) }));
+			// The tag sits on its own last line (eval joins text blocks with no separator), so a list tool's body parses.
+			const rows = await evalJs(second.session, 'const t = (await tool.list_functions({ limit: 2 })).text; JSON.parse(t.split("\\n").slice(1, -1).join("\\n")).length');
+			expect(rows.text).toBe("2");
 			expect(second.notes.filter((n) => n.startsWith("[runtime]"))).toEqual([]);
 		} finally {
 			await second.shutdown();
