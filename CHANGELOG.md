@@ -6,31 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-10-27
-
-### Changed
-
-- **The RE tools are `xd://` devices, driven from omp's own `eval`.** Every
-  tool is registered `discoverable` (`RE_LOAD_MODE` in `render.ts`) instead of
-  `essential`, so omp mounts it as an `xd://<name>` device rather than putting
-  64 schemas in the model's top-level tool list. The model reads a tool's docs
-  with `read xd://<name>`, calls one with `write xd://<name>`, and composes
-  them in omp's `eval` as `await tool.<name>({ ... })`, defining helpers that
-  persist for the session (and across sessions with `%load`). Every path goes
-  through omp's tool wrapper: approval tiers, the audit log, and evidence
-  recording behave exactly as before. The `re-triage` skill and the
-  `re-analyst` agent say how to reach the tools.
-- **The evidence tag starts on its own line.** omp's `eval` joins a tool
-  result's text blocks with no separator, which glued the
-  `[evidence xxxxxxxx]` tag onto a list tool's JSON, so
-  `JSON.parse` of the body failed in `tool.<name>()` code. `.text` now reads
-  header line, body, tag line.
-- **`/re off` blocks RE tool calls instead of deactivating the tools.** It
-  sets a per-session gate checked on omp's `tool_call` event, so it covers
-  top-level, `xd://`, and `eval` calls alike and leaves the devices mounted;
-  deactivating and re-activating through `setActiveTools` would have pinned
-  the tools top-level on `/re on`.
-
 ### Fixed
 
 - **Function sizes are bytes of code.** `list_functions` (and its
@@ -57,6 +32,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `--resolve` headless no longer claims to have sent the agenda: print mode
   starts no turn after a command, so it prints the agenda to pass as the next
   prompt (`omp -c -p "<agenda>"`).
+
+## [0.7.0] - 2026-10-27
+
+### Changed
+
+- **The RE tools are `xd://` devices, driven from omp's own `eval`.** Every
+  tool is registered `discoverable` (`RE_LOAD_MODE` in `render.ts`) instead of
+  `essential`, so omp mounts it as an `xd://<name>` device rather than putting
+  64 schemas in the model's top-level tool list. The model reads a tool's docs
+  with `read xd://<name>`, calls one with `write xd://<name>`, and composes
+  them in omp's `eval` as `await tool.<name>({ ... })`, defining helpers that
+  persist for the session (and across sessions with `%load`). Every path goes
+  through omp's tool wrapper: approval tiers, the audit log, and evidence
+  recording behave exactly as before. The `re-triage` skill and the
+  `re-analyst` agent say how to reach the tools.
+- **The evidence tag starts on its own line.** omp's `eval` joins a tool
+  result's text blocks with no separator, which glued the
+  `[evidence xxxxxxxx]` tag onto a list tool's JSON, so
+  `JSON.parse` of the body failed in `tool.<name>()` code. `.text` now reads
+  header line, body, tag line.
+- **`/re off` blocks RE tool calls instead of deactivating the tools.** It
+  sets a per-session gate checked on omp's `tool_call` event, so it covers
+  top-level, `xd://`, and `eval` calls alike and leaves the devices mounted;
+  deactivating and re-activating through `setActiveTools` would have pinned
+  the tools top-level on `/re on`.
 
 ### Added
 
