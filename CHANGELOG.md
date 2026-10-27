@@ -29,6 +29,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   deactivating and re-activating through `setActiveTools` would have pinned
   the tools top-level on `/re on`.
 
+### Fixed
+
+- **Function sizes are bytes of code.** `list_functions` (and its
+  `sort: "size"`), `get_function`'s header, and the function navigator used
+  rizin's `size`, the linear span from a function's lowest to highest
+  address, which swallows whatever sits between non-contiguous blocks — on
+  `/bin/ls` it ranked a function with 2 380 bytes of code first at 75 534.
+  They now use `realsz`; list rows add `span` when the two differ. Found by a
+  live-model run, where the model noticed the inconsistency itself.
+- **`/re` output reaches headless runs.** Messages and errors from `/re`
+  commands and from the background `--binary` open went to UI
+  notifications, which `omp -p` drops, so a failing `/re carry` printed
+  nothing. Headless, information now goes to stdout and an error to stderr
+  with a non-zero exit code, as `/re report` and `/re verify` already did.
+- **`--binary` no longer races the first tool call or `/re` command.** The
+  startup open runs in the background; a tool call or a binary-dependent
+  `/re` subcommand arriving before it finished failed with "no binary
+  open". They now wait for that open.
+- **A headless `/re carry --inherit` keeps what it re-proved.** omp writes a
+  session to disk on its first model turn, and `omp -c` skips a session with
+  no turn and no title, so `omp -p "/re carry … --inherit"` lost its
+  inherited findings and the next `omp -c` started over. The inherit now
+  writes the session at once and, headless, names it when it has no name.
+  `--resolve` headless no longer claims to have sent the agenda: print mode
+  starts no turn after a command, so it prints the agenda to pass as the next
+  prompt (`omp -c -p "<agenda>"`).
+
 ### Added
 
 - **`scripts/install-rizin.sh`** builds rizin (shared libraries) and rz-ghidra

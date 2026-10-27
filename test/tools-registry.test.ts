@@ -41,7 +41,11 @@ interface GroundFn {
 	addr?: number;
 	name: string;
 	size: number;
+	realsz?: number;
 }
+
+/** Bytes of code, the way the tools report a function's size: rizin's realsz, falling back to its linear span. */
+const groundSize = (fn: GroundFn) => fn.realsz ?? fn.size;
 interface GroundImport {
 	name: string;
 	plt?: number;
@@ -163,10 +167,22 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 			expect(parsed).toHaveLength(1);
 			expect(parsed[0]?.name).toBe(groundFns[0]!.name);
 			expect(parsed[0]?.ea).toBe(eaFromOffset(addrOf(groundFns[0]!)!));
-			expect(parsed[0]?.size).toBe(groundFns[0]!.size);
+			expect(parsed[0]?.size).toBe(groundSize(groundFns[0]!));
 			// Rows are slimmed: no decimal offset, no per-function reference arrays.
 			expect(parsed[0]?.offset).toBeUndefined();
 			expect(parsed[0]?.callrefs).toBeUndefined();
+		});
+
+		test("valid: sort by size orders by bytes of code (realsz), and shows the linear span only when it differs", async () => {
+			const { body } = splitHeaderBody(textOf(await run("list_functions", { sort: "size", limit: 5 })));
+			const parsed = JSON.parse(body) as { name: string; size: number; span?: number }[];
+			const expected = [...groundFns].sort((a, b) => groundSize(b) - groundSize(a)).slice(0, 5);
+			expect(parsed.map((row) => row.size)).toEqual(expected.map(groundSize));
+			for (const [i, row] of parsed.entries()) {
+				const ground = expected[i]!;
+				if (ground.size === groundSize(ground)) expect(row.span).toBeUndefined();
+				else expect(row.span).toBe(ground.size);
+			}
 		});
 
 		test("sort=callers orders by rizin's indegree, most-called first", async () => {
@@ -222,7 +238,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 		test("valid: target 'main' returns its name, size, and hex ea", async () => {
 			const result = await run("get_function", { target: "main" });
 			const text = textOf(result);
-			expect(text.startsWith(`main at ${mainEa} (size ${mainFn.size})\n`)).toBe(true);
+			expect(text.startsWith(`main at ${mainEa} (size ${groundSize(mainFn)})\n`)).toBe(true);
 			const parsed = JSON.parse(splitHeaderBody(text).body) as {
 				name: string;
 				ea: string;
@@ -269,7 +285,7 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 				expect(text.startsWith(`${DISASM_ONLY_PREFIX}disassembly of ${mainEa}\n`)).toBe(true);
 			}
 			expect(text.startsWith(DECOMPILER_EMPTY_PREFIX)).toBe(false);
-		});
+		}, 30_000); // a real decompiler (rz-ghidra) loading its Sleigh specs cold can take longer than the default 5s
 
 		test("invalid: an addr containing forbidden characters throws validateAddr's exact message", async () => {
 			expect((await captureError(run("decompile_function", { addr: BAD_ADDR }))).message).toBe(invalidAddrMessage(BAD_ADDR));

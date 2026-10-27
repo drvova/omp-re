@@ -38,6 +38,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { type AnchorFingerprint, relocateAnchor } from "./anchor.ts";
 import { branchEntries } from "./entries.ts";
@@ -591,6 +592,28 @@ export function formatAgendaPrompt(outcome: InheritOutcome, toSha256: string | n
 	return lines.join("\n");
 }
 
+/**
+ * Write the session to disk now. omp persists a session lazily, on its first
+ * model turn, so a headless run that only executes `/re carry --inherit` would
+ * otherwise drop the findings it just re-proved. omp's extension API exposes no
+ * persist call; the session manager's own `ensureOnDisk` does it, so use it when
+ * present and do nothing when not.
+ *
+ * Headless, also name the session when it has no name: `omp -c` skips a session
+ * with no model turn and no title, so without one the next `omp -c -p` would
+ * start a fresh session instead of resolving the agenda where the inherited
+ * findings live. Interactive sessions are left unnamed — an extension-set name
+ * counts as the user's and would stop omp titling the session itself.
+ */
+async function persistSession(pi: ExtensionAPI, ctx: ExtensionContext, manifestPath: string): Promise<void> {
+	const manager = ctx.sessionManager as { ensureOnDisk?: () => Promise<void> };
+	if (typeof manager.ensureOnDisk === "function") await manager.ensureOnDisk().catch(() => {});
+	if (!ctx.hasUI && !pi.getSessionName()) {
+		const binary = getState(ctx).binaryPath;
+		await pi.setSessionName(`re carry ${basename(manifestPath)}${binary ? ` → ${basename(binary)}` : ""}`).catch(() => {});
+	}
+}
+
 export async function carryManifest(
 	ctx: ExtensionContext,
 	manifestPath: string,
@@ -612,6 +635,7 @@ export async function carryManifest(
 	if (opts.inherit) {
 		const inheritance = await inheritFindings(opts.inherit, ctx, manifest, result);
 		result.inheritance = inheritance;
+		if (inheritance.inherited.length > 0) await persistSession(opts.inherit, ctx, manifestPath);
 		summary += `\ninherit: ${inheritance.inherited.length} finding(s) re-proven on this build and recorded, ${inheritance.agenda.length} need another look${inheritance.alreadyPresent ? `, ${inheritance.alreadyPresent} already present` : ""}${manifest.findings.length === 0 ? " (this manifest has no findings — record them with record_finding before /re report)" : ""}`;
 		if (inheritance.agenda.length > 0) agendaPrompt = formatAgendaPrompt(inheritance, result.toSha256);
 	}
@@ -627,11 +651,16 @@ export async function carryManifest(
 
 	// --resolve: hand the agenda straight to the model as a user turn (it has the RE tools and
 	// record_finding in this session, where the fresh evidence lives). Otherwise it goes into the editor,
-	// like /re cite, for the analyst to send or edit.
-	const resolving = opts.resolve === true && agendaPrompt !== undefined && opts.inherit !== undefined;
+	// like /re cite, for the analyst to send or edit. Headless (`omp -p`) cannot do this: print mode starts
+	// no model turn after its scripted prompts, so a turn requested from inside a command would never run.
+	// There the agenda is printed instead, to pass as the next prompt.
+	const resolveWanted = opts.resolve === true && agendaPrompt !== undefined && opts.inherit !== undefined;
+	const resolving = resolveWanted && ctx.hasUI;
 	if (resolving) {
 		opts.inherit!.sendUserMessage(agendaPrompt!);
 		summary += `\nresolve: sent ${result.inheritance!.agenda.length} finding(s) to the model to re-examine`;
+	} else if (resolveWanted) {
+		summary += `\nresolve: a headless run cannot start a model turn from a command — the agenda for ${result.inheritance!.agenda.length} finding(s) follows; pass it to the model as the next prompt (e.g. omp -c -p "<agenda>")`;
 	}
 	if (ctx.hasUI) {
 		ctx.ui.notify(summary, failed ? "error" : c.drifted > 0 ? "warning" : "info");

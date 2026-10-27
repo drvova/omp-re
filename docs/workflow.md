@@ -250,8 +250,13 @@ into the editor, like `/re cite`; headless it is printed. With `--resolve` it is
 instead sent to the model as a user turn (`pi.sendUserMessage`). That works
 because the model is in the session where the fresh evidence was just recorded,
 so it can re-examine each item and `record_finding` a revision citing evidence
-on this build. Inheriting is idempotent: a claim already live on the branch is
-skipped.
+on this build. Headless, `--resolve` prints the agenda instead: print mode
+starts no model turn after its scripted prompts, so a turn requested from a
+command would never run; pass the printed agenda as the next prompt
+(`omp -c -p "<agenda>"`). A headless inherit also writes the session to disk at
+once (omp otherwise writes a session on its first model turn) and names it if it
+has no name, because `omp -c` skips a session with no turn and no title.
+Inheriting is idempotent: a claim already live on the branch is skipped.
 
 Findings also survive compaction. The `session.compacting` hook (preserve.ts)
 restates every live finding (id, confidence, inherited or not, claim, address)

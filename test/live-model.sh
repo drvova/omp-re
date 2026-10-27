@@ -8,9 +8,11 @@
 #      a finding for each citing the `[evidence xxxxxxxx]` tags, then attempts an
 #      overreaching claim — the support auditor should refuse it. /re report.
 #   B. on v2, fresh session: /re carry <v1 manifest> --resolve — the holding
-#      finding is re-proven, the drifted checksum finding is sent to the model
-#      with its diff as a turn, and the model should revise it.
-#   C. same session continued: /re report on v2.
+#      finding is re-proven and recorded. Headless, a command cannot start a
+#      model turn, so --resolve prints the agenda (the drifted checksum finding
+#      with its diff) instead of sending it.
+#   C. same session continued: the agenda goes to the model as a prompt, and
+#      the model should revise the drifted finding; then /re report on v2.
 #
 # Asserts only on recorded state (session entries, report files), never on model
 # prose. Model choice: OMPRE_LIVE_MODEL (default minimax-code/MiniMax-M3, which
@@ -95,10 +97,16 @@ grep -q "## Findings" "$WORK/v1.md" 2>/dev/null && pass "v1 report has a Finding
 timeout 900 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -p "/re carry $WORK/v1.md.manifest.json --resolve" </dev/null >"$WORK/b.log" 2>&1
 log "phase B exit: $?"
 grep -q "inherit: [1-9][0-9]* finding(s) re-proven" "$WORK/b.log" && pass "carry --resolve re-proved finding(s) on v2" || fail "no inherit summary (see b.log)"
-grep -q "resolve: sent [1-9]" "$WORK/b.log" && pass "the agenda was sent to the model" || log "NOTE: nothing sent to the model (no finding drifted?)"
+# The agenda is everything from its opening line to the end of b.log.
+AGENDA="$(sed -n '/^These findings from the earlier report do not carry over unchanged/,$p' "$WORK/b.log")"
+[ -n "$AGENDA" ] && pass "carry --resolve printed the agenda for the next prompt" || log "NOTE: no agenda printed (no finding drifted?)"
 
-# --- C: write the v2 report in the same session -------------------------------
-timeout 600 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -c -p "/re report $WORK/v2.md" </dev/null >"$WORK/c.log" 2>&1
+# --- C: resolve the agenda, then write the v2 report, in the same session ------
+if [ -n "$AGENDA" ]; then
+	timeout 900 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -c -p "$AGENDA" "/re report $WORK/v2.md" </dev/null >"$WORK/c.log" 2>&1
+else
+	timeout 600 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -c -p "/re report $WORK/v2.md" </dev/null >"$WORK/c.log" 2>&1
+fi
 log "phase C exit: $?"
 S2="$(ls -t "$WORK"/s2/*.jsonl 2>/dev/null | head -1)"
 grep -q "re-verified on this build" "$WORK/v2.md" 2>/dev/null && pass "v2 report carries inherited finding(s)" || fail "v2 report has no inherited finding"

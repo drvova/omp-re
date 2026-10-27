@@ -339,7 +339,9 @@ exactly what changed, ready to hand to the model: "this no longer holds as
 written; here is the change; revise or retract". `--resolve` goes further: it
 sends that agenda to the model as a turn, so a single command takes v1's report
 to a v2 analysis that is already re-proven, plus the model working through
-exactly what changed. `/re findings` lists the findings on the branch, and they
+exactly what changed. (Headless, `omp -p` starts no turn after a command, so the
+agenda is printed for you to pass as the next prompt: `omp -c -p "<agenda>"`.)
+`/re findings` lists the findings on the branch, and they
 are restated in the context summary when the conversation is compacted, so the
 model doesn't re-derive or contradict what it already recorded. Every command still goes through the read-only
 `rizin_command` gate, because a manifest is untrusted input, and carrying

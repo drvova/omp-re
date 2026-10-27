@@ -122,6 +122,26 @@ function clearAnalysisStatus(ctx: ExtensionContext): void {
 	if (ctx.hasUI) ctx.ui.setStatus("re", undefined);
 }
 
+/**
+ * Tell the user something from a `/re` command or a background open. With a UI
+ * it is a notification. Headless (`omp -p`) has no notification surface, so a
+ * notification would vanish: information goes to stdout, and an error to
+ * stderr with a non-zero exit code — the same loud headless signal `/re report`,
+ * `/re verify`, and `/re carry` give.
+ */
+function tell(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error" = "info"): void {
+	if (ctx.hasUI) {
+		ctx.ui.notify(message, type);
+		return;
+	}
+	if (type === "info") console.log(message);
+	else console.error(message);
+	if (type === "error") process.exitCode = 1;
+}
+
+/** `/re` subcommands that never touch the binary, so they answer at once even while a background open is still analyzing. */
+const ANSWERS_DURING_OPEN = new Set(["help", "status", "on", "off"]);
+
 function describeOpen(result: OpenResult & { loadOptions?: LoadOptions }): string {
 	const lines = [`Binary opened: ${result.path}`];
 	if (result.loadOptions) {
@@ -278,12 +298,17 @@ function registerShell(pi: ExtensionAPI): void {
 
 		if (opts.flag && opts.flag !== recorded) {
 			const onProgress = analysisStatus(ctx, basename(opts.flag));
-			void openBinary(pi, ctx, opts.flag, { onProgress })
+			const opening: Promise<void> = openBinary(pi, ctx, opts.flag, { onProgress })
 				.then((result) => {
-					if (result.replayFailures.length > 0 && ctx.hasUI) ctx.ui.notify(describeOpen(result), "warning");
+					if (result.replayFailures.length > 0) tell(ctx, describeOpen(result), "warning");
 				})
-				.catch((err) => ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"))
-				.finally(() => clearAnalysisStatus(ctx));
+				.catch((err) => tell(ctx, err instanceof Error ? err.message : String(err), "error"))
+				.finally(() => {
+					clearAnalysisStatus(ctx);
+					if (state.opening === opening) state.opening = null;
+				});
+			// Published so a tool call or /re command arriving mid-analysis waits for this open instead of racing it.
+			state.opening = opening;
 			return;
 		}
 
@@ -303,7 +328,7 @@ function registerShell(pi: ExtensionAPI): void {
 		const onProgress = analysisStatus(ctx, basename(state.binaryPath));
 		void ensureRizin(ctx, { onProgress })
 			.then(() => refreshStatusBand(ctx))
-			.catch((err) => ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"))
+			.catch((err) => tell(ctx, err instanceof Error ? err.message : String(err), "error"))
 			.finally(() => clearAnalysisStatus(ctx));
 	}
 
@@ -329,11 +354,15 @@ function registerShell(pi: ExtensionAPI): void {
 		shutdownState(ctx.sessionManager.getSessionId());
 	});
 
-	// `/re off`: refuse RE tool calls, whichever path they come by — top-level, `write xd://<name>`,
-	// or `tool.<name>()` from omp's eval — since all of them pass through omp's tool_call event.
-	pi.on("tool_call", (event, ctx) => {
-		if (RE_ALL_TOOL_NAMES[event.toolName] !== true || !getState(ctx).toolsOff) return undefined;
-		return { block: true, reason: "omp-re: RE tools are off for this session — the user can re-enable them with /re on" };
+	// Every RE tool call, whichever path it comes by — top-level, `write xd://<name>`, or `tool.<name>()`
+	// from omp's eval — passes through omp's tool_call event, which omp awaits. So this is where `/re off`
+	// refuses calls, and where a call arriving while `--binary` is still analyzing waits for that open.
+	pi.on("tool_call", async (event, ctx) => {
+		if (RE_ALL_TOOL_NAMES[event.toolName] !== true) return undefined;
+		const state = getState(ctx);
+		if (state.toolsOff) return { block: true, reason: "omp-re: RE tools are off for this session — the user can re-enable them with /re on" };
+		if (state.opening) await state.opening;
+		return undefined;
 	});
 
 	function completeArguments(prefix: string): AutocompleteItem[] | null {
@@ -367,7 +396,7 @@ function registerShell(pi: ExtensionAPI): void {
 		const onProgress = analysisStatus(ctx, basename(path));
 		try {
 			const result = await openBinary(pi, ctx, path, { onProgress });
-			if (result.replayed > 0) ctx.ui.notify(describeOpen(result), result.replayFailures.length > 0 ? "warning" : "info");
+			if (result.replayed > 0) tell(ctx, describeOpen(result), result.replayFailures.length > 0 ? "warning" : "info");
 		} finally {
 			clearAnalysisStatus(ctx);
 		}
@@ -380,10 +409,12 @@ function registerShell(pi: ExtensionAPI): void {
 			latestCtx = ctx;
 			const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			try {
+				const opening = getState(ctx).opening;
+				if (opening && sub !== undefined && !ANSWERS_DURING_OPEN.has(sub)) await opening;
 				switch (sub) {
 					case "open": {
 						const path = rest.join(" ");
-						if (!path) ctx.ui.notify("Usage: /re open <path>", "error");
+						if (!path) tell(ctx, "Usage: /re open <path>", "error");
 						else await runOpen(ctx, path);
 						return;
 					}
@@ -400,16 +431,16 @@ function registerShell(pi: ExtensionAPI): void {
 					case "cite": {
 						const id = rest[0];
 						if (!id) {
-							ctx.ui.notify("Usage: /re cite <id>", "error");
+							tell(ctx, "Usage: /re cite <id>", "error");
 							return;
 						}
 						const rec = findEvidence(ctx, id);
-						if (!rec) ctx.ui.notify(`omp-re: no evidence found with id ${id}`, "error");
+						if (!rec) tell(ctx, `omp-re: no evidence found with id ${id}`, "error");
 						else citeEvidence(ctx, rec);
 						return;
 					}
 					case "undo":
-						ctx.ui.notify(await undoLastAnnotation(pi, ctx), "info");
+						tell(ctx, await undoLastAnnotation(pi, ctx), "info");
 						return;
 					case "report": {
 						// --audit[=advisory|strict] / --no-audit (--audit=off) toggle the claim-support audit;
@@ -448,7 +479,7 @@ function registerShell(pi: ExtensionAPI): void {
 						}
 						const manifestPath = pathTokens.join(" ");
 						if (!manifestPath) {
-							ctx.ui.notify("Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]", "error");
+							tell(ctx, "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]", "error");
 							return;
 						}
 						if (against) await runOpen(ctx, against);
@@ -459,29 +490,29 @@ function registerShell(pi: ExtensionAPI): void {
 						return;
 					}
 					case "status":
-						ctx.ui.notify(await statusText(ctx), "info");
+						tell(ctx, await statusText(ctx), "info");
 						return;
 					// A gate on the tool_call event (above), not setActiveTools: re-selecting a tool through
 					// setActiveTools pins it top-level, which would undo omp's xd:// mounting on /re on.
 					case "off": {
 						getState(ctx).toolsOff = true;
-						ctx.ui.notify("omp-re: RE tools disabled for this session — /re on to re-enable", "info");
+						tell(ctx, "omp-re: RE tools disabled for this session — /re on to re-enable", "info");
 						return;
 					}
 					case "on": {
 						getState(ctx).toolsOff = false;
-						ctx.ui.notify("omp-re: RE tools enabled for this session", "info");
+						tell(ctx, "omp-re: RE tools enabled for this session", "info");
 						return;
 					}
 					case "help":
 					case undefined:
-						ctx.ui.notify(HELP_TEXT, "info");
+						tell(ctx, HELP_TEXT, "info");
 						return;
 					default:
-						ctx.ui.notify(`omp-re: unknown /re subcommand ${JSON.stringify(sub)} — try /re help`, "error");
+						tell(ctx, `omp-re: unknown /re subcommand ${JSON.stringify(sub)} — try /re help`, "error");
 				}
 			} catch (err) {
-				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
+				tell(ctx, err instanceof Error ? err.message : String(err), "error");
 			}
 		},
 	});
