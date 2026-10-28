@@ -221,6 +221,18 @@ How to work
     evidence-gated report, and /re verify re-runs cited commands to confirm the
     recorded output still reproduces.
 
+Render in eval (display vs print)
+  A tool call inside eval returns { text, details } to your code — it is NOT drawn
+  as a tool card (that rendering is for top-level calls and \`write xd://<name>\`).
+  So choose how it shows in the transcript: print(x) shows monospace text;
+  display(value) shows a highlighted block. List tools return a JSON array after
+  the header line, so display the parsed rows; print code/disassembly as text.
+  Define a helper once — it persists across eval calls:
+
+    const show = (r) => { try { display(JSON.parse(r.text.slice(r.text.indexOf("\\n") + 1))); } catch { print(r.text); } };
+    show(await tool.list_functions({ sort: "size", limit: 10 }));      // highlighted JSON
+    print((await tool.decompile_function({ addr: "main" })).text);     // C as text
+
 What's here (signatures: re_describe)
   - Session: open_binary, map_file, export_project.
   - Read: functions, xrefs, strings, imports/exports/symbols, segments, graphs,

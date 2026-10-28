@@ -15,6 +15,7 @@ import {
 	type ToolMeta,
 } from "../extensions/re/tools-guide.ts";
 import { makeHarness, textOf } from "./helpers.ts";
+import { jsonResult, textResult } from "../extensions/re/format.ts";
 import { registerReadTools } from "../extensions/re/tools-read.ts";
 import { registerRizinTools } from "../extensions/re/tools-rizin.ts";
 
@@ -107,6 +108,34 @@ describe("describeAll (grouped listing)", () => {
 		// prove a non-RE tool (omp's own) never appears.
 		const out = describeAll([...tools, { name: "bash", description: "Not an RE tool.", parameters: z.object({}) }]);
 		expect(out).not.toContain("bash");
+	});
+});
+
+describe("re_manual eval guidance (display vs print)", () => {
+	// The exact parser the manual documents for turning a list tool's result text into rows for display().
+	// In eval, `r.text` is the flattened result text — the same string as content[0].text here.
+	const rows = (text: string) => JSON.parse(text.slice(text.indexOf("\n") + 1));
+
+	test("the documented parse turns a list result into rows for display()", async () => {
+		const res = await jsonResult("206 functions", [
+			{ ea: "0x1", name: "a" },
+			{ ea: "0x2", name: "b" },
+		]);
+		expect(rows(textOf(res))).toEqual([
+			{ ea: "0x1", name: "a" },
+			{ ea: "0x2", name: "b" },
+		]);
+	});
+
+	test("the parse throws on code/text output, so show() falls back to print", async () => {
+		const res = await textResult("decompiled 0x1 (pdg)", "int main() { return 0; }");
+		expect(() => rows(textOf(res))).toThrow();
+	});
+
+	test("the manual teaches display() and ships the show() helper", () => {
+		expect(RE_MANUAL).toContain("display(");
+		expect(RE_MANUAL).toContain("const show =");
+		expect(RE_MANUAL).toContain("print(");
 	});
 });
 

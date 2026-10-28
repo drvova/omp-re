@@ -110,11 +110,20 @@ tool list; the model gets them from omp's own tooling:
   sessions, write them to a script and `%load` it — omp's own setup mechanism.
 
 ```js
-// eval — the three biggest functions, first line of each decompile
+// eval — a tool call returns { text, details } to your code; choose how it shows:
+// display(value) renders a highlighted block, print(x) shows monospace text.
 await tool.open_binary({ path: "/bin/ls" });
-const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
+// List tools return a JSON array after the header line, so parse from the first newline:
+const rows = (r) => JSON.parse(r.text.slice(r.text.indexOf("\n") + 1));
+display(rows(await tool.list_functions({ sort: "size", limit: 10 })));   // highlighted JSON, not raw text
+// Decompiled C is text — print it:
 for (const f of rows(await tool.list_functions({ sort: "size", limit: 3 }))) print((await tool.decompile_function({ addr: f.ea })).text.split("\n")[0]);
 ```
+
+A tool call made from `eval` returns its `{ text, details }` to your code; omp
+renders the eval cell (your `print`/`display` output), not a per-tool card — the
+card renderers apply to top-level and `write xd://<name>` calls. So `display(...)`
+structured results for a highlighted block instead of a wall of `print` text.
 
 Because these are real omp tools on every path, nothing about them is
 reimplemented: each call — top-level, `write xd://…`, or `tool.<name>()` from

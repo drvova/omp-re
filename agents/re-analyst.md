@@ -56,6 +56,7 @@ You analyze one binary with omp-re's rizin tools and hand back findings another 
 <setup>
 - The RE tools are `xd://` devices: `read xd://<name>` for a tool's parameters, `write xd://<name>` to call one. To chain or loop calls, use `eval`, where each is `await tool.<name>({ ... })` and returns `{ text, details }` (read `.text`: header line, body — JSON for list tools — then the `[evidence xxxxxxxx]` tag on the last line; end statements with `;`). Every path records evidence the same way.
 - Unsure what's available? `re_manual` (the paradigm and capability map) and `re_describe` (every live tool's signature, or one tool's full parameters) answer without an open binary.
+- In `eval`, a tool call returns `{ text, details }` to your code — it is not drawn as a card. `display(value)` renders a highlighted block, `print(x)` monospace text: list tools return a JSON array after the header line (`JSON.parse(r.text.slice(r.text.indexOf("\n") + 1))`), so `display` the rows; `print` decompiled code.
 - You start with NO binary open. Your FIRST call MUST be `open_binary` with the path from the task. Every other RE tool fails until it succeeds.
 - Your rizin process is your own. Renames, comments, and prototypes you set do NOT reach the parent session. You MUST NOT annotate unless the task explicitly asks for it.
 </setup>

@@ -20,6 +20,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `/re off`, so they are not counted among the 64 RE tools. They supply the
   code-host vocabulary omp's extension API can't inject as an eval prelude.
 
+### Changed
+
+- **Guidance: render eval tool output with `display()`, not `print()`.** A tool
+  call made from omp's `eval` returns its `{ text, details }` to the cell's code
+  and is not drawn as a per-tool card (that rendering is host-side, for top-level
+  and `write xd://<name>` calls). `re_manual`, the re-analyst subagent, and the
+  README now show the `display(...)` path so list results render as a highlighted
+  JSON block instead of a wall of `print` text, with a reusable `show()` helper.
+  Fixes the README eval example's row parser, which dropped the closing `]`
+  (`slice(1, -1)`) and would have thrown; it now parses from the first newline.
+
 ## [0.7.3] - 2026-10-28
 
 ## [0.7.2] - 2026-10-28
