@@ -14,11 +14,9 @@ import { composeApp } from "./app.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
-import { registerGuideTools } from "./tools-guide.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { registerAnalyzeTools } from "./tools-analyze.ts";
-import { registerDeobfuscateTools } from "./tools-deobfuscate.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
 import { registerSignatureTools } from "./tools-signatures.ts";
 import { branchEntries, lastRecordedBinaryPath, lastRecordedBinarySha256, lastRecordedLoadOptions } from "./entries.ts";
@@ -32,13 +30,8 @@ import type { AuditMode } from "./audit-claims.ts";
 import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
-import { registerInfoTools } from "./tools-info.ts";
 import { registerMapFileTools } from "./tools-mapfile.ts";
 import { registerProjectTools } from "./tools-project.ts";
-import { registerReadTools } from "./tools-read.ts";
-import { registerSearchTools } from "./tools-search.ts";
-import { registerSyscallTools } from "./tools-syscalls.ts";
-import { registerTypeTools } from "./tools-types.ts";
 import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
@@ -527,13 +520,6 @@ function registerShell(pi: ExtensionAPI): void {
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
 	await composeApp(pi, [
-		{ name: "re:guide", apply: registerGuideTools },
-		{ name: "re:read-tools", apply: registerReadTools },
-		{ name: "re:info-tools", apply: registerInfoTools },
-		{ name: "re:search-tools", apply: registerSearchTools },
-		{ name: "re:deobfuscate", apply: registerDeobfuscateTools },
-		{ name: "re:type-tools", apply: registerTypeTools },
-		{ name: "re:syscall-tools", apply: registerSyscallTools },
 		{ name: "re:mutate-tools", apply: registerMutateTools },
 		{ name: "re:signature-tools", apply: registerSignatureTools },
 		{ name: "re:analyze-tools", apply: registerAnalyzeTools },

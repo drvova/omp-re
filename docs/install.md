@@ -82,10 +82,10 @@ OMPRE_RIZIN_PATH="$(which rizin)"   # e.g. in ~/.omp/agent/config.yml env, or yo
 
 ## Decompiler plugins (optional, strongly recommended)
 
-rizin itself has no decompiler. Without a plugin, `decompile_function` and
-the code viewer's `d` key return annotated disassembly whose output begins
-`(disassembly only — no decompiler plugin available) `, so it is never
-mistaken for decompiled code. omp-re probes for, in order:
+rizin itself has no decompiler. Without a plugin, `pdg`/`pdd` (via
+`rizin_command`) error and the code viewer's `d` key falls back to annotated
+disassembly (`pdf`), so it is never mistaken for decompiled code. omp-re probes
+for, in order:
 
 | Plugin | Command | Notes |
 | --- | --- | --- |

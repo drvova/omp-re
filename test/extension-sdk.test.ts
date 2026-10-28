@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_READ_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
+import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
 import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
 import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
@@ -29,7 +29,7 @@ logSkip("extension-sdk rizin tests");
 const EXTENSION = resolve(import.meta.dir, "../extensions/re");
 /** The tools registered unconditionally in every session. Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
 const ALWAYS_REGISTERED = [
-	...Object.keys(RE_READ_TOOL_NAMES),
+	// The read-tier wrappers are no longer registered (one-tool design): reads go through rizin_command.
 	...Object.keys(RE_MUTATE_TOOL_NAMES),
 	...Object.keys(RE_RIZIN_TOOL_NAMES),
 	...Object.keys(RE_EMULATE_TOOL_NAMES),
@@ -155,16 +155,24 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 	});
 
 	test("omp's eval reaches an RE tool as tool.<name>(), and its error is catchable in the cell", async () => {
-		expect((await evalJs(h.session, caught("await tool.list_functions({})"))).text).toBe("omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first");
+		expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toBe("omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first");
+	});
+
+	test("an empty rizin_command returns the omp-re manual — the one-tool entry, no binary or rizin needed", async () => {
+		const out = await evalJs(h.session, '(await tool.rizin_command({ command: "" })).text');
+		expect(out.isError).toBe(false);
+		expect(out.text).toContain("omp-re — reverse engineering with rizin");
+		expect(out.text).toContain("await tool.rizin_command(");
+		expect(out.text).toContain("await tool.rizin_help(");
 	});
 
 	test("/re off refuses RE tool calls from eval while the devices stay mounted, and /re on lifts it", async () => {
 		await h.session.prompt("/re off");
-		expect((await evalJs(h.session, caught("await tool.hash_binary({})"))).text).toBe("omp-re: RE tools are off for this session — the user can re-enable them with /re on");
+		expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toBe("omp-re: RE tools are off for this session — the user can re-enable them with /re on");
 		expect(mountedRe(h.session).sort()).toEqual(expect.arrayContaining(ALWAYS_REGISTERED.sort()));
 		await h.session.prompt("/re on");
 		expect(h.notes.at(-1)).toBe("[info] omp-re: RE tools enabled for this session");
-		expect((await evalJs(h.session, caught("await tool.hash_binary({})"))).text).toContain("omp-re: no binary open");
+		expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toContain("omp-re: no binary open");
 		expect(activeRe(h.session)).toEqual([]);
 	});
 
@@ -208,7 +216,7 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 	});
 
 	test("a tool called with no binary open fails with omp-re's guidance", async () => {
-		await expect(h.session.getToolByName("list_functions")!.execute("t-nobin", {})).rejects.toThrow("omp-re: no binary open");
+		await expect(h.session.getToolByName("rizin_command")!.execute("t-nobin", { command: "aflj" })).rejects.toThrow("omp-re: no binary open");
 	});
 });
 
@@ -231,18 +239,20 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		try {
 			// A call made from eval goes through omp's tool wrapper, so the evidence hook records it and tags what the cell gets
 			// back. A tool with details comes back to the cell as { text, details }.
-			const result = await evalJs(second.session, '(await tool.get_function({ target: "omp_re_sdk_main" })).text');
-			expect(result.text).toMatch(/^omp_re_sdk_main at 0x/);
+			const result = await evalJs(second.session, '(await tool.rizin_command({ command: "afij", addr: "omp_re_sdk_main" })).text');
+			expect(result.text.startsWith("rizin> afij @ omp_re_sdk_main\n")).toBe(true);
+			expect(result.text).toContain("omp_re_sdk_main"); // the replayed rename shows in rizin's own output
 			const tag = result.text.match(/\[evidence ([0-9a-f]{8}) — cite it in record_finding\]/);
 			expect(tag).not.toBeNull();
 			const recorded = second.session.sessionManager
 				.getEntries()
 				.filter((e) => e.type === "custom" && (e as { customType?: string }).customType === "re.evidence")
 				.map((e) => (e as { data?: { id: string; tool: string } }).data!);
-			expect(recorded).toContainEqual(expect.objectContaining({ tool: "get_function", id: expect.stringMatching(new RegExp(`^${tag![1]}`)) }));
-			// The tag sits on its own last line (eval joins text blocks with no separator), so a list tool's body parses.
-			const rows = await evalJs(second.session, 'const t = (await tool.list_functions({ limit: 2 })).text; JSON.parse(t.split("\\n").slice(1, -1).join("\\n")).length');
-			expect(rows.text).toBe("2");
+			expect(recorded).toContainEqual(expect.objectContaining({ tool: "rizin_command", id: expect.stringMatching(new RegExp(`^${tag![1]}`)) }));
+			// A read's text is header line, JSON body, then the [evidence] tag line: drop the first and last to parse
+			// the body. Use a bounded command (afij = one function) so the size cap never truncates it to invalid JSON.
+			const rows = await evalJs(second.session, 'const t = (await tool.rizin_command({ command: "afij", addr: "omp_re_sdk_main" })).text; JSON.parse(t.split("\\n").slice(1, -1).join("\\n")).length >= 1');
+			expect(rows.text).toBe("true");
 			expect(second.notes.filter((n) => n.startsWith("[runtime]"))).toEqual([]);
 		} finally {
 			await second.shutdown();
@@ -254,8 +264,9 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		// session_start opens the binary in the background; the call below is made before that open can have finished.
 		const h = await boot(SessionManager.inMemory(), { flags: { binary: TEST_BINARY } });
 		try {
-			const result = await evalJs(h.session, "(await tool.hash_binary({})).text");
-			expect(result.text).toMatch(/^sha256=[0-9a-f]{64}$/m);
+			const result = await evalJs(h.session, '(await tool.rizin_command({ command: "ij" })).text');
+			expect(result.isError).toBe(false);
+			expect(result.text.startsWith("rizin> ij\n")).toBe(true); // the binary-needing call waited for the background open and ran
 		} finally {
 			await h.shutdown();
 		}

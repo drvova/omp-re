@@ -6,37 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Added
-
-- **`re_manual` and `re_describe` — the eval namespace's `man()`/`describe()`.**
-  Two always-present meta tools make the host-native surface
-  self-documenting from inside omp's `eval` code host. `re_manual` is the entry
-  manual (the paradigm, how to open a binary, the capability map, the
-  evidence/report workflow, and config); `re_describe` lists every **live**
-  capability with its call signature and one-line purpose, or — with `name` —
-  one tool's full parameters, read back from omp's own tool registry
-  (`getAllTools()`) so it never drifts from what is registered. Both are pure
-  metadata: no rizin spawn, no open binary, no evidence, and not gated by
-  `/re off`, so they are not counted among the 64 RE tools. They supply the
-  code-host vocabulary omp's extension API can't inject as an eval prelude.
-
 ### Changed
 
-- **`re_describe` now covers the whole eval-callable namespace.** It lists every
-  tool reachable as `tool.<name>()` — omp-re's RE capabilities by tier, then omp's
-  built-ins and other extensions under "Other callable tools" — with the guide
-  tools leading. `name` describes any registered tool, not just an RE one. A tool
-  whose schema comes from an unfamiliar builder renders `name(…)` rather than a
-  misleading `name()`, and the listing names what it *can't* enumerate: the eval
-  kernel's own helpers and the functions the model has defined in eval.
-- **Guidance: render eval tool output with `display()`, not `print()`.** A tool
-  call made from omp's `eval` returns its `{ text, details }` to the cell's code
-  and is not drawn as a per-tool card (that rendering is host-side, for top-level
-  and `write xd://<name>` calls). `re_manual`, the re-analyst subagent, and the
-  README now show the `display(...)` path so list results render as a highlighted
-  JSON block instead of a wall of `print` text, with a reusable `show()` helper.
-  Fixes the README eval example's row parser, which dropped the closing `]`
-  (`slice(1, -1)`) and would have thrown; it now parses from the first newline.
+- **One-tool read surface.** omp-re no longer registers a typed tool per read.
+  You read the binary through a single tool — `rizin_command` — running rizin's
+  own read-only commands (`aflj`, `pdg`, `izj`, `iij`, `iEj`, `axtj`, `tsj`,
+  `/xj`, `ph entropy`, …) and composing them in omp's `eval`; `rizin_help` finds
+  a command's arguments, and an **empty `rizin_command` returns the manual** (the
+  command families and the other tools, no binary needed). The 31 typed read
+  wrappers (`list_functions`, `decompile_function`, `get_xrefs_to`, the
+  `search_*` family, `list_types`, `list_syscalls`, `get_binary_info`, …) are
+  unregistered; per the one-tool design their code stays in the repository
+  (`tools-read.ts`, `tools-search.ts`, `tools-types.ts`, `tools-syscalls.ts`,
+  `tools-info.ts`, `tools-deobfuscate.ts`) but is no longer advertised. The
+  stateful tools — `open_binary`, the annotate tools (recorded and replayed),
+  `record_finding`/`adopt_finding`/`retract_finding`, `rizin_cli`, triage, the
+  debugger, the emulator, signatures, and `analyze` — are unchanged, since they
+  carry behavior a raw rizin command can't (session lifecycle, annotation
+  replay, evidence-gated findings).
+- **Render eval reads with `display()`.** A tool call from `eval` returns its
+  `{ text, details }` to the cell — it is not drawn as a per-tool card (that
+  rendering is host-side, for top-level and `write xd://<name>` calls). The
+  manual, the re-analyst subagent, and the README show the `display(...)` path: a
+  `*j` read's body is JSON between the `rizin> …` header line and the trailing
+  `[evidence …]` tag, so
+  `display(JSON.parse(r.text.split("\n").slice(1, -1).join("\n")))` renders a
+  highlighted block. A big list truncates to an artifact — read it or narrow the
+  command.
+- **`rizin_command` fails fast when no binary is open**, before loading the rizin
+  command catalog, so the "no binary open" guidance fires without a rizin install
+  (matching what the typed read tools used to do).
 
 ## [0.7.3] - 2026-10-28
 

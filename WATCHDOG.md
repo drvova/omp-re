@@ -7,7 +7,7 @@ Review priorities for an advisor watching an RE-mode session (see the suite READ
 - An address, constant, API/import name, ATT&CK technique, or verdict ("this is ransomware", "this exfiltrates data") asserted in the analyst's response without a matching `re.evidence` record from this session backing it. "Matching" means: the tool call that would produce that fact actually ran, and its recorded output actually contains it — not merely that some tool ran at some point.
 - An address carried over from a different function, a different binary, or computed by hand rather than quoted from a tool's `ea` field.
 - A claim stated more strongly than its evidence supports — e.g. treating one string match or one import as proof of a capability the decompiled logic doesn't corroborate.
-- Silent reliance on disassembly-only output (decompile_function output that begins `(disassembly only — …)`) to support a behavioral claim that would normally need decompiled logic to justify.
+- Silent reliance on disassembly-only output (a `pdf` fallback when no decompiler plugin is installed) to support a behavioral claim that would normally need decompiled logic to justify.
 
 ## Do not flag
 
