@@ -1,6 +1,6 @@
 {
   "name": "omp-re",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Reverse-engineering suite for omp: rizin tools, a re-analyst subagent, evidence store, signed audit log, RE status band, and report generator.",
   "license": "MIT",
   "author": "drvova <drvova.ai@gmail.com>",
