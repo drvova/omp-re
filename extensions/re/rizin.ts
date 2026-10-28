@@ -11,6 +11,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { constants as fsConstants, openSync as fsOpenSync, readSync as fsReadSync, closeSync as fsCloseSync } from "node:fs";
 import { access, realpath as fsRealpath } from "node:fs/promises";
+import { dirname, extname, isAbsolute, join } from "node:path";
 
 /** Allowed characters in an address/expression interpolated after `@`: hex, flag names, and
  * arithmetic (sym.main+0x10, $$). `@` itself is excluded so no value can smuggle in rizin's
@@ -587,13 +588,16 @@ export async function rizinBitsMismatch(binaryPath: string): Promise<string | un
  */
 export function resolveRizinTool(tool: string): string {
 	const rizin = resolveRizinPath();
-	const slash = rizin.lastIndexOf("/");
-	return slash === -1 ? tool : `${rizin.slice(0, slash + 1)}${tool}`;
+	// Carry rizin's extension onto the sibling (Windows: `…\rizin.exe` → `…\rz-hash.exe`) and
+	// handle both separators via node:path, so the value handed to spawn/exec is a real path on
+	// Windows, not a bare name without `.exe`. A bare command stays bare and resolves on PATH.
+	const name = `${tool}${extname(rizin)}`;
+	return /[\\/]/.test(rizin) ? join(dirname(rizin), name) : name;
 }
 
-/** Whether `name` resolves to an executable, either as a path or via PATH. On Windows a path without an extension also tries the `.exe` form: a sibling tool resolved from OMPRE_RIZIN_PATH is "C:/dir/rz-hash", which access() cannot see but every spawn API runs fine. */
+/** Whether `name` resolves to an executable, either as a path (POSIX or Windows) or via PATH. On Windows a path without an extension also tries the `.exe` form. */
 export async function isExecutable(name: string): Promise<boolean> {
-	if (!name.includes("/")) return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
+	if (!/[\\/]/.test(name) && !isAbsolute(name)) return Bun.which(name) !== null || Bun.which(`${name}.exe`) !== null;
 	for (const candidate of process.platform === "win32" && !/\.(exe|cmd|bat)$/i.test(name) ? [name, `${name}.exe`] : [name]) {
 		try {
 			await access(candidate, fsConstants.X_OK);
