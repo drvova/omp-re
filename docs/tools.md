@@ -22,6 +22,19 @@ model and saved in full to the session's artifact store; the result ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
 that artifact. List results are JSON arrays with one compact row per line.
 
+## Guide (2 meta tools)
+
+Two always-present meta tools bootstrap the rest. They are **not** counted in the
+64: they spawn no rizin, need no open binary, record no evidence, and are not
+disabled by `/re off` (they stay readable when the tools are off). They are the
+in-namespace vocabulary for omp's `eval` host — `man()` and `describe()` — since
+omp's extension API exposes no way to seed the eval namespace directly.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `re_manual` | `read` | (none) | **Start here.** The entry manual: the paradigm (every capability is an `xd://<name>` device driven from `eval` as `await tool.<name>({ … })`, with omp's `eval` the single code host), how to open a binary, the capability map, the evidence/report workflow, and the config env vars. |
+| `re_describe` | `read` | `name?` | Lists every **live** capability with its call signature and one-line purpose; with `name`, the full parameters and docs for one. The live source of truth for what `tool.<name>()` you can call — triage and debugger capabilities appear only when actually registered. |
+
 ## Session (3 tools)
 
 | Tool | Approval | Parameters | What it does |

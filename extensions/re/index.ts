@@ -14,6 +14,7 @@ import { composeApp } from "./app.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
+import { registerGuideTools } from "./tools-guide.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { registerAnalyzeTools } from "./tools-analyze.ts";
@@ -526,6 +527,7 @@ function registerShell(pi: ExtensionAPI): void {
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
 	await composeApp(pi, [
+		{ name: "re:guide", apply: registerGuideTools },
 		{ name: "re:read-tools", apply: registerReadTools },
 		{ name: "re:info-tools", apply: registerInfoTools },
 		{ name: "re:search-tools", apply: registerSearchTools },

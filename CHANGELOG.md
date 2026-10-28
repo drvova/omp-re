@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`re_manual` and `re_describe` — the eval namespace's `man()`/`describe()`.**
+  Two always-present meta tools make the host-native surface
+  self-documenting from inside omp's `eval` code host. `re_manual` is the entry
+  manual (the paradigm, how to open a binary, the capability map, the
+  evidence/report workflow, and config); `re_describe` lists every **live**
+  capability with its call signature and one-line purpose, or — with `name` —
+  one tool's full parameters, read back from omp's own tool registry
+  (`getAllTools()`) so it never drifts from what is registered. Both are pure
+  metadata: no rizin spawn, no open binary, no evidence, and not gated by
+  `/re off`, so they are not counted among the 64 RE tools. They supply the
+  code-host vocabulary omp's extension API can't inject as an eval prelude.
+
 ## [0.7.3] - 2026-10-28
 
 ## [0.7.2] - 2026-10-28
