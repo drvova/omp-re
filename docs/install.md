@@ -143,6 +143,12 @@ omp plugin marketplace add drvova/omp-re
 omp plugin install omp-re@drvova
 ```
 
+Update an installed copy to the latest published version with:
+
+```bash
+omp plugin upgrade omp-re@drvova   # `omp plugin list` shows the installed version
+```
+
 See the [README](../README.md#install) for the dev-load alternative and the
 marketplace-name-vs-GitHub-owner distinction.
 
