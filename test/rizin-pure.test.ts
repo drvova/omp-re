@@ -9,6 +9,7 @@ import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
 import { baseRizinFlags, buildLoadFlags, eaFromOffset, firstExecutable, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, resolveRizinTool, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 describe("validateAddr", () => {
 	test("accepts hex addresses, flag names, and arithmetic", () => {
@@ -522,13 +523,17 @@ describe("resolveRizinTool (sibling rz-* resolution)", () => {
 	});
 
 	test("a path takes the sibling from the same directory", () => {
-		set("/opt/rizin/bin/rizin");
-		expect(resolveRizinTool("rz-bin")).toBe("/opt/rizin/bin/rz-bin");
+		// Build the expected path with node:path so the separators match the host
+		// (`join`/`dirname` emit `\` on Windows) — the contract is "sibling in rizin's dir", not a literal slash.
+		const rizin = join("/opt", "rizin", "bin", "rizin");
+		set(rizin);
+		expect(resolveRizinTool("rz-bin")).toBe(join(dirname(rizin), "rz-bin"));
 	});
 
 	test("the sibling inherits rizin's extension, so it is a real path for spawn (Windows .exe)", () => {
-		set("/opt/rizin/bin/rizin.exe");
-		expect(resolveRizinTool("rz-hash")).toBe("/opt/rizin/bin/rz-hash.exe");
+		const rizin = join("/opt", "rizin", "bin", "rizin.exe");
+		set(rizin);
+		expect(resolveRizinTool("rz-hash")).toBe(join(dirname(rizin), "rz-hash.exe"));
 		set("rizin.exe");
 		expect(resolveRizinTool("rz-ax")).toBe("rz-ax.exe");
 	});
