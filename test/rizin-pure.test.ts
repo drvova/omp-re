@@ -6,9 +6,10 @@ import { mapFileCommand, validateMapPerm } from "../extensions/re/mapfiles.ts";
 import { ANALYSIS_PASSES, isAnalysisPass } from "../extensions/re/passes.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
 import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
-import { baseRizinFlags, buildLoadFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, resolveRizinTool, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { baseRizinFlags, buildLoadFlags, eaFromOffset, firstExecutable, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, resolveRizinTool, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 describe("validateAddr", () => {
 	test("accepts hex addresses, flag names, and arithmetic", () => {
@@ -513,21 +514,39 @@ describe("resolveRizinTool (sibling rz-* resolution)", () => {
 	afterEach(() => set(original));
 
 	test("a bare command stays bare (resolved on PATH, like rizin itself)", () => {
-		set(undefined);
-		expect(resolveRizinTool("rz-bin")).toBe("rz-bin");
+		// An explicit bare OMPRE_RIZIN_PATH bypasses discovery, so the sibling stays bare too.
+		// (Unset env would run discoverRizin(), which resolves to an absolute path wherever rizin
+		// is actually installed — host-dependent, and covered by the firstExecutable suite below.)
 		set("rizin");
+		expect(resolveRizinTool("rz-bin")).toBe("rz-bin");
 		expect(resolveRizinTool("rz-diff")).toBe("rz-diff");
 	});
 
 	test("a path takes the sibling from the same directory", () => {
-		set("/opt/rizin/bin/rizin");
-		expect(resolveRizinTool("rz-bin")).toBe("/opt/rizin/bin/rz-bin");
+		// Build the expected path with node:path so the separators match the host
+		// (`join`/`dirname` emit `\` on Windows) — the contract is "sibling in rizin's dir", not a literal slash.
+		const rizin = join("/opt", "rizin", "bin", "rizin");
+		set(rizin);
+		expect(resolveRizinTool("rz-bin")).toBe(join(dirname(rizin), "rz-bin"));
 	});
 
 	test("the sibling inherits rizin's extension, so it is a real path for spawn (Windows .exe)", () => {
-		set("/opt/rizin/bin/rizin.exe");
-		expect(resolveRizinTool("rz-hash")).toBe("/opt/rizin/bin/rz-hash.exe");
+		const rizin = join("/opt", "rizin", "bin", "rizin.exe");
+		set(rizin);
+		expect(resolveRizinTool("rz-hash")).toBe(join(dirname(rizin), "rz-hash.exe"));
 		set("rizin.exe");
 		expect(resolveRizinTool("rz-ax")).toBe("rz-ax.exe");
+	});
+});
+
+describe("firstExecutable (rizin discovery in common locations)", () => {
+	test("returns the first existing, executable candidate, else undefined", () => {
+		const dir = mkdtempSync(`${tmpdir()}/omp-re-exe-`);
+		const exe = `${dir}/rizin`;
+		writeFileSync(exe, "#!/bin/sh\n");
+		chmodSync(exe, 0o755);
+		expect(firstExecutable([`${dir}/missing`, exe])).toBe(exe);
+		expect(firstExecutable([`${dir}/missing`, `${dir}/nope`])).toBeUndefined();
+		rmSync(dir, { recursive: true, force: true });
 	});
 });

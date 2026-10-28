@@ -9,7 +9,8 @@
  * exactly one request at a time over the pipe.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { constants as fsConstants, openSync as fsOpenSync, readSync as fsReadSync, closeSync as fsCloseSync } from "node:fs";
+import { accessSync, constants as fsConstants, openSync as fsOpenSync, readSync as fsReadSync, closeSync as fsCloseSync } from "node:fs";
+import { homedir } from "node:os";
 import { access, realpath as fsRealpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join } from "node:path";
 
@@ -496,7 +497,45 @@ export function resolveRizinPath(binaryPath?: string, bitsOverride?: 8 | 16 | 32
 		if (bits === 64 && process.env.OMPRE_RIZIN_PATH_64?.trim()) return process.env.OMPRE_RIZIN_PATH_64.trim();
 		if (bits === 32 && process.env.OMPRE_RIZIN_PATH_32?.trim()) return process.env.OMPRE_RIZIN_PATH_32.trim();
 	}
-	return process.env.OMPRE_RIZIN_PATH?.trim() || "rizin";
+	return process.env.OMPRE_RIZIN_PATH?.trim() || discoverRizin();
+}
+
+/**
+ * Common absolute locations a package manager drops `rizin`, checked when it
+ * is not on the process PATH. A desktop/GUI launch of omp often inherits a
+ * minimal PATH (no `/opt/homebrew/bin`, `/usr/local/bin`, …), so `rizin` works
+ * in the user's terminal yet `Bun.which` can't see it — this is what makes
+ * omp-re "load but not find rizin". An absolute hit is returned so both the
+ * availability check and the spawn use a concrete path, not a bare name.
+ */
+const COMMON_RIZIN_PATHS: readonly string[] =
+	process.platform === "win32"
+		? ["C:\\Program Files\\rizin\\bin\\rizin.exe", "C:\\Program Files (x86)\\rizin\\bin\\rizin.exe"]
+		: ["/opt/homebrew/bin/rizin", "/usr/local/bin/rizin", "/usr/bin/rizin", "/opt/rizin/bin/rizin", "/snap/bin/rizin", `${homedir()}/.local/bin/rizin`];
+
+/** The first of `candidates` that exists and is executable, or undefined. */
+export function firstExecutable(candidates: readonly string[]): string | undefined {
+	for (const candidate of candidates) {
+		try {
+			accessSync(candidate, fsConstants.X_OK);
+			return candidate;
+		} catch {
+			// not here; try the next
+		}
+	}
+	return undefined;
+}
+
+let discoveredRizin: string | undefined;
+
+/** Resolve the default `rizin` to a concrete path: PATH first, then common install locations. Falls back to the bare name (so the "not found" error still fires) WITHOUT caching, so installing rizin mid-session is picked up. A positive hit is cached. */
+function discoverRizin(): string {
+	if (discoveredRizin) return discoveredRizin;
+	const onPath = Bun.which("rizin") ?? (process.platform === "win32" ? Bun.which("rizin.exe") : null);
+	if (onPath) return (discoveredRizin = onPath);
+	const common = firstExecutable(COMMON_RIZIN_PATHS);
+	if (common) return (discoveredRizin = common);
+	return "rizin";
 }
 
 /**
@@ -611,7 +650,9 @@ export async function isExecutable(name: string): Promise<boolean> {
 
 export async function assertRizinAvailable(): Promise<void> {
 	if (!(await isExecutable(resolveRizinPath()))) {
-		throw new Error("omp-re: rizin not found on PATH — install rizin (https://rizin.re) or set OMPRE_RIZIN_PATH");
+		throw new Error(
+			"omp-re: rizin not found on PATH or common install locations — install rizin (https://rizin.re), or set OMPRE_RIZIN_PATH to its full path (the output of `which rizin` in your shell). A desktop launch of omp may not inherit your shell's PATH, so rizin can work in your terminal yet be invisible here.",
+		);
 	}
 }
 

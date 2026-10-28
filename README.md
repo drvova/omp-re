@@ -55,9 +55,13 @@ start with no build step. Never use a real home directory in this config
 **rizin is required, and it is yours.** omp-re does not bundle, download,
 or build rizin: it runs the `rizin` on your `PATH` (or the one
 `OMPRE_RIZIN_PATH` names), so you choose the version, update it with your
-package manager, and keep the decompiler plugins you already have. Without
-it, `/re open` throws exactly: `omp-re: rizin not found on PATH — install
-rizin (https://rizin.re) or set OMPRE_RIZIN_PATH`. See
+package manager, and keep the decompiler plugins you already have. If a
+desktop launch of omp didn't inherit your shell `PATH` (so `rizin` works in
+your terminal but omp-re can't see it), omp-re also looks in the common
+install locations — Homebrew, `/usr/local/bin`, `/usr/bin`, `/opt/rizin/bin`,
+snap, `~/.local/bin`; set `OMPRE_RIZIN_PATH` to its full path for anywhere
+else (the output of `which rizin`). When it truly can't be found, `/re open`
+says so and points you at `OMPRE_RIZIN_PATH`. See
 [Prerequisites](#prerequisites) and [`docs/install.md`](docs/install.md).
 
 ## Quickstart
