@@ -33,7 +33,7 @@ omp's extension API exposes no way to seed the eval namespace directly.
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `re_manual` | `read` | (none) | **Start here.** The entry manual: the paradigm (every capability is an `xd://<name>` device driven from `eval` as `await tool.<name>({ … })`, with omp's `eval` the single code host), how to open a binary, the capability map, the evidence/report workflow, and the config env vars. |
-| `re_describe` | `read` | `name?` | Lists every **live** capability with its call signature and one-line purpose; with `name`, the full parameters and docs for one. The live source of truth for what `tool.<name>()` you can call — triage and debugger capabilities appear only when actually registered. |
+| `re_describe` | `read` | `name?` | Lists **every tool callable from eval** as `tool.<name>()` — omp-re's RE capabilities grouped by tier, then omp's built-ins and other extensions under "Other callable tools" — each with its signature and one-line purpose; with `name`, one tool's full parameters. The live source of truth, read from omp's own registry (triage/debugger appear only when registered). It can't list the eval kernel's built-in helpers (`print`/`display`/`read`/…) or functions you've defined in eval. |
 
 ## Session (3 tools)
 

@@ -22,7 +22,6 @@
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
-	RE_ALL_TOOL_NAMES,
 	RE_ANALYZE_TOOL_NAMES,
 	RE_DEBUG_TOOL_NAMES,
 	RE_EMULATE_TOOL_NAMES,
@@ -59,6 +58,9 @@ const GROUPS: readonly { label: string; names: Record<string, true> }[] = [
 	{ label: "Emulator — RzIL interpretation", names: RE_EMULATE_TOOL_NAMES },
 	{ label: "Findings — record/adopt/retract gated claims", names: RE_FINDING_TOOL_NAMES },
 ];
+
+/** The two meta/guide tools, grouped first so they stay the obvious entry even in the full listing. Not in the RE_*_TOOL_NAMES registries (they are pure metadata), so they are named here explicitly. */
+const GUIDE_TOOL_NAMES: Record<string, true> = { re_manual: true, re_describe: true };
 
 /** One parameter as read from the schema: its name, whether it is optional, a short type label, and its `.describe()` text. */
 interface ParamInfo {
@@ -132,12 +134,19 @@ export function readParams(parameters: unknown): ParamInfo[] {
 	return [];
 }
 
-/** A compact call signature, `name(addr, offset?, limit?)` — a trailing `?` marks an optional parameter. A parameterless tool renders `name()`. */
+/** Whether a schema is in a shape {@link readParams} understands (omptype IR or a JSON-Schema object), so the renderers can tell a genuinely parameterless tool from one whose schema came from an unfamiliar builder (a non-omp-re tool). */
+function introspectable(parameters: unknown): boolean {
+	// omptype schemas are callable (typeof "function") with an `.ir`; a JSON-Schema is a plain object. Accept both.
+	if (!parameters || (typeof parameters !== "object" && typeof parameters !== "function")) return false;
+	const s = parameters as { ir?: { k?: string }; properties?: unknown; type?: unknown };
+	return s.ir?.k === "object" || (typeof s.properties === "object" && s.properties !== null) || s.type === "object";
+}
+
+/** A compact call signature: `name(addr, offset?, limit?)` (a trailing `?` marks an optional parameter), `name()` when the schema is readable and empty, or `name(…)` when the schema is in a shape we can't introspect — e.g. a host tool built with another schema library. */
 export function signature(name: string, parameters: unknown): string {
-	const params = readParams(parameters)
-		.map((p) => `${p.name}${p.optional ? "?" : ""}`)
-		.join(", ");
-	return `${name}(${params})`;
+	const params = readParams(parameters);
+	if (params.length > 0) return `${name}(${params.map((p) => `${p.name}${p.optional ? "?" : ""}`).join(", ")})`;
+	return introspectable(parameters) ? `${name}()` : `${name}(…)`;
 }
 
 /** The first line of a description, trimmed and clamped, for the one-line listing. */
@@ -151,7 +160,7 @@ export function describeTool(meta: ToolMeta): string {
 	const params = readParams(meta.parameters);
 	const lines = [`${signature(meta.name, meta.parameters)}`, "", `drive it with: await tool.${meta.name}({ … })`, "", meta.description];
 	if (params.length === 0) {
-		lines.push("", "Parameters: none");
+		lines.push("", introspectable(meta.parameters) ? "Parameters: none" : `Parameters: not introspectable here — read xd://${meta.name} for this tool's own docs`);
 	} else {
 		lines.push("", "Parameters:");
 		for (const p of params) {
@@ -163,11 +172,15 @@ export function describeTool(meta: ToolMeta): string {
 }
 
 /**
- * Every live capability, grouped by tier, each as `signature — one-line doc`.
- * `tools` is the already-RE-filtered `getAllTools()` result, so a tier shows
- * only the tools actually registered this session (triage/debugger appear only
- * when available); any RE tool not placed in a known group is listed last so
- * the surface is never silently incomplete.
+ * Every tool callable from eval as `await tool.<name>()`, grouped: the guide
+ * tools first, then omp-re's RE tiers (each backed by the same name registry the
+ * audit log uses), then every other registered tool — omp's built-ins and other
+ * extensions — under "Other callable tools". `tools` is the full
+ * `getAllTools()` result, so a tier shows only what is actually registered this
+ * session (triage/debugger appear only when available), and nothing registered is
+ * silently dropped. A trailing note names what is reachable in eval but is NOT a
+ * registered tool (the kernel's own helpers and the functions the model has
+ * defined), which an extension cannot enumerate.
  */
 export function describeAll(tools: readonly ToolMeta[]): string {
 	const byName = new Map(tools.map((t) => [t.name, t]));
@@ -178,16 +191,22 @@ export function describeAll(tools: readonly ToolMeta[]): string {
 		const meta = byName.get(name)!;
 		return `  ${signature(name, meta.parameters)} — ${firstLine(meta.description)}`;
 	};
-	for (const group of GROUPS) {
-		const names = Object.keys(group.names)
-			.filter((n) => byName.has(n))
-			.sort();
-		if (names.length === 0) continue;
-		out.push(`## ${group.label}`, ...names.map(render), "");
-	}
-	const rest = tools.filter((t) => RE_ALL_TOOL_NAMES[t.name] === true && !shown.has(t.name)).map((t) => t.name);
-	if (rest.length > 0) out.push("## Other", ...rest.sort().map(render), "");
-	out.push("Full parameters for one: await tool.re_describe({ name: \"<tool>\" }).");
+	const section = (label: string, names: readonly string[]): void => {
+		const present = names.filter((n) => byName.has(n) && !shown.has(n)).sort();
+		if (present.length > 0) out.push(`## ${label}`, ...present.map(render), "");
+	};
+	section("Guide — start here", Object.keys(GUIDE_TOOL_NAMES));
+	for (const group of GROUPS) section(group.label, Object.keys(group.names));
+	// Everything else registered: omp's built-ins, other extensions, the eval tool itself.
+	const rest = tools.map((t) => t.name).filter((n) => !shown.has(n));
+	if (rest.length > 0) out.push("## Other callable tools (omp built-ins + other extensions)", ...rest.sort().map(render), "");
+	out.push(
+		"Also reachable in eval, but not registered tools (so not listed above): omp's built-in",
+		"helpers (print, display, read, write, find, agent, …; see the eval tool's own docs), and any",
+		"functions you have defined in eval this session.",
+		"",
+		'Full parameters for one: await tool.re_describe({ name: "<tool>" }).',
+	);
 	return out.join("\n").trimEnd();
 }
 
@@ -206,9 +225,9 @@ Start here
      the most-recently-opened binary, so call this first — a task subagent starts
      with nothing open.
   2. await tool.re_describe({})
-     Lists every live capability with its call signature and one-line purpose.
-     await tool.re_describe({ name: "decompile_function" }) — full parameters and
-     docs for one.
+     Lists every tool you can call from eval — omp-re's RE capabilities and omp's
+     own built-ins/other extensions — each with its signature and one-line purpose.
+     await tool.re_describe({ name: "decompile_function" }) — full parameters for one.
   3. read xd://<name> shows one device's docs without calling it;
      write xd://<name> calls it directly. Same tool, same results as eval.
 
@@ -280,30 +299,30 @@ export function registerGuideTools(pi: ExtensionAPI): void {
 		name: z
 			.string()
 			.optional()
-			.describe("A capability name (e.g. decompile_function) for its full signature, parameters, and docs. Omit to list every live capability grouped by tier."),
+			.describe("A tool name (e.g. decompile_function) for its full signature, parameters, and docs. Omit to list every tool callable from eval, grouped."),
 	});
 	pi.registerTool({
 		name: "re_describe",
 		label: "omp-re describe",
 		description:
-			"List every live omp-re capability with its call signature and one-line purpose, or — with `name` — the full parameters and docs for one. The live source of truth for what you can call as `await tool.<name>({ ...params })`: triage and debugger capabilities appear only when actually available. Needs no open binary.",
+			"List every tool you can call from eval as `await tool.<name>({ ...params })` — omp-re's RE capabilities grouped by tier, then omp's built-ins and other extensions — each with its call signature and one-line purpose. With `name`, the full parameters and docs for one tool. The live source of truth, read from omp's own tool registry: triage and debugger appear only when registered. It cannot list the eval kernel's built-in helpers (print/display/read/…) or functions you have defined in eval. Needs no open binary.",
 		approval: "read",
 		loadMode: RE_LOAD_MODE,
 		parameters: describeParams,
 		...reRenderers({ title: "omp-re describe", subject: "name", body: "text" }),
 		async execute(_id, params) {
-			const reTools = pi.getAllTools().filter((t) => RE_ALL_TOOL_NAMES[t.name] === true);
+			const tools = pi.getAllTools();
 			if (params.name) {
-				const meta = reTools.find((t) => t.name === params.name);
+				const meta = tools.find((t) => t.name === params.name);
 				if (!meta) {
 					return {
-						...plainResult(`omp-re: no capability named ${JSON.stringify(params.name)}. Call re_describe with no name to list them all.`),
+						...plainResult(`omp-re: no tool named ${JSON.stringify(params.name)} is registered. Call re_describe with no name to list them all.`),
 						isError: true,
 					};
 				}
 				return textResult(`describe ${meta.name}`, describeTool(meta));
 			}
-			return textResult(`omp-re capabilities (${reTools.length})`, describeAll(reTools));
+			return textResult(`callable tools (${tools.length})`, describeAll(tools));
 		},
 	});
 }

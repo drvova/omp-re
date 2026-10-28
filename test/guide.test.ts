@@ -103,11 +103,31 @@ describe("describeAll (grouped listing)", () => {
 		expect(out).toContain('await tool.re_describe({ name: "<tool>" })');
 	});
 
-	test("a non-RE tool is ignored, and an unknown RE tool falls into 'Other' rather than vanishing", () => {
-		// `analyze` is a real RE tool (RE_ANALYZE_TOOL_NAMES); place it so it shows under its tier, and
-		// prove a non-RE tool (omp's own) never appears.
-		const out = describeAll([...tools, { name: "bash", description: "Not an RE tool.", parameters: z.object({}) }]);
-		expect(out).not.toContain("bash");
+	test("a non-RE tool (omp built-in / other extension) is listed under 'Other callable tools'", () => {
+		const out = describeAll([...tools, { name: "bash", description: "Run a shell command.", parameters: z.object({ cmd: z.string() }) }]);
+		expect(out).toContain("## Other callable tools");
+		expect(out).toContain("  bash(cmd) — Run a shell command.");
+	});
+
+	test("the guide tools lead the listing under their own section", () => {
+		const out = describeAll([{ name: "re_manual", description: "The manual.", parameters: z.object({}) }, ...tools]);
+		expect(out).toContain("## Guide — start here");
+		expect(out).toContain("  re_manual() — The manual.");
+		// The guide section comes before the RE tiers.
+		expect(out.indexOf("## Guide")).toBeLessThan(out.indexOf("## Session"));
+	});
+
+	test("notes the eval-only helpers and the model's own definitions that it cannot enumerate", () => {
+		const out = describeAll(tools);
+		expect(out).toContain("not registered tools");
+		expect(out).toContain("functions you have defined in eval");
+	});
+
+	test("a tool whose schema is in an unfamiliar shape renders name(…), not a misleading name()", () => {
+		// No omptype `.ir` and no JSON-Schema `properties`: introspection fails, so the signature must
+		// signal 'has params, look closer' rather than claim it is parameterless.
+		const out = describeAll([{ name: "weird", description: "Opaque schema.", parameters: { kind: "mystery" } }]);
+		expect(out).toContain("weird(…)");
 	});
 });
 
@@ -155,19 +175,24 @@ describe("re_manual tool", () => {
 });
 
 describe("re_describe tool", () => {
-	test("with no name, lists the live RE capabilities read back from getAllTools()", async () => {
+	test("with no name, lists every callable tool read back from getAllTools(): RE tiers, guide tools, and a non-RE host tool", async () => {
 		const h = makeHarness("guide-describe-all");
-		// Register real tool groups so getAllTools() returns genuine RE tools to enumerate.
+		// Register real tool groups so getAllTools() returns genuine RE tools, plus a fake host tool.
 		registerReadTools(h.pi);
 		registerRizinTools(h.pi);
 		registerGuideTools(h.pi);
+		h.pi.registerTool({ name: "bash", label: "Bash", description: "Run a shell command.", parameters: h.pi.zod.object({ cmd: h.pi.zod.string() }), execute: async () => ({ content: [{ type: "text", text: "" }] }) } as never);
 		const result = await h.tool("re_describe").execute("call-1", {}, new AbortController().signal, undefined, h.ctx);
 		const text = textOf(result);
 		expect(text).toContain("## Read");
 		expect(text).toContain("decompile_function(addr)");
 		expect(text).toContain("rizin_help(query)");
-		// re_describe/re_manual are meta, not RE capabilities, so they are not listed among them.
-		expect(text).not.toContain("re_manual(");
+		// Guide tools now lead the listing (they ARE callable from eval).
+		expect(text).toContain("## Guide — start here");
+		expect(text).toContain("re_describe(");
+		// A non-RE host tool is surfaced under Other, so the model sees everything it can call.
+		expect(text).toContain("## Other callable tools");
+		expect(text).toContain("bash(cmd) — Run a shell command.");
 	});
 
 	test("with a name, returns that capability's full parameters", async () => {
@@ -187,6 +212,6 @@ describe("re_describe tool", () => {
 		registerGuideTools(h.pi);
 		const result = await h.tool("re_describe").execute("call-1", { name: "no_such_tool" }, new AbortController().signal, undefined, h.ctx);
 		expect(result.isError).toBe(true);
-		expect(textOf(result)).toContain("no capability named");
+		expect(textOf(result)).toContain("no tool named");
 	});
 });

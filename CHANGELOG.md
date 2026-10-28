@@ -22,6 +22,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **`re_describe` now covers the whole eval-callable namespace.** It lists every
+  tool reachable as `tool.<name>()` — omp-re's RE capabilities by tier, then omp's
+  built-ins and other extensions under "Other callable tools" — with the guide
+  tools leading. `name` describes any registered tool, not just an RE one. A tool
+  whose schema comes from an unfamiliar builder renders `name(…)` rather than a
+  misleading `name()`, and the listing names what it *can't* enumerate: the eval
+  kernel's own helpers and the functions the model has defined in eval.
 - **Guidance: render eval tool output with `display()`, not `print()`.** A tool
   call made from omp's `eval` returns its `{ text, details }` to the cell's code
   and is not drawn as a per-tool card (that rendering is host-side, for top-level
