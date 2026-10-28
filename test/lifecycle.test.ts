@@ -1,14 +1,13 @@
 /**
- * The cordis backbone (runtime.ts, via the state.ts facade): the per-session
- * record is stable and synchronous, and each rizin/debug process's teardown is
- * owned by a revertible effect on the session scope — so a respawn closes the
- * old process and disposing the session closes every process it owns.
+ * Per-session process lifecycle (state.ts): the per-session record is stable,
+ * a respawn closes the previous process, and shutting a session down closes
+ * every process it owns (static + debug).
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, startDebug } from "../extensions/re/state.ts";
 import { canRunRizin, logSkip, makeHarness, TEST_BINARY } from "./helpers.ts";
 
-logSkip("runtime (cordis backbone) tests");
+logSkip("lifecycle tests");
 
 describe("session record (no rizin needed)", () => {
 	test("getState returns one stable, mutable record per session id", () => {
@@ -43,17 +42,17 @@ describe("session record (no rizin needed)", () => {
 	});
 });
 
-describe.skipIf(!canRunRizin)("process lifecycle is owned by cordis effects", () => {
+describe.skipIf(!canRunRizin)("process lifecycle", () => {
 	const h = makeHarness("runtime-lifecycle");
 	beforeAll(() => {
 		getState(h.ctx).binaryPath = TEST_BINARY;
 	});
 	afterAll(() => shutdownState("runtime-lifecycle"));
 
-	test("a respawn tears down the previous process via its effect", async () => {
+	test("a respawn closes the previous process", async () => {
 		const first = await ensureRizin(h.ctx);
 		expect(first.isClosed).toBe(false);
-		// a fresh spawn of the same binary replaces the process; the old one's effect inverse closes it
+		// a fresh spawn of the same binary replaces the process and closes the old one
 		const { rz: second } = await spawnRizin(h.ctx, TEST_BINARY);
 		expect(second).not.toBe(first);
 		expect(first.isClosed).toBe(true);
@@ -61,7 +60,7 @@ describe.skipIf(!canRunRizin)("process lifecycle is owned by cordis effects", ()
 		expect(getState(h.ctx).rz).toBe(second);
 	}, 25_000);
 
-	test("disposing the session scope closes every process it owns (static + debug)", async () => {
+	test("shutting down a session closes every process it owns (static + debug)", async () => {
 		const h2 = makeHarness("runtime-dispose");
 		getState(h2.ctx).binaryPath = TEST_BINARY;
 		const rz = await ensureRizin(h2.ctx);

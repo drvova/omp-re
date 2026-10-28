@@ -10,7 +10,6 @@ import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { liveAnnotations } from "./annotations.ts";
-import { composeApp } from "./app.ts";
 import { RE_ALL_TOOL_NAMES, registerAuditLog } from "./audit.ts";
 import { loadCatalog, missingRequiredCommands, REQUIRED_COMMANDS } from "./catalog.ts";
 import { decompilerCommands, decompilerLabel } from "./decompile.ts";
@@ -162,9 +161,8 @@ async function statusText(ctx: ExtensionContext): Promise<string> {
 /**
  * The command shell subsystem: the `re.binary` renderer, the `open_binary`
  * tool and `--binary` flag, the session-lifecycle handlers, argument
- * completion, and the `/re` command. Registered like every other subsystem as
- * a cordis plugin (see the default export), so it activates once the host
- * service is available.
+ * completion, and the `/re` command. Registered from the default export like
+ * every other subsystem.
  */
 function registerShell(pi: ExtensionAPI): void {
 	/** Session id this instance last saw, to tell a branch into a new session file apart from navigation within one. */
@@ -377,24 +375,22 @@ function registerShell(pi: ExtensionAPI): void {
 }
 
 /**
- * Extension entry: compose every omp-re subsystem onto one cordis context.
- * The tool groups, evidence, audit, UI, and the command shell are each a
- * plugin node; `composeApp` provides the host (`pi`) as a service they inject
- * and awaits their activation (the triage/CLI probes are async) before init
- * completes. See app.ts for the paradigm.
+ * Extension entry: register every omp-re subsystem — the tool groups, the
+ * evidence store, the audit log, compaction preservation, the UI, and the
+ * command shell. Plain ordered registration; the conditional groups (triage,
+ * the rz-* CLI) probe PATH and are awaited so every tool and listener is in
+ * place before init completes.
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
-	await composeApp(pi, [
-		{ name: "re:read-tools", apply: registerReadTools },
-		{ name: "re:mutate-tools", apply: registerMutateTools },
-		{ name: "re:rizin-repl", apply: registerRizinTools },
-		{ name: "re:rizin-cli", apply: registerRzCliTools },
-		{ name: "re:triage-tools", apply: registerTriageTools },
-		{ name: "re:debugger", apply: registerDebugTools },
-		{ name: "re:evidence", apply: registerEvidenceStore },
-		{ name: "re:audit", apply: registerAuditLog },
-		{ name: "re:preserve", apply: registerPreservation },
-		{ name: "re:ui", apply: registerUI },
-		{ name: "re:shell", apply: registerShell },
-	]);
+	registerReadTools(pi);
+	registerMutateTools(pi);
+	registerRizinTools(pi);
+	await registerRzCliTools(pi);
+	await registerTriageTools(pi);
+	registerDebugTools(pi);
+	registerEvidenceStore(pi);
+	registerAuditLog(pi);
+	registerPreservation(pi);
+	registerUI(pi);
+	registerShell(pi);
 }

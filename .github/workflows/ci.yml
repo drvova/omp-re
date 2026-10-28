@@ -28,7 +28,7 @@ jobs:
       # extension-sdk, which loads the extension through omp's real SDK and
       # catches host API drift — run in full; the rizin suites
       # `describe.skipIf(...)` themselves out except for their rizin-free tests
-      # — 105 pass, 98 skip, 0 fail, exit code 0. That is the expected shape of
+      # — 102 pass, 98 skip, 0 fail, exit code 0. That is the expected shape of
       # this job; run the rizin suites locally (they use /bin/ls). See
       # docs/testing.md. Never fetch a malware sample into CI.
       - run: bun test
