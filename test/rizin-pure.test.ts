@@ -6,8 +6,8 @@ import { mapFileCommand, validateMapPerm } from "../extensions/re/mapfiles.ts";
 import { ANALYSIS_PASSES, isAnalysisPass } from "../extensions/re/passes.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
 import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
-import { baseRizinFlags, buildLoadFlags, eaFromOffset, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { baseRizinFlags, buildLoadFlags, eaFromOffset, firstExecutable, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 describe("validateAddr", () => {
@@ -499,6 +499,18 @@ describe("resolveRizinPath bits-aware precedence", () => {
 		expect(resolveRizinPath(p32)).toBe("C:/base/rizin.exe");
 		setEnv({ OMPRE_RIZIN_PATH_32: "C:/rz32/rizin.exe" });
 		expect(resolveRizinPath(p32)).toBe("C:/rz32/rizin.exe");
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("firstExecutable (rizin discovery in common locations)", () => {
+	test("returns the first existing, executable candidate, else undefined", () => {
+		const dir = mkdtempSync(`${tmpdir()}/omp-re-exe-`);
+		const exe = `${dir}/rizin`;
+		writeFileSync(exe, "#!/bin/sh\n");
+		chmodSync(exe, 0o755);
+		expect(firstExecutable([`${dir}/missing`, exe])).toBe(exe);
+		expect(firstExecutable([`${dir}/missing`, `${dir}/nope`])).toBeUndefined();
 		rmSync(dir, { recursive: true, force: true });
 	});
 });

@@ -66,6 +66,20 @@ Use the installer from the releases page; set `OMPRE_RIZIN_PATH` if
 rizin -v
 ```
 
+### If omp-re "loads but can't find rizin"
+
+A desktop/GUI launch of omp often starts with a minimal `PATH` that omits
+`/opt/homebrew/bin`, `/usr/local/bin`, etc. — so `rizin` works in your
+terminal but omp-re's lookup can't see it. omp-re handles the common case by
+also checking the usual install locations (Homebrew, `/usr/local/bin`,
+`/usr/bin`, `/opt/rizin/bin`, `/snap/bin`, `~/.local/bin`; `C:\Program Files\rizin\bin`
+on Windows). If your rizin is anywhere else, set `OMPRE_RIZIN_PATH` to its full
+path — on macOS/Linux, the output of `which rizin` in your shell:
+
+```bash
+OMPRE_RIZIN_PATH="$(which rizin)"   # e.g. in ~/.omp/agent/config.yml env, or your shell profile
+```
+
 ## Decompiler plugins (optional, strongly recommended)
 
 rizin itself has no decompiler. Without a plugin, `decompile_function` and
