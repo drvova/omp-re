@@ -6,7 +6,7 @@ import { mapFileCommand, validateMapPerm } from "../extensions/re/mapfiles.ts";
 import { ANALYSIS_PASSES, isAnalysisPass } from "../extensions/re/passes.ts";
 import { parseAppliedCount, signatureApplyCommand, validateSignaturePath } from "../extensions/re/signatures.ts";
 import type { SessionEntry as Entry } from "@oh-my-pi/pi-coding-agent";
-import { baseRizinFlags, buildLoadFlags, eaFromOffset, firstExecutable, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
+import { baseRizinFlags, buildLoadFlags, eaFromOffset, firstExecutable, isExecutable, normalizeAddr, parseRizinVersionArch, readBinaryBits, resolveRizinPath, resolveRizinTool, rzQuote, validateAddr, validateIdent, validateText, validateTypeLike } from "../extensions/re/rizin.ts";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -500,6 +500,37 @@ describe("resolveRizinPath bits-aware precedence", () => {
 		setEnv({ OMPRE_RIZIN_PATH_32: "C:/rz32/rizin.exe" });
 		expect(resolveRizinPath(p32)).toBe("C:/rz32/rizin.exe");
 		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("resolveRizinTool (sibling rz-* resolution)", () => {
+	const original = process.env.OMPRE_RIZIN_PATH;
+	const set = (v: string | undefined) => {
+		if (v === undefined) delete process.env.OMPRE_RIZIN_PATH;
+		else process.env.OMPRE_RIZIN_PATH = v;
+	};
+	// Restore after every test so a mutated OMPRE_RIZIN_PATH never leaks into other suites' rizin spawns.
+	afterEach(() => set(original));
+
+	test("a bare command stays bare (resolved on PATH, like rizin itself)", () => {
+		// An explicit bare OMPRE_RIZIN_PATH bypasses discovery, so the sibling stays bare too.
+		// (Unset env would run discoverRizin(), which resolves to an absolute path wherever rizin
+		// is actually installed — host-dependent, and covered by the firstExecutable suite below.)
+		set("rizin");
+		expect(resolveRizinTool("rz-bin")).toBe("rz-bin");
+		expect(resolveRizinTool("rz-diff")).toBe("rz-diff");
+	});
+
+	test("a path takes the sibling from the same directory", () => {
+		set("/opt/rizin/bin/rizin");
+		expect(resolveRizinTool("rz-bin")).toBe("/opt/rizin/bin/rz-bin");
+	});
+
+	test("the sibling inherits rizin's extension, so it is a real path for spawn (Windows .exe)", () => {
+		set("/opt/rizin/bin/rizin.exe");
+		expect(resolveRizinTool("rz-hash")).toBe("/opt/rizin/bin/rz-hash.exe");
+		set("rizin.exe");
+		expect(resolveRizinTool("rz-ax")).toBe("rz-ax.exe");
 	});
 });
 

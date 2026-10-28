@@ -29,6 +29,16 @@ omp plugin install omp-re@drvova
 separate identifier (the `marketplace add` argument is the GitHub `owner/repo`,
 the `@name` is the catalog).
 
+To update an installed copy to the latest published version:
+
+```bash
+omp plugin upgrade omp-re@drvova
+```
+
+`omp plugin list` shows the installed version. (A dev-load via the
+`extensions:` config below has nothing to upgrade — a fresh `omp` start picks
+up your checkout.)
+
 To develop against a local checkout instead of installing as a plugin, point
 omp at the extension directory directly:
 
