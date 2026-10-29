@@ -157,10 +157,14 @@ omp plugin marketplace add drvova/omp-re
 omp plugin install omp-re@drvova
 ```
 
-Update an installed copy to the latest published version with:
+Update an installed copy to the latest published version. `omp plugin upgrade`
+reinstalls from a **local cache** of the marketplace catalog, so refresh that
+cache first — otherwise the upgrade reinstalls the version you already have and
+appears to do nothing:
 
 ```bash
-omp plugin upgrade omp-re@drvova   # `omp plugin list` shows the installed version
+omp plugin marketplace update drvova   # re-fetch the drvova catalog (omit the name to refresh all)
+omp plugin upgrade omp-re@drvova       # `omp plugin list` shows the installed version
 ```
 
 See the [README](../README.md#install) for the dev-load alternative and the
