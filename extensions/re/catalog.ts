@@ -68,7 +68,7 @@ export function isKnownCommand(catalog: RzCatalog, name: string): boolean {
 	return false;
 }
 
-/** Every rizin command omp-re's own tools send. Checked against the installed rizin at open and by `/re status`. */
+/** Every rizin command omp-re relies on — the ones its own code issues (analysis, annotations, the UI panels) plus the search/type/info families the `rizin_command` workflows lean on. Checked against the installed rizin at open and by `/re status`. */
 export const REQUIRED_COMMANDS: readonly string[] = [
 	"aaa",
 	"aflj",
@@ -95,7 +95,7 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 	"fdj",
 	"%v",
 	"echo",
-// search tools: /xj search family; /R+/C prime the gadget cache for /Rj+/Cj
+// search family: /xj bytes, /Rj ROP, /vj values; /R and /C prime the gadget/crypto caches for /Rj and /Cj
 "/xj",
 "/xrj",
 "/aj",
@@ -112,27 +112,22 @@ export const REQUIRED_COMMANDS: readonly string[] = [
 "/Rj",
 "/C",
 "/Cj",
-// type tools
+// types
 "tsj",
 "tej",
 "ttj",
 "tfj",
 "td",
 "tp",
-// syscall tools
+// syscalls
 "aslj",
 "asn",
 "asr",
-// binary-info tools
+// binary identity & flags
 "iIj",
-"iej",
 "irj",
 "flj",
 "icj",
-// deobfuscate tool: block transforms + decrypt under the write cache
-"wox",
-"woD",
-"wc-",
 ];
 
 export function missingRequiredCommands(catalog: RzCatalog): string[] {
@@ -165,7 +160,7 @@ export const READ_ONLY_EXTRAS: ReadonlySet<string> = new Set([
 	"Csl", "Cslj", "Cslq", "Cs.", "Cs.j", "Cs.q", "Cs.l",
 	"Cdl", "Cdlj", "Cd.", "Cfl", "Cflj", "Chl", "Chlj", "Cml", "Cmlj", "Ctl", "Ctlj", "CSl", "CSlj", "CSlq",
 	// Types (book: analysis/types) — lists, unions, enums, typedefs, calling-convention lists, type xrefs, typeclass reads.
-	// The writers stay out: td/tdf (define → define_types tool), tfc (set cc), tn (NOARG_DUALS), tks (set typeclass), to/toe/tos (load file), tr (rename), t- (delete).
+	// The writers stay out (rizin_command is read-only): td/tdf (define), tfc (set cc), tn (NOARG_DUALS), tks (set typeclass), to/toe/tos (load file), tr (rename), t- (delete).
 	"t", "tj", "tl",
 	"tu", "tuj", "tul", "tuc", "tud",
 	"te", "tej", "teb", "tec", "ted", "tef",

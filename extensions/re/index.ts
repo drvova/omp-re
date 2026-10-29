@@ -253,7 +253,7 @@ function registerShell(pi: ExtensionAPI): void {
 		name: "open_binary",
 		label: "Open binary",
 		description:
-			"Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (hash_binary, list_functions, decompile_function, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open. For a raw/headerless target (flat shellcode, firmware, a ROM dump) pass arch/bits/base/format so rizin loads it correctly instead of autodetecting from a header it doesn't have.",
+			"Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (rizin_command, rizin_cli, the annotate tools, ...) acts on whichever binary was most recently opened here — call this first, especially in a task subagent, which starts with no binary open. For a raw/headerless target (flat shellcode, firmware, a ROM dump) pass arch/bits/base/format so rizin loads it correctly instead of autodetecting from a header it doesn't have.",
 		approval: "read",
 		loadMode: RE_LOAD_MODE,
 		parameters: openBinaryParams,

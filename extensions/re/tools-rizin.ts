@@ -105,7 +105,7 @@ function describeCommand(args: unknown): string {
 }
 
 export function registerRizinTools(pi: ExtensionAPI): void {
-	// Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
+	// Named const schemas, declared outside registerTool so TypeScript infers each tool's param type in execute().
 	const z = pi.zod;
 	const helpParams = z.object({
 		query: z

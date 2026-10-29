@@ -296,7 +296,7 @@ export function buildRunDirectives(run: unknown): string[] | undefined {
 export function registerDebugTools(pi: ExtensionAPI): void {
 	if (!debuggerEnabled()) return; // opt-in only: without OMPRE_ENABLE_DEBUGGER the sample is never executed
 
-	// Named const schema: see registerReadTools for why it stays outside registerTool({...}).
+	// Named const schema, declared outside registerTool so TypeScript infers the tool's param type in execute().
 	const z = pi.zod;
 	const debugParams = z.object({
 		action: z.enum(DEBUG_ACTIONS).describe(

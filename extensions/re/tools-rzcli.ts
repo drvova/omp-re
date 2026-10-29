@@ -190,7 +190,7 @@ export async function registerRzCliTools(pi: ExtensionAPI): Promise<void> {
 	if (available.length === 0) return; // no rz-* tools found — don't offer a tool that can't run
 	const byName = new Map(available.map((def) => [def.tool, def]));
 
-	// Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
+	// Named const schemas, declared outside registerTool so TypeScript infers each tool's param type in execute().
 	const z = pi.zod;
 	const toolNames = available.map((def) => def.tool) as [string, ...string[]];
 	const cliParams = z.object({

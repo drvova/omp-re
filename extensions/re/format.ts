@@ -1,6 +1,6 @@
 /**
- * Shared tool-result formatting: every read/triage tool sends the model the
- * real data (not just a count — see tools-read.ts header comment for why),
+ * Shared tool-result formatting: every tool sends the model the real data
+ * (the matched bytes, the decoded rows, the findings — not just a count),
  * truncated to a context-friendly size.
  *
  * When output is truncated and a tool context is available, the untruncated
@@ -25,7 +25,7 @@ export interface ReToolDetails {
 	truncated?: boolean;
 	/** Session artifact holding the untruncated output, when it was truncated and saving succeeded. */
 	artifactId?: string;
-	/** decompile_function only: which decompiler produced the code. */
+	/** Which decompiler produced a code-style result; "disasm" marks the disassembly fallback. */
 	decompiler?: string;
 	/** rizin_command only: the exact rizin line(s) that produced this output, for the verification manifest and re-run. */
 	commands?: string[];
