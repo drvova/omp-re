@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordedMapFiles } from "../extensions/re/entries.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { registerMapFileTools } from "../extensions/re/tools-mapfile.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, rmDirSafe, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -33,8 +33,8 @@ describe.skipIf(!canRunRizin)("map_file against a real rizin session", () => {
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
 		rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa`
-		getState(ctx).binaryPath = binaryPath;
-		getState(ctx).rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 	});
 	afterAll(() => {
 		shutdownState(ctx.sessionManager.getSessionId());

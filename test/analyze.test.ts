@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { recordedAnalysisPasses } from "../extensions/re/entries.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { getState, shutdownState, spawnRizin } from "../extensions/re/state.ts";
+import { attachSession, getState, shutdownState, spawnRizin, switchBinary } from "../extensions/re/state.ts";
 import { registerAnalyzeTools } from "../extensions/re/tools-analyze.ts";
 import { canRunRizin, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -23,8 +23,8 @@ describe.skipIf(!canRunRizin)("analyze (chapter H)", () => {
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
 		const rz = await RzSession.spawn(rizinPath, binaryPath);
-		getState(ctx).binaryPath = binaryPath;
-		getState(ctx).rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 	});
 
 	afterAll(() => {

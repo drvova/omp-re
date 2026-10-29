@@ -1,26 +1,29 @@
 # Tool reference
 
-All 64 `omp-re` tools, grouped by tier. Triage tools register only when their
-backing binary is on PATH at load time, so your own tool list may legitimately
-show fewer than 64 (the debugger needs OMPRE_ENABLE_DEBUGGER too).
+`omp-re`'s model-facing surface is deliberately small: **one tool to read the
+binary — `rizin_command` — plus a few stateful tools** (open, annotate, findings,
+the rz-* CLI, triage, debugger). You observe the binary by running rizin's own
+read-only commands through `rizin_command` and composing them in omp's `eval`;
+there is no typed tool per read. (The 31 typed read wrappers of earlier versions
+remain in the codebase but are no longer registered — see
+[Reading the binary](#reading-the-binary--rizin_command-one-tool).)
 
 Every tool is registered `discoverable`, so omp presents it as an `xd://<name>`
-device rather than a top-level tool: `read xd://<name>` shows its
-documentation, `write xd://<name>` calls it, and omp's `eval` calls it as
-`await tool.<name>({ ...params })`, which returns `{ text, details }` and
-throws on failure. The parameter tables below are the same on every path.
+device rather than a top-level tool: `read xd://<name>` shows its documentation,
+`write xd://<name>` calls it, and omp's `eval` calls it as
+`await tool.<name>({ ...params })`, which returns `{ text, details }` and throws
+on failure. Call `rizin_command` with an empty command for the manual.
 
 Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
-`tools.approval.<name>` in your omp config), every tool has its own
-transcript renderer, and every read-tier and `rizin_command` call also
-becomes a `re.evidence` entry — see [`workflow.md`](workflow.md). All tools honor
-cancellation.
+`tools.approval.<name>` in your omp config), every tool has its own transcript
+renderer, and every `rizin_command` read becomes a `re.evidence` entry — see
+[`workflow.md`](workflow.md). All tools honor cancellation.
 
 Output larger than the context cap (2000 lines or 50 KB) is truncated for the
 model and saved in full to the session's artifact store; the result ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
-that artifact. List results are JSON arrays with one compact row per line.
+that artifact. `*j` command results are a single compact JSON array.
 
 ## Session (3 tools)
 
@@ -30,52 +33,44 @@ that artifact. List results are JSON arrays with one compact row per line.
 | `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
 | `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable — reopen to drop the map. |
 
-## Read tier (31 tools)
+## Reading the binary — `rizin_command` (one tool)
 
-Every read-tier call that succeeds is recorded as a `re.evidence` entry.
+There is no typed tool per read. You read the binary by running rizin's own
+read-only commands through **one** tool, `rizin_command`, and composing them in
+omp's `eval`. Prefer the JSON (`*j`) forms — they canonicalize for `/re verify`
+and parse cleanly (the body is JSON between the `rizin> <cmd>` header line and the
+trailing `[evidence …]` tag). Every successful read is recorded as a
+`re.evidence` entry. Call `rizin_command` with an empty command for the manual,
+and `rizin_help` for any command's exact arguments.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `list_functions` | `read` | `offset?, limit?, sort?` | Functions as `{ea, name, size, span?, blocks, callers, callees, signature}`. `size` is bytes of code (rizin's `realsz`); `span`, rizin's linear extent, appears only when it differs — a sign of scattered blocks. `sort` is `address` (default), `size`, or `callers`. |
-| `search_functions` | `read` | `query, offset?, limit?` | Same rows, filtered by name substring. |
-| `get_function` | `read` | `target` (name or address) | One function: signature, size and complexity metrics, `args`/`locals` with types and storage, `calls` (unique call targets, named via rizin's flags), `callers` (call sites that reach it), and `refCounts`. Raw jump/data reference arrays are reduced to counts. |
-| `decompile_function` | `read` | `addr` (address or name) | Decompile with rz-ghidra (`pdg`) or jsdec (`pdd`), header `decompiled <ea> (<kind>)`. With neither — or when the decompiler returns nothing for this function — returns annotated disassembly whose output begins `(disassembly only — …) `. |
-| `disassemble_function` | `read` | `addr` | Annotated instructions: comments, flags/labels, and incoming xrefs folded in. |
-| `get_xrefs_to` | `read` | `addr, offset?, limit?` | Cross-references pointing at an address, with `fromEa`/`toEa`. |
-| `get_xrefs_from` | `read` | `addr, offset?, limit?` | Cross-references originating from the instruction at an address (per instruction — use `get_function`'s `calls` for a whole function). |
-| `list_imports` | `read` | `offset?, limit?` | Imported symbols, with the PLT stub as `ea` when there is one. |
-| `list_exports` | `read` | `offset?, limit?` | Exported symbols. |
-| `list_symbols` | `read` | `offset?, limit?, filter?` | The full symbol table (`is`) — local/internal functions and data symbols with name, type, bind, size, and `ea`; a superset of imports/exports. `filter` matches the name. |
-| `list_strings` | `read` | `offset?, limit?, filter?` | Strings in data sections, optionally filtered by substring. |
-| `list_segments` | `read` | `offset?, limit?` | Sections with permissions, sizes, and addresses. |
-| `hash_binary` | `read` | (none) | SHA-256, SHA-1, and MD5 digests of the open binary. |
-| `get_graph` | `read` | `kind` (`function_cfg`/`callgraph`/`xrefs`/`imports`), `addr?`, `offset?, limit?` | Rizin's analysis graphs as JSON (`agf`/`agc`/`agx`/`agi`): a function's control-flow graph, the callgraph from a function, the xref graph around an address, or the import graph. Returns nodes (address + label) and their edges resolved to addresses. `addr` required except for `imports`. |
-| `deobfuscate` | `read` | `addr, size, op, key?, algo?, iv?` | Reveal obfuscated bytes in place: xor/add/sub/or/and with a `key`, an endian swap, or `decrypt` with `algo`+`key`(+`iv`) — shown as hex and string. Runs under the write cache and resets it, so the file is never modified. |
-| `search_bytes` | `read` | `pattern` (hex), `in_function?, offset?, limit?` | Raw-byte search (`/xj`) as `{ea, size, flag}` rows; `..` masks one nibble. |
-| `search_string` | `read` | `pattern` (string), `in_function?, offset?, limit?` | Literal string search over raw bytes (hex-encoded client-side, then `/xj`) — finds matches everywhere, including code pages. |
-| `search_regex_bytes` | `read` | `pattern` (regex), `in_function?, offset?, limit?` | Raw-byte regex search (`/xrj`) for shaped patterns (e.g. variable displacements). |
-| `search_asm` | `read` | `instructions`, `in_function?, offset?, limit?` | Assemble instruction text with the binary's arch config and search for the resulting bytes (`/aj`). |
-| `search_value` | `read` | `width` (1/2/4/8), `value` or `min`+`max`, `in_function?, offset?, limit?` | Immediate-value search (`/vNj` exact, `/VNj` range) — hardcoded constants, magic numbers, pointers. |
-| `search_gadgets` | `read` | `kind` (`rop`/`cop`), `filter?, in_function?, offset?, limit?` | ROP/COP gadget chains natively: a text-mode run primes rizin's gadget cache, then `/Rj`/`/Cj` returns `{ea, size, gadgets}` rows (each opcode carries its own address and type). `filter` is rizin's own gadget filter string. |
-| `list_types` | `read` | `kind` (`struct`/`enum`/`typedef`/`function`), `filter?, offset?, limit?` | Types loaded in rizin's database (`tsj`/`tej`/`ttj`/`tfj`) — the built-in Windows type base plus debug-info and user-defined types. |
-| `define_types` | `read` | `definitions: string[]` | Define types from C statements (`td`, one declaration per entry; names used must be defined first). Rizin's errors surface verbatim. |
-| `cast_memory` | `read` | `addr`, `type` | Print memory at an address interpreted as a named type (`tp`). |
-| `list_syscalls` | `read` | `filter?, offset?, limit?` | The active syscall profile (`aslj`) — on a PE binary, the Windows Nt* interface, as `{name, swi, num}` rows. |
-| `syscall_lookup` | `read` | `name` or `number` (exactly one) | Resolve a syscall name to its number (`asn`) or number to its name (`asr`). |
-| `get_binary_info` | `read` | (none) | Binary identity object (`iIj`): arch, bits, base address, format, class, compiler, sizes, checksums. |
-| `list_entrypoints` | `read` | (none) | Entry points (`iej`) as `{ea, type, headerAddr}`. |
-| `list_relocations` | `read` | `offset?, limit?` | Load-time relocations (`irj`) as `{ea, type}`. |
-| `list_flags` | `read` | `filter?, offset?, limit?` | All flags rizin knows (`flj`) as `{ea, name, size}` — analysis, reloc, and section labels. |
-| `list_classes` | `read` | `filter?, offset?, limit?` | Classes from binary metadata (`icj`) — C++ RTTI, Objective-C, Swift; empty on plain C binaries. |
+| To read… | command | | To read… | command |
+| --- | --- | --- | --- | --- |
+| functions | `aflj` | | one function | `afij @ <fn>` |
+| decompile | `pdg @ <fn>` (or `pdd`) | | disassemble | `pdfj @ <fn>` |
+| strings | `izj` | | imports | `iij` |
+| exports | `iEj` | | entrypoints | `iej` |
+| symbols | `isj` | | sections | `iSj` |
+| headers | `iHj` | | bin identity | `iIj` |
+| xrefs to | `axtj @ <addr>` | | xrefs from | `axfj @ <addr>` |
+| types | `tsj` / `tej` / `ttj` | | flags | `flj` |
+| relocations | `irj` | | classes | `icj` |
+| syscalls | `aslj` | | graphs | `agfj` / `agcj` / `agxj` |
+| byte search | `/xj <hex>` | | regex-byte search | `/xrj <re>` |
+| value search | `/vNj <val>` | | ROP / COP gadgets | `/Rj` / `/Cj` |
+| asm search | `/aj <asm>` | | hexdump | `px <n> @ <addr>` |
+| entropy | `ph entropy` | | cast memory as type | `tp <type> @ <addr>` |
 
-`offset`/`limit` default to 0/200 and cap at 1000; every paginated result
-reports its total so the model knows a view is partial. An empty page is
-marked as compactable, so omp can drop it from context once it has been read.
+For anything not listed, `rizin_help` finds the command. `rizin_command` refuses
+writes, pipes, redirects, and `@` inside the command (put the address in `addr`).
 
-Every `search_*` tool accepts `in_function` (an address or name): the search
-is restricted to that function's extent (rizin's `search.in=range` plus
-`search.from`/`search.to`), and the previous scope is always restored
-afterward. Omit it to search the whole binary.
+> **Retired typed wrappers.** Earlier versions registered 31 typed read tools
+> (`list_functions`, `decompile_function`, `get_xrefs_to`, the `search_*` family,
+> `list_types`, `list_syscalls`, `get_binary_info`, …), each a thin wrapper over
+> one of the commands above with extra shaping (named calls/callers, a decompiler
+> fallback, offset/limit paging). The one-tool design reads through
+> `rizin_command` instead; their code remains in the repository
+> (`tools-read.ts`, `tools-search.ts`, `tools-types.ts`, `tools-syscalls.ts`,
+> `tools-info.ts`, `tools-deobfuscate.ts`) but is no longer registered.
 
 ## Mutate tier (15 tools)
 
@@ -123,15 +118,15 @@ evidence.
 
 ## rizin REPL (2 tools)
 
-For everything the dedicated tools don't cover. Both read the catalog the
-installed rizin publishes about itself (`rizin -qc '?*j'`, read once per
-process with no binary open), so they match the user's rizin version and
-plugins exactly.
+omp-re's read surface (see [Reading the binary](#reading-the-binary--rizin_command-one-tool))
+and command discovery. Both read the catalog the installed rizin publishes about
+itself (`rizin -qc '?*j'`, read once per process with no binary open), so they
+match the user's rizin version and plugins exactly.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `rizin_help` | `read` | `query: string` | A command or prefix (`ph`, `afv`, `/R`) lists that family; an exact match adds its typed arguments (required/optional, defaults, choices) and description. Anything else is a keyword search over summaries and descriptions (`entropy`, `rop gadgets`). Entries `rizin_command` would refuse are marked `[not runnable via rizin_command]`. |
-| `rizin_command` | `exec` (reason names the command) | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
+| `rizin_command` | `exec` (reason names the command) | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. An **empty command returns the omp-re manual** (no binary needed). When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
 
 `rizin_command` accepts a command only if all of these hold, checked before
 anything reaches rizin:

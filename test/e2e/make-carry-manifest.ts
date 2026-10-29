@@ -8,7 +8,7 @@
 import { recordEvidence } from "../../extensions/re/evidence.ts";
 import { registerFindingTools } from "../../extensions/re/findings.ts";
 import { writeReport } from "../../extensions/re/report.ts";
-import { getState, shutdownState } from "../../extensions/re/state.ts";
+import { getState, setBinarySha256, shutdownState, switchBinary } from "../../extensions/re/state.ts";
 import { runRizinCommand } from "../../extensions/re/tools-rizin.ts";
 import { sha256File } from "../../extensions/re/verify.ts";
 import { makeHarness } from "../helpers.ts";
@@ -19,8 +19,8 @@ if (!v1 || !reportPath) throw new Error("usage: bun test/e2e/make-carry-manifest
 const h = makeHarness("tui-carry-fixture");
 registerFindingTools(h.pi, { judge: () => async (items) => items.map((i) => ({ index: i.index, verdict: "supported" as const, reason: "fixture" })) });
 const sha = await sha256File(v1);
-getState(h.ctx).binaryPath = v1;
-getState(h.ctx).binarySha256 = sha;
+switchBinary(h.ctx, v1);
+setBinarySha256(h.ctx, sha);
 h.entries.push({ type: "custom", id: "b", customType: "re.binary", data: { path: v1, sha256: sha } });
 const findings: [string, string][] = [
 	["sym.fib", "fib computes Fibonacci numbers iteratively."],

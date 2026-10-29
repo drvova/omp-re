@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DECOMPILER_EMPTY_PREFIX, DISASM_ONLY_PREFIX } from "../extensions/re/decompile.ts";
 import { reRenderers } from "../extensions/re/render.ts";
 import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { registerReadTools } from "../extensions/re/tools-read.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, splitHeaderBody, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -95,9 +95,8 @@ describe.skipIf(!canRunRizin)("registerReadTools (read-only rizin tool wrappers)
 	beforeAll(async () => {
 		const binaryPath = await resolveBinaryPath(TEST_BINARY);
 		session = await RzSession.spawn(rizinPath, binaryPath);
-		const state = getState(ctx);
-		state.rz = session;
-		state.binaryPath = binaryPath;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, session);
 		registerReadTools(harness.pi);
 
 		groundFns = JSON.parse((await session.cmd("aflj")).trim()) as GroundFn[];

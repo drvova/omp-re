@@ -87,13 +87,12 @@ none of them can start a second command:
   given to `define_variable` (`afvs`/`afvr`), which — like `set_prototype`,
   `set_variable_type`, and `define_global` — is single-quoted, not merely
   character-checked.
-- Free-form search arguments — the `search_regex_bytes` regex, the
-  `search_asm` assembly text, and the `search_gadgets` filter — are checked
-  against the same forbidden-syntax guard `rizin_command` applies
-  (`forbiddenSyntaxReason`) before being interpolated into the search command,
-  since they reach the pipe verbatim. `search_bytes` (hex charset) and
-  `search_string` (hex-encoded client-side) carry no metacharacters by
-  construction.
+- The single read entry, `rizin_command` (the one tool through which the model
+  reads the binary — searches included, as `/xj`, `/xrj`, `/Rj`, …), gates every
+  command against the read-only catalog check and a forbidden-syntax guard
+  (`forbiddenSyntaxReason`) before it reaches the pipe: no `;`, `|`, `<`/`>`,
+  backticks, `~`, line breaks, or `@` modifiers except `@!<n>`. (The retired
+  typed `search_*` wrappers reused the same guard on their free-form arguments.)
 
 **0.1.x is affected by a command-injection bug fixed in 0.2.0.** It
 interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and the

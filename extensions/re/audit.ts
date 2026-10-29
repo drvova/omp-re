@@ -15,7 +15,7 @@ import { mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { getState } from "./state.ts";
+import { getState, markAuditHmacWarned } from "./state.ts";
 
 /**
  * Every read-tier RE tool — the ones registered with `approval: "read"`,
@@ -200,8 +200,7 @@ async function appendAuditLine(
 			text = `${JSON.stringify({ ...base, hmac })}\n`;
 		} else {
 			text = `${canonicalJson}\n`;
-			if (!state.auditHmacWarned) {
-				state.auditHmacWarned = true;
+			if (markAuditHmacWarned(ctx)) {
 				const msg = "omp-re: OMPRE_AUDIT_HMAC_KEY not configured — audit log entries will not be signed.";
 				if (ctx.hasUI) ctx.ui.notify(msg, "warning");
 				else logger?.warn(msg);

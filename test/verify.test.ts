@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { EvidenceRecord } from "../extensions/re/entries.ts";
 import { canonicalHash, canonicalizeRizinOutput } from "../extensions/re/format.ts";
-import { ensureRizin, getState, shutdownState } from "../extensions/re/state.ts";
+import { ensureRizin, setBinarySha256, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { recordedStatus, sha256File, verifyEvidence } from "../extensions/re/verify.ts";
 import { canRunRizin, logSkip, makeHarness, TEST_BINARY } from "./helpers.ts";
 
@@ -74,9 +74,8 @@ describe("verifyEvidence classification (no rizin needed)", () => {
 
 	test("evidence bound to a different binary is unverifiable (not a false pass or fail)", async () => {
 		const h = makeHarness("verify-mismatch");
-		const state = getState(h.ctx);
-		state.binaryPath = "/does/not/matter"; // never read: binarySha256 is set, so no file hashing happens
-		state.binarySha256 = HEX64("b");
+		switchBinary(h.ctx, "/does/not/matter"); // path never read: binarySha256 is set, so no file hashing happens
+		setBinarySha256(h.ctx, HEX64("b"));
 		h.entries.push({
 			type: "custom",
 			id: "e1",
@@ -96,10 +95,9 @@ describe("verifyEvidence classification (no rizin needed)", () => {
 describe.skipIf(!canRunRizin)("verifyEvidence against real rizin", () => {
 	test("a rizin_command record re-runs to the same hash (reproducible), and tampering makes it FAIL", async () => {
 		const h = makeHarness("verify-live");
-		const state = getState(h.ctx);
-		state.binaryPath = TEST_BINARY;
+		switchBinary(h.ctx, TEST_BINARY);
 		const sha = await sha256File(TEST_BINARY);
-		state.binarySha256 = sha;
+		setBinarySha256(h.ctx, sha);
 
 		// Record evidence the way rizin_command does: reproHash over the RAW output, canonicalized against the binary path.
 		const rz = await ensureRizin(h.ctx);

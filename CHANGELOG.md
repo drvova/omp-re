@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-session state is encapsulated behind a read-only view + intent methods.**
+  `getState` now returns a `ReSessionView` — external modules query it (and may
+  call methods on a live process handle) but can no longer reassign its fields or
+  reach the evidence-index map. Every mutation goes through a named facade
+  function (`setToolsOff`, `setBinarySha256`, `setPendingOpen`/`clearPendingOpen`,
+  `markAuditHmacWarned`, `switchBinary`, `attachSession`, `resetEvidenceIndex`,
+  `recordEvidenceAt`, `evidenceIdAt`), so the shared record is no longer poked
+  field-by-field across two dozen files and its invariants live in one place. The
+  branch-switch lifecycle (closing the live rizin process on a binary change)
+  moved into the backend and now tears the process down through its teardown
+  effect instead of a raw `close()` that bypassed the session scope. No behavior
+  change; internal structure only.
+- **One-tool read surface.** omp-re no longer registers a typed tool per read.
+  You read the binary through a single tool — `rizin_command` — running rizin's
+  own read-only commands (`aflj`, `pdg`, `izj`, `iij`, `iEj`, `axtj`, `tsj`,
+  `/xj`, `ph entropy`, …) and composing them in omp's `eval`; `rizin_help` finds
+  a command's arguments, and an **empty `rizin_command` returns the manual** (the
+  command families and the other tools, no binary needed). The 31 typed read
+  wrappers (`list_functions`, `decompile_function`, `get_xrefs_to`, the
+  `search_*` family, `list_types`, `list_syscalls`, `get_binary_info`, …) are
+  unregistered; per the one-tool design their code stays in the repository
+  (`tools-read.ts`, `tools-search.ts`, `tools-types.ts`, `tools-syscalls.ts`,
+  `tools-info.ts`, `tools-deobfuscate.ts`) but is no longer advertised. The
+  stateful tools — `open_binary`, the annotate tools (recorded and replayed),
+  `record_finding`/`adopt_finding`/`retract_finding`, `rizin_cli`, triage, the
+  debugger, the emulator, signatures, and `analyze` — are unchanged, since they
+  carry behavior a raw rizin command can't (session lifecycle, annotation
+  replay, evidence-gated findings).
+- **Render eval reads with `display()`.** A tool call from `eval` returns its
+  `{ text, details }` to the cell — it is not drawn as a per-tool card (that
+  rendering is host-side, for top-level and `write xd://<name>` calls). The
+  manual, the re-analyst subagent, and the README show the `display(...)` path: a
+  `*j` read's body is JSON between the `rizin> …` header line and the trailing
+  `[evidence …]` tag, so
+  `display(JSON.parse(r.text.split("\n").slice(1, -1).join("\n")))` renders a
+  highlighted block. A big list truncates to an artifact — read it or narrow the
+  command.
+- **`rizin_command` fails fast when no binary is open**, before loading the rizin
+  command catalog, so the "no binary open" guidance fires without a rizin install
+  (matching what the typed read tools used to do).
+
 ## [0.7.3] - 2026-10-28
 
 ## [0.7.2] - 2026-10-28

@@ -45,12 +45,10 @@ system binary like `/bin/ls` is enough to learn the flow.
 
 ## How the evidence chain actually works
 
-Every successful call to one of the **12 read-tier tools** —
-`list_functions`, `search_functions`, `get_function`, `decompile_function`,
-`disassemble_function`, `get_xrefs_to`, `get_xrefs_from`, `list_imports`,
-`list_exports`, `list_strings`, `list_segments`, `hash_binary` — and to
-`rizin_command` is automatically recorded as a `re.evidence` session entry via a `tool_result`
-hook (`extensions/re/evidence.ts`), content-addressed and hashed. Mutations
+Every successful `rizin_command` read (`aflj`, `pdg`, `izj`, `axtj`, …) — the one
+tool through which you read the binary — is automatically recorded as a
+`re.evidence` session entry via a `tool_result` hook
+(`extensions/re/evidence.ts`), content-addressed and hashed. Mutations
 (`rename_function`, `set_comment`, etc.) similarly record `re.annotation`
 entries.
 
@@ -67,8 +65,8 @@ would be worse than an obvious failure, because it would look complete.
 
 In practice: if you want something in the final report, get it through a
 tool call, not a shell command or a paraphrase. A call the model makes from
-omp's `eval` (`await tool.decompile_function({ ... })`) is a tool call too, and
-is recorded and tagged the same way. `/re evidence` and `/re cite
+omp's `eval` (`await tool.rizin_command({ command: "pdg", addr: "main" })`) is a
+tool call too, and is recorded and tagged the same way. `/re evidence` and `/re cite
 <id>` exist specifically so the model (and you) can look back at exactly
 what was actually observed, in its own words, before writing a claim that
 depends on it.
@@ -176,7 +174,7 @@ Two constraints:
   no self-review guard — setting both to the same model is silently allowed
   and defeats the point of a second reviewer.
 - **The `tools:` grant is restricted to omp's built-in tool names.** This
-  suite's own tools (`list_strings`, `decompile_function`, etc.) are
+  suite's own tools (`rizin_command`, `rename_function`, etc.) are
   extension-registered, not built-in, so listing them here does nothing —
   the advisor gets `read`/`grep`/`glob` regardless, which is enough to read
   evidence blobs and session entries directly. Never grant a mutating tool

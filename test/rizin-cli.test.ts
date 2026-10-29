@@ -17,7 +17,7 @@ import {
 	searchCatalog,
 } from "../extensions/re/catalog.ts";
 import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { cleanStderr, registerRizinTools } from "../extensions/re/tools-rizin.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinAvailable, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -542,9 +542,8 @@ describe.skipIf(!canRunRizin)("rizin_help and rizin_command against rizin", () =
 	beforeAll(async () => {
 		const binaryPath = await resolveBinaryPath(TEST_BINARY);
 		session = await RzSession.spawn(rizinPath, binaryPath);
-		const state = getState(ctx);
-		state.rz = session;
-		state.binaryPath = binaryPath;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, session);
 		registerRizinTools(harness.pi);
 		const fns = JSON.parse((await session.cmd("aflj")).trim()) as { name: string; offset?: number; addr?: number }[];
 		const main = fns.find((fn) => fn.name === "main");

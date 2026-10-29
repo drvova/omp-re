@@ -78,6 +78,10 @@ export function makeHarness(sessionId: string): Harness {
 		registerTool: (def: ToolDefinition<any, any>) => {
 			tools.set(def.name, def);
 		},
+		// omp's getAllTools(), synthesized from what this harness has registered: the ToolInfo
+		// fields re_describe reads (name, description, parameters). Enough to drive re_describe
+		// end-to-end without a live host.
+		getAllTools: () => [...tools.values()].map((def) => ({ name: def.name, description: def.description, parameters: def.parameters })),
 		appendEntry: (customType: string, data?: unknown) => {
 			entries.push({ type: "custom", id: `entry-${counter++}`, customType, data });
 		},

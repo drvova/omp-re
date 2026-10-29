@@ -18,8 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { RE_EVIDENCE_TOOL_NAMES } from "./audit.ts";
 import { branchEntries, customEntries } from "./entries.ts";
-import { normalizeAddr } from "./rizin.ts";
-import { getState } from "./state.ts";
+import { getState, recordEvidenceAt, resetEvidenceIndex } from "./state.ts";
 
 /** Write content to the content-addressed blob store, returning its SHA-256 hex hash. Idempotent: skips the write if the target already exists. Atomic: writes to a temp file in the same directory, then renames. */
 export async function writeBlob(content: string): Promise<string> {
@@ -78,16 +77,11 @@ function extractText(content: readonly { type: string; text?: string }[]): strin
  * mutate tool's grounding lookup must see exactly those.
  */
 export function rebuildEvidenceIndex(ctx: ExtensionContext): void {
-	const state = getState(ctx);
-	state.evidenceByAddr.clear();
-	state.evidenceCount = 0;
+	resetEvidenceIndex(ctx);
 	for (const entry of customEntries(branchEntries(ctx), "re.evidence")) {
 		const data = entry.data as { id?: unknown; ea?: unknown } | undefined;
 		if (!data || typeof data.id !== "string") continue;
-		state.evidenceCount++;
-		if (typeof data.ea === "string" && data.ea) {
-			state.evidenceByAddr.set(normalizeAddr(data.ea), data.id);
-		}
+		recordEvidenceAt(ctx, typeof data.ea === "string" && data.ea ? data.ea : undefined, data.id);
 	}
 }
 
@@ -131,8 +125,7 @@ export async function recordEvidence(
 	const binarySha256 = typeof state.binarySha256 === "string" ? state.binarySha256 : undefined;
 
 	const id = randomUUID();
-	state.evidenceCount++;
-	if (ea) state.evidenceByAddr.set(normalizeAddr(ea), id);
+	recordEvidenceAt(ctx, ea, id);
 
 	pi.appendEntry("re.evidence", {
 		id,

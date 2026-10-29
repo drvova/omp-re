@@ -4,13 +4,15 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![64 tools](https://img.shields.io/badge/tools-64-informational)
+![one code tool](https://img.shields.io/badge/surface-one%20code%20tool-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
 `omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) behind 64 agent tools — presented the
-omp-native way, as `xd://` devices the model calls from omp's own `eval` — a
+it drives [rizin](https://rizin.re) through **one tool to read the binary**
+(`rizin_command`, run from omp's own `eval`) plus a few stateful tools for
+opening, annotating, and recording findings — all presented the omp-native way,
+as `xd://` devices the model calls from `eval` — a
 `/re` slash command, five overlay panels, a packaged `re-analyst` subagent, a
 content-addressed evidence store, an HMAC-signable audit log, and a report
 writer that refuses to write a claim with no supporting evidence. The agent
@@ -88,29 +90,40 @@ address behind them.
 
 ## Host-native: `xd://` devices and omp's `eval`
 
-omp-re adds no code tool or tool menu of its own. Every RE tool is registered
-as an ordinary omp tool with `loadMode: "discoverable"`, so omp mounts it as an
-`xd://<name>` device instead of putting 64 schemas in the model's top-level
-tool list; the model gets them from omp's own tooling:
+omp-re adds no tool menu of its own, and no second code tool: omp's `eval` is the
+code host. Its capabilities register as ordinary omp tools with
+`loadMode: "discoverable"`, so omp mounts each as an `xd://<name>` device instead
+of putting a schema in the model's top-level tool list. You **read the binary
+through one tool, `rizin_command`**, and compose rizin's own commands in `eval`:
 
-- **Discover:** omp's system prompt lists the mounted devices;
-  `read xd://decompile_function` shows one tool's description and parameters.
-- **Call one:** `write xd://hash_binary` with the parameters as JSON.
-- **Compose:** in omp's `eval` tool, every RE tool is
-  `await tool.<name>({ ... })` — loop over functions, filter strings, chain
-  xrefs, and define helpers that persist for the session (`eval` state
-  survives compaction). A tool's result comes back as `{ text, details }`:
-  `.text` is the header line, the body (JSON for list tools), and, for an
-  observing tool, the `[evidence xxxxxxxx]` tag on the last line. Failures
-  throw, so the code can `try`/`catch`. To keep helpers across
-  sessions, write them to a script and `%load` it — omp's own setup mechanism.
+- **Discover:** `await tool.rizin_command({ command: "" })` returns the manual —
+  the command families and the other tools — and `rizin_help` looks up any
+  command's exact arguments. omp's system prompt also lists the mounted devices,
+  and `read xd://rizin_command` shows a device's own docs.
+- **Call one:** `write xd://rizin_command` with `{ "command": "aflj" }`.
+- **Compose:** in omp's `eval` tool, every tool is `await tool.<name>({ ... })` —
+  loop over functions, filter strings, chain xrefs, and define helpers that
+  persist for the session (`eval` state survives compaction). A read's result
+  comes back as `{ text, details }`: `.text` is the `rizin> <cmd>` header line,
+  the body (JSON for a `*j` command), and the `[evidence xxxxxxxx]` tag on the
+  last line. Failures throw, so the code can `try`/`catch`. To keep helpers
+  across sessions, write them to a script and `%load` it — omp's own mechanism.
 
 ```js
-// eval — the three biggest functions, first line of each decompile
+// eval — read with rizin_command; a call returns { text, details } to your code.
+// display(value) renders a highlighted block, print(x) shows monospace text.
 await tool.open_binary({ path: "/bin/ls" });
+// A *j read is JSON between the header line and the trailing [evidence] tag:
 const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
-for (const f of rows(await tool.list_functions({ sort: "size", limit: 3 }))) print((await tool.decompile_function({ addr: f.ea })).text.split("\n")[0]);
+display(rows(await tool.rizin_command({ command: "afij", addr: "main" })));  // one function, highlighted JSON
+print((await tool.rizin_command({ command: "pdg", addr: "main" })).text);    // decompiled C as text
+// A big list (aflj on a large binary) can exceed the size cap and spill to an artifact — read it or narrow.
 ```
+
+A tool call made from `eval` returns its `{ text, details }` to your code; omp
+renders the eval cell (your `print`/`display` output), not a per-tool card — the
+card renderers apply to top-level and `write xd://<name>` calls. So `display(...)`
+structured reads for a highlighted block instead of a wall of `print` text.
 
 Because these are real omp tools on every path, nothing about them is
 reimplemented: each call — top-level, `write xd://…`, or `tool.<name>()` from
@@ -134,8 +147,8 @@ tools top-level instead; nothing else changes.)
 | Session lifecycle events | `--continue`/`/resume` reopen the branch's binary in the background and **replay its annotations** into the fresh rizin process; a crashed or timed-out rizin respawns the same way. |
 | Compaction preservation (`session.compacting`) | When omp compacts the conversation, omp-re folds a snapshot of the RE session — open binary, evidence and annotation counts, the most recent evidence ids — into the summary, so the post-compaction model stays grounded and knows it can recall detail with `/re evidence` / `/re cite`. |
 | process lifecycle | The rizin/debug processes a session owns are tracked on a small per-session teardown scope: a respawn closes just the previous process, session shutdown closes them all. Subsystems are applied in order with the host handed to each. No third-party runtime dependencies — the plugin resolves only the host's own packages. See `extensions/re/{runtime,app}.ts`. |
-| Approval tiers with reasons | Read tools (and `rizin_help`) are `read`; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); `rizin_command` is `exec` with the exact command in its reason; triage tools are `exec`. omp's `tools.approvalMode` decides. |
-| `xd://` devices (`loadMode: "discoverable"`) and the `eval` tool bridge | All 64 RE tools are mounted as devices, not top-level tools; the model reads `xd://<name>` for a tool's docs and drives the tools from omp's `eval` as `tool.<name>()`. See [Host-native](#host-native-xd-devices-and-omps-eval). |
+| Approval tiers with reasons | `rizin_help` is `read`; `rizin_command` is `exec` with the exact command in its reason; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); triage tools are `exec`. omp's `tools.approvalMode` decides. |
+| `xd://` devices (`loadMode: "discoverable"`) and the `eval` tool bridge | Every omp-re tool is mounted as a device, not a top-level tool; the model reads `xd://<name>` for a tool's docs and drives them from omp's `eval` as `tool.<name>()`. The read surface is one tool — `rizin_command` — with an empty command returning the manual. See [Host-native](#host-native-xd-devices-and-omps-eval). |
 | `tool_call` blocking | `/re off` refuses every RE tool call on every path (top-level, `xd://`, `eval`) until `/re on`, without unmounting the devices. |
 | Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
 | Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the evidence ids on this branch. |
@@ -179,7 +192,7 @@ interactive view are refused.
 
 ### Decompiler: whatever you have
 
-`decompile_function` and the code view use the best decompiler plugin
+The code view and `pdg`/`pdd` via `rizin_command` use the best decompiler plugin
 installed — rz-ghidra (`pdg`) then jsdec (`pdd`) by default. `OMPRE_DECOMPILER`
 reorders that, or names another plugin's command entirely (any `pdX`-style
 decompiler is probed the same way); the built-ins stay as a fallback. Without
@@ -216,12 +229,6 @@ walk a decryptor loop. `apply_signatures` names library functions from FLIRT
 signatures: `aaa` applies rizin's built-in database on open, and this
 re-applies it or applies a custom `.sig`/`.pat` file you provide (re-applied
 automatically on resume). `rizin_command Flt` lists the built-in database.
-
-`deobfuscate` reveals hidden bytes in place: xor/add/sub a window with a key,
-swap endianness, or decrypt it with a named cipher (RC4, AES) — shown as hex
-and as a string, so an xor-masked URL or an embedded config becomes readable.
-The transform runs under rizin's write cache and is reset immediately, so the
-file on disk is never modified.
 
 `open_binary` runs rizin's baseline analysis (`aaa`); `analyze` re-runs the
 deeper passes it skips — prelude scans that recover functions in stripped
@@ -268,10 +275,10 @@ pretending to have a real decompile — see [Prerequisites](#prerequisites).
 
 `/re evidence` lists every fact gathered on this branch by an 8-character id;
 Enter on a row (or `/re cite <id>`) pulls it straight into the editor as a
-prefilled message — here, the exact SHA-256/SHA-1/MD5 `hash_binary` actually
-returned, not a retyped guess:
+prefilled message — here, the exact digests a hash command (`rizin_cli` rz-hash,
+or `rizin_command ph sha256`) actually returned, not a retyped guess:
 
-![/re cite prefilling the editor with a hash_binary evidence entry](docs/img/evidence-cite.png)
+![/re cite prefilling the editor with a hash evidence entry](docs/img/evidence-cite.png)
 
 ### The report gate, proven
 
@@ -368,7 +375,7 @@ records no evidence.
 | `omp` ≥ 18.11.1 | Developed and tested against 18.11.1, the latest release (its `getAllTools()` returns tool objects, and Tern renders tools natively). The dev dependencies pin it, so `bun install` tests against the same host. |
 | `bun` | The runtime `omp` invokes plugin code with; omp ships it as a dependency, but you need it to run this repo's own `bun install`/`bun test` for local development. |
 | **rizin — required, not bundled** | Your own install, found on `PATH` or via `OMPRE_RIZIN_PATH`. Tested with rizin 0.9.1, the latest release. `/re status` shows which rizin and decompiler omp-re found. |
-| **rz-ghidra — optional, strongly recommended** | Provides `pdg`, a real Ghidra decompile. jsdec (`pdd`) is used when rz-ghidra is absent. With neither, `decompile_function` and the code viewer's `d` key return annotated disassembly whose output begins `(disassembly only — no decompiler plugin available) `. `/re status` shows which decompiler is active. |
+| **rz-ghidra — optional, strongly recommended** | Provides `pdg`, a real Ghidra decompile. jsdec (`pdd`) is used when rz-ghidra is absent. With neither, `pdg`/`pdd` error and the code viewer's `d` key falls back to annotated disassembly (`pdf`). `/re status` shows which decompiler is active. |
 | Optional triage binaries | Each is independently probed on PATH at load time and simply not registered when absent: `capa` → `triage_capa`, `floss` → `triage_floss`, `diec` → `triage_die`, `yara` → `triage_yara`. |
 
 ## Command reference
@@ -394,50 +401,21 @@ records no evidence.
 
 ## Tool reference
 
-All 64 tools — see [`docs/tools.md`](docs/tools.md) for full parameter
-tables. Each is an `xd://<name>` device (see
-[Host-native](#host-native-xd-devices-and-omps-eval)): `read` it for its
-docs, `write` it to call it, or call it from `eval` as `tool.<name>()`.
-Triage tools appear only when their backing binary is on PATH, and
-`rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set, so your own device
-list may legitimately show fewer than 64.
+You read the binary through **one tool, `rizin_command`**, and compose rizin's
+commands in `eval`; the rest are stateful tools (open, annotate, findings, the
+rz-* CLI, triage, debugger). See [`docs/tools.md`](docs/tools.md) for the full
+command map and parameter tables. Each tool is an `xd://<name>` device (see
+[Host-native](#host-native-xd-devices-and-omps-eval)): `read` it for its docs,
+`write` it to call it, or call it from `eval` as `tool.<name>()`. Triage tools
+appear only when their backing binary is on PATH, and `rizin_debug` only when
+`OMPRE_ENABLE_DEBUGGER` is set.
 
 | Tool | Tier | What it does |
 | --- | --- | --- |
 | `open_binary` | session | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. |
 | `export_project` | session (exec) | Save the analysis as a rizin project (`.rzdb`, `Ps`) to open in rizin or Cutter. |
 | `map_file` | session (exec) | Open an additional file into the session at a virtual address (`o`), re-mapped on respawn. |
-| `list_functions` | read | List analyzed functions; sort by address, size, or callers. |
-| `search_functions` | read | Search functions by name substring. |
-| `get_function` | read | One function: signature, metrics, args/locals, named call targets, callers. |
-| `decompile_function` | read | Decompile a function (rz-ghidra `pdg`, jsdec `pdd`, or labeled disassembly). |
-| `disassemble_function` | read | Disassemble a function, with comments, labels, and incoming xrefs folded in. |
-| `get_xrefs_to` | read | Cross-references pointing at an address. |
-| `get_xrefs_from` | read | Cross-references originating from an instruction. |
-| `list_imports` | read | List imported symbols. |
-| `list_exports` | read | List exported symbols. |
-| `list_symbols` | read | List the full symbol table (`isj`), name-filtered — local/internal functions and data symbols. |
-| `list_strings` | read | List strings, optionally filtered. |
-| `search_bytes` | read | Search raw bytes for a hex pattern (`/xj`), with nibble-mask wildcards. |
-| `search_string` | read | Search raw bytes for a literal string (encoded to hex client-side). |
-| `search_regex_bytes` | read | Search raw bytes with a rizin `/xr` regex. |
-| `search_asm` | read | Assemble instruction text and search for its bytes (`/aj`). |
-| `search_value` | read | Search immediates by exact value or range, 1/2/4/8-byte widths (`/vj`, `/Vj`). |
-| `search_gadgets` | read | ROP/COP gadget search (`/R` prime + `/Rj`/`/Cj` native JSON; rizin's own filter string). |
-| `list_types` | read | List loaded structs, enums, typedefs, or function definitions (`tsj`/`tej`/`ttj`/`tfj`), name-filtered. |
-| `define_types` | read | Define types from C statements (`td`, one declaration per entry). |
-| `cast_memory` | read | Print memory at an address interpreted as a named type (`tp`). |
-| `list_syscalls` | read | List the active syscall profile (`aslj`), name-filtered. |
-| `syscall_lookup` | read | Resolve a syscall by name (`asn`) or by number (`asr`). |
-| `get_binary_info` | read | Binary identity: arch, bits, base address, format, compiler, checksums (`iIj`). |
-| `list_entrypoints` | read | Entry points with addresses and types (`iej`). |
-| `list_relocations` | read | Load-time relocations (`irj`). |
-| `list_flags` | read | Named flags/labels rizin knows (`flj`), name-filtered. |
-| `list_classes` | read | Classes from binary metadata — C++ RTTI, ObjC, Swift (`icj`). |
-| `list_segments` | read | List sections with permissions and addresses. |
-| `hash_binary` | read | SHA-256/SHA-1/MD5 of the binary. |
-| `deobfuscate` | read | Reveal obfuscated bytes in place (xor/add/sub/or/and, endian swap, or RC4/AES decrypt), shown as hex and string, under the write cache (the file is never modified). |
-| `get_graph` | read | Rizin's analysis graphs as JSON: control-flow, callgraph, xref, or import graph (`agf`/`agc`/`agx`/`agi`). |
+| **read the binary** | read | One tool — `rizin_command` — runs any read-only rizin command (`aflj`, `pdg @ <fn>`, `izj`, `iij`, `iEj`, `axtj`, `tsj`, `/xj`, `ph entropy`, …); see [Reading the binary](docs/tools.md#reading-the-binary--rizin_command-one-tool) for the full command map. `rizin_help` finds a command's arguments. (The former typed read wrappers are retired — their code stays in the repo, unregistered.) |
 | `rename_function` | mutate | Rename a function, with read-back verification. |
 | `rename_variable` | mutate | Rename a local variable or argument, with read-back verification. |
 | `set_comment` | mutate | Set (or clear) a comment at an address. |
@@ -458,7 +436,7 @@ list may legitimately show fewer than 64.
 | `create_signature` | signatures (exec) | Build a FLIRT signature (`Fc`) from the analyzed functions, to recognize them in other samples. |
 | `rizin_emulate` | emulate (exec) | Emulate code in rizin's RzIL VM — init, step, read/set VM state (no OS process runs). |
 | `rizin_help` | rizin REPL (read) | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
-| `rizin_command` | rizin REPL (exec) | Run one read-only rizin command the dedicated tools don't cover (`pdsf`, `agc`, `px`, `ph entropy`, `/x`, `/R`, `aoe`, …). |
+| `rizin_command` | rizin REPL (exec) | **The read surface.** Run any read-only rizin command against the open binary (`aflj`, `pdg`, `izj`, `iij`, `axtj`, `tsj`, `px`, `/xj`, …); an empty command returns the manual. |
 | `rizin_cli` | rizin CLI (exec) | Run a standalone rizin CLI tool (`rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax`) with its own arguments. |
 | `rizin_debug` | debugger (exec) | Dynamic analysis: launch the binary under rizin's debugger and drive it (breakpoints, continue, step, registers, memory, backtrace). Opt-in via `OMPRE_ENABLE_DEBUGGER`. |
 | `triage_capa` | triage | Run capa rules (capabilities, ATT&CK techniques). |
@@ -492,7 +470,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
-- [`docs/tools.md`](docs/tools.md) — full parameter tables for all 64 tools.
+- [`docs/tools.md`](docs/tools.md) — the `rizin_command` read map and parameter tables for the stateful tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

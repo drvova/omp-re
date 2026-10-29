@@ -15,7 +15,7 @@ import { branchEntries } from "./entries.ts";
 import { plainResult, type ReToolResult } from "./format.ts";
 import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { addrOf, eaFromOffset, normalizeAddr, resolveNumericAddr, validateIdent, validateText, validateTypeLike, type RzSession } from "./rizin.ts";
-import { ensureRizin, getState, markAnnotationsApplied } from "./state.ts";
+import { ensureRizin, evidenceIdAt, getState, markAnnotationsApplied } from "./state.ts";
 
 interface AfijRow {
 	addr?: number;
@@ -111,7 +111,7 @@ async function apply(rz: RzSession, commands: string[], signal?: AbortSignal): P
 
 /** Append the `re.annotation` entry (grounded by the latest evidence at the same EA, if any) and record that rizin now matches the branch. */
 function recordAnnotation(pi: ExtensionAPI, ctx: ExtensionContext, data: Omit<AnnotationData, "evidenceId" | "ungrounded">): void {
-	const evidenceId = getState(ctx).evidenceByAddr.get(normalizeAddr(data.ea)) ?? "";
+	const evidenceId = evidenceIdAt(ctx, data.ea) ?? "";
 	pi.appendEntry("re.annotation", { ...data, evidenceId, ungrounded: evidenceId === "" });
 	markAnnotationsApplied(ctx);
 }

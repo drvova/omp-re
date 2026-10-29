@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { liveAnnotations } from "../extensions/re/annotations.ts";
 import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { ensureRizin, getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, ensureRizin, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { registerMutateTools, undoLastAnnotation } from "../extensions/re/tools-mutate.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -44,9 +44,8 @@ describe.skipIf(!canRunRizin)("mutate tool registry + undo coverage", () => {
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
 		rz = await RzSession.spawn(rizinPath, binaryPath);
-		const state = getState(ctx);
-		state.binaryPath = binaryPath;
-		state.rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 		const main = (await rz.cmdj<{ offset: number; name: string }[]>("afij @ main"))![0]!;
 		mainEa = eaFromOffset(addrOf(main)!);
 		mainName = main.name;
@@ -226,9 +225,8 @@ describe.skipIf(!canRunRizin)("analysis-edit mutate tools (chapter C): define_fu
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
 		rz = await RzSession.spawn(rizinPath, binaryPath);
-		const state = getState(ctx);
-		state.binaryPath = binaryPath;
-		state.rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 		mainEa = eaFromOffset(addrOf((await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never)!);
 		// set_flag replaces the single flag at an address, so its clean target is a
 		// function start that has exactly one flag. `main` qualifies on a stripped-ish

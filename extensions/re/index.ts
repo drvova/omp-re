@@ -17,7 +17,6 @@ import { decompilerCommands, decompilerLabel } from "./decompile.ts";
 import { registerPreservation } from "./preserve.ts";
 import { debuggerEnabled, registerDebugTools } from "./tools-debug.ts";
 import { registerAnalyzeTools } from "./tools-analyze.ts";
-import { registerDeobfuscateTools } from "./tools-deobfuscate.ts";
 import { registerEmulateTools } from "./tools-emulate.ts";
 import { registerSignatureTools } from "./tools-signatures.ts";
 import { branchEntries, lastRecordedBinaryPath, lastRecordedBinarySha256, lastRecordedLoadOptions } from "./entries.ts";
@@ -29,15 +28,10 @@ import { sha256File, verifyEvidence } from "./verify.ts";
 import { carryManifest } from "./carry.ts";
 import type { AuditMode } from "./audit-claims.ts";
 import { type LoadOptions, resolveBinaryPath, resolveRizinPath, rizinVersion } from "./rizin.ts";
-import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "./state.ts";
+import { clearPendingOpen, ensureRizin, getState, rekeyState, setBinarySha256, setPendingOpen, setToolsOff, shutdownState, spawnRizin, switchBinary, syncAnnotationsToBranch } from "./state.ts";
 import { registerMutateTools, undoLastAnnotation } from "./tools-mutate.ts";
-import { registerInfoTools } from "./tools-info.ts";
 import { registerMapFileTools } from "./tools-mapfile.ts";
 import { registerProjectTools } from "./tools-project.ts";
-import { registerReadTools } from "./tools-read.ts";
-import { registerSearchTools } from "./tools-search.ts";
-import { registerSyscallTools } from "./tools-syscalls.ts";
-import { registerTypeTools } from "./tools-types.ts";
 import { registerRizinTools } from "./tools-rizin.ts";
 import { registerRzCliTools } from "./tools-rzcli.ts";
 import { registerTriageTools } from "./tools-triage.ts";
@@ -88,7 +82,7 @@ async function openBinary(pi: ExtensionAPI, ctx: ExtensionContext, inputPath: st
 	// binary. A hash failure must never block opening — degrade to an unbound (unverifiable) session.
 	const sha256 = await sha256File(resolved).catch(() => undefined);
 	const { replayFailures } = await spawnRizin(ctx, resolved, options);
-	if (sha256) getState(ctx).binarySha256 = sha256;
+	if (sha256) setBinarySha256(ctx, sha256);
 	const replayed = liveAnnotations(branchEntries(ctx), resolved).length;
 	// Persist the load settings and binary hash in the entry too, so a resume reopens a raw blob the same way (header autodetection carries nothing) and restores the evidence binding.
 	const details = {
@@ -294,7 +288,7 @@ function registerShell(pi: ExtensionAPI): void {
 		const state = getState(ctx);
 		const recorded = lastRecordedBinaryPath(branchEntries(ctx));
 		// Restore the open binary's hash from the branch so evidence recorded after a resume/branch/tree stays bound (openBinary recomputes it when it actually reopens a file below).
-		state.binarySha256 = lastRecordedBinarySha256(branchEntries(ctx)) ?? null;
+		setBinarySha256(ctx, lastRecordedBinarySha256(branchEntries(ctx)) ?? null);
 
 		if (opts.flag && opts.flag !== recorded) {
 			const onProgress = analysisStatus(ctx, basename(opts.flag));
@@ -305,19 +299,16 @@ function registerShell(pi: ExtensionAPI): void {
 				.catch((err) => tell(ctx, err instanceof Error ? err.message : String(err), "error"))
 				.finally(() => {
 					clearAnalysisStatus(ctx);
-					if (state.opening === opening) state.opening = null;
+					clearPendingOpen(ctx, opening);
 				});
 			// Published so a tool call or /re command arriving mid-analysis waits for this open instead of racing it.
-			state.opening = opening;
+			setPendingOpen(ctx, opening);
 			return;
 		}
 
 		if (recorded !== state.binaryPath) {
-			state.rz?.close();
-			state.rz = null;
-			state.binaryPath = recorded ?? null;
 			// Recover how this binary was loaded (raw-blob arch/bits/base) so the respawn below reloads it the same way. Applied FLIRT files are recomputed from the branch entries in spawn(), like annotations.
-			state.loadOptions = recorded ? (lastRecordedLoadOptions(branchEntries(ctx)) ?? null) : null;
+			switchBinary(ctx, recorded ?? null, recorded ? (lastRecordedLoadOptions(branchEntries(ctx)) ?? null) : null);
 		} else {
 			syncAnnotationsToBranch(ctx);
 		}
@@ -495,12 +486,12 @@ function registerShell(pi: ExtensionAPI): void {
 					// A gate on the tool_call event (above), not setActiveTools: re-selecting a tool through
 					// setActiveTools pins it top-level, which would undo omp's xd:// mounting on /re on.
 					case "off": {
-						getState(ctx).toolsOff = true;
+						setToolsOff(ctx, true);
 						tell(ctx, "omp-re: RE tools disabled for this session — /re on to re-enable", "info");
 						return;
 					}
 					case "on": {
-						getState(ctx).toolsOff = false;
+						setToolsOff(ctx, false);
 						tell(ctx, "omp-re: RE tools enabled for this session", "info");
 						return;
 					}
@@ -526,12 +517,6 @@ function registerShell(pi: ExtensionAPI): void {
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
 	await composeApp(pi, [
-		{ name: "re:read-tools", apply: registerReadTools },
-		{ name: "re:info-tools", apply: registerInfoTools },
-		{ name: "re:search-tools", apply: registerSearchTools },
-		{ name: "re:deobfuscate", apply: registerDeobfuscateTools },
-		{ name: "re:type-tools", apply: registerTypeTools },
-		{ name: "re:syscall-tools", apply: registerSyscallTools },
 		{ name: "re:mutate-tools", apply: registerMutateTools },
 		{ name: "re:signature-tools", apply: registerSignatureTools },
 		{ name: "re:analyze-tools", apply: registerAnalyzeTools },

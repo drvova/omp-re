@@ -7,24 +7,31 @@ description: First-pass reverse engineering of a binary using omp-re's rizin too
 
 ## How you reach the tools
 
-The RE tools are `xd://` devices, not top-level tools: `read xd://<name>`
-shows a tool's description and parameters, and `write xd://<name>` with the
-parameters as JSON calls it. To do more than one call — loop over functions,
-filter strings, follow xrefs, build helpers — use the `eval` tool, where every
-RE tool is `await tool.<name>({ ... })`:
+omp-re has **one** tool for reading the binary — `rizin_command`, which runs any
+read-only rizin command — plus a few stateful tools (open, annotate, findings,
+the rz-* CLI, triage, debugger). They are `xd://` devices, not top-level tools:
+`read xd://<name>` shows a tool's parameters, `write xd://<name>` calls it. To do
+more than one call — loop over functions, filter strings, follow xrefs, build
+helpers — use the `eval` tool, where every tool is `await tool.<name>({ ... })`
+and you compose rizin commands:
 
 ```js
 await tool.open_binary({ path: "/path/to/binary" });
 const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
-for (const f of rows(await tool.list_functions({ sort: "callers", limit: 10 }))) print((await tool.get_function({ target: f.ea })).text.split("\n")[0]);
+for (const f of rows(await tool.rizin_command({ command: "aflj" })).sort((a, b) => b.nbbs - a.nbbs).slice(0, 10))
+  print((await tool.rizin_command({ command: "pdsf", addr: f.offset })).text);
 ```
 
+Call `await tool.rizin_command({ command: "" })` for the full manual (the command
+families and the other tools), and `rizin_help` to look up a command's arguments.
+
 - A tool returns `{ text, details }` to `eval`; read `.text`. Its first line is
-  the header and, for an observing tool, its last line is the
-  `[evidence xxxxxxxx]` tag; a list tool's lines in between are JSON, as
-  `rows` above parses them. Output cut short by the size cap ends with an
-  `[Output truncated …]` note and is not valid JSON: page with
-  `offset`/`limit` instead. A failing tool throws; `try`/`catch` it.
+  the header (`rizin> <cmd>`) and, for an observing command, its last line is the
+  `[evidence xxxxxxxx]` tag; a `*j` command's lines in between are JSON, as
+  `rows` above parses them (drop the first and last lines). Output cut short by
+  the size cap ends with an `[Output truncated … artifact://N]` note and is not
+  valid JSON: `read` that artifact, or run a narrower command. A failing tool
+  throws; `try`/`catch` it.
 - End statements with `;` in `eval`: it rewrites top-level destructuring, and
   without the semicolon the line can join the one before it.
 - Functions you define in `eval` persist for the session (across compaction).
@@ -71,21 +78,28 @@ is gated like any finding. Don't hand-copy a subagent claim into
 
 ## Order of work
 
-Do not skip ahead — later steps depend on evidence the earlier ones record.
+Do not skip ahead — later steps depend on evidence the earlier ones record. Run
+each with `rizin_command`; `rizin_help` gives a command's exact arguments for the
+installed rizin.
 
-1. `hash_binary` — establish identity before anything else.
-2. `list_segments`, `list_imports`, `list_exports` — shape and external surface.
-3. `list_strings` with a `filter` when the set is large — never page blindly
-   through thousands.
-4. `list_functions` — `sort: "callers"` surfaces the most-used helpers,
-   `sort: "size"` the biggest logic; then `get_function` on the handful that
-   matter (it lists what each one calls, by name, and who calls it). If the
-   list looks sparse for the binary's size (a stripped, Go, or Objective-C
-   target), run `analyze` with `preludes`, `golang`, or `objc` to recover
-   more functions before reading.
-5. `decompile_function` only on functions you have a reason to read.
-6. `triage_capa` when it is registered — it is the only source that grounds
-   ATT&CK and verdict claims.
+1. Identity first: `rizin_cli` with `rz-hash` (or `rizin_command` `ph sha256`) —
+   hash the bytes before anything else.
+2. Shape and external surface: `iSj` (sections), `iij` (imports), `iEj`
+   (exports), `iHj` (headers), `ij` (bin info).
+3. `izj` (strings); for a large set find a narrower search with `rizin_help`
+   rather than paging thousands.
+4. Functions: `aflj` lists them (each row has `offset`, `name`, `nbbs` blocks,
+   `size`); sort in `eval` by callers or size and read the handful that matter
+   with `afij @ <fn>` (signature, args, callers/callees) and `pdsf @ <fn>`
+   (summary). If the list looks sparse for the binary's size (stripped, Go, or
+   Objective-C), run `analyze` with `preludes`, `golang`, or `objc` to recover
+   more functions first.
+5. Decompile only functions you have a reason to read: `pdg @ <fn>` (rz-ghidra)
+   or `pdd @ <fn>` (jsdec). If neither plugin is installed those error — fall
+   back to `pdf @ <fn>` (annotated disassembly) and say it is disassembly, not
+   decompiled C, before drawing behavioural conclusions.
+6. `triage_capa` when it is registered — the only source that grounds ATT&CK and
+   verdict claims.
 
 A triage tool exists only when its binary was on PATH at load: `triage_capa`
 needs `capa`, `triage_floss` needs `floss`, `triage_die` needs `diec`,
@@ -95,25 +109,26 @@ the call failed.
 Long output ends with `[Output truncated … Full output: artifact://N]`; `read`
 that artifact when the part that was cut matters.
 
-## Beyond the dedicated tools
+## Finding commands
 
-The tools above cover the common path. For the rest of rizin — function
-summaries (`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy
-(`ph entropy`), byte and ROP-gadget searches (`/x`, `/R`), ESIL emulation
-(`aoe`), headers (`iH`) — use the installed rizin's own CLI:
+`rizin_command` is the whole of rizin's read surface — function summaries
+(`pdsf`), call graphs (`agc`), hexdumps (`px`), entropy (`ph entropy`), byte and
+ROP-gadget searches (`/x`, `/R`), ESIL emulation (`aoe`), config (`e asm.arch`,
+`el`), metadata, classes, types — not just the listings above. When you don't
+know the command or its arguments:
 
-1. `rizin_help` with a command prefix (`ph`, `/R`, `ag`) for its usage and
-   typed arguments, or with keywords (`entropy`, `call graph`) to find one.
-   It answers from the rizin actually installed, so its syntax is right for
-   this version, and it marks the commands `rizin_command` will refuse.
-2. `rizin_command` with that one command; put the address in `addr`, never
-   `@` in the command (the only `@` allowed is `@!<n>`, a block size, e.g.
+1. `rizin_help` with a command prefix (`ph`, `/R`, `ag`) for its usage and typed
+   arguments, or with keywords (`entropy`, `call graph`) to find one. It answers
+   from the rizin actually installed, so its syntax is right for this version,
+   and it marks the commands `rizin_command` will refuse.
+2. `rizin_command` with that one command; put the address in `addr`, never `@` in
+   the command (the only `@` allowed is `@!<n>`, a block size, e.g.
    `ph entropy @!4096`). If rizin rejects the arguments its error comes back;
    fix them from `rizin_help` instead of guessing.
 
-`rizin_command` output is recorded evidence like any other tool's. It runs
-read-only commands only: annotate with the dedicated tools so annotations are
-recorded, verified, and undoable.
+Every `rizin_command` read is recorded evidence. It runs read-only commands
+only: annotate with the dedicated tools below so annotations are recorded,
+verified, and undoable.
 
 For rizin's standalone CLI programs, use `rizin_cli`: `rz-bin` for quick
 headers/imports/strings, `rz-diff` to compare two binaries (e.g. two versions
@@ -169,9 +184,9 @@ functions from a FLIRT file (also replayed on resume).
 - Every address you name must have come from tool output in this session. Never
   infer an address arithmetically and never carry one over from another binary.
 - Quote the `ea` field a tool returned. Do not convert decimal offsets yourself.
-- When `decompile_function` output begins `(disassembly only — …)`, it is
-  disassembly, not decompiled code: say so before drawing behavioural
-  conclusions from it.
+- When no decompiler plugin is installed, `pdg`/`pdd` error and you fall back to
+  `pdf` (disassembly): say it is disassembly, not decompiled code, before drawing
+  behavioural conclusions from it.
 - Hedge genuine hypotheses ("this resembles…", "possibly…"). Hedged reasoning is
   legitimate; an unhedged claim with no evidence is not.
 - Absence of evidence is a finding. "No network imports observed" beats silence.
