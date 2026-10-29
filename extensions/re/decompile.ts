@@ -71,7 +71,7 @@ export async function availableDecompilers(rz: RzSession, signal?: AbortSignal):
 export function decompilerLabel(kind: DecompilerKind | null): string {
 	if (kind === "pdg") return "rz-ghidra (pdg)";
 	if (kind === "pdd") return "jsdec (pdd)";
-	return kind ? `${kind} (plugin)` : "none — decompile_function returns labeled disassembly";
+	return kind ? `${kind} (plugin)` : "none — pdg/pdd fall back to labeled disassembly";
 }
 
 /** Never infer presence from anything short of the command's own help text. */

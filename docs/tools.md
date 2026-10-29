@@ -68,9 +68,7 @@ writes, pipes, redirects, and `@` inside the command (put the address in `addr`)
 > `list_types`, `list_syscalls`, `get_binary_info`, …), each a thin wrapper over
 > one of the commands above with extra shaping (named calls/callers, a decompiler
 > fallback, offset/limit paging). The one-tool design reads through
-> `rizin_command` instead; their code remains in the repository
-> (`tools-read.ts`, `tools-search.ts`, `tools-types.ts`, `tools-syscalls.ts`,
-> `tools-info.ts`, `tools-deobfuscate.ts`) but is no longer registered.
+> `rizin_command` instead, and those wrappers have been removed.
 
 ## Mutate tier (15 tools)
 

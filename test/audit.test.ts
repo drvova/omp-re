@@ -14,7 +14,6 @@ import {
 	RE_EVIDENCE_TOOL_NAMES,
 	RE_FINDING_TOOL_NAMES,
 	RE_SIGNATURE_TOOL_NAMES,
-	RE_READ_TOOL_NAMES,
 	RE_RIZIN_TOOL_NAMES,
 	RE_RZCLI_TOOL_NAMES,
 	RE_SESSION_TOOL_NAMES,
@@ -23,8 +22,7 @@ import {
 } from "../extensions/re/audit.ts";
 
 describe("RE_ALL_TOOL_NAMES", () => {
-	test("contains exactly 64 names and is the union of read (31), mutate (15), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (2), analyze (1), session (3), and finding (3)", () => {
-		expect(Object.keys(RE_READ_TOOL_NAMES)).toHaveLength(31);
+	test("contains exactly 33 names and is the union of mutate (15), rizin (2), rizin CLI (1), triage (4), debug (1), emulate (1), signature (2), analyze (1), session (3), and finding (3)", () => {
 		expect(Object.keys(RE_MUTATE_TOOL_NAMES)).toHaveLength(15);
 		expect(Object.keys(RE_RIZIN_TOOL_NAMES)).toHaveLength(2);
 		expect(Object.keys(RE_RZCLI_TOOL_NAMES)).toHaveLength(1);
@@ -37,10 +35,9 @@ describe("RE_ALL_TOOL_NAMES", () => {
 		expect(Object.keys(RE_FINDING_TOOL_NAMES)).toHaveLength(3);
 
 		const allNames = Object.keys(RE_ALL_TOOL_NAMES);
-		expect(allNames).toHaveLength(64);
+		expect(allNames).toHaveLength(33);
 
 		const expectedUnion = new Set([
-			...Object.keys(RE_READ_TOOL_NAMES),
 			...Object.keys(RE_MUTATE_TOOL_NAMES),
 			...Object.keys(RE_RIZIN_TOOL_NAMES),
 			...Object.keys(RE_RZCLI_TOOL_NAMES),
@@ -55,10 +52,12 @@ describe("RE_ALL_TOOL_NAMES", () => {
 		expect(new Set(allNames)).toEqual(expectedUnion);
 	});
 
-	test("the search / types / syscall / binary-info read tools ground evidence (not just the original twelve)", () => {
-		for (const name of ["search_bytes", "search_value", "search_gadgets", "list_types", "cast_memory", "list_syscalls", "get_binary_info", "list_flags", "list_classes"]) {
-			expect(RE_EVIDENCE_TOOL_NAMES[name]).toBe(true);
-			expect(RE_ALL_TOOL_NAMES[name]).toBe(true);
+	test("rizin_command is the one observational tool that grounds evidence; the retired read tier is gone from every gate", () => {
+		expect(RE_EVIDENCE_TOOL_NAMES.rizin_command).toBe(true);
+		expect(Object.keys(RE_EVIDENCE_TOOL_NAMES)).toEqual(["rizin_command"]);
+		for (const name of ["search_bytes", "list_types", "get_binary_info", "list_functions", "deobfuscate", "syscall_lookup"]) {
+			expect(RE_EVIDENCE_TOOL_NAMES[name]).toBeUndefined();
+			expect(RE_ALL_TOOL_NAMES[name]).toBeUndefined();
 		}
 	});
 
@@ -137,7 +136,7 @@ describe("audit log", () => {
 		const notifications: { message: string; type?: string }[] = [];
 		const ctx = makeCtx(sessionId, notifications);
 
-		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "hash_binary", input: { path: "/tmp/x" } }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "rizin_command", input: { command: "aflj" } }, ctx);
 
 		const lines = await readAuditLines(sessionId);
 		expect(lines).toHaveLength(1);
@@ -157,9 +156,9 @@ describe("audit log", () => {
 		const notifications: { message: string; type?: string }[] = [];
 		const ctx = makeCtx(sessionId, notifications);
 
-		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "hash_binary", input: {} }, ctx);
-		await handler({ type: "tool_call", toolCallId: "call-2", toolName: "list_functions", input: {} }, ctx);
-		await handler({ type: "tool_call", toolCallId: "call-3", toolName: "list_imports", input: {} }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "rizin_command", input: {} }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-2", toolName: "rename_function", input: {} }, ctx);
+		await handler({ type: "tool_call", toolCallId: "call-3", toolName: "set_comment", input: {} }, ctx);
 
 		const lines = await readAuditLines(sessionId);
 		expect(lines).toHaveLength(3);
@@ -177,8 +176,8 @@ describe("audit log", () => {
 		const { toolCall: handler } = captureHandlers();
 		const ctx = makeCtx(sessionId, []);
 		await handler({ type: "tool_call", toolCallId: "call-1", toolName: "bash", input: { command: "ls" } }, ctx);
-		await handler({ type: "tool_call", toolCallId: "call-2", toolName: "hash_binary", input: {} }, ctx);
-		expect((await readAuditLines(sessionId)).map((l) => (JSON.parse(l) as { tool: string }).tool)).toEqual(["hash_binary"]);
+		await handler({ type: "tool_call", toolCallId: "call-2", toolName: "rizin_command", input: {} }, ctx);
+		expect((await readAuditLines(sessionId)).map((l) => (JSON.parse(l) as { tool: string }).tool)).toEqual(["rizin_command"]);
 	});
 
 	test("an approval decision for an RE tool is recorded next to its call", async () => {

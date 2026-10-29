@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Retired the dormant read-tier tool code (internal; no user-facing change).**
+  The 0.8.0 one-tool redesign unregistered the 31 typed read wrappers but left
+  their source in the tree. This removes it: the six `tools-{read,info,search,
+  deobfuscate,syscalls,types}.ts` modules and their four test files (~2.5k
+  lines), the dead `RE_READ_TOOL_NAMES` audit roster (evidence now gates on
+  `rizin_command` alone), the deobfuscate-only `wox`/`woD`/`wc-` entries in
+  `REQUIRED_COMMANDS`, and the stale references in `docs/tools.md`,
+  `docs/ARCHITECTURE.md`, and several code comments. Reading the binary is
+  unchanged — it goes through `rizin_command`.
+
 ## [0.9.0] - 2026-10-29
 
 ### Added

@@ -6,8 +6,8 @@
  * registered only when its binary is found on PATH at load time — an offered
  * tool that always fails is worse than an absent one.
  *
- * Like tools-read.ts, every tool returns the real findings (rule names,
- * matched capabilities, detections) as content, not just a count.
+ * Every tool returns the real findings (rule names, matched capabilities,
+ * detections) as content, not just a count.
  */
 import { access, realpath as fsRealpath } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
@@ -129,7 +129,7 @@ export async function registerTriageTools(pi: ExtensionAPI): Promise<void> {
 		isExecutable("yara"),
 	]);
 
-	// Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
+	// Named const schemas, declared outside registerTool so TypeScript infers each tool's param type in execute().
 	const noParams = z.object({});
 	const yaraParams = z.object({
 		rules_path: z.string().describe("Path to a YARA rules file."),

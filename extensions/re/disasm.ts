@@ -1,7 +1,7 @@
 /**
  * Function disassembly via rizin's `pdfj`, rendered as compact annotated text.
- * The one formatter behind `disassemble_function`, the decompiler fallback,
- * and the code view, so all three show the same lines for the same function.
+ * The one formatter behind the decompiler fallback and the code view, so both
+ * show the same lines for the same function.
  */
 import { addrOf, eaFromOffset, type RzSession } from "./rizin.ts";
 

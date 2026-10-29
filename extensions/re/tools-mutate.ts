@@ -122,7 +122,7 @@ function mutateResult(kind: AnnotationKind, data: { ea: string; oldValue: string
 }
 
 export function registerMutateTools(pi: ExtensionAPI): void {
-	// Named const schemas: see registerReadTools for why they stay outside registerTool({...}).
+	// Named const schemas, declared outside registerTool so TypeScript infers each tool's param type in execute().
 	const z = pi.zod;
 	const undoNote = "Reversible with /re undo.";
 	const fnAddr = () => z.string().describe("Function address or name.");
