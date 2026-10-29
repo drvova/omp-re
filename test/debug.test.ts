@@ -166,6 +166,30 @@ describe.skipIf(!canRunRizin)("emulate tool against a real rizin session", () =>
 		const vars = JSON.parse(textOf(await run("step_until", { addr: target })).replace(/^emulate: step_until .+\n(?:rizin build is [^\n]*\n)?/, ""));
 		expect(parseInt(String(vars.PC), 16)).toBe(parseInt(target, 16));
 	}, 30_000);
+
+	test("set_mem is exec-tier and names the overlay, not the file", () => {
+		const approval = harness.tool("rizin_emulate").approval as (a: unknown) => { tier: string; reason: string };
+		const { tier, reason } = approval({ action: "set_mem" });
+		expect(tier).toBe("exec");
+		expect(reason).toMatch(/overlay|not .*written to the file/i);
+	});
+
+	test("set_mem seeds the VM memory image and reads it back (io.cache, run last)", async () => {
+		// Seed over a known-mapped address (entry0's own PC) and confirm the bytes
+		// the VM now sees — this writes an io.cache overlay, never the file. Kept
+		// last in the block so the overlay cannot perturb the stepping tests above.
+		const init = JSON.parse(textOf(await run("init", { addr: "entry0" })).replace(/^emulate: VM initialized at .+\n(?:rizin build is [^\n]*\n)?/, ""));
+		const pc = parseInt(String(init.PC), 16);
+		expect(pc).toBeGreaterThan(0);
+		const back = JSON.parse(textOf(await run("set_mem", { addr: `0x${pc.toString(16)}`, bytes: "deadbeef" })).replace(/^emulate: set_mem .+\n/, ""));
+		expect(back.slice(0, 4)).toEqual([0xde, 0xad, 0xbe, 0xef]);
+	}, 30_000);
+
+	test("set_mem rejects odd-length / non-hex bytes before touching rizin", async () => {
+		await expect(run("set_mem", { addr: "entry0", bytes: "abc" })).rejects.toThrow(/even number of hex digits/);
+		await expect(run("set_mem", { addr: "entry0", bytes: "zz" })).rejects.toThrow(/hex/);
+		await expect(run("set_mem", { addr: "entry0" })).rejects.toThrow(/needs addr and bytes/);
+	});
 });
 
 describe.skipIf(!canRunRizin || !debuggerSupported)("debug tool against a real debug session", () => {
