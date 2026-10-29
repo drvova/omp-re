@@ -15,7 +15,7 @@ import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 import { ensureRizin, getState, requireBinary } from "./state.ts";
 import { debugTimeoutMs, rizinBitsMismatch, validateAddr, type RzSession } from "./rizin.ts";
 
-const EMULATE_ACTIONS = ["init", "step", "step_until", "vars", "set_var"] as const;
+const EMULATE_ACTIONS = ["init", "step", "step_until", "vars", "set_var", "set_mem"] as const;
 type EmulateAction = (typeof EMULATE_ACTIONS)[number];
 
 function approvalReason(action: EmulateAction): string {
@@ -23,6 +23,8 @@ function approvalReason(action: EmulateAction): string {
 		case "init":
 		case "set_var":
 			return "Set up the RzIL emulation state (no OS process runs — the code is interpreted inside rizin).";
+		case "set_mem":
+			return "Seed the RzIL VM's memory image (an io.cache overlay in memory — nothing is written to the file on disk).";
 		case "step":
 		case "step_until":
 			return "Run the target's code logic inside rizin's RzIL VM (interpreted, no OS process).";
@@ -51,6 +53,18 @@ function validateVarValue(value: string): string {
 	return value;
 }
 
+/**
+ * Hex bytes for `set_mem` — an even number of hex digits (an optional `0x` is
+ * tolerated), the form `wx` wants. Returned lowercased without the prefix.
+ */
+function validateHexBytes(value: string): string {
+	const hex = /^0x/i.test(value) ? value.slice(2) : value;
+	if (hex.length === 0 || hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) {
+		throw new Error(`omp-re: emulate: bad bytes ${JSON.stringify(value)} — use an even number of hex digits, e.g. 41424344`);
+	}
+	return hex.toLowerCase();
+}
+
 export function registerEmulateTools(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	const emulateParams = z.object({
@@ -61,19 +75,21 @@ export function registerEmulateTools(pi: ExtensionAPI): void {
 				"step_until: run until PC equals `addr` (required).",
 				"vars: full VM state (registers, flags, PC) as JSON.",
 				"set_var: set VM variable `name` to `value` (e.g. the stack pointer before stepping).",
+				"set_mem: write `bytes` (hex) into the VM's memory at `addr` — seed an input buffer a routine reads. In-memory overlay, never the file.",
 			].join("\n"),
 		),
-		addr: z.string().optional().describe("Address or symbol for init / step_until."),
+		addr: z.string().optional().describe("Address or symbol for init / step_until / set_mem."),
 		count: z.number().optional().describe("Instruction count for step (default 1)."),
 		name: z.string().optional().describe("VM variable name for set_var (from the vars action)."),
 		value: z.string().optional().describe("Number (decimal or 0x hex) for set_var."),
+		bytes: z.string().optional().describe("Hex bytes for set_mem, e.g. 41424344 — seeds the VM memory image at addr (must be a mapped address: a .data/.bss buffer or the VM stack region)."),
 	});
 
 	pi.registerTool({
 		name: "rizin_emulate",
 		label: "emulator",
 		description:
-			"Emulate code with rizin's RzIL VM: init at an address, step instructions and watch register/flag changes, step until an address, read and set VM variables. No process runs — the target's logic is interpreted inside rizin, and the VM state lives in the analysis session (init resets it). External calls and syscalls are not emulated; keep runs small (a decryptor loop, an argument computation). To execute the real process instead, use the debugger tool.",
+			"Emulate code with rizin's RzIL VM: init at an address, step instructions and watch register/flag changes, step until an address, read and set VM variables, and seed the VM's memory (set_mem) so a routine can read an input buffer. No process runs — the target's logic is interpreted inside rizin, and the VM state lives in the analysis session (init resets registers; set_mem writes an in-memory overlay that persists and never touches the file on disk). External calls and syscalls are not emulated; keep runs small (a decryptor loop, an argument computation). To execute the real process instead, use the debugger tool.",
 		approval: (args) => {
 			let action: EmulateAction | undefined;
 			if (args && typeof args === "object" && "action" in args && typeof args.action === "string") {
@@ -127,6 +143,22 @@ export function registerEmulateTools(pi: ExtensionAPI): void {
 					// print form (`aezv rsp`) is empty in practice — use the echo.
 					const out = (await rz.cmd(`aezv ${name} ${value}`, { signal })).trim();
 					return textResult(`emulate: set_var ${name}`, out || `${name} set`, { ctx, tool: "rizin_emulate" });
+				}
+				case "set_mem": {
+					if (params.addr === undefined || params.bytes === undefined) throw new Error("omp-re: emulate set_mem needs addr and bytes");
+					const ea = validateAddr(params.addr);
+					const hex = validateHexBytes(params.bytes);
+					// The static session's IO is file-backed and read-only; io.cache
+					// overlays the write in memory so the VM reads it without ever
+					// touching the file (we never `wci`-commit the cache). It stays on
+					// so the seed survives across init/step calls.
+					await rz.cmd("e io.cache=true", { signal });
+					const { stderr } = await rz.cmdWithStderr(`wx ${hex} @ ${ea}`, { signal });
+					const err = stderr.trim();
+					if (err) return { ...textResult(`emulate: set_mem @ ${ea}`, `wx ${hex} @ ${ea}: ${err}`, { ctx, tool: "rizin_emulate" }), isError: true };
+					const len = hex.length / 2;
+					const back = (await rz.cmd(`pxj ${len} @ ${ea}`, { signal })).trim();
+					return textResult(`emulate: set_mem ${len} byte(s) @ ${ea}`, back || "(wrote; no readback)", { ctx, tool: "rizin_emulate" });
 				}
 				default:
 					throw new Error(`omp-re: emulate: unknown action ${JSON.stringify(params.action)}`);

@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`rizin_emulate` can seed VM memory (`set_mem`).** A new action writes hex
+  bytes into the RzIL VM's memory image at an address, so a routine being
+  emulated can read an input buffer (a decryptor's ciphertext, a validator's
+  candidate key) — the one emulation primitive that was previously out of
+  reach, since `rizin_command` is read-only. The write is an `io.cache` overlay
+  held in memory and is **never committed to the file on disk**, and because it
+  does not survive a rebuild a doctored read still fails `/re verify`, so the
+  evidence model is unaffected.
 - **re-triage playbooks** (`skills/re-triage/playbooks.md`): task-shaped recipes
   — deep-function review, vulnerability patterns, crackme/constraint recovery,
   IOC extraction, exploit-dev recon, shellcode and file-format triage, binary
