@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { registerProjectTools } from "../extensions/re/tools-project.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
 
@@ -30,9 +30,8 @@ describe.skipIf(!canRunRizin)("export_project against a real rizin session", () 
 		process.env.OMPRE_OUTPUT_DIR = outDir;
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa` on open
-		const state = getState(ctx);
-		state.binaryPath = binaryPath;
-		state.rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 	});
 	afterAll(() => {
 		delete process.env.OMPRE_OUTPUT_DIR;

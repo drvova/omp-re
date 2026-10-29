@@ -5,27 +5,27 @@
  * the old process and disposing the session closes every process it owns.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ensureRizin, getState, rekeyState, shutdownState, spawnRizin, startDebug } from "../extensions/re/state.ts";
+import { ensureRizin, getState, recordEvidenceAt, rekeyState, shutdownState, spawnRizin, startDebug, switchBinary } from "../extensions/re/state.ts";
 import { canRunRizin, logSkip, makeHarness, TEST_BINARY } from "./helpers.ts";
 
 logSkip("runtime (process-lifecycle) tests");
 
 describe("session record (no rizin needed)", () => {
-	test("getState returns one stable, mutable record per session id", () => {
+	test("getState returns one stable per-session view; intent mutations are visible on it", () => {
 		const h = makeHarness("runtime-stable");
+		switchBinary(h.ctx, "/tmp/x");
+		recordEvidenceAt(h.ctx, undefined, "ev-1");
 		const a = getState(h.ctx);
-		a.binaryPath = "/tmp/x";
-		a.evidenceCount = 3;
 		const b = getState(h.ctx);
 		expect(b).toBe(a);
 		expect(b.binaryPath).toBe("/tmp/x");
-		expect(b.evidenceCount).toBe(3);
+		expect(b.evidenceCount).toBe(1);
 		shutdownState("runtime-stable");
 	});
 
 	test("shutdown drops the record; the next getState is fresh", () => {
 		const h = makeHarness("runtime-drop");
-		getState(h.ctx).binaryPath = "/tmp/y";
+		switchBinary(h.ctx, "/tmp/y");
 		shutdownState("runtime-drop");
 		expect(getState(h.ctx).binaryPath).toBeNull();
 		shutdownState("runtime-drop");
@@ -33,8 +33,8 @@ describe("session record (no rizin needed)", () => {
 
 	test("rekey carries the record to a new session id", () => {
 		const from = makeHarness("runtime-from");
+		switchBinary(from.ctx, "/tmp/z");
 		const rec = getState(from.ctx);
-		rec.binaryPath = "/tmp/z";
 		rekeyState("runtime-from", "runtime-to");
 		const to = makeHarness("runtime-to");
 		expect(getState(to.ctx)).toBe(rec);
@@ -46,7 +46,7 @@ describe("session record (no rizin needed)", () => {
 describe.skipIf(!canRunRizin)("process lifecycle is owned by the session scope", () => {
 	const h = makeHarness("runtime-lifecycle");
 	beforeAll(() => {
-		getState(h.ctx).binaryPath = TEST_BINARY;
+		switchBinary(h.ctx, TEST_BINARY);
 	});
 	afterAll(() => shutdownState("runtime-lifecycle"));
 
@@ -63,7 +63,7 @@ describe.skipIf(!canRunRizin)("process lifecycle is owned by the session scope",
 
 	test("disposing the session scope closes every process it owns (static + debug)", async () => {
 		const h2 = makeHarness("runtime-dispose");
-		getState(h2.ctx).binaryPath = TEST_BINARY;
+		switchBinary(h2.ctx, TEST_BINARY);
 		const rz = await ensureRizin(h2.ctx);
 		const dbg = await startDebug(h2.ctx);
 		expect(rz.isClosed).toBe(false);

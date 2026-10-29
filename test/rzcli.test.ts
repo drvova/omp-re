@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BINARY_PLACEHOLDER, checkRzCli, type RzCliToolDef, RZ_CLI_TOOLS, registerRzCliTools } from "../extensions/re/tools-rzcli.ts";
 
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { captureError, canRunRizin, isRzToolAvailable, logSkip, makeHarness, TEST_BINARY, textOf } from "./helpers.ts";
 
 logSkip("rizin CLI (rz-*) tests");
@@ -100,7 +100,7 @@ const run = (tool: string, args: string[]) => harness.tool("rizin_cli").execute(
 
 describe.skipIf(!canRunRizin || !isRzToolAvailable("rz-bin"))("rizin_cli against the real rz-* tools", () => {
 	beforeAll(async () => {
-		getState(ctx).binaryPath = TEST_BINARY;
+		switchBinary(ctx, TEST_BINARY);
 		await registerRzCliTools(harness.pi);
 	});
 	afterAll(() => shutdownState(ctx.sessionManager.getSessionId()));

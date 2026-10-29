@@ -14,7 +14,7 @@ import { recordedSignatures } from "../extensions/re/entries.ts";
 import { rizinPathArg } from "../extensions/re/output.ts";
 import { addrOf, eaFromOffset, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { registerSignatureTools } from "../extensions/re/tools-signatures.ts";
-import { ensureRizin, getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, ensureRizin, getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, TEST_BINARY, textOf } from "./helpers.ts";
 
 logSkip("signatures tests");
@@ -37,8 +37,8 @@ describe.skipIf(!canRunRizin)("apply_signatures (chapter D)", () => {
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		entries.push({ type: "custom", id: "bin-0", customType: "re.binary", data: { path: binaryPath } });
 		rz = await RzSession.spawn(rizinPath, binaryPath);
-		getState(ctx).binaryPath = binaryPath;
-		getState(ctx).rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 		mainEa = eaFromOffset(addrOf((await rz.cmdj<{ offset: number }[]>("afij @ main"))![0]! as never)!);
 
 		// A minimal FLIRT .pat matching main's first 16 bytes: <32 nibbles> <crc-len> <crc16> <len> :<off> <name>.
@@ -94,8 +94,8 @@ describe.skipIf(!canRunRizin)("create_signature (FLIRT creation)", () => {
 		process.env.OMPRE_OUTPUT_DIR = outDir;
 		binaryPath = await resolveBinaryPath(TEST_BINARY);
 		rz = await RzSession.spawn(rizinPath, binaryPath); // spawn runs `aaa`, so there are functions to signature
-		getState(ctx).binaryPath = binaryPath;
-		getState(ctx).rz = rz;
+		switchBinary(ctx, binaryPath);
+		attachSession(ctx, rz);
 	});
 	afterAll(() => {
 		delete process.env.OMPRE_OUTPUT_DIR;

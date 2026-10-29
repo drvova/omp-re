@@ -53,6 +53,26 @@ export interface ReSessionState {
 	_disposeDbg: Disposer | null;
 }
 
+/**
+ * The read-only view external modules (tools, UI, evidence, audit) get from
+ * `getState`. They *query* these fields — and may call methods on a live
+ * process handle (`rz.cmd(...)`, `rz.close()`) — but every field mutation goes
+ * through a named facade function in `state.ts`, so the shared record is never
+ * poked field-by-field across the codebase. The mutable internals
+ * (`evidenceByAddr`, `loadOptions`, the teardown scope and disposers) are not on
+ * the view at all, so a caller can't reach past the facade.
+ */
+export interface ReSessionView {
+	readonly sessionId: string;
+	readonly binaryPath: string | null;
+	readonly binarySha256: string | null;
+	readonly toolsOff: boolean;
+	readonly opening: Promise<void> | null;
+	readonly rz: RzSession | null;
+	readonly dbg: RzSession | null;
+	readonly evidenceCount: number;
+}
+
 type Disposer = () => Promise<void> | void;
 type Teardown = () => Promise<void> | void;
 
@@ -137,11 +157,46 @@ class RizinBackend {
 		return rec._scope;
 	}
 
-	requireBinary(rec: ReSessionState): string {
+	requireBinary(rec: ReSessionView): string {
 		if (!rec.binaryPath) {
 			throw new Error("omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first");
 		}
 		return rec.binaryPath;
+	}
+
+	/**
+	 * A branch/resume switched which binary this session is about: tear the live
+	 * process down (through its teardown effect, not a raw close) and record the
+	 * new identity. The next tool call respawns and replays the new branch's
+	 * annotations. No-op when the binary is unchanged.
+	 */
+	switchBinary(sessionId: string, binaryPath: string | null, loadOptions: LoadOptions | null): void {
+		const rec = this.record(sessionId);
+		if (rec.binaryPath === binaryPath) return;
+		const rz = rec.rz;
+		const dispose = rec._disposeRz;
+		rec._disposeRz = null;
+		rec.rz = null;
+		if (dispose) void dispose();
+		else if (rz && !rz.isClosed) rz.close();
+		rec.binaryPath = binaryPath;
+		rec.loadOptions = loadOptions;
+	}
+
+	/**
+	 * Attach an already-spawned rizin process as this session's live one and
+	 * register its teardown on the session scope, so shutdown closes it. The
+	 * production path spawns through {@link spawn}/{@link ensure}; this is for a
+	 * direct attach (and the test fixtures that inject a process).
+	 */
+	attachSession(sessionId: string, rz: RzSession): void {
+		const rec = this.record(sessionId);
+		const previous = rec._disposeRz;
+		rec._disposeRz = this.scope(rec).effect(() => () => {
+			if (!rz.isClosed) rz.close();
+		});
+		rec.rz = rz;
+		void previous?.();
 	}
 
 	/**

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deobfuscateCommand, registerDeobfuscateTools } from "../extensions/re/tools-deobfuscate.ts";
 import { RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { attachSession, getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, rizinPath, rmDirSafe, TEST_BINARY, textOf } from "./helpers.ts";
 
 logSkip("deobfuscate tests");
@@ -52,8 +52,8 @@ describe.skipIf(!canRunRizin)("deobfuscate against a real session", () => {
 		const payload = Buffer.from([...Buffer.from(`${PLAINTEXT}\0`)].map((b) => b ^ 0x5a));
 		writeFileSync(blob, Buffer.concat([Buffer.alloc(0x10, 0x90), payload]));
 		const rz = await RzSession.spawn(rizinPath, blob);
-		getState(ctx).binaryPath = blob;
-		getState(ctx).rz = rz;
+		switchBinary(ctx, blob);
+		attachSession(ctx, rz);
 	});
 
 	afterAll(() => {

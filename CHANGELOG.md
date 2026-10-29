@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Per-session state is encapsulated behind a read-only view + intent methods.**
+  `getState` now returns a `ReSessionView` — external modules query it (and may
+  call methods on a live process handle) but can no longer reassign its fields or
+  reach the evidence-index map. Every mutation goes through a named facade
+  function (`setToolsOff`, `setBinarySha256`, `setPendingOpen`/`clearPendingOpen`,
+  `markAuditHmacWarned`, `switchBinary`, `attachSession`, `resetEvidenceIndex`,
+  `recordEvidenceAt`, `evidenceIdAt`), so the shared record is no longer poked
+  field-by-field across two dozen files and its invariants live in one place. The
+  branch-switch lifecycle (closing the live rizin process on a binary change)
+  moved into the backend and now tears the process down through its teardown
+  effect instead of a raw `close()` that bypassed the session scope. No behavior
+  change; internal structure only.
 - **One-tool read surface.** omp-re no longer registers a typed tool per read.
   You read the binary through a single tool — `rizin_command` — running rizin's
   own read-only commands (`aflj`, `pdg`, `izj`, `iij`, `iEj`, `axtj`, `tsj`,

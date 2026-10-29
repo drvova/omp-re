@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { preservedStateLines, registerPreservation } from "../extensions/re/preserve.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { makeHarness } from "./helpers.ts";
 
 function withEvidence(h: ReturnType<typeof makeHarness>, items: { id: string; tool: string; ea?: string }[]): void {
@@ -21,7 +21,7 @@ describe("preservedStateLines", () => {
 
 	test("names the open binary, the counts, and the most recent evidence", () => {
 		const h = makeHarness("preserve-active");
-		getState(h.ctx).binaryPath = "/usr/bin/ls";
+		switchBinary(h.ctx, "/usr/bin/ls");
 		withEvidence(h, [
 			{ id: "aaaaaaaa-1111", tool: "hash_binary" },
 			{ id: "bbbbbbbb-2222", tool: "list_imports", ea: "0x1000" },
@@ -39,7 +39,7 @@ describe("preservedStateLines", () => {
 
 	test("restates live findings verbatim (not superseded or retracted ones) so the model doesn't re-derive them", () => {
 		const h = makeHarness("preserve-findings");
-		getState(h.ctx).binaryPath = "/bin/ls";
+		switchBinary(h.ctx, "/bin/ls");
 		withEvidence(h, [{ id: "dddddddd-4444", tool: "rizin_command" }]);
 		h.pi.appendEntry("re.finding", { id: "f1111111-x", claim: "checksum is djb2.", evidenceIds: ["dddddddd-4444"], addr: "sym.checksum", confidence: "confirmed" });
 		h.pi.appendEntry("re.finding", { id: "f2222222-x", claim: "old claim", evidenceIds: ["dddddddd-4444"], confidence: "likely" });
@@ -55,7 +55,7 @@ describe("preservedStateLines", () => {
 
 	test("caps the named evidence but still reports the full count", () => {
 		const h = makeHarness("preserve-cap");
-		getState(h.ctx).binaryPath = "/bin/ls";
+		switchBinary(h.ctx, "/bin/ls");
 		withEvidence(
 			h,
 			Array.from({ length: 20 }, (_, i) => ({ id: `id${i.toString().padStart(6, "0")}-x`, tool: "list_functions" })),
@@ -90,7 +90,7 @@ describe("registerPreservation", () => {
 		expect(handler).toBeDefined();
 
 		const active = makeHarness("preserve-handler-active");
-		getState(active.ctx).binaryPath = "/bin/ls";
+		switchBinary(active.ctx, "/bin/ls");
 		active.pi.appendEntry("re.evidence", { id: "dddddddd-4444", tool: "list_strings", summary: "s" });
 		const result = (await handler!({ type: "session.compacting" }, active.ctx)) as { context?: string[] } | undefined;
 		expect(result?.context?.join("\n")).toContain("Open binary: ls");

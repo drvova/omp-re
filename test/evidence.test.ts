@@ -7,7 +7,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { collectEvidence } from "../extensions/re/entries.ts";
 import { readBlob, rebuildEvidenceIndex, registerEvidenceStore, writeBlob } from "../extensions/re/evidence.ts";
 import { collectFindings, registerFindingTools } from "../extensions/re/findings.ts";
-import { getState } from "../extensions/re/state.ts";
+import { evidenceIdAt, getState } from "../extensions/re/state.ts";
 import { makeHarness, textOf } from "./helpers.ts";
 
 let tempDir: string;
@@ -56,15 +56,14 @@ describe("rebuildEvidenceIndex", () => {
 			{ type: "custom", id: "e3", customType: "re.evidence", data: { id: "ev-c", tool: "list_imports", summary: "" } },
 		);
 		rebuildEvidenceIndex(ctx);
-		const state = getState(ctx);
-		expect(state.evidenceCount).toBe(3);
-		expect(state.evidenceByAddr.get("0x4da0")).toBe("ev-b");
+		expect(getState(ctx).evidenceCount).toBe(3);
+		expect(evidenceIdAt(ctx, "0x4da0")).toBe("ev-b");
 
 		// /tree navigation back to before the decompile: the index follows the branch.
 		entries.splice(1);
 		rebuildEvidenceIndex(ctx);
-		expect(state.evidenceCount).toBe(1);
-		expect(state.evidenceByAddr.get("0x4da0")).toBe("ev-a");
+		expect(getState(ctx).evidenceCount).toBe(1);
+		expect(evidenceIdAt(ctx, "0x4da0")).toBe("ev-a");
 	});
 });
 

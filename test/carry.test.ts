@@ -19,7 +19,7 @@ import { fingerprintAnchor, sequenceSimilarity } from "../extensions/re/anchor.t
 import { canonicalExcerpt, canonicalHash, maskAddresses, shiftHash } from "../extensions/re/format.ts";
 import { RzSession, resolveRizinPath } from "../extensions/re/rizin.ts";
 import { writeReport } from "../extensions/re/report.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { getState, setBinarySha256, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { sha256File } from "../extensions/re/verify.ts";
 import { makeHarness, rizinAvailable, rmDirSafe } from "./helpers.ts";
 
@@ -204,7 +204,7 @@ describe.skipIf(!canCarryLive)("carryManifest against a rebuilt binary (real riz
 
 	test("on the same build every reproducible claim holds and nothing fails", async () => {
 		const h = makeHarness("carry-same");
-		getState(h.ctx).binaryPath = v1;
+		switchBinary(h.ctx, v1);
 		const result = await carryManifest(h.ctx, manifestPath);
 		const byId = new Map(result.evidence.map((r) => [r.evidenceId, r.status]));
 		for (const id of ["ev-arch", "ev-clamp", "ev-checksum", "ev-fib", "ev-fib-nofp", "ev-square", "ev-transform"]) expect([id, byId.get(id)]).toEqual([id, "holds"]);
@@ -215,7 +215,7 @@ describe.skipIf(!canCarryLive)("carryManifest against a rebuilt binary (real riz
 
 	test("on the rebuilt binary: unchanged code holds, shifted code holds, edited code drifts, renamed code relocates (or breaks without a fingerprint)", async () => {
 		const h = makeHarness("carry-v2");
-		getState(h.ctx).binaryPath = v2;
+		switchBinary(h.ctx, v2);
 		const out = join(dir, "carry.md");
 		const result = await carryManifest(h.ctx, manifestPath, { out });
 		const row = (id: string) => result.evidence.find((r) => r.evidenceId === id)!;
@@ -260,10 +260,9 @@ describe.skipIf(!canCarryLive)("carryManifest against a rebuilt binary (real riz
 
 	test("/re report fingerprints an address-pinned rizin_command's anchor into the manifest while its binary is open", async () => {
 		const h = makeHarness("carry-report-anchor");
-		const state = getState(h.ctx);
 		const sha = await sha256File(v1);
-		state.binaryPath = v1;
-		state.binarySha256 = sha;
+		switchBinary(h.ctx, v1);
+		setBinarySha256(h.ctx, sha);
 		h.entries.push(
 			{ type: "custom", id: "b1", customType: "re.binary", data: { path: v1, sha256: sha } },
 			{
@@ -299,7 +298,7 @@ describe.skipIf(!canCarryLive)("carryManifest against a rebuilt binary (real riz
 		await writeFile(path, JSON.stringify(driftOnly));
 
 		const h = makeHarness("carry-strict");
-		getState(h.ctx).binaryPath = v2;
+		switchBinary(h.ctx, v2);
 		await carryManifest(h.ctx, path);
 		expect(process.exitCode).not.toBe(1);
 		await carryManifest(h.ctx, path, { strict: true });

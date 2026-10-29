@@ -6,6 +6,7 @@ import { checkRizinCommand, isKnownCommand, loadCatalog, NOARG_DUALS, READ_ONLY_
 import { resolveDecompiler } from "../extensions/re/decompile.ts";
 import { RzAbortError, RzProtocolError, RzSession, resolveBinaryPath } from "../extensions/re/rizin.ts";
 import { ensureRizin, getState, shutdownState, spawnRizin, syncAnnotationsToBranch } from "../extensions/re/state.ts";
+import { backend } from "../extensions/re/runtime.ts";
 import { scopedSearch, searchCommand } from "../extensions/re/tools-search.ts";
 import { defineTypeLines } from "../extensions/re/tools-types.ts";
 import { canRunRizin, logSkip, makeHarness, rizinPath, rmDirSafe, TEST_BINARY } from "./helpers.ts";
@@ -275,7 +276,8 @@ describe.skipIf(!canRunRizin)("session state: respawn, replay, and branch sync",
 
 	test("navigating to a branch without the annotation retires the process and the respawn drops the rename", async () => {
 		const state = getState(ctx);
-		state.appliedAnnotations = "ann-0";
+		// appliedAnnotations is a backend internal (not on the read-only view): poke the record directly to simulate a prior fingerprint.
+		backend().record(ctx.sessionManager.getSessionId()).appliedAnnotations = "ann-0";
 		entries.splice(entries.findIndex((e) => e.id === "ann-0"), 1);
 		syncAnnotationsToBranch(ctx);
 		expect(state.rz).toBeNull();

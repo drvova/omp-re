@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEBUG_LAUNCH_WARNING, buildDebugTarget, buildRunDirectives, debuggerEnabled, registerDebugTools } from "../extensions/re/tools-debug.ts";
 import { registerEmulateTools } from "../extensions/re/tools-emulate.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { getState, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { canRunRizin, captureError, logSkip, makeHarness, TEST_BINARY, textOf } from "./helpers.ts";
 
 logSkip("debugger tests");
@@ -127,7 +127,7 @@ describe.skipIf(!canRunRizin)("emulate tool against a real rizin session", () =>
 		harness.tool("rizin_emulate").execute("t-emulate", { action, ...extra }, undefined, undefined, ctx);
 
 	beforeAll(() => {
-		getState(ctx).binaryPath = TEST_BINARY;
+		switchBinary(ctx, TEST_BINARY);
 		registerEmulateTools(harness.pi);
 	});
 	afterAll(() => shutdownState(ctx.sessionManager.getSessionId()));
@@ -179,7 +179,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)("debug tool against a real d
 		process.env.OMPRE_ENABLE_DEBUGGER = "1";
 		outDir = mkdtempSync(join(tmpdir(), "omp-re-dump-test-"));
 		process.env.OMPRE_OUTPUT_DIR = outDir;
-		getState(ctx).binaryPath = TEST_BINARY;
+		switchBinary(ctx, TEST_BINARY);
 		registerDebugTools(harness.pi);
 	});
 	afterAll(() => {
@@ -390,7 +390,7 @@ describe.skipIf(!canRunRizin || !debuggerSupported)("debug attach to a running p
 
 	beforeAll(() => {
 		process.env.OMPRE_ENABLE_DEBUGGER = "1";
-		getState(ctx).binaryPath = TEST_BINARY; // the open binary is the symbol source
+		switchBinary(ctx, TEST_BINARY); // the open binary is the symbol source
 		registerDebugTools(harness.pi);
 		// A long-lived process of our own to attach to.
 		victim = Bun.spawn(["sleep", "120"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });

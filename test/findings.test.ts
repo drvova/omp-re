@@ -20,7 +20,7 @@ import { collectEvidence } from "../extensions/re/entries.ts";
 import { recordEvidence } from "../extensions/re/evidence.ts";
 import { collectFindings, registerFindingTools } from "../extensions/re/findings.ts";
 import { writeReport } from "../extensions/re/report.ts";
-import { getState, shutdownState } from "../extensions/re/state.ts";
+import { getState, setBinarySha256, shutdownState, switchBinary } from "../extensions/re/state.ts";
 import { runRizinCommand } from "../extensions/re/tools-rizin.ts";
 import { sha256File } from "../extensions/re/verify.ts";
 import { makeHarness, rizinAvailable, rmDirSafe, textOf } from "./helpers.ts";
@@ -51,7 +51,7 @@ afterEach(() => {
 function setup(sessionId: string, judge: ClaimJudge | null) {
 	const h = makeHarness(sessionId);
 	registerFindingTools(h.pi, { judge: () => judge });
-	getState(h.ctx).binarySha256 = SHA_A;
+	setBinarySha256(h.ctx, SHA_A);
 	h.entries.push(
 		{ type: "custom", id: "b", customType: "re.binary", data: { path: "/bin/sample", sha256: SHA_A } },
 		{
@@ -87,7 +87,7 @@ describe("record_finding gates (no rizin needed)", () => {
 
 	test("refuses evidence taken against a different binary", async () => {
 		const { h, run } = setup("find-foreign", judgeSaying("supported"));
-		getState(h.ctx).binarySha256 = "c".repeat(64);
+		setBinarySha256(h.ctx, "c".repeat(64));
 		await expect(run("record_finding", { claim: "x", evidence: ["11111111"] })).rejects.toThrow("different binary");
 		shutdownState("find-foreign");
 	});
@@ -177,8 +177,8 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		let verdict: ClaimAudit["verdict"] = "supported";
 		registerFindingTools(h.pi, { judge: () => async (items) => items.map((i) => ({ index: i.index, verdict, reason: verdict === "supported" ? "shown" : "a loop, not a hash" })) });
 		const v1Sha = await sha256File(v1);
-		getState(h.ctx).binaryPath = v1;
-		getState(h.ctx).binarySha256 = v1Sha;
+		switchBinary(h.ctx, v1);
+		setBinarySha256(h.ctx, v1Sha);
 		const adopt = (params: Record<string, unknown>) => h.tool("adopt_finding").execute("c", params, undefined, undefined, h.ctx);
 		// What re-analyst hands back: claim + reproduce lines + its sha256 + confidence "possible".
 		const subagentFinding = { claim: "fib computes Fibonacci numbers iteratively.", commands: [{ command: "pdf", addr: "sym.fib" }], addr: "sym.fib", confidence: "possible", source: "re-analyst", expect_sha256: v1Sha };
@@ -214,8 +214,8 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		const a = makeHarness("inherit-v1");
 		registerFindingTools(a.pi, { judge: () => judgeSaying("supported") });
 		const v1Sha = await sha256File(v1);
-		getState(a.ctx).binaryPath = v1;
-		getState(a.ctx).binarySha256 = v1Sha;
+		switchBinary(a.ctx, v1);
+		setBinarySha256(a.ctx, v1Sha);
 		a.entries.push({ type: "custom", id: "b", customType: "re.binary", data: { path: v1, sha256: v1Sha } }); // what /re open writes
 		const evidenceFor = async (command: string, addr: string) => {
 			const res = await runRizinCommand(a.ctx, command, addr);
@@ -235,8 +235,8 @@ describe.skipIf(!canRunLive)("record → report → carry --inherit across two b
 		// ── Session B: carry onto v2 and inherit.
 		const b = makeHarness("inherit-v2");
 		const v2Sha = await sha256File(v2);
-		getState(b.ctx).binaryPath = v2;
-		getState(b.ctx).binarySha256 = v2Sha;
+		switchBinary(b.ctx, v2);
+		setBinarySha256(b.ctx, v2Sha);
 		b.entries.push({ type: "custom", id: "b", customType: "re.binary", data: { path: v2, sha256: v2Sha } });
 		// omp writes a session lazily, on its first model turn; inheriting must write it now, or a headless
 		// `omp -p "/re carry --inherit"` run drops the findings it just re-proved.
