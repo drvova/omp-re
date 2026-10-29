@@ -109,6 +109,17 @@ the call failed.
 Long output ends with `[Output truncated … Full output: artifact://N]`; `read`
 that artifact when the part that was cut matters.
 
+## Playbooks
+
+For a task beyond first-pass triage — deep-function review, vulnerability
+hunting, crackme/constraint recovery, IOC extraction, exploit-dev recon,
+shellcode or file-format triage, diffing two binaries, or emulation — `read`
+the sibling file `playbooks.md` in this skill. Each playbook composes
+`rizin_command`, the stateful tools, and `rizin_emulate` into the kind of
+analysis other suites expose as a single tool, with the exact (version-checked)
+commands and the evidence/finding tie-in. They are starting lines to adapt, not
+scripts to run blind.
+
 ## Finding commands
 
 `rizin_command` is the whole of rizin's read surface — function summaries
@@ -154,7 +165,12 @@ a single run as exhaustive. Keep static annotations in the mutate tools.
 
 For code that only computes (a decryptor, an argument builder) without
 syscalls, `rizin_emulate` interprets it in rizin's RzIL VM with no OS process
-— safer than the debugger and enabled by default.
+— safer than the debugger and enabled by default. Its `step` returns a full
+per-instruction read/write trace, so you watch exactly which registers and
+branch a candidate input takes. For one-off arithmetic with no VM, `ae <rpn>`
+through `rizin_command` is an ESIL calculator (`ae 0x41,0x13,^`); `aoj`/`ao`
+lifts a single instruction to its ESIL and RzIL forms. See the emulation
+playbook in `playbooks.md`.
 
 ## Navigating
 

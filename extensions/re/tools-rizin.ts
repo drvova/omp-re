@@ -44,7 +44,9 @@ Reading the binary (prefer the JSON \`*j\` forms; they canonicalize for /re veri
   symbols     isj              sections      iSj             headers    iHj
   types       tsj              entropy       ph entropy      hexdump    px <n> @ <addr>
   search      /xj <hex>  /Rj (ROP)  /vj (value)             info       ij
+  il lift     aoj @ <addr>  (esil+rzil)  esil calc  ae <rpn>  (ae 0x41,0x13,^)
   Anything else: rizin_help first, then rizin_command. Read-only; writes are refused here.
+  Driving the RzIL VM (stateful) is the separate rizin_emulate tool.
 
 Render in eval (display vs print)
   A call returns { text, details } to your code — not a card. display(value) shows a
