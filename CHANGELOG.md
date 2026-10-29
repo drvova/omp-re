@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-29
+
 ### Changed
 
 - **Per-session state is encapsulated behind a read-only view + intent methods.**
