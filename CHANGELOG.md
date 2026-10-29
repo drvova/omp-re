@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docs: `omp plugin upgrade` needs a catalog refresh first.** `omp plugin
+  upgrade omp-re@drvova` reinstalls from a *local cache* of the marketplace
+  catalog, so on its own it reinstalls the version you already have and looks
+  like it did nothing. README and `docs/install.md` now show
+  `omp plugin marketplace update drvova` before the upgrade.
+
 ## [0.8.0] - 2026-10-29
 
 ### Changed

@@ -34,8 +34,14 @@ the `@name` is the catalog).
 To update an installed copy to the latest published version:
 
 ```bash
+omp plugin marketplace update drvova   # re-fetch the catalog first — upgrade reads a local cache
 omp plugin upgrade omp-re@drvova
 ```
+
+`omp plugin upgrade` reinstalls from a **local cache** of the marketplace
+catalog, so without the `marketplace update` refresh it just reinstalls the
+version you already have (and looks like it did nothing). Omit the name from
+`marketplace update` to refresh every marketplace.
 
 `omp plugin list` shows the installed version. (A dev-load via the
 `extensions:` config below has nothing to upgrade — a fresh `omp` start picks
