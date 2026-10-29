@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **re-triage playbooks** (`skills/re-triage/playbooks.md`): task-shaped recipes
+  — deep-function review, vulnerability patterns, crackme/constraint recovery,
+  IOC extraction, exploit-dev recon, shellcode and file-format triage, binary
+  diffing, and emulation — that compose `rizin_command`, the stateful tools, and
+  `rizin_emulate` into the analyses other suites expose as single tools, with
+  version-checked commands and the evidence/finding tie-in. The skill and the
+  `re-analyst` agent point to it.
+- The `rizin_command` manual and the emulation guidance now surface the ESIL
+  calculator (`ae <rpn>`) and single-instruction IL lifting (`aoj`, showing both
+  the ESIL and RzIL forms) alongside the RzIL VM, so the one-tool surface
+  advertises the emulation/computation commands it already serves.
+
 ### Fixed
 
 - **Docs: `omp plugin upgrade` needs a catalog refresh first.** `omp plugin
