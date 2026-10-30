@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Release automation now cuts a version on every merge to `main`.** The
+  Conventional-Commits bump in `scripts/release.mjs` previously released only on
+  `feat`/`fix`/`perf`/breaking; now `feat` → minor and breaking → major as
+  before, but **every other merge** (`refactor`, `docs`, `chore`, `ci`, `test`,
+  `style`, `build`, or no prefix) → **patch**, so each merge is an upgradeable
+  version. The workflow's own `chore(release):` commit is exempt so a release
+  never loops into the next.
 - **Retired the dormant read-tier tool code (internal; no user-facing change).**
   The 0.8.0 one-tool redesign unregistered the 31 typed read wrappers but left
   their source in the tree. This removes it: the six `tools-{read,info,search,
