@@ -13,10 +13,14 @@
  *   breaking → major   (but minor while the version is still 0.x — a stray
  *                        `!` shouldn't silently cut 1.0.0)
  *   feat     → minor
- *   fix,perf → patch
- *   anything else (docs, chore, ci, test, refactor, style, build, release, …)
- *            → no release on its own
- * The highest level across the range wins; an empty result means "no release".
+ *   everything else → patch   (every merge to main ships a version: fix, perf,
+ *                              refactor, docs, chore, ci, test, style, build,
+ *                              or a subject with no conventional prefix)
+ *   chore(release): … → no release — the workflow's own release commit, so a
+ *                        release never loops into the next (the workflow also
+ *                        guards this, but the script stands alone too)
+ * The highest level across the range wins; "none" only when the range is empty
+ * or holds nothing but the release commit.
  *
  * Usage:
  *   node scripts/release.mjs <baseRef> <headRef> [--dry-run]
@@ -87,12 +91,14 @@ function levelOf(message) {
 	const subject = message.split("\n")[0].trim();
 	const m = TYPE_RE.exec(subject);
 	const breakingFooter = /(^|\n)BREAKING[ -]CHANGE:/.test(message);
+	// The release commit the workflow pushes must never trigger another release,
+	// or each release would loop into the next. (The workflow's `if:` also skips
+	// such a push; this keeps the script correct on its own.)
+	if (/^chore\(release\)!?:/i.test(subject)) return "none";
 	if ((m && m[2] === "!") || breakingFooter) return "major";
-	if (!m) return "none";
-	const type = m[1].toLowerCase();
-	if (type === "feat") return "minor";
-	if (type === "fix" || type === "perf") return "patch";
-	return "none";
+	if (m && m[1].toLowerCase() === "feat") return "minor";
+	// Every other merge to main ships: at least a patch, whatever the type.
+	return "patch";
 }
 
 /** The level actually applied, capping a breaking change to minor while in 0.x. */
