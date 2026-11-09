@@ -124,25 +124,25 @@ no host-level hot-unload — the host does not offer one.
 | `ui.ts` | Status band, overlay panels, evidence helpers |
 | `report.ts` / `annotations.ts` / `entries.ts` / `disasm.ts` / `format.ts` / `render.ts` | Report gate, annotation replay, branch entry helpers, disassembly, result formatting, tool renderers |
 
-## A second host: nodecode (`nodecode/`)
+## A second engine: the nodecode cell (`nodecode/`)
 
-The engine above needs a host, not omp in particular. `nodecode/host.ts` is a
-headless one: it implements the part of `ExtensionAPI` the engine uses — tool
-and command registration, the event listeners, `appendEntry`/`getBranch` over
-an append-only file per session, an artifact store, argv exec — and runs the
-same `tool_call` → execute → `tool_result` pipeline omp's tool wrapper does, so
-the audit log and the evidence store cannot tell the two hosts apart. It has
-no UI (`hasUI` is false), so the engine takes its own headless branches; what
-those print is captured per request (`AsyncLocalStorage`) and returned as the
-command's text, and the `process.exitCode` they set is read back as that
-command's failure and cleared.
+`nodecode-re.asd` and `nodecode/*.lisp` are this engine again, in Common Lisp,
+for [nodecode](https://nodecode.ai) — whose extensions are Lisp cells and
+whose model has one tool, `eval`. It is a port, module for module (each Lisp
+file names the TypeScript it ports), not a wrapper: it needs rizin and nothing
+else. It keeps this document's shape — a session owns a rizin process and a
+record; the record is the truth and the process a cache of it; every tool
+call goes through one pipeline that audits it and records a read as evidence —
+and writes the same entries, blobs, audit lines and report manifest.
 
-`nodecode/bridge.ts` serves that host over stdin/stdout, one JSON object per
-line, with request ids, per-session ordering, cancellation and an idle reaper.
-`nodecode-re.asd` and `nodecode/*.lisp` are the nodecode cell that spawns it
-and presents the engine as eval verbs. Nothing under `extensions/re` imports
-from `nodecode/`; the dependency points one way. See
-[`nodecode.md`](nodecode.md).
+Nothing under `extensions/re` depends on `nodecode/`. The dependency the other
+way is deliberate and narrow: `scripts/gen-nodecode-policy.ts` generates
+`nodecode/policy-data.lisp` from `catalog.ts`, so the read-only command policy
+has one source, and `test/nodecode-parity.test.ts` asks both engines the same
+questions and fails when they answer differently. **A change to the policy,
+the validators, the canonical output projection or a record's shape here must
+be made there too** — the generator and the parity test will say so for the
+first three. See [`nodecode.md`](nodecode.md).
 
 ## Data that outlives a process
 

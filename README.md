@@ -143,17 +143,18 @@ tools top-level instead; nothing else changes.)
 
 The same engine runs under [nodecode](https://nodecode.ai), whose model has one
 tool — `eval`, evaluating Lisp — and whose extensions are *cells*. This
-repository is one: clone it into the cells folder and install the engine's
-dependencies once.
+repository is one: clone it into the cells folder. It needs rizin and nothing
+else.
 
 ```sh
 git clone https://github.com/drvova/omp-re ~/.nodecode/cells/nodecode-re
-cd ~/.nodecode/cells/nodecode-re && bun install
 ```
 
-The cell is native Lisp — verbs in the `RE` package, a `/re` command, a
-`(help :re)` manual, a config section — and adds no tool schemas by default,
-the nodecode counterpart of the one-tool surface above:
+The cell is pure Common Lisp (`nodecode-re.asd`, `nodecode/*.lisp`): omp-re's
+engine ported from `extensions/re`, presented the nodecode way — verbs in the
+`RE` package, a `/re` command, a `(help :re)` manual, a config section — with
+no tool schemas added by default, the counterpart of the one-tool surface
+above:
 
 ```lisp
 (re:open "/bin/ls")                  ; open and analyze
@@ -163,11 +164,13 @@ the nodecode counterpart of the one-tool surface above:
 (re:slash "report analysis.md")      ; a /re line
 ```
 
-It drives `extensions/re` itself through a stdio bridge rather than
-reimplementing it, so evidence, the audit log, findings and the report gate
-are the same code on both hosts. See [`docs/nodecode.md`](docs/nodecode.md)
-for the verbs, configuration, and what differs from omp (no approval tiers, no
-panels, no branch following).
+Evidence, the audit log, findings, annotations with replay, `/re verify` and
+the report gate behave as they do under omp, the records are the same shape,
+and the read-only command policy is generated from this engine's own, so the
+two cannot disagree about what `rizin_command` runs. See
+[`docs/nodecode.md`](docs/nodecode.md) for the verbs, configuration, how the
+two engines are held together, and what differs from omp (no approval tiers,
+no panels, no branch following).
 
 ## What's omp-native
 
@@ -506,7 +509,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
-- [`docs/nodecode.md`](docs/nodecode.md) — running omp-re as a nodecode cell: verbs, configuration, how the bridge works.
+- [`docs/nodecode.md`](docs/nodecode.md) — running omp-re as a nodecode cell: verbs, configuration, the Lisp engine and how it is held to this one.
 - [`docs/tools.md`](docs/tools.md) — the `rizin_command` read map and parameter tables for the stateful tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.

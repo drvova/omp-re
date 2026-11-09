@@ -8,26 +8,25 @@ the same reverse-engineering engine the omp plugin runs: one tool to read the
 binary, stateful annotations, the evidence store, the audit log, gated
 findings, and the report writer that refuses a claim with no evidence.
 
-It is the same engine, not a port. The cell is native Lisp — verbs, a `/re`
-command, a manual topic, a config section — and it drives `extensions/re`
-through a small stdio bridge, so a fix to the engine lands on both hosts.
+The cell is pure Common Lisp: omp-re's engine ported file by file from the
+TypeScript under `extensions/re`, with the verbs, the `/re` command, the
+manual and the config section over it. It needs rizin and nothing else — no
+bun, no node. The two engines write the same records and enforce the same
+read-only policy, and a test holds them to each other
+([Two engines, one behaviour](#two-engines-one-behaviour)).
 
 ## Install
 
-You need [rizin](install.md), [bun](https://bun.sh), and nodecode.
+You need [rizin](install.md) and nodecode.
 
 ```sh
 git clone https://github.com/drvova/omp-re ~/.nodecode/cells/nodecode-re
-cd ~/.nodecode/cells/nodecode-re && bun install
 ```
 
 The folder must be named `nodecode-re`, after the system in
 `nodecode-re.asd`. It loads at the next launch (or `(restart-cells
 "nodecode-re")`). To work from a checkout elsewhere, link it instead:
 `ln -s /path/to/omp-re ~/.nodecode/cells/nodecode-re`.
-
-`bun install` fetches the engine's dependencies (omp's own packages, which it
-is written against). Without it the first call says so and names the command.
 
 Then, in a session:
 
@@ -89,7 +88,8 @@ every request and `(help :re)` answers the full primer.
 
 Set `"surface": "tools"` and every engine tool is also registered as a tool of
 its own, named `re_<name>` (`re_rizin_command`, `re_record_finding`, …), with
-the engine's own description and JSON schema. The verbs stay. Use this for a
+its description and a JSON Schema derived from the same parameter list the
+verbs are checked against. The verbs stay. Use this for a
 model that calls tools more reliably than it writes Lisp; the default keeps
 thirty schemas out of every request.
 
@@ -108,21 +108,23 @@ A section of `~/.nodecode/config.jsonc`; every member is optional (see
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `command` | `["bun"]` | The argv prefix that runs the engine. |
-| `timeout_seconds` | `600` | One call's ceiling. A call past it is cancelled in the engine and says so. |
 | `surface` | `"eval"` | `"eval"`: verbs only. `"tools"`: also one `re_<name>` tool per engine tool. |
 | `rizin_path` | `""` | The rizin to run when it is not the one on `PATH`. |
 | `state_dir` | `""` | Where session records, evidence, the audit log and reports go. Empty: `omp-re/` under the nodecode home (it follows a profile). |
 | `debugger` | `false` | Offer `rizin_debug`, which **executes the sample**. Leave off outside a sandbox. |
+| `idle_minutes` | `30` | Close the rizin process of a session unused this long. Nothing is lost: its next call restores it from the record. |
 
-The engine's own environment variables (`OMPRE_DECOMPILER`,
-`OMPRE_ANALYSIS_TIMEOUT_MS`, `OMPRE_AUDIT_HMAC_KEY`, …; see the README) are
-read from the organism's environment as before. `"enabled": false` turns the
+The engine's environment variables (`OMPRE_DECOMPILER`,
+`OMPRE_ANALYSIS_TIMEOUT_MS`, `OMPRE_AUDIT_HMAC_KEY`, `OMPRE_OUTPUT_DIR`, …; see
+the README) are read from the organism's environment, as the omp plugin reads
+them. `rizin_path` and `debugger` take the place of `OMPRE_RIZIN_PATH` and
+`OMPRE_ENABLE_DEBUGGER`, which still work. `"enabled": false` turns the
 cell off.
 
 ## What is the same as under omp, and what is not
 
-The same, because it is the same code:
+The same, because the Lisp engine is a port of the TypeScript one and writes
+the same records:
 
 - every call is written to the audit log, signed when `OMPRE_AUDIT_HMAC_KEY`
   is set;
@@ -133,9 +135,10 @@ The same, because it is the same code:
   hash;
 - annotations are recorded and **replayed** when rizin restarts. A session's
   record (open binary, annotations, evidence, findings) is an append-only file
-  under `state_dir`, so it survives the engine exiting, a nodecode restart, and
-  the idle reaper (a session unused for 30 minutes has its rizin closed; its
-  next call restores it).
+  under `state_dir`, so it survives rizin dying, a nodecode restart, and the
+  idle reaper;
+- `rizin_command` runs exactly the commands the omp plugin's does, and refuses
+  the rest in the same words.
 
 Different, because the host is:
 
@@ -151,51 +154,88 @@ Different, because the host is:
 - **No panels, renderers or status band** — those are omp's terminal UI. The
   `/re` lists are text.
 - **No claim-support audit side turn** (`/re report --audit`): it uses omp's
-  ephemeral model turn, which this host does not provide, so the report runs
-  with the evidence gate alone.
+  ephemeral model turn, which nodecode's cell API does not offer, so the
+  report runs with the evidence gate alone.
+- **A cut result names a file**, not `artifact://N`: the whole output is kept
+  beside the session's record and `(re:json …)` reads it for you.
 - **The `re-analyst` subagent and the `re-triage` skill** are omp assets; the
-  cell's `(help :re)` primer carries the same workflow.
+  cell's `(help :re)` primer and `(re:cmd "")` manual carry the same workflow.
 
 ## How it is built
 
 ```
 nodecode-re.asd            the system: this repository is the cell folder
 nodecode/package.lisp      NODECODE-RE, nicknamed RE; the peripheral declaration
-nodecode/bridge.lisp       the engine process and one request to it
+nodecode/json.lisp         JSON, written in a fixed order (records are hashed and signed)
+nodecode/sha256.lisp       SHA-256, HMAC-SHA256, base64 — no digest library is assumed
+nodecode/util.lisp         validators, quoting, truncation, the canonical output projection
+nodecode/rizin.lisp        one rizin process on the NUL-framed pipe; finding rizin; its catalog
+nodecode/policy-data.lisp  GENERATED from extensions/re/catalog.ts — the read-only policy's data
+nodecode/policy.lisp       which commands rizin_command may run; rizin_help
+nodecode/session.lisp      the session record, the process lifecycle, evidence, audit, one tool call
+nodecode/tools-core.lisp   open_binary, rizin_help, rizin_command, /re, status, the output directory
+nodecode/extras.lisp       map_file, analyze, signatures, export_project, rizin_cli, triage, rizin_emulate
+nodecode/annotate.lisp     the fifteen annotation tools, undo, replay
+nodecode/findings.lisp     record_finding, adopt_finding, retract_finding
+nodecode/verify.lisp       /re verify
+nodecode/report.lisp       /re report and its verification manifest
+nodecode/carry.lisp        /re carry
+nodecode/debug.lisp        rizin_debug (only when `debugger` is set)
 nodecode/verbs.lisp        the verbs, the argument mapping, the top-level surface
 nodecode/cell.lisp         the primer, /re, the nle:define-cell declaration
-nodecode/bridge.ts         stdio bridge: one JSON object per line, each way
-nodecode/host.ts           a headless host for extensions/re (no UI, file-backed session)
 ```
 
-`host.ts` is a second implementation of the part of omp's `ExtensionAPI` the
-engine uses: a session branch of custom entries, the `tool_call` → execute →
-`tool_result` pipeline with its blocking and rewriting semantics, an artifact
-store, argv exec. The engine cannot tell it from omp, which is why evidence
-and audit behave identically.
+Each file names the TypeScript it ports in its header. The shape is the
+engine's own: a **session** is the open binary, the rizin process analyzing it
+and the session's **record**; the record is the truth and the process a cache
+of it. Every tool call, whoever makes it — a verb, a top-level tool, `/re` —
+goes through one function that checks the arguments against the tool's
+declared parameters, refuses while `/re off`, writes the audit line, runs the
+body, and for a read records the evidence.
 
-`bridge.lisp` starts `bun nodecode/bridge.ts` at the first request and keeps
-it. There is no reader thread: callers take turns reading replies in short
-slices and file each under its request id, so two sessions' calls overlap in
-the engine. A call that outlasts its deadline, or whose eval is interrupted,
-is cancelled in the engine. If the engine dies, the next call starts another
-and the session is restored from its record. The engine's stderr is appended
-to `bridge.log` in the state directory.
+rizin is driven the way the TypeScript engine drives it: `rizin -q0`, one NUL
+after every response, a unique `echo` marker after each command so the stream
+cannot lose its place. There is no reader thread — the caller reads the pipe
+itself under the session's lock, draining stderr as it goes — and a command
+left half-read by an interrupted eval is read up to its marker by the next, so
+the process and its analysis survive. Only a timeout kills it, and then the
+next call starts another and replays the record.
+
+The cell uses about a dozen and a half names from nodecode (`nle:define-cell`,
+`nlk:define-peripheral`, `nlk:spawn-program`, `nlk:run-bounded`, `nle:turn`,
+`nle:register-tool`, …) and `cl-ppcre`, which nodecode already carries.
+
+## Two engines, one behaviour
+
+A port drifts unless something holds it. Three things do:
+
+- **The policy is generated, not transcribed.** `bun run gen:nodecode` lifts
+  the regular expressions and command lists out of `extensions/re/catalog.ts`
+  into `nodecode/policy-data.lisp`; `cl-ppcre` reads the same Perl syntax, so
+  the patterns cross unchanged. `test/nodecode-parity.test.ts` fails when the
+  generated file is stale.
+- **Both engines are asked the same questions.** The same test hands a file of
+  cases to the Lisp engine and compares: which of the installed rizin's ~2000
+  commands `rizin_command` runs, every refusal's exact words, the breakpoint
+  on-hit policy, `rizin_help`'s output, quoting and the validators, the
+  canonical/shift hashes, SHA-256 and HMAC, JSON as written to records, and
+  truncation.
+- **The records are the same shape**, so evidence taken under one engine
+  verifies under the other.
 
 ## Tests, and what they prove
 
-- `bun test test/nodecode-bridge.test.ts` — the headless host in-process and
-  the bridge as a child process over its real protocol; with rizin present,
-  that a call is audited and recorded as evidence and that a new process
-  restores the session.
 - `bun run test:nodecode` (`sbcl --non-interactive --load
-  test/nodecode/smoke.lisp`) — loads the real `nodecode-re` system and drives
-  the real bridge and rizin through the cell's Lisp: argument mapping, every
-  verb, `/re`, deadlines, overlapping sessions, the top-level surface, an
-  engine killed and replaced, stop.
+  test/nodecode/run.lisp`) loads the real `nodecode-re` system and runs its
+  suites against a real rizin: the primitives against published vectors, the
+  policy, every verb and tool, `/re`, the audit log and evidence store, a
+  rizin killed and replaced, a session forgotten and restored from its record,
+  an interrupted command, a timeout, the idle reaper, start and stop. Needs
+  SBCL and cl-ppcre (the distribution's packages are enough).
+- `bun test test/nodecode-parity.test.ts` is the comparison above.
 
-The Lisp suite runs on `test/nodecode/kernel-stub.lisp`, a stand-in for the
-two dozen names the cell uses from nodecode's kernel, written to the contract
-in nodecode's `docs/CELLS.md` and source. It proves the cell's own code. It
-does not prove nodecode's side of the seam — that takes loading the folder in
-a nodecode build, which CI here does not do.
+The Lisp suites run on `test/nodecode/kernel-stub.lisp`, a stand-in for the
+names the cell uses from nodecode's kernel, written to the contract in
+nodecode's `docs/CELLS.md` and source. They prove the cell's own code. They do
+not prove nodecode's side of the seam — that takes loading the folder in a
+nodecode build, which CI here does not do.

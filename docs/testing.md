@@ -160,20 +160,27 @@ other branch.
 
 ## nodecode cell — `bun run test:nodecode`
 
-`sbcl --non-interactive --load test/nodecode/smoke.lisp` loads the real
-`nodecode-re` system (`nodecode-re.asd`, `nodecode/*.lisp`) and drives the
-real bridge (`bun nodecode/bridge.ts`) through the cell's Lisp: the argument
-mapping, every verb, `/re`, a deadline, overlapping sessions, the top-level
-tool surface, an engine killed and replaced, start and stop. Needs SBCL, bun
-and `bun install`. The rizin half (open, read, findings, verify, restore after
-a kill) runs when rizin and the test binary are present and prints `SKIPPED`
-when they are not.
+The nodecode cell is this engine ported to Common Lisp (`nodecode/*.lisp`).
+`sbcl --non-interactive --load test/nodecode/run.lisp` loads the real
+`nodecode-re` system and runs every `test/nodecode/suite-*.lisp` against a
+real rizin: SHA-256/HMAC against published vectors, the policy, every verb and
+tool, `/re`, the audit log and evidence store, a rizin killed and replaced, a
+session forgotten and restored from its record, an interrupted command, a
+timeout, start and stop. Needs SBCL and cl-ppcre (`apt-get install sbcl
+cl-ppcre`). Each suite's rizin half runs when rizin and the test binary are
+present and prints `SKIPPED` when they are not.
+`OMPRE_TEST_SUITES=core,annotate` runs a subset.
 
-It runs on `test/nodecode/kernel-stub.lisp`, a stand-in for the names the cell
-uses from nodecode's kernel. That proves the cell's own code, not nodecode's
-side of the seam: loading the folder in a nodecode build is a manual check
-(`docs/nodecode.md`). The TypeScript half — the headless host and the bridge's
-protocol — is `test/nodecode-bridge.test.ts`, part of `bun test`.
+The suites run on `test/nodecode/kernel-stub.lisp`, a stand-in for the names
+the cell uses from nodecode's kernel. That proves the cell's own code, not
+nodecode's side of the seam: loading the folder in a nodecode build is a
+manual check (`docs/nodecode.md`).
+
+`test/nodecode-parity.test.ts`, part of `bun test`, holds the two engines to
+each other: `nodecode/policy-data.lisp` must be current with `catalog.ts`
+(`bun run gen:nodecode` regenerates it), and — when SBCL and cl-ppcre are
+installed; skipped otherwise — both engines must give the same answers for
+the same policy, quoting, hashing and formatting cases.
 
 ## What CI actually runs
 
@@ -184,9 +191,10 @@ Three jobs:
 - **`test`** — `bun install --ignore-scripts && bun test`. Does **not**
   install rizin, so the rizin-dependent suites skip as described above and
   the run exits 0. Never add a malware sample to CI.
-- **`nodecode`** — installs SBCL and runs `bun run test:nodecode`. No rizin
-  here either, so the smoke test's rizin half prints `SKIPPED`; everything
-  that needs only the bridge runs.
+- **`nodecode`** — installs SBCL and cl-ppcre, runs `bun run test:nodecode`,
+  then the parity test (which needs SBCL to compare). No rizin here either,
+  so each Lisp suite's rizin half prints `SKIPPED` and the parity test judges
+  a fixed list of command names instead of the installed catalog.
 
 Both tmux tiers (`test/tui.sh`, `test/tui-qa.sh`) are **local/self-hosted
 only**: both hard-exit 0 when a prerequisite is missing, which would make
