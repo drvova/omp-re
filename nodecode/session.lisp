@@ -386,6 +386,12 @@ the next call that needs one starts it."
 
 (defun close-session-processes (session)
   (rz-close (session-rz session))
+  ;; Killing only the debug rizin detaches its tracee, which would then run
+  ;; on to completion: the sample, executing with nothing watching it. So the
+  ;; debuggee is killed first, through rizin, as the tool's own stop does.
+  (let ((dbg (session-dbg session)))
+    (when (rz-alive-p dbg)
+      (ignore-errors (rz-cmd dbg "dk 9" :seconds 5))))
   (rz-close (session-dbg session))
   (setf (session-rz session) nil
         (session-dbg session) nil))

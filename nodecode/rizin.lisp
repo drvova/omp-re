@@ -352,6 +352,41 @@ the reason as its stderr."
          (let ((line (trimmed (first (split-lines out)))))
            (and (plusp (length line)) line)))))
 
+;;; --- the build's width against the target's ---------------------------------------------
+;;; The surfaces that depend on the build's addressing — the debugger, which
+;;; executes the process, and the RzIL VM — misbehave when rizin's own width
+;;; is not the target's, and must say so rather than answer wrongly.
+
+(defun parse-rizin-version-arch (version)
+  "The build's pointer width from `rizin -v''s first line (\"rizin 0.9.1 @
+windows-x86-64\"), or NIL when it does not say."
+  (multiple-value-bind (match groups) (ppcre:scan-to-strings "-(32|64)(?:\\s|$)" version)
+    (cond (match (if (string= (aref groups 0) "64") 64 32))
+          ;; The 64-bit names first: "x86_64" contains "x86".
+          ((js-scan "x86_64|aarch64|arm64" version) 64)
+          ((js-scan "x86|arm(?![_-]?[6-9])|i386" version) 32))))
+
+(defvar *build-bits* (make-hash-table :test #'equal :synchronized t)
+  "rizin path => its build's bits (or NIL), asked once per path.")
+
+(defun rizin-build-bits (rizin-path)
+  "The bits of the rizin at RIZIN-PATH, from its `-v'."
+  (multiple-value-bind (bits known) (gethash rizin-path *build-bits*)
+    (if known
+        bits
+        (setf (gethash rizin-path *build-bits*)
+              (parse-rizin-version-arch
+               (trimmed (first (split-lines (values (run-program (list rizin-path "-v") :seconds 20))))))))))
+
+(defun rizin-bits-mismatch (binary-path)
+  "A note for when the rizin that would run BINARY-PATH is not of the
+target's bits, or NIL when they match or either side is unknown."
+  (let ((build (rizin-build-bits (resolve-rizin-path binary-path)))
+        (target (read-binary-bits binary-path)))
+    (when (and build target (/= build target))
+      (format nil "rizin build is ~d-bit but the target is ~d-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_~d to a matching build."
+              build target target))))
+
 (defun resolve-binary-path (input)
   "INPUT resolved to an absolute, existing, readable file."
   (let ((file (ignore-errors (probe-file (uiop:parse-native-namestring input)))))

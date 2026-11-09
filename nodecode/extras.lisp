@@ -640,7 +640,7 @@ refuses anything else anyway, and refusing here keeps the message ours."
     (fail "omp-re: emulate: bad value ~a — use a decimal or 0x hex number" (js-string value)))
   value)
 
-(defun validate-hex-bytes (value)
+(defun validate-emulate-hex (value)
   "VALUE as the lowercase hex `wx' wants: an even number of digits, an
 optional 0x taken off."
   (let ((hex (if (js-scan "^0[xX]" value) (subseq value 2) value)))
@@ -653,39 +653,6 @@ optional 0x taken off."
   (if (realp value)
       (max 1 (min (floor value) 1000))
       1))
-
-(defun version-line-bits (line)
-  "The build's pointer width from `rizin -v''s first line
-(\"rizin 0.9.1 @ windows-x86-64\"), or NIL when it does not say."
-  (multiple-value-bind (match groups) (ppcre:scan-to-strings "-(32|64)(?:\\s|$)" line)
-    (cond (match (if (string= "64" (aref groups 0)) 64 32))
-          ;; 64-bit names first: "x86_64" contains "x86".
-          ((js-scan "x86_64|aarch64|arm64" line) 64)
-          ((js-scan "x86|arm(?![_-]?[6-9])|i386" line) 32))))
-
-(defvar *build-bits* (make-hash-table :test #'equal :synchronized t)
-  "rizin path => its build's pointer width or NIL, asked once per path.")
-
-(defun rizin-build-bits (rizin-path)
-  (multiple-value-bind (bits known) (gethash rizin-path *build-bits*)
-    (if known
-        bits
-        (setf (gethash rizin-path *build-bits*)
-              (multiple-value-bind (out err status) (run-program (list rizin-path "-v") :seconds 20)
-                (declare (ignore err))
-                (and (eql status 0)
-                     (version-line-bits (trimmed (or (first (split-lines out)) "")))))))))
-
-(defun emulator-bits-note (binary-path)
-  "A line saying the rizin build's width differs from the target's, or NIL
-when they match or either is unknown. The VM inherits the build's addressing:
-a mismatched build emulates at a file-relative base with the build-width
-register names, and the result must say so."
-  (let ((build (rizin-build-bits (resolve-rizin-path binary-path)))
-        (target (read-binary-bits binary-path)))
-    (and build target (/= build target)
-         (format nil "rizin build is ~d-bit but the target is ~d-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_~d to a matching build."
-                 build target target))))
 
 (define-tool "rizin_emulate"
     (:label "emulator" :tier :exec
@@ -715,7 +682,7 @@ register names, and the result must say so."
          (let ((ea (validate-addr addr)))
            (rz-cmd rz (format nil "aezi @ ~a" ea))
            (let ((vars (vm-state))
-                 (note (emulator-bits-note (require-binary))))
+                 (note (rizin-bits-mismatch (require-binary))))
              (answer (format nil "emulate: VM initialized at ~a" ea)
                      (format nil "~@[~a~%~]~a" note (if (blank-p vars) "(no VM state)" vars))))))
         ((string= action "step")
@@ -747,7 +714,7 @@ register names, and the result must say so."
          (unless (and addr (jstring arguments "bytes"))
            (fail "omp-re: emulate set_mem needs addr and bytes"))
          (let ((ea (validate-addr addr))
-               (hex (validate-hex-bytes (jstring arguments "bytes"))))
+               (hex (validate-emulate-hex (jstring arguments "bytes"))))
            ;; The static session's IO is file-backed and read-only; io.cache
            ;; overlays the write in memory so the VM reads it and the file is
            ;; never touched (the cache is never committed). It stays on so

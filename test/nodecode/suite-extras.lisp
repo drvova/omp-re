@@ -129,17 +129,17 @@
        (equal '(1 1 2 1000 1 7)
               (mapcar #'re::clamp-step-count '(nil 0 2.9 5000 -3 7))))
 (check "the emulator's own validators say what a good value looks like"
-       (and (string= "41424344" (re::validate-hex-bytes "0x41424344"))
-            (string= "ab" (re::validate-hex-bytes "AB"))
-            (has "even number of hex digits" (refusal (lambda () (re::validate-hex-bytes "abc"))))
-            (refusal (lambda () (re::validate-hex-bytes "0x")))
-            (refusal (lambda () (re::validate-hex-bytes "zz")))
+       (and (string= "41424344" (re::validate-emulate-hex "0x41424344"))
+            (string= "ab" (re::validate-emulate-hex "AB"))
+            (has "even number of hex digits" (refusal (lambda () (re::validate-emulate-hex "abc"))))
+            (refusal (lambda () (re::validate-emulate-hex "0x")))
+            (refusal (lambda () (re::validate-emulate-hex "zz")))
             (has "bad variable name" (refusal (lambda () (re::validate-vm-variable "rax;!id"))))
             (has "bad value" (refusal (lambda () (re::validate-vm-value "1+1"))))
             (string= "0x10" (re::validate-vm-value "0x10"))))
 (check "a build's width is read from rizin -v's first line"
        (equal '(64 64 32 32 64 nil)
-              (mapcar #'re::version-line-bits
+              (mapcar #'re::parse-rizin-version-arch
                       '("rizin 0.9.1 @ linux-x86-64" "rizin 0.9.1 @ darwin-arm64" "rizin 0.9.1 @ windows-x86-32"
                         "rizin 0.9.1 @ linux-arm" "rizin 0.9.1 @ linux-aarch64" "rizin 0.9.1 @ plan9-mips"))))
 (check "capa's rule map becomes a list of names with their meta"
