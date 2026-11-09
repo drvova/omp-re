@@ -19,13 +19,15 @@
   (:export #:define-peripheral #:spawn-program #:child-exit #:kill-tree #:run-bounded
            #:worker-start #:worker-stop #:write-file-atomically
            #:home #:expand-home #:find-session-cwd
-           #:*stub-home* #:*stub-session-cwd*))
+           #:store-open-p #:session-visible-turn-set #:session-lineage
+           #:*stub-home* #:*stub-session-cwd* #:*stub-visible* #:*stub-lineage*))
 
 (defpackage #:nodecode.evolved
   (:use #:cl)
   (:nicknames #:nle)
   (:export #:define-cell #:turn #:failure #:notice #:on-stop #:register-tool #:unregister-tool
-           #:*tools* #:*notices* #:*help* #:*commands* #:*stub-session* #:*failed*))
+           #:list-dialog #:run-row #:ask-row #:bare-args-p #:*slash-effects*
+           #:*tools* #:*notices* #:*help* #:*commands* #:*stub-session* #:*stub-turn* #:*failed*))
 
 (in-package #:nodecode.kernel)
 
@@ -53,6 +55,24 @@
       (write-string content out))
     (sb-posix:rename temporary native)
     path))
+
+;;; --- the session tree: which turns are on a session's branch -------------------------
+;;; A test sets these to play /tree, /redo and /fork.
+
+(defvar *stub-visible* (make-hash-table :test #'equal)
+  "session id => a table whose keys are the turn ids on that session's branch.")
+(defvar *stub-lineage* (make-hash-table :test #'equal)
+  "session id => ((ANCESTOR-SESSION-ID ANCHOR-TURN-ID POSITION) ...), root first.")
+
+(defun store-open-p ()
+  "True once a test has described a session tree."
+  (or (plusp (hash-table-count *stub-visible*)) (plusp (hash-table-count *stub-lineage*))))
+
+(defun session-visible-turn-set (session-id)
+  (values (gethash session-id *stub-visible*)))
+
+(defun session-lineage (session-id)
+  (values (gethash session-id *stub-lineage*)))
 
 (defun find-session-cwd (session-id)
   (declare (ignore session-id))
@@ -190,8 +210,31 @@ STATUS the exit code or :TIMEOUT."
 (defvar *commands* '())
 (defvar *registrations* nil)
 
+(defvar *stub-turn* nil "The id of the turn NLE:TURN says is running, or NIL for an unnamed one.")
+
 (defun turn ()
-  (and *stub-session* (list :session-id *stub-session* :turn-id "turn-1")))
+  (and *stub-session* (list :session-id *stub-session* :turn-id *stub-turn*)))
+
+;;; --- a command's dialog and effects, as tui/commands/bare.lisp shapes them --------------
+
+(defvar *slash-effects* nil "The effects the caller of a command performs: (:clipboard :draft) from a shell.")
+
+(defun bare-args-p (args)
+  (zerop (length (string-trim '(#\Space #\Tab #\Return #\Newline) (or args "")))))
+
+(defun run-row (label line &rest keys &key detail mark mark-tone key verb suffix)
+  (declare (ignore detail mark mark-tone key verb suffix))
+  (list* :label label :run (list :enter line) keys))
+
+(defun ask-row (label ask line &rest keys &key placeholder detail mark mark-tone key verb)
+  (declare (ignore detail mark mark-tone key))
+  (list* :label label
+         :ask (list :label ask :line line :placeholder (or placeholder "") :verb (or verb ""))
+         keys))
+
+(defun list-dialog (&rest keys &key title rows summary &allow-other-keys)
+  (declare (ignore title rows summary))
+  (list* :dialog :list keys))
 
 (defun failure (text)
   (setf *failed* t)

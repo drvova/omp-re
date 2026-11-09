@@ -39,6 +39,43 @@ families and the other tools), and `rizin_help` to look up a command's arguments
 - `eval`, `xd://`, and top-level calls are the same tool calls: each is
   recorded as evidence, audited, and approved the same way.
 
+## Recipes
+
+The reads every analysis opens with are already composed, in a script that
+ships beside this file. Load it once a session, in a standalone JavaScript
+`eval` cell (omp resolves `skill://<this skill's name>/<file>` to the skill's
+own directory, wherever the plugin is installed):
+
+```
+%load skill://re-triage/recipes.js
+```
+
+It defines one global, `re`. Each function returns its report as a string —
+`print` it — and `re.help()` lists them:
+
+- `await re.triage({ maxStrings, maxFunctions })` — what the binary is, the
+  build's protections, sections with entropy, what the imports reach, notable
+  strings, the largest functions, entry points. The first call on a new binary.
+- `await re.scanImports({ callers, maxCallers })` — the imports a reviewer
+  stops at (unbounded copies, shell and exec, format sinks, races, weak
+  randomness), why each matters, and who calls it.
+- `await re.inspectFunction(addr, { maxItems })` — one function's shape,
+  variables, callers, callees and the strings it refers to: the context to read
+  before `pdg` at the same address.
+- `await re.findComparisons(addr, { maxItems })` — every compare with the
+  branch that follows it and where each way leads, calls that compare or
+  validate, strings on the way: the skeleton of validation logic.
+- `await re.findCrypto({ references })` — rizin's key and certificate search,
+  and where the published constants of common algorithms lie.
+
+These are not tools: a recipe is `eval` code over `rizin_command`, so each read
+it makes is its own tool call — approved, audited, recorded as evidence — and
+a recipe reads a list past the size cap whole, from its artifact. Every section
+of a report cites the `[evidence xxxxxxxx]` id of the read it rests on and the
+report ends with the reads it took. A line of a report is a lead to open, not a
+finding: a claim still goes through `record_finding` with those ids, and an
+import or a constant table being present says nothing yet about how it is used.
+
 ## Evidence
 
 These tools are the only source of recorded evidence in this session. Anything

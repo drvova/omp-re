@@ -126,6 +126,14 @@ print((await tool.rizin_command({ command: "pdg", addr: "main" })).text);    // 
 // A big list (aflj on a large binary) can exceed the size cap and spill to an artifact — read it or narrow.
 ```
 
+**Recipes.** The reads every analysis opens with are written once, as code
+for `eval` rather than as more tools: `%load skill://re-triage/recipes.js`
+defines `re.triage()`, `re.scanImports()`, `re.inspectFunction(addr)`,
+`re.findComparisons(addr)` and `re.findCrypto()`. Each composes
+`tool.rizin_command` — so every read is approved, audited and recorded as
+evidence like any other — and returns a report whose every line names the
+evidence id it rests on, ready to cite in `record_finding`.
+
 A tool call made from `eval` returns its `{ text, details }` to your code; omp
 renders the eval cell (your `print`/`display` output), not a per-tool card — the
 card renderers apply to top-level and `write xd://<name>` calls. So `display(...)`
@@ -168,10 +176,12 @@ a function inside it — the counterpart of the one-tool surface above:
 Evidence, the audit log, findings, annotations with replay, `/re verify` and
 the report gate behave as they do under omp, the records are the same shape,
 and the read-only command policy is generated from this engine's own, so the
-two cannot disagree about what `rizin_command` runs. See
+two cannot disagree about what `rizin_command` runs. The record follows
+nodecode's session tree as it follows omp's: after a rewind, an abandoned
+branch's annotations are rolled back and its evidence grounds nothing. See
 [`docs/nodecode.md`](docs/nodecode.md) for the verbs, configuration, how the
 two engines are held together, and what differs from omp (no approval tiers,
-no panels, no branch following).
+no panels).
 
 ## What's omp-native
 

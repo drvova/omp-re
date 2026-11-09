@@ -124,8 +124,18 @@
   (check "reading with no binary open says how to open one"
          (in-session ((fresh-session))
            (has "no binary open" (refusal (lambda () (re:cmd "aflj"))))))
-  (check "/re typed alone answers the list of subcommands"
-         (let ((text (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) "" "cell")))
+  (check "/re typed alone answers a dialog of what it offers: rows that run a line, rows that ask for a word"
+         (multiple-value-bind (text dialog)
+             (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) "" "cell")
+           (let ((rows (getf (rest (rest dialog)) :rows)))
+             (and (stringp text)
+                  (find "/re status" rows :key (lambda (row) (second (getf row :run))) :test #'equal)
+                  (equal "/re open" (getf (getf (find "Open a binary" rows :key (lambda (row) (getf row :label))
+                                                      :test #'equal)
+                                                :ask)
+                                          :line))))))
+  (check "/re help answers the list of subcommands as text"
+         (let ((text (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) "help" "cell")))
            (and (has "/re open" text) (has "/re status" text))))
   (check "an unknown /re line says so"
          (has "unknown /re subcommand" (refusal (lambda () (re:slash "frobnicate")))))

@@ -452,10 +452,20 @@ in order after the core's: how a tool group says its own state.")
                                      (and line (subseq line 0 (min 80 (length line)))))))
                          (evidence-records)))))
 
-(define-slash "cite" (:usage "<id>" :description "one evidence record, as text to quote") (words)
+(defvar *offered-draft* :unbound
+  "While a /re line runs for a caller that can take one: the text the line
+would put in the operator's input box, or NIL. :UNBOUND when nobody asked.")
+
+(define-slash "cite" (:usage "<id>" :description "cite an evidence entry in your next message") (words)
   (let ((record (and words (find-evidence (first words)))))
     (cond ((null words) (values "Usage: /re cite <id>" t))
           ((null record) (values (format nil "omp-re: no evidence found with id ~a" (first words)) t))
-          (t (format nil "Re: evidence ~a (~a @ ~a)~%~%~a"
-                     (subseq (jstring record "id") 0 8) (jstring record "tool")
-                     (or (jstring record "ea") "?") (jstring record "summary"))))))
+          (t (let ((text (format nil "Re: evidence ~a (~a @ ~a)~%~%~a"
+                                 (subseq (jstring record "id") 0 8) (jstring record "tool")
+                                 (or (jstring record "ea") "?") (jstring record "summary"))))
+               ;; Where the caller has an input box, the citation is put in it,
+               ;; as omp-re does under omp; anywhere else it is the answer.
+               (if (eq *offered-draft* :unbound)
+                   text
+                   (progn (setf *offered-draft* (format nil "~a~%~%" text))
+                          (format nil "Evidence ~a is in your draft." (subseq (jstring record "id") 0 8)))))))))

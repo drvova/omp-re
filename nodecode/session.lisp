@@ -51,7 +51,13 @@ under omp's agent directory."
   (binary-path nil)
   (binary-sha256 nil)
   (load-options nil)                    ; a JSON object, or NIL for header autodetection
-  (entries (make-array 0 :adjustable t :fill-pointer 0))
+  ;; Every entry this session wrote, in order. What a call reads is
+  ;; SESSION-ENTRIES: these, as the session's current branch sees them.
+  (all-entries (make-array 0 :adjustable t :fill-pointer 0))
+  (view nil)                            ; the branch's entries, as last computed
+  (view-key nil)                        ; what that computation depended on
+  (synced-view nil)                     ; the view the fields below were last set from,
+  (synced-length -1)                    ; and how long it was then
   (evidence-by-addr (make-hash-table :test #'equal))
   (applied-annotations "")
   (tools-off nil)
@@ -72,6 +78,33 @@ under omp's agent directory."
 (defun record-path (session)
   (merge-pathnames "branch.jsonl" (session-directory session)))
 
+;;; --- the branch a session is on ----------------------------------------------------------
+;;; A nodecode session is a tree of turns: /tree moves its head to an earlier
+;;; turn and new turns branch from there, /redo goes back, and /fork opens a
+;;; session that reads its parent's turns up to the fork point. omp-re's rule
+;;; under omp holds here too: evidence, annotations and the open binary follow
+;;; the active branch. After a rewind, what an abandoned branch renamed is
+;;; rolled back in rizin and what it observed no longer grounds a claim.
+;;;
+;;; So every entry is stamped with the turn it was written in, and what a
+;;; call reads is the entries whose turn is on the session's branch — its
+;;; own, and through a fork's lineage its ancestors'. Nothing is deleted: a
+;;; redo makes the same entries visible again.
+
+(defvar *branch-view* nil
+  "A function of a session id answering (values VISIBLE LINEAGE): VISIBLE a
+table whose keys are the turn ids on that session's current branch, across
+its fork lineage; LINEAGE the sessions it was forked from, root first, as
+((SESSION-ID ...) ...). NIL, or answering NIL for both, means every entry is
+on the branch. Set by the cell at start.")
+
+(defvar *current-turn* nil
+  "A function answering the id of the turn this thread works for, or NIL
+outside one. Set by the cell at start.")
+
+(defun current-turn-id ()
+  (and *current-turn* (ignore-errors (funcall *current-turn*))))
+
 (defun load-record (session)
   "Read SESSION's record from disk. A torn last line — the process died
 mid-append — loses that one entry, never the record."
@@ -80,27 +113,64 @@ mid-append — loses that one entry, never the record."
       (dolist (line (split-lines text))
         (let ((entry (and (not (blank-p line)) (json-parse line))))
           (when (and (hash-table-p entry) (jstring entry "customType"))
-            (vector-push-extend entry (session-entries session))))))))
+            (vector-push-extend entry (session-all-entries session))))))))
 
 (defun find-session (id)
   "The session called ID, its record read and its state restored from it on
 first use."
-  (sb-thread:with-mutex (*sessions-lock*)
-    (or (gethash id *sessions*)
-        (let ((session (make-session :id id)))
-          (load-record session)
-          (restore-from-record session)
-          (setf (gethash id *sessions*) session)))))
+  (multiple-value-bind (session fresh)
+      (sb-thread:with-mutex (*sessions-lock*)
+        (let ((known (gethash id *sessions*)))
+          (if known
+              (values known nil)
+              (let ((session (make-session :id id)))
+                (load-record session)
+                (values (setf (gethash id *sessions*) session) t)))))
+    ;; Outside the table's lock: reading a fork's branch reads its ancestors'
+    ;; records, which finds their sessions in turn.
+    (when fresh (sync-to-branch session))
+    session))
+
+(defun session-entries (session)
+  "SESSION's record as its current branch sees it: a vector of the entries
+whose turn is on the branch — its ancestors' first, through a fork's lineage,
+then its own — and of those written outside any turn."
+  (multiple-value-bind (visible lineage)
+      (if *branch-view* (ignore-errors (funcall *branch-view* (session-id session))) (values nil nil))
+    (if (and (null visible) (null lineage))
+        (session-all-entries session)
+        (let* ((sources (append (loop for (ancestor) in lineage
+                                      for known = (and (stringp ancestor) (string/= ancestor (session-id session))
+                                                       (find-session ancestor))
+                                      when known collect (session-all-entries known))
+                                (list (session-all-entries session))))
+               (current (current-turn-id))
+               (key (list visible current (mapcar #'length sources))))
+          (if (and (session-view session) (equal key (session-view-key session))
+                   (eq visible (first (session-view-key session))))
+              (session-view session)
+              (let ((view (make-array 0 :adjustable t :fill-pointer 0)))
+                (dolist (entries sources)
+                  (loop for entry across entries
+                        for turn = (jstring entry "turn")
+                        ;; The running turn is on the branch by definition,
+                        ;; whatever the store has recorded of it so far.
+                        do (when (or (null turn) (null visible) (equal turn current) (gethash turn visible))
+                             (vector-push-extend entry view))))
+                (setf (session-view-key session) key
+                      (session-view session) view)))))))
 
 (defun append-entry (type data &optional (session *session*))
   "Append one entry of TYPE carrying the JSON object DATA to the record, on
 disk before it is in memory's list: what was said to be recorded is."
   (let ((entry (obj "type" "custom"
-                    "id" (format nil "~(~36r~)-~d" (get-universal-time) (length (session-entries session)))
+                    "id" (format nil "~(~36r~)-~d" (get-universal-time) (length (session-all-entries session)))
                     "customType" type
+                    ;; The turn it was written in: what puts it on a branch.
+                    "turn" (or (current-turn-id) :absent)
                     "data" data)))
     (append-text-file (record-path session) (format nil "~a~%" (json-encode entry)))
-    (vector-push-extend entry (session-entries session))
+    (vector-push-extend entry (session-all-entries session))
     entry))
 
 (defun entries-of (type &optional (session *session*))
@@ -201,6 +271,20 @@ whose reproducibility fields are what /re verify later re-runs."
 
 ;;; --- the audit log -------------------------------------------------------------------------
 
+(defvar *notify* nil
+  "A function of (TEXT &key level) that tells the operator and the model
+something that lasts, or NIL. Set by the cell at start to post a standing
+notice; without one the text is a warning on the process's log.")
+
+(defun notify (control &rest arguments)
+  "Say something the operator should not miss: a standing notice where the
+host has them."
+  (let ((text (apply #'format nil control arguments)))
+    (if *notify*
+        (ignore-errors (funcall *notify* text :level :warning))
+        (warn "~a" text))
+    text))
+
 (defun append-audit-line (session call-id tool arguments)
   "Append one line for this call to the session's audit log, signed when
 OMPRE_AUDIT_HMAC_KEY is set. Never signals: the log is a mirror for the
@@ -216,11 +300,13 @@ operator, and must not abort the call it records."
                      canonical (json-encode base)))
               ((not (session-audit-warned session))
                (setf (session-audit-warned session) t)
+               ;; Said once a session, and only on the log: the status line
+               ;; carries it for anyone who asks, and it is not a fault.
                (warn "omp-re: OMPRE_AUDIT_HMAC_KEY not configured — audit log entries will not be signed.")))
         (append-text-file (state-path "audit" (format nil "~a.log" (session-id session)))
                           (format nil "~a~%" canonical)))
     (error (condition)
-      (warn "omp-re: audit log write failed: ~a" condition))))
+      (notify "omp-re: audit log write failed: ~a" condition))))
 
 ;;; --- what a tool answers -------------------------------------------------------------------
 
@@ -369,20 +455,39 @@ previous process died."
           (when rz (rz-close rz))
           (multiple-value-bind (rz failures) (spawn-rizin (require-binary session) :session session)
             (when failures
-              (warn "omp-re: ~d annotation(s) could not be replayed:~%~{~a~^~%~}" (length failures) failures))
+              (notify "omp-re: ~d annotation(s) could not be replayed:~%~{~a~^~%~}" (length failures) failures))
             rz)))))
 
-(defun restore-from-record (session)
-  "Set SESSION's binary, its hash and its load options from the record's
-last re.binary entry, and rebuild the evidence index. No process is started:
-the next call that needs one starts it."
-  (rebuild-evidence-index session)
-  (let ((binary (last-binary-entry session)))
-    (when binary
-      (setf (session-binary-path session) (jstring binary "path")
-            (session-binary-sha256 session) (jstring binary "sha256")
-            (session-load-options session) (let ((load (jget binary "load")))
-                                             (and (hash-table-p load) load))))))
+(defun sync-to-branch (session)
+  "Bring SESSION in line with the branch it is on: the binary its branch
+last opened, that binary's hash and load options, the evidence index, and —
+when the annotations in effect are no longer the ones the live rizin
+carries — no rizin, so the next call that needs one starts it and replays
+exactly this branch's. Cheap when nothing moved: it acts only on a view it
+has not seen. No process is started here."
+  (let ((view (session-entries session)))
+    (unless (and (eq view (session-synced-view session))
+                 (eql (length view) (session-synced-length session)))
+      (setf (session-synced-view session) view
+            (session-synced-length session) (length view))
+      (rebuild-evidence-index session)
+      (let* ((binary (last-binary-entry session))
+             (path (and binary (jstring binary "path"))))
+        (unless (equal path (session-binary-path session))
+          ;; The branch is about another binary, or none: the process
+          ;; analyzing the old one has nothing to say about it.
+          (rz-close (session-rz session))
+          (setf (session-rz session) nil
+                (session-binary-path session) path))
+        (setf (session-binary-sha256 session) (and binary (jstring binary "sha256"))
+              (session-load-options session) (let ((load (and binary (jget binary "load"))))
+                                               (and (hash-table-p load) load)))
+        (when (and path *annotation-fingerprint* (rz-alive-p (session-rz session))
+                   (string/= (funcall *annotation-fingerprint* session path)
+                             (session-applied-annotations session)))
+          (rz-close (session-rz session))
+          (setf (session-rz session) nil)))))
+  session)
 
 (defun close-session-processes (session)
   (rz-close (session-rz session))
@@ -526,6 +631,8 @@ never coerced; null reads as absent."
        (sb-thread:with-mutex ((session-lock ,it))
          (let ((*session* ,it))
            (setf (session-last-used ,it) (get-universal-time))
+           ;; The head may have moved since the last call: read the branch first.
+           (sync-to-branch ,it)
            ,@body)))))
 
 (defun call-tool-in-session (name arguments)
@@ -558,7 +665,7 @@ makes each of them a tool call in its own right, not a way around one."
                        ;; evidence recorded", it does not fail the call.
                        (let ((id (handler-case (record-evidence name arguments text (result-details result))
                                    (error (condition)
-                                     (warn "omp-re: evidence recording failed: ~a" condition)
+                                     (notify "omp-re: evidence recording failed: ~a" condition)
                                      nil))))
                          (values (if id (format nil "~a~%~a" text (evidence-tag id)) text) nil raw)))
                       (t (values text nil raw)))))))

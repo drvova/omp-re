@@ -31,7 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   reviewer stops at and who calls them, one function from every side, what a
   function compares and branches on, where cryptographic constants lie. They
   are not tools: under nodecode they are `re:` functions, under omp a script
-  loaded into `eval` with `%load skills/re-triage/recipes.js`, and on both
+  loaded into `eval` with `%load skill://re-triage/recipes.js`, and on both
   each read is an ordinary `rizin_command` call — audited, recorded as
   evidence — with every line naming the evidence id it rests on. Their tables
   live once, in `recipes/tables.json`.
@@ -48,9 +48,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `bun run test:nodecode`: the Lisp suites, run under SBCL against a real
   rizin over a stand-in for nodecode's kernel. A new `nodecode` CI job runs
   them and the parity test.
+- **The nodecode record follows the session tree.** Entries are stamped with
+  their turn, and a call reads only those on the current branch, across a
+  fork's lineage: a `/tree` rewind rolls an abandoned branch's annotations
+  back in rizin and its evidence stops grounding findings, `/redo` restores
+  them, and a `/fork` inherits the record up to the fork point.
+- `/re` under nodecode answers a dialog when typed alone, `/re cite` puts the
+  citation in the input box where there is one, and conditions that last
+  stand as the cell's notice.
 - `docs/nodecode.md`: install, verbs, configuration, how the engine is built,
-  and what differs from omp (no approval tiers, no panels, no branch
-  following, no claim-audit side turn).
+  and what differs from omp (no approval tiers, no panels, no claim-support
+  audit yet).
 
 ### Changed
 

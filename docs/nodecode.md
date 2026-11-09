@@ -104,15 +104,23 @@ and re-run by `/re verify`. A recipe says what was observed and what is worth
 a look; it never states a conclusion. The tables behind them (which imports,
 which constants) are data in `recipes/tables.json`, shared with the omp
 plugin's twin of these functions, `skills/re-triage/recipes.js`, which omp's
-`eval` loads with `%load`.
+`eval` loads with `%load skill://re-triage/recipes.js` (`await re.triage()`
+and so on); a test compares the two outputs line for line.
 
 ## `/re`
 
-The operator's command, in every shell nodecode has: `/re open <path>`,
-`/re status`, `/re functions`, `/re findings`, `/re verify`,
-`/re report [path]`, `/re undo`, `/re off`, `/re on`, `/re help`. It is the
-engine's own `/re`, answered as text — the overlay panels are omp's and are
-listed here as plain lists.
+The operator's command, in every shell nodecode has. Typed alone it answers
+a dialog, as nodecode's commands do: a row for each thing it does — status,
+functions, strings, imports, evidence, findings, verify, undo, tools on and
+off — and rows that ask for a word first (open a binary, cite evidence,
+write the report). The same lines work typed or from eval
+(`/re status`, `(re:slash "status")`). `/re cite <id>` puts the citation in
+the input box where the shell has one, and answers it as text elsewhere. The
+lists are text: the overlay panels are omp's.
+
+Something that lasts — annotations that could not be replayed, an audit log
+that could not be written — stands as the cell's notice in `/cells` and at
+the tail of the model's prompt until it is replaced or the cell stops.
 
 ## Configuration
 
@@ -146,6 +154,14 @@ the same records:
 - `record_finding` is gated on evidence that exists, and `/re report` refuses
   ungrounded claims; `/re verify` re-runs the evidence against the binary's
   hash;
+- **the record follows the session's branch.** nodecode's session is a tree
+  of turns, as omp's is. Each entry is stamped with the turn it was written
+  in, and a call reads only the entries on the current branch: after a `/tree`
+  rewind, what the abandoned branch renamed is rolled back in rizin (the
+  process is replaced and only this branch's annotations replayed) and what
+  it observed no longer grounds a finding; `/redo` brings it back; a `/fork`
+  starts with its parent's binary and the evidence of the turns before the
+  fork point, and writes to a record of its own;
 - annotations are recorded and **replayed** when rizin restarts. A session's
   record (open binary, annotations, evidence, findings) is an append-only file
   under `state_dir`, so it survives rizin dying, a nodecode restart, and the
@@ -161,14 +177,12 @@ Different, because the host is:
   executing the sample under a debugger, is off unless the operator sets
   `debugger`. Run untrusted samples in a sandbox either way
   ([SECURITY.md](../SECURITY.md)).
-- **No branch following.** omp's `/tree` rolls annotations back with the
-  branch. A nodecode session is one line of history here; `/re undo` and
-  `retract_finding` are the ways back.
 - **No panels, renderers or status band** — those are omp's terminal UI. The
   `/re` lists are text.
-- **No claim-support audit side turn** (`/re report --audit`): it uses omp's
-  ephemeral model turn, which nodecode's cell API does not offer, so the
-  report runs with the evidence gate alone.
+- **No claim-support audit yet** (`/re report --audit`). Under omp it asks
+  the model a side question; nodecode has the means (`nle:submit` to a fork
+  with no tools), but the cell does not use it yet, so findings are stored as
+  `unaudited` and the report runs with the evidence gate alone.
 - **A cut result names a file**, not `artifact://N`: the whole output is kept
   beside the session's record and `(re:json …)` reads it for you.
 - **The `re-analyst` subagent and the `re-triage` skill** are omp assets; the

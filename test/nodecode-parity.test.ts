@@ -97,6 +97,12 @@ test("nodecode/policy-data.lisp is generated from catalog.ts and current", () =>
 	expect(check.exitCode).toBe(0);
 });
 
+test("the recipe tables in both hosts are generated from recipes/tables.json and current", () => {
+	const check = Bun.spawnSync(["bun", join(ROOT, "scripts", "gen-recipes.ts"), "--check"], { stdout: "pipe", stderr: "pipe" });
+	expect(check.stderr.toString()).toBe("");
+	expect(check.exitCode).toBe(0);
+});
+
 describe.skipIf(!canRunLisp)("the Lisp engine agrees with this one", () => {
 	let lisp: Record<string, unknown[]>;
 	let catalog: RzCatalog;

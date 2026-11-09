@@ -25,14 +25,18 @@
     old))
 
 (defun extras-replay-warnings (thunk)
-  "Run THUNK => the replay-failure warnings the engine raised while it ran."
-  (let ((seen '()))
-    (handler-bind ((warning (lambda (warning)
-                              (let ((text (princ-to-string warning)))
-                                (when (has "could not be replayed" text) (push text seen)))
-                              (muffle-warning warning))))
-      (funcall thunk))
-    (nreverse seen)))
+  "Run THUNK => the replay failures the engine reported while it ran. A
+replay that fails is something that lasts, so the cell says it as its keyed
+notice, which the model reads; the notice standing before THUNK is put back."
+  (let ((before (gethash "nodecode-re" nle:*notices*)))
+    (remhash "nodecode-re" nle:*notices*)
+    (unwind-protect
+         (progn (funcall thunk)
+                (let ((notice (gethash "nodecode-re" nle:*notices*)))
+                  (and notice (has "could not be replayed" notice) (list notice))))
+      (if before
+          (setf (gethash "nodecode-re" nle:*notices*) before)
+          (remhash "nodecode-re" nle:*notices*)))))
 
 (defun extras-entries (kind id)
   (re::entries-of kind (re::find-session id)))

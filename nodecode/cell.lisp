@@ -3,7 +3,7 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; Config, a sibling top-level key of ~/.nodecode/config.jsonc:
-;;;;   "re": {"rizin_path": "", "state_dir": "",
+;;;;   "re": {"rizin_path": "", "state_dir": "omp-re/",
 ;;;;          "allowed_dirs": [], "debugger": false, "idle_minutes": 30}
 ;;;; A vetoed section ("enabled": false) installs nothing. There is no secret
 ;;;; here: the audit log's signing key stays the engine's own environment
@@ -65,23 +65,51 @@ skill, in the cell's voice.")
 
 ;;; --- the operator's command ----------------------------------------------------------
 
+(defun re-dialog ()
+  "What /re offers typed alone: a row a thing it does. A command is its name
+— nobody types after it — so the lines that need a word ask for it."
+  (nle:list-dialog
+   :title "Reverse engineering"
+   :summary "rizin, with every read recorded as evidence"
+   :rows (list (nle:ask-row "Open a binary" "Path" "/re open" :placeholder "/path/to/binary" :verb "open")
+               (nle:run-row "Status" "/re status" :detail "rizin, the open binary, evidence and findings")
+               (nle:run-row "Functions" "/re functions")
+               (nle:run-row "Strings" "/re strings")
+               (nle:run-row "Imports" "/re imports")
+               (nle:run-row "Evidence" "/re evidence" :detail "what has been observed on this branch")
+               (nle:ask-row "Cite evidence" "Evidence id" "/re cite" :placeholder "1a2b3c4d" :verb "cite")
+               (nle:run-row "Findings" "/re findings" :detail "the conclusions recorded, each on its evidence")
+               (nle:run-row "Verify" "/re verify" :detail "re-run the evidence and compare")
+               (nle:ask-row "Write the report" "File" "/re report" :placeholder "analysis.md" :verb "write")
+               (nle:run-row "Undo the last annotation" "/re undo")
+               (nle:run-row "Turn the tools off" "/re off")
+               (nle:run-row "Turn the tools on" "/re on")
+               (nle:run-row "Help" "/re help"))))
+
 (defun run-slash (&optional args session-id)
-  "One /re invocation: the engine's own /re line for the session it was
-typed in, `help' when typed alone."
-  (handler-case
-      (let* ((line (trimmed args))
-             (session-id (if (and (stringp session-id) (plusp (length session-id))) session-id "default"))
-             (words (words line)))
-        (values
-         (run-slash-line
-          (find-session session-id)
-          ;; A path typed after `open' reads against the session's directory, as (re:open) reads it.
-          (if (and (string-equal (first words) "open") (rest words))
-              (format nil "open ~a"
-                      (session-path (trimmed (subseq line (length (first words)))) session-id))
-              (if (plusp (length line)) line "help")))))
-    (re-error (condition)
-      (format nil "re: ~a" condition))))
+  "One /re invocation for the session it was typed in: typed alone, the
+dialog of what it offers; with a line, the engine's /re answer, and — where
+the caller has an input box — the draft a line such as `cite' leaves in it."
+  (if (nle:bare-args-p args)
+      (values "Reverse engineering with rizin" (re-dialog))
+      (handler-case
+          (let* ((line (trimmed args))
+                 (session-id (if (and (stringp session-id) (plusp (length session-id))) session-id "default"))
+                 (words (words line))
+                 (*offered-draft* (if (member :draft nle:*slash-effects*) nil :unbound))
+                 (text (values
+                        (run-slash-line
+                         (find-session session-id)
+                         ;; A path typed after `open' reads against the session's directory, as (re:open) reads it.
+                         (if (and (string-equal (first words) "open") (rest words))
+                             (format nil "open ~a"
+                                     (session-path (trimmed (subseq line (length (first words)))) session-id))
+                             line)))))
+            (if (stringp *offered-draft*)
+                (values text nil (list (list :draft *offered-draft*)))
+                text))
+        (re-error (condition)
+          (format nil "re: ~a" condition)))))
 
 ;;; --- start ---------------------------------------------------------------------------
 
@@ -93,12 +121,31 @@ nothing has called for idle_minutes, which loses nothing: the session's
 record is on disk and its next call restores it."
   (setf *state-directory*
         (lambda ()
-          (let ((named (trimmed (and *re* (setting :state-dir)))))
-            (if (plusp (length named)) (nlk:expand-home named) (nlk:home "omp-re/"))))
+          ;; A :directory value may arrive as a string or a pathname, home-
+          ;; relative or expanded; all of them end up under the home.
+          (let* ((value (and *re* (setting :state-dir)))
+                 (named (trimmed (if (pathnamep value) (native value) value))))
+            (if (plusp (length named))
+                (merge-pathnames (uiop:ensure-directory-pathname (nlk:expand-home named)) (nlk:home))
+                (nlk:home "omp-re/"))))
         ;; Read through *RE*, not SETTING: a stopped cell answers "unset", it does not refuse.
-        *configured-rizin* (lambda () (and *re* (setting :rizin-path)))
+        *configured-rizin* (lambda ()
+                             (let ((value (and *re* (setting :rizin-path))))
+                               (if (pathnamep value) (native value) value)))
         *debugger-setting* (lambda () (and *re* (setting :debugger)))
-        *allowed-directories* (lambda () (and *re* (setting :allowed-dirs))))
+        *allowed-directories* (lambda () (and *re* (setting :allowed-dirs)))
+        *current-turn* (lambda () (getf (nle:turn) :turn-id))
+        ;; Which turns are on a session's branch, across its fork lineage:
+        ;; what makes evidence and annotations follow /tree, /redo and /fork.
+        *branch-view* (lambda (session-id)
+                        (when (nlk:store-open-p)
+                          (values (nlk:session-visible-turn-set session-id)
+                                  (nlk:session-lineage session-id))))
+        ;; What lasts is a keyed notice: it stands in /cells and at the tail
+        ;; of the model's prompt until it is replaced or the cell stops.
+        *notify* (lambda (text &key (level :warning))
+                   (nle:notice text :level level :key "nodecode-re")))
+  (nle:on-stop (lambda () (nle:notice nil :key "nodecode-re")))
   (nle:on-stop #'shutdown-sessions)
   (let* ((idle (* 60 (setting :idle-minutes)))
          (worker (nlk:worker-start "nodecode-re idle sessions"
@@ -109,10 +156,10 @@ record is on disk and its next call restores it."
 (nle:define-cell re
   (:section ("re")
     (:guide "install rizin (https://rizin.re); nothing else is required. (re:status) says what the engine found")
-    ("rizin_path" :string :default ""
+    ("rizin_path" :path :default ""
      :doc "the rizin to run when it is not the one on PATH (the engine's OMPRE_RIZIN_PATH)")
-    ("state_dir" :string :default ""
-     :doc "where session records, evidence, the audit log and reports are kept; omp-re/ under the home when empty")
+    ("state_dir" :directory :default "omp-re/"
+     :doc "where session records, evidence, the audit log and reports are kept; a relative folder is under the home")
     ("allowed_dirs" :list :default '()
      :doc "directories binaries and other input files may be opened from; empty allows any file the organism can read")
     ("debugger" :boolean :default nil
