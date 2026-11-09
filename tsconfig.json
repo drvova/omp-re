@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "types": ["bun-types"]
   },
-  "include": ["extensions/**/*.ts", "nodecode/**/*.ts", "test/**/*.ts"]
+  "include": ["extensions/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
 }

@@ -119,6 +119,30 @@ line. Any `=' is refused, so a register assignment can never write."
 
 ;;; --- rizin_help -------------------------------------------------------------------------
 
+(defparameter +collation-order+
+  " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789"
+  "Where the characters that are not letters stand in the order JavaScript's
+localeCompare sorts by (the Unicode collation root): blanks, punctuation,
+symbols, the currency sign, digits — and every letter after all of them.")
+
+(defun collation-key (char)
+  (let ((at (position char +collation-order+)))
+    (cond (at at)
+          ((alpha-char-p char) (+ 100 (char-code (char-downcase char))))
+          (t (+ 1000 (char-code char))))))
+
+(defun locale-less-p (a b)
+  "Whether A sorts before B the way localeCompare orders command names:
+letters compared without case first, punctuation before digits before
+letters, and between two names that differ only by case the lowercase first."
+  (let ((mismatch (mismatch a b :test (lambda (x y) (= (collation-key x) (collation-key y))))))
+    (cond ((null mismatch)
+           (let ((cased (mismatch a b)))
+             (and cased (lower-case-p (char a cased)) (upper-case-p (char b cased)))))
+          ((>= mismatch (length a)) t)
+          ((>= mismatch (length b)) nil)
+          (t (< (collation-key (char a mismatch)) (collation-key (char b mismatch)))))))
+
 (defun describe-arguments (spec)
   (mapcar (lambda (argument)
             (format nil "  <~a>: ~{~a~^, ~}"
@@ -146,14 +170,14 @@ match; anything else is a keyword search over summaries and descriptions."
          (specs (loop for spec being the hash-values of catalog collect spec))
          (family (and (plusp (length query))
                       (sort (remove-if-not (lambda (spec) (starts-with query (jstring spec "cmd"))) specs)
-                            #'string< :key (lambda (spec) (jstring spec "cmd"))))))
+                            #'locale-less-p :key (lambda (spec) (jstring spec "cmd"))))))
     (if (or exact family)
         (let* ((rest (remove query family :key (lambda (spec) (jstring spec "cmd")) :test #'string=))
                (lines (append
                        (when exact
                          (append (list (catalog-line exact))
                                  (describe-arguments exact)
-                                 (when (jstring exact "description")
+                                 (when (plusp (length (jstring exact "description")))
                                    (list (format nil "  ~a" (jstring exact "description"))))
                                  (when (jlist exact "details")
                                    (list (format nil "  details: ~a" (json-encode (jget exact "details")))))
