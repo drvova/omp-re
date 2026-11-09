@@ -135,6 +135,30 @@ an empty last line."
 (defun native (path)
   (uiop:native-namestring path))
 
+;;; --- patterns, read as JavaScript reads them -----------------------------------------
+;;; The engine's patterns come from the TypeScript engine, and in JavaScript
+;;; `$' is the end of the string and nothing else. In Perl syntax — cl-ppcre's
+;;; — `$' also matches before a final newline, so "main\n" would pass a
+;;; validator anchored with it, and a value ending in a newline ends the pipe
+;;; line: what follows would run as a command of its own. Every pattern is
+;;; therefore compiled through JS-SCANNER, which makes the anchor exact.
+
+(defun js-scanner (regex)
+  "A scanner for the pattern REGEX with JavaScript's `$': the very end."
+  (ppcre:create-scanner
+   (subst :modeless-end-anchor-no-newline :end-anchor (ppcre:parse-string regex))))
+
+(defvar *js-scanners* (make-hash-table :test #'equal))
+(defvar *js-scanners-lock* (sb-thread:make-mutex :name "omp-re patterns"))
+
+(defun js-scan (regex text)
+  "Whether the pattern REGEX matches in TEXT, as JavaScript's test() answers.
+REGEX is a literal pattern; its scanner is compiled once."
+  (let ((scanner (sb-thread:with-mutex (*js-scanners-lock*)
+                   (or (gethash regex *js-scanners*)
+                       (setf (gethash regex *js-scanners*) (js-scanner regex))))))
+    (and (ppcre:scan scanner text) t)))
+
 ;;; --- validators: what may reach rizin's pipe ---------------------------------------
 
 (defun validate-addr (addr)
@@ -142,7 +166,7 @@ an empty last line."
 arithmetic. `@' is excluded so no value can smuggle in an iterator, and `(',
 `;', `~', `|' and quotes so none can open a substitution, a separator, a grep
 or a pipe."
-  (unless (and (stringp addr) (ppcre:scan "^[0-9a-zA-Z_.:$+-]+$" addr))
+  (unless (and (stringp addr) (js-scan "^[0-9a-zA-Z_.:$+-]+$" addr))
     (fail "omp-re: invalid address or expression: ~a" (js-string addr)))
   addr)
 
@@ -160,7 +184,7 @@ lowercased as written."
 
 (defun validate-ident (key value)
   "VALUE when it is an identifier a rename may use."
-  (unless (and (stringp value) (ppcre:scan "^[A-Za-z_][A-Za-z0-9_.]*$" value))
+  (unless (and (stringp value) (js-scan "^[A-Za-z_][A-Za-z0-9_.]*$" value))
     (fail "omp-re: invalid ~a: ~a" key (js-string value)))
   value)
 
@@ -267,7 +291,7 @@ so a rebuild that only moves code compares equal."
   (join-lines
    (mapcar
     (lambda (line)
-      (when (ppcre:scan "\\brip\\b" line)
+      (when (js-scan "\\brip\\b" line)
         (setf line (ppcre:regex-replace-all "0x[0-9a-fA-F]+" line "<ADDR>")))
       (let* ((line (ppcre:regex-replace "^([\\s|\\\\/:.,=<>`'+*!^-]*)0x[0-9a-fA-F]+" line "\\1<ADDR>"))
              (line (ppcre:regex-replace-all "@ 0x[0-9a-fA-F]+" line "@ <ADDR>"))

@@ -51,6 +51,8 @@ const FIXED_NAMES = [
 	...REQUIRED_COMMANDS,
 	..."p pd pdf pdfj pdg pdd px pxw p8 pr prx prc prz prg po pw pkill p6d p6e pf pfj pf. pf.j pfc pfd pfs pfv pfa pfo pfw pfn pf- pm pmj p= p== p=e p==e p=ev p=rj ph i ij iz izj iI iIj ii iij id idj idq idp idpd / /x /xj /R /Rj /F /m ag agc agcj age agn agw ao aoj ab abj ax axt axtj axf axfj axl axlj axlq axg axgj axc axC axd axs ax- axm aai aaij aau aa aaa afbr afns afnsj afsb afsbj afcl afclj afcll afclk afcr afcrj afd afvf afvc afvcj afl aflj aflt afi afij afb afbj afbc afbe afx afvl afvlj afvx afvR afvW afvd afo afM afn afvn afvt afs afii CC CC. CCl CCf CC- fd fdj cc ccc ccd cX cXj cu cu1 cu8 cud cf cfj av avj avx avxt avrD avr avra avD avgl avglj avgp avgx avgc tp tpv tpx ts tsj tsl tsc tsd kj k %v %vi %vi8 %X %x %b64 %b %o %u %l %lq %h %f %s %btw %P %p %w %B %Bj %$ %j %= %== %+ %- %! %% %0 %i y yj yq yx ys yp yy yt as asl aslj asn asr asc asca ol olj oml omlQ om obl md mdj mi ml C. C.j C.l sh shj shu x xj xc aL aLj aLc e el elj et es w wx wa o oo d dc db dr s sr ! !! . ( #! L Ll Ld Ldj Lo tn tnj t tj td tdf tfc tks to tr t- Flt Fc ica q".split(" "),
 ];
+// In JavaScript `$` is the very end; a pattern engine where it also matches before a final newline would let these through.
+const NEWLINE_NAMES = ["aflj\n", "p=e\n", "pf.\n", "tsj\n", "aflj\n!id", "\naflj"];
 const LINES = [
 	"aflj", "px 64", "ph entropy @!4096", "ph entropy @!0x1000", "pd 4 @ main", "pd @@ sym.*", "afl~main", "izj | sh", "px > /tmp/x", "px < /tmp/x",
 	"pd `iI`", "px $(id)", "px ${x}", 'px "a"', "pd #x", "px \\x", "px\n!id", "px\r", "px\0q", "aflj;!id", "e asm.arch", "ph md5 @!16 extra", "px @!", "px @!abc",
@@ -61,12 +63,12 @@ const COMMANDS = [
 	{ command: "tn" }, { command: "tn exit" }, { command: "Ld" }, { command: "Ld native" }, { command: "aflt:size/sort/dec:name/head/5" }, { command: "aflt:$x" }, { command: "aflt:a b" },
 	{ command: "pzzzq" }, { command: "pd 4" }, { command: "agc interactive" }, { command: "/m" }, { command: "/m /etc/magic" }, { command: "pm" }, { command: "pm /etc" },
 	{ command: "izj~x" }, { command: "px 16;!id" }, { command: "p=e" }, { command: "p=ev" }, { command: "ph entropy 4096" }, { command: "ph entropy @!4096" }, { command: "/xj 4889e5" },
-	{ command: "%v main" }, { command: "%= 1" }, { command: "dr" }, { command: "o /etc/passwd" }, { command: "!id" }, { command: "aai" }, { command: "afvlj", addr: "entry0" }, { command: "cf /etc/passwd" },
+	{ command: "%v main" }, { command: "%= 1" }, { command: "dr" }, { command: "o /etc/passwd" }, { command: "!id" }, { command: "aai" }, { command: "afvlj", addr: "entry0" }, { command: "cf /etc/passwd" }, { command: "pdf", addr: "main\n" }, { command: "aflt:name\n" }, { command: "aflj\n!id" },
 ];
 const ON_HIT = ["drj", "dr rax=0", "dmj", "dbtj", "dmhg", "dc", "dpa 1", "px 16", "wx 90", "", "drj;!id", "dm=", "pd 2", "dkl", "ddl", "dd /etc/passwd"];
 const QUERIES = ["afl", "pd", "/R", "entropy", "rop gadgets", "call graph", "zzzznothing", "px", "", "CC."];
 const TEXTS = ["plain", "x; !id", "it's", "back\\slash", "a'b\\c'", "semi;colon", "pipe|x", "amp&x", "tick`x", "dollar$x", "new\nline", "cr\rx", "nul\0x", "int (*)(char *, ...)", "unsigned long long", "héllo — λ", "@ ~ # > <"];
-const ADDRS = ["0x1100", "0X01100", "0x1100 ", "0x", "0x0", "0x000", "main", "Main", "sym.main+0x10", "$$", "entry0", "main;!id", "a b", "x@y", "x~y", "(x)", "", "fcn.00001100", "0x00000000deadBEEF", "_start", "9lives", "a.b.c", "a-b"];
+const ADDRS = ["0x1100", "0X01100", "0x1100 ", "0x", "0x0", "0x000", "main", "Main", "sym.main+0x10", "$$", "entry0", "main;!id", "a b", "x@y", "x~y", "(x)", "", "fcn.00001100", "0x00000000deadBEEF", "_start", "9lives", "a.b.c", "a-b", "main\n", "main\n!id", "\nmain", "main\r"];
 const OUTPUTS = [
 	"",
 	"0x00001000  call 0x2000\n0x00001005  mov eax, 0x10\n",
@@ -104,7 +106,7 @@ describe.skipIf(!canRunLisp)("the Lisp engine agrees with this one", () => {
 		// With rizin, the installed catalog — every command this build has; without, an empty one (then only the catalog-independent refusals are compared) plus the fixed names.
 		const real = rizinAvailable ? await loadCatalog() : new Map<string, RzCommandSpec>();
 		catalog = real;
-		names = [...new Set([...FIXED_NAMES, ...real.keys()])];
+		names = [...new Set([...FIXED_NAMES, ...NEWLINE_NAMES, ...real.keys()])];
 		const dir = mkdtempSync(join(tmpdir(), "omp-re-parity-"));
 		const input = join(dir, "in.json");
 		const output = join(dir, "out.json");

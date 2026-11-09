@@ -198,7 +198,7 @@ so a nonsense or flag-shaped one fails here, in words."
           (map (jget load "map")) (format (jget load "format")))
       (append
        (when arch
-         (unless (and (stringp arch) (ppcre:scan "^[A-Za-z][A-Za-z0-9_.]*$" arch))
+         (unless (and (stringp arch) (js-scan "^[A-Za-z][A-Za-z0-9_.]*$" arch))
            (fail "omp-re: load: invalid arch ~a — a plugin name like x86, arm, mips (see rizin -L)"
                  (js-string arch)))
          (list "-a" arch))
@@ -209,7 +209,7 @@ so a nonsense or flag-shaped one fails here, in words."
        (when base (list "-B" (validate-addr base)))
        (when map (list "-m" (validate-addr map)))
        (when format
-         (unless (and (stringp format) (ppcre:scan "^[A-Za-z][A-Za-z0-9_.]*$" format))
+         (unless (and (stringp format) (js-scan "^[A-Za-z][A-Za-z0-9_.]*$" format))
            (fail "omp-re: load: invalid format ~a — a bin plugin name like elf, pe, mach0, or any for raw (see rizin -L)"
                  (js-string format)))
          (list "-F" format))))))

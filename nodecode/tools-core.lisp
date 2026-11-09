@@ -88,7 +88,7 @@ output directory."
   (let ((name (trimmed name)))
     (when (member name '("" "." "..") :test #'string=)
       (fail "omp-re: invalid output filename ~a" (js-string name)))
-    (unless (and (ppcre:scan "^[A-Za-z0-9._-]+$" name) (not (search ".." name)))
+    (unless (and (js-scan "^[A-Za-z0-9._-]+$" name) (not (search ".." name)))
       (fail "omp-re: invalid output filename ~a — use a bare name of letters, digits, '.', '_' or '-' (no path separators)"
             (js-string name)))
     name))
@@ -249,7 +249,7 @@ re-runs a carried command through this, so it is recorded as the tool would."
 (defun decompiler-commands ()
   "The decompiler commands to probe, OMPRE_DECOMPILER's first."
   (remove-duplicates
-   (append (remove-if-not (lambda (name) (ppcre:scan "^[a-zA-Z][a-zA-Z0-9]*$" name))
+   (append (remove-if-not (lambda (name) (js-scan "^[a-zA-Z][a-zA-Z0-9]*$" name))
                           (mapcar #'trimmed
                                   (uiop:split-string (or (env "OMPRE_DECOMPILER") "") :separator '(#\,))))
            (list "pdg" "pdd"))

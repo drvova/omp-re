@@ -11,11 +11,11 @@
 
 (in-package #:nodecode-re)
 
-(defparameter *allowed-scanner* (ppcre:create-scanner +allowed-command+))
-(defparameter *denied-scanner* (ppcre:create-scanner +denied-command+))
-(defparameter *entropy-scanner* (ppcre:create-scanner +entropy-map+))
+(defparameter *allowed-scanner* (js-scanner +allowed-command+))
+(defparameter *denied-scanner* (js-scanner +denied-command+))
+(defparameter *entropy-scanner* (js-scanner +entropy-map+))
 (defparameter *forbidden-scanners*
-  (mapcar (lambda (entry) (cons (ppcre:create-scanner (car entry)) (cdr entry))) +forbidden-syntax+))
+  (mapcar (lambda (entry) (cons (js-scanner (car entry)) (cdr entry))) +forbidden-syntax+))
 
 (defun string-set (names)
   (let ((table (make-hash-table :test #'equal)))
@@ -65,7 +65,7 @@ command's name; a refusal is RE-ERROR in the engine's words."
       ;; the command's table. Only the head must be runnable and known; every
       ;; spec part must be table-grammar-shaped.
       (when colon
-        (unless (every (lambda (part) (ppcre:scan "^[A-Za-z0-9_*/.-]+$" part))
+        (unless (every (lambda (part) (js-scan "^[A-Za-z0-9_*/.-]+$" part))
                        (uiop:split-string (subseq name (1+ colon)) :separator '(#\:)))
           (fail "omp-re: rizin_command: table spec parts must match [A-Za-z0-9_*/.-] (see the table query grammar)")))
       (unless (runnable-p checked)
@@ -74,7 +74,7 @@ command's name; a refusal is RE-ERROR in the engine's words."
       (unless (known-command-p catalog checked)
         (fail "omp-re: rizin_command: this rizin has no command ~a — look it up with rizin_help"
               (js-string checked)))
-      (when (ppcre:scan "(^|\\s)interactive(\\s|$)" line)
+      (when (js-scan "(^|\\s)interactive(\\s|$)" line)
         (fail "omp-re: rizin_command: interactive output modes would wait for keyboard input"))
       (let ((arguments (trimmed (subseq line (length name)))))
         ;; `e <key>' reads a value; `e <key>=<value>' sets it.
@@ -85,7 +85,7 @@ command's name; a refusal is RE-ERROR in the engine's words."
                 checked))
         ;; A command whose catalog entry takes a file or path reads from disk; it runs only with none given.
         (let ((file-argument (find-if (lambda (argument)
-                                        (ppcre:scan "(?i)file|path|dir" (or (jstring argument "name") "")))
+                                        (js-scan "(?i)file|path|dir" (or (jstring argument "name") "")))
                                       (jlist (gethash checked catalog) "args"))))
           (when (and file-argument (string/= line name))
             (fail "omp-re: rizin_command: ~a reads <~a> from disk; run it without arguments or not at all"
