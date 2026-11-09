@@ -35,6 +35,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   each read is an ordinary `rizin_command` call — audited, recorded as
   evidence — with every line naming the evidence id it rests on. Their tables
   live once, in `recipes/tables.json`.
+- **The recipes in omp's Python kernel too.** `%load
+  skill://re-triage/recipes.py` in a `language: "py"` cell defines
+  `omp_re.triage()`, `scan_imports()`, `inspect_function(addr)`,
+  `find_comparisons(addr)` and `find_crypto()` — plain functions with keyword
+  options, answering the same text as `recipes.js` line for line. The global
+  is `omp_re` because `re` is the regex module omp already imports into every
+  Python cell.
 - **A directory allow-list** for the nodecode cell (`allowed_dirs`, or
   `OMPRE_ALLOWED_DIRS`): binaries and other input files open only from the
   listed directories, with links resolved first; and `/re status` says when

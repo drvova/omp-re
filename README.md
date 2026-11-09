@@ -134,7 +134,10 @@ print((await tool.rizin_command({ command: "pdg", addr: "main" })).text);    // 
 **Recipes.** The reads every analysis opens with are written once, as code
 for `eval` rather than as more tools: `%load skill://re-triage/recipes.js`
 defines `re.triage()`, `re.scanImports()`, `re.inspectFunction(addr)`,
-`re.findComparisons(addr)` and `re.findCrypto()`. Each composes
+`re.findComparisons(addr)` and `re.findCrypto()`. `eval`'s other kernel has
+the same five: in a Python cell, `%load skill://re-triage/recipes.py` defines
+`omp_re.triage()`, `omp_re.scan_imports()` and the rest (`omp_re`, because
+`re` is Python's regex module there), answering the same text. Each composes
 `tool.rizin_command` — so every read is approved, audited and recorded as
 evidence like any other — and returns a report whose every line names the
 evidence id it rests on, ready to cite in `record_finding`. What the recipes

@@ -50,32 +50,34 @@ families and the other tools), and `rizin_help` to look up a command's arguments
 ## Recipes
 
 The reads every analysis opens with are already composed, in a script that
-ships beside this file. Load it once — and again whenever the kernel was lost
-(`re is not defined`) — in a standalone JavaScript
-`eval` cell (omp resolves `skill://<this skill's name>/<file>` to the skill's
-own directory, wherever the plugin is installed):
+ships beside this file — one for each of `eval`'s kernels. Load the one for the
+language you are writing, once, in a standalone `eval` cell of that language
+(omp resolves `skill://<this skill's name>/<file>` to the skill's own
+directory, wherever the plugin is installed), and again whenever that kernel
+was lost (`re is not defined`, `name 'omp_re' is not defined`):
 
-```
-%load skill://re-triage/recipes.js
-```
+| `language` | Load | Global | A call |
+| --- | --- | --- | --- |
+| `"js"` | `%load skill://re-triage/recipes.js` | `re` | `print(await re.triage({ maxStrings: 40 }));` |
+| `"py"` | `%load skill://re-triage/recipes.py` | `omp_re` | `print(omp_re.triage(max_strings=40))` |
 
-It defines one global, `re`. Each function returns its report as a string —
-`print` it — and `re.help()` lists them:
+**In Python the global is `omp_re`, not `re`:** `re` there is the standard
+library's regex module, which omp has already imported into every Python cell,
+and the recipes leave it alone. Python recipes are plain functions with keyword
+options — no `await` (one is tolerated) — while a Python tool call is still
+awaited and takes a dict: `r = await tool.rizin_command({"command": "aflj"})`,
+then `r["text"]`.
 
-- `await re.triage({ maxStrings, maxFunctions })` — what the binary is, the
-  build's protections, sections with entropy, what the imports reach, notable
-  strings, the largest functions, entry points. The first call on a new binary.
-- `await re.scanImports({ callers, maxCallers })` — the imports a reviewer
-  stops at (unbounded copies, shell and exec, format sinks, races, weak
-  randomness), why each matters, and who calls it.
-- `await re.inspectFunction(addr, { maxItems })` — one function's shape,
-  variables, callers, callees and the strings it refers to: the context to read
-  before `pdg` at the same address.
-- `await re.findComparisons(addr, { maxItems })` — every compare with the
-  branch that follows it and where each way leads, calls that compare or
-  validate, strings on the way: the skeleton of validation logic.
-- `await re.findCrypto({ references })` — rizin's key and certificate search,
-  and where the published constants of common algorithms lie.
+Each function returns its report as a string — `print` it — and `help()` lists
+them. The same five in both, with the same defaults and the same text:
+
+| JavaScript (`await re.…`) | Python (`omp_re.…`) | Answers |
+| --- | --- | --- |
+| `triage({ maxStrings, maxFunctions })` | `triage(max_strings=…, max_functions=…)` | What the binary is, the build's protections, sections with entropy, what the imports reach, notable strings, the largest functions, entry points. The first call on a new binary. |
+| `scanImports({ callers, maxCallers })` | `scan_imports(callers=…, max_callers=…)` | The imports a reviewer stops at (unbounded copies, shell and exec, format sinks, races, weak randomness), why each matters, and who calls it. |
+| `inspectFunction(addr, { maxItems })` | `inspect_function(addr, max_items=…)` | One function's shape, variables, callers, callees and the strings it refers to: the context to read before `pdg` at the same address. |
+| `findComparisons(addr, { maxItems })` | `find_comparisons(addr, max_items=…)` | Every compare with the branch that follows it and where each way leads, calls that compare or validate, strings on the way: the skeleton of validation logic. |
+| `findCrypto({ references })` | `find_crypto(references=…)` | rizin's key and certificate search, and where the published constants of common algorithms lie. |
 
 These are not tools: a recipe is `eval` code over `rizin_command`, so each read
 it makes is its own tool call — approved, audited, recorded as evidence — and

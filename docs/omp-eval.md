@@ -70,12 +70,13 @@ One `eval` call is one cell (`tools/eval.ts`, `evalSchema`):
 off, and a disabled language is removed from the schema the model sees
 (`eval/settings.ts`; `tools/eval-backends.ts`, `resolveEvalBackends`).
 
-Python gets one paragraph, because omp-re uses none of it: a plain Python
-subprocess with IPython-style magics, synchronous helpers, and `await
-tool.<name>(args)` through the same bridge as JavaScript
-(`eval/py/tool-bridge.ts` forwards to `callSessionTool`), so the
-[`tool.<name>()`](#toolnameargs) section holds for it. `python.kernelMode:
-"per-call"` gives up persistence (`eval/settings.ts`).
+Most of this page is written from the JavaScript kernel, which is where the
+plugin's tools are usually composed. The Python kernel reaches the same tools
+through the same bridge (`eval/py/tool-bridge.ts` forwards to
+`callSessionTool`), so [`tool.<name>()`](#toolnameargs),
+[`%load`](#load-path) and the [internal URLs](#internal-urls) hold for it;
+where it differs — and it does, in ways `recipes.py` has to know — is in
+[The Python kernel](#the-python-kernel).
 
 ### What a cell answers
 
@@ -171,7 +172,8 @@ the realm…`*
 
 A script may define any other name. `re` is free: no helper is called that, and
 neither is a prelude enabled by default. *contract: `the name re is not taken
-by the host…`*
+by the host…`* That is true of this realm only: in the Python kernel `re` is
+[taken](#what-a-python-cell-starts-with).
 
 ## `tool.<name>(args)`
 
@@ -445,6 +447,176 @@ tools are listed top-level, `xd://` is "not mounted in this session", and cells
 are unchanged — the presentation changed, as omp.sh says, not what is
 permitted. *contract: `off, the same tools are listed top-level…`*
 
+## The Python kernel
+
+A plain Python subprocess running omp's own runner (`eval/py/runner.py`: "no
+third-party imports, no IPython"), spoken to over stdin and stdout, with a
+loopback HTTP bridge for tool calls. Everything here was seen with CPython
+3.13; the runner's source allows for older ones (it has a branch for "Python <
+3.12") and uses `asyncio.to_thread`, so 3.9 is the floor it could run on. omp
+states no minimum.
+
+### Finding a Python
+
+Before a Python cell, `eval` asks whether a kernel can be had
+(`tools/eval.ts`, `resolveBackend`; `eval/py/kernel.ts`,
+`checkPythonKernelAvailability`). The candidates, in order
+(`eval/py/runtime.ts`, `enumeratePythonRuntimes`): the interpreter of an
+active or project virtualenv (`VIRTUAL_ENV`, `CONDA_PREFIX`, else `.venv` or
+`venv` under the working directory); omp's managed environment
+(`~/.omp/python-env`); `python`, else `python3`, on `PATH`. The first that
+runs `import sys` is used. `python.interpreter` names one outright and skips
+the search. None working gives the model `Python backend is unavailable in this
+session. Pass language: "js" or install the python kernel.`; `eval.py: false`
+(or `PI_PY=0`) gives `Python backend is disabled …` and takes `py` out of the
+schema. *source only* — except that the tests here ask omp the same question
+before they run, with `forceProbe`, because under `bun test` (and with
+`PI_PYTHON_SKIP_CHECK`) the check answers "available" without looking.
+
+The kernel is started in the session's working directory, and that directory
+has to exist: started in one that does not, the cell's answer was `ENOENT: no
+such file or directory, posix_spawn '<the interpreter's path>'`, which names
+the wrong file. *seen while writing the contract test; the test makes the
+directory.* `python.kernelMode: "per-call"` gives up persistence
+(`eval/settings.ts`); the default, `session`, keeps one kernel as JavaScript
+does.
+
+### What a Python cell starts with
+
+omp's prelude (`eval/py/prelude.py`) is executed *in the cell namespace*, so
+its imports are globals of every cell beside its helpers: `asyncio`,
+`collections`, `contextvars`, `inspect`, `json`, `math`, `os`, **`re`**,
+`time`, `types`, `typing`, `urllib`, `Path` and `unquote`, plus the prelude's
+own underscore-prefixed internals (`_bridge_call`, `_ToolProxy`, …). A cell may
+write `re.search(…)` or `json.loads(…)` with no import, and a script that bound
+one of those names would take the module away from every later cell.
+*contract: `the name re is taken in a Python cell…`* That is why the Python
+recipes are `omp_re` and not `re`.
+
+The helpers have the names the JavaScript ones have and, as the tool
+description says, are synchronous and take keyword arguments
+(`prompts/tools/eval.md`: "Python helpers: sync, kwargs"):
+`read(path, offset=1, limit=None)`, `write(path, content)`, `display(value)`,
+`env(key=None, value=None)`, `output(*ids, format=…, query=…, offset=…,
+limit=…)`, `log`, `phase`, `wait`, `budget`, `agent`, `workpool`, `completion`,
+`judge`, `judge_batch`. *contract: same test* (that they are there and
+callable; the signatures were read).
+
+**`tool.<name>(…)` is the exception: it answers a coroutine.**
+`_ToolCallable.__call__` is `async def`; nothing reaches the bridge until it is
+awaited, and a call left un-awaited is shown as `<coroutine object …>` with a
+`RuntimeWarning`. Arguments are one dict, keywords, or both (keywords win);
+anything else positional is a `TypeError`. Awaited, it gives what
+[JavaScript gets](#what-comes-back), as Python values:
+
+| The tool's result | The cell gets | Pinned by |
+| --- | --- | --- |
+| text only, no details | the text, a `str` | *contract: `tool.<name>(args) answers a coroutine; awaited…`* |
+| has `details` | `{"text": …, "details": …}`, a `dict` | same |
+| marked `isError` | the dict with `"hasError": True` — no exception | *contract: `a tool that throws raises RuntimeError…`* |
+| the tool throws, the arguments fail validation, or the name is no tool | `RuntimeError` whose message is the tool's (`Unknown tool from js runtime: <name>` for the last — the wording is the bridge's, whatever the kernel) | same |
+
+Integers arrive as Python `int`s, but they crossed the bridge as JSON written
+by JavaScript: a number in a tool's `details` past 2^53 was already rounded on
+the other side. A tool's *text* is a string and arrives as written, which is
+why `recipes.py` parses rizin's JSON out of the text. *seen; not pinned*
+
+### One event loop, and what a plain function can do in it
+
+A cell is compiled with top-level `await` allowed and run inside the runner's
+persistent event loop, on the main thread. `asyncio.run(…)` there raises
+`asyncio.run() cannot be called from a running event loop`, so a synchronous
+function cannot wait for a tool call the ordinary way. *contract: `a cell runs
+inside a running event loop…`*
+
+It can on another thread: `asyncio.run` on a thread of its own, entered
+through a copy of the calling context (`contextvars.copy_context().run(…)`),
+while the caller joins the thread. The copy is not optional. The bridge
+attributes a call to the running cell by `__omp_current_run_id__`, which reads
+a context variable (`runner.py`, `_CURRENT_RID`); a fresh thread has an empty
+context and the bridge answers `Missing session/run/name`. With the copy the
+call is the same call as any other — `tool_call` and `tool_result` fire, the
+approval gate applies. *contract: `a tool call can be settled from a plain
+function on another thread…`* omp's own `read()` blocks the loop the same way
+when it goes to the read tool (`prelude.py`, `_read_tool_text` →
+`_bridge_call`), so a helper that holds the main thread for a tool call is
+within what the kernel already does. This is how `recipes.py` keeps to "Python
+helpers: sync".
+
+### What a Python cell answers
+
+`print()` output is the text. The value of the last expression is shown as
+`repr(value)` (`runner.py`, `_mime_bundle`: `text/plain` is the repr unless the
+value has a `_repr_*_` method), so a string comes out on one line, quoted, its
+newlines as `\n` — where the JavaScript kernel prints a string as it is. A
+`str` subclass with its own `__repr__` is shown by that. *contract: `a string
+left as a cell's last expression is shown as its repr…`* An uncaught exception
+is the output — the traceback, then `Command exited with code 1` — marked
+`isError`.
+
+**A line that begins with `%` or `!` is a magic or a shell escape wherever it
+stands.** The runner rewrites such lines before parsing (`runner.py`,
+`transform_cell`), strings excepted but brackets not, so a string format
+continued onto a line starting `% (…)` becomes a `SyntaxError` naming the line
+above. This applies to a `%load`ed file as much as to a cell. *contract: `a
+line that begins with % is rewritten as a magic…`*
+
+### `%load` in Python
+
+The host half is [the same](#load-path) — `prepareEvalSource` resolves the
+path, reads the file and refuses the same things in the same words; for Python
+it intercepts `%load` only (`%pip` is the runner's own). The runner then
+executes the source in the cell namespace under the file's name. Beyond what
+the script itself does, that leaves three marks (`runner.py`,
+`_prepare_file_source`, and Python's rules for module code):
+
+- `__file__` is set, in the cell namespace, to the script's path;
+- the script's directory is put on `sys.path`;
+- a string literal as the script's first statement becomes the namespace's
+  `__doc__`. *seen; not pinned* — `recipes.py` opens with comments for that
+  reason.
+
+*contract: `%load skill://<name>/<path> runs a Python file in the cell
+namespace…`* The output is what the script printed and the repr of its last
+expression; a script that wants to say what it defined should `print` it.
+
+### `read("artifact://<id>")` in Python
+
+Synchronous, like every Python helper. For a bare `artifact://<id>` the
+prelude looks for `<id>.*` in the session's artifacts directory — the host
+passes the directory in `PI_EVAL_LOCAL_ROOTS` — and returns the file's text
+whole, with no header, no line numbers and no size bound; `offset` and `limit`
+select lines. *contract: `read("artifact://<id>") is synchronous in Python…`*
+The file is opened in text mode, so `\r\n` and a lone `\r` come back as
+`\n` — a difference from JavaScript's raw read that does not touch a `*j`
+command's output, where JSON escapes them. *seen; not pinned* Any other
+`scheme://` goes to the `read` tool (`skill://…` comes back under its
+`[Skill file: …]` line, as in JavaScript).
+
+A session with no artifacts directory has no root to pass; the read falls to
+the `read` tool and raises `RuntimeError: No session - artifacts unavailable`.
+*contract: `in a session that is not on disk, read of an artifact id raises…`*
+
+### The deadline in Python
+
+Not the JavaScript kernel's. A Python cell past its deadline is *interrupted*
+(SIGINT) and the kernel is meant to live: the output begins `[eval cell timed
+out after Ns; kernel interrupted but remains running. Reset the kernel via {
+reset: true } if state appears corrupted.]`. Tool time counts toward the
+deadline as it does in JavaScript, and the signal of a tool call in flight is
+aborted with a `TimeoutError`. When the interrupt lands in a plain function
+waiting on a thread — a recipe — it surfaces as `KeyboardInterrupt`, the cell
+ends, and the namespace is intact: `omp_re` survives a timed-out recipe.
+*contract: `a Python cell past its deadline is interrupted, not killed…`*
+
+When it lands in a cell that is itself `await`ing a tool call, what was seen is
+worse than the message says: the cell reports the timeout as above, and the
+*next* cell answers `[Kernel died during execution; completion is uncertain…]`
+`Python kernel exited with code 130`, after which a fresh kernel is started
+with nothing in it. *seen once, in a scratch run; not pinned, and not examined
+in the source.* So for Python too, give a slow tool call a `timeout` and a cell
+of its own.
+
 ## Eval preludes
 
 A *prelude* is a capability omp installs into every kernel: a snippet of
@@ -489,7 +661,7 @@ through the real RE tools (`test/extension-sdk.test.ts`) and the real recipes
 
 | Behaviour | Depends on it | Pinned by |
 | --- | --- | --- |
-| `tool.<name>()` reaches tools mounted as `xd://` devices | every RE tool (`render.ts`, `RE_LOAD_MODE`); `recipes.js` (`observe`); SKILL.md | contract: `reaches a discoverable tool…`; extension-sdk: `omp's eval reaches an RE tool as tool.<name>()…` |
+| `tool.<name>()` reaches tools mounted as `xd://` devices | every RE tool (`render.ts`, `RE_LOAD_MODE`); `recipes.js` and `recipes.py` (`observe`); SKILL.md | contract: `reaches a discoverable tool…`; extension-sdk: `omp's eval reaches an RE tool as tool.<name>()…` |
 | A tool with details returns `{ text, details }`, details intact | `recipes.js` (`observe` reads `details.truncated`, `details.artifactId`); SKILL.md ("read `.text`") | contract: `a result with details comes back as { text, details }…` |
 | `text` is the blocks joined, so a `tool_result` handler's block is its last line | `evidence.ts` (the `[evidence …]` tag); `recipes.js` (`EVIDENCE_TAG`) | contract: same test; extension-sdk: `open, annotate, and resume through eval…` |
 | A tool that throws rejects with its own message | `recipes.js`; SKILL.md ("A failing tool throws"); every `omp-re: …` refusal | contract: `a tool that throws rejects in the cell…`; extension-sdk: `…its error is catchable in the cell` |
@@ -506,11 +678,27 @@ through the real RE tools (`test/extension-sdk.test.ts`) and the real recipes
 | A tool result of at most 50 KB reaches the cell uncut | `format.ts` (its cap is meant to be the only one) | contract: `a result whose text is at most tools.artifactSpillThreshold…`, `one byte more…` |
 | `read xd://<name>` documents a mounted tool; `tools.xdev` off changes nothing for cells | SKILL.md; README | contract: `read("xd://") lists the mounted devices…`, `off, the same tools are listed top-level…` |
 
+The Python script, `skills/re-triage/recipes.py`, stands on the same bridge
+and on these besides, all from [The Python kernel](#the-python-kernel):
+
+| Behaviour | Depends on it | Pinned by |
+| --- | --- | --- |
+| `re` is already the regex module in a Python cell | `recipes.py` (the global is `omp_re`); SKILL.md | contract: `the name re is taken in a Python cell…`; recipes-eval: `%load by the skill's own URL defines omp_re…` |
+| `tool.<name>()` answers a coroutine that gives a `str` or a `dict` of `text` and `details` | `recipes.py` (`observe`) | contract: `tool.<name>(args) answers a coroutine; awaited…` |
+| A tool that throws raises `RuntimeError` with its message; an `isError` result comes back with `hasError` | `recipes.py` (`observe` raises on it); every `omp-re: …` refusal reaching a Python cell | contract: `a tool that throws raises RuntimeError…`; recipes-eval: `with no binary open every recipe fails…` (Python) |
+| A coroutine can be run to its end on another thread under a copy of the cell's context, and only under one | `recipes.py` (`settled`: what lets a recipe be a plain function) | contract: `a tool call can be settled from a plain function on another thread…` |
+| `%load skill://re-triage/recipes.py` runs the file in the cell namespace; the output is what it printed | `recipes.py` (its last line prints the "recipes loaded" message); SKILL.md | contract: `%load skill://<name>/<path> runs a Python file…`; recipes-eval: same test as the first row |
+| `read("artifact://<id>")` is synchronous and returns the text whole; without a session on disk it raises | `recipes.py` (`whole_output`, `lost`) | contract: `read("artifact://<id>") is synchronous in Python…`, `in a session that is not on disk…`; recipes-eval: `a read cut at the size cap is read back whole … by Python's read()`, `when the whole of a cut read cannot be had, the Python recipe stops…` |
+| A value is shown by its `__repr__` | `recipes.py` (`Report`: a report left as a cell's value reads as its text) | contract: `a string left as a cell's last expression is shown as its repr…`; recipes-eval: `a report is text…` |
+| A line beginning with `%` is a magic even inside brackets | `recipes.py` (no line starts with a format's `%`) | contract: `a line that begins with % is rewritten as a magic…` |
+| A timed-out Python cell is interrupted and the namespace kept | nothing depends on it; it is why `omp_re` outlives a recipe that ran out of time | contract: `a Python cell past its deadline is interrupted, not killed…` |
+
 Three host behaviours the plugin is exposed to and does nothing about. They are
 pinned so that they stay known:
 
-- **A cell that outlives its deadline takes `re` with it.** The default is 30
-  s and tool time counts; `open_binary` budgets 300 s for analysis and
+- **A JavaScript cell that outlives its deadline takes `re` with it.** (A
+  Python one is interrupted instead; see [The deadline in
+  Python](#the-deadline-in-python).) The default is 30 s and tool time counts; `open_binary` budgets 300 s for analysis and
   `rizin_command` 120 s a command. contract: `a cell past its deadline is
   killed…`, `time spent inside tool.<name>() counts toward the deadline…`
 - **An interrupted cell does too.** contract: `aborting a cell kills the kernel
@@ -539,6 +727,19 @@ pinned so that they stay known:
 - **Python's kernel.** The setting's label says "IPython kernel"; the tool
   description says "plain Python subprocess, not IPython". The description
   matches the code.
+- **`tool.<name>(args)` in Python: awaited or not.** The tool description's
+  helper list puts `await` before `tool.<name>(args)` for JavaScript only
+  (`prompts/tools/eval.md`: `{{#if js}}await {{/if}}tool.<name>(args)`), under
+  the heading "Python helpers: sync, kwargs" — which reads as "no await in
+  Python". The code is `async def __call__`, and an un-awaited call does
+  nothing (*contract*). `omp://tools/eval.md` was not checked on this point.
+  SKILL.md tells the model to await it.
+- **A Python cell that times out while awaiting a tool call.** The message
+  says the kernel "remains running"; the next cell found it dead (exit 130).
+  Seen once; whether it is the rule was not established.
+- **An older Python.** The runner allows for Python before 3.12 and nothing
+  states a floor. `recipes.py` uses nothing newer than 3.9, but was run on
+  3.13 only.
 - **Another session's artifact.** When a session has no artifacts directory,
   `read("artifact://<id>")` falls to the `read` tool, which searches the
   directories of every session registered in the process

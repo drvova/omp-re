@@ -34,11 +34,13 @@
  * still has to cite those ids to pass record_finding. The tables are
  * judgement, worded as "worth a look", never as a verdict.
  *
- * nodecode/recipes.lisp is this file's twin: the same five, as Lisp verbs
- * for the nodecode host. The two must answer the same text for the same
- * binary, line for line, and test/recipes-eval.test.ts holds them to it; so
- * a change to the wording or the order of reads here is a change there. The
- * tables both read are generated from recipes/tables.json by
+ * This file has two twins: recipes.py beside it, the same five for omp's
+ * Python kernel (as `omp_re`, since `re` there is the regex module), and
+ * nodecode/recipes.lisp, the same five as Lisp verbs for the nodecode host.
+ * All three must answer the same text for the same binary, line for line,
+ * and test/recipes-eval.test.ts holds them to it; so a change to the wording
+ * or the order of reads here is a change in the other two. The tables all
+ * three read are generated from recipes/tables.json by
  * scripts/gen-recipes.ts, which rewrites the marked block below — edit the
  * JSON and run the script, never the block.
  *

@@ -26,6 +26,26 @@ import { rmDirSafe } from "./helpers.ts";
 const ROOT = resolve(import.meta.dir, "..");
 const SKILLS = join(ROOT, "skills");
 const RECIPES = join(SKILLS, "re-triage", "recipes.js");
+const RECIPES_PY = join(SKILLS, "re-triage", "recipes.py");
+
+/**
+ * Whether omp can start its Python kernel here, by omp's own probe (eval/py/kernel.ts): a project
+ * or active virtualenv, then its managed environment, then `python` or `python3` on PATH — the
+ * first that runs. Forced, because under `bun test` omp answers "available" without looking.
+ */
+const python = await (async () => {
+	const { checkPythonKernelAvailability } = await import("@oh-my-pi/pi-coding-agent/eval/py/kernel");
+	const home = getAgentDir();
+	const scratchHome = await mkdtemp(join(tmpdir(), "omp-re-contract-python-probe-"));
+	setAgentDir(scratchHome);
+	try {
+		return await checkPythonKernelAvailability(tmpdir(), undefined, { forceProbe: true });
+	} finally {
+		setAgentDir(home);
+		rmDirSafe(scratchHome);
+	}
+})();
+if (!python.ok) console.log(`omp-re: SKIPPING the Python-kernel contract tests — omp reports its Python backend unavailable here: ${python.reason ?? "no reason given"}`);
 
 /** omp's own bound on a tool result's text: `tools.artifactSpillThreshold`, 50 KB by default. */
 const SPILL_THRESHOLD_BYTES = 50 * 1024;
@@ -602,6 +622,141 @@ describe("what a cell prints or returns is cut for the model", () => {
 		expect(lines.filter((line) => /^\[…\d+ln elided…\]$/.test(line)).length).toBe(1);
 		expect(lines.length).toBeLessThan(2000);
 		expect((await value<string>(h, `read("artifact://${note![1]}")`)).trimEnd().split("\n").length).toBe(5000);
+	});
+});
+
+// --- the Python kernel ------------------------------------------------------------------------
+
+describe.skipIf(!python.ok)("the Python kernel", () => {
+	const py = (session: AgentSession, code: string, more: Record<string, unknown> = {}) => cell(session, code, { language: "py", ...more });
+	const pyOut = async (session: AgentSession, code: string): Promise<string> => {
+		const result = await py(session, code);
+		expect({ code, isError: result.isError, text: result.isError ? result.text : "" }).toEqual({ code, isError: false, text: "" });
+		return result.text;
+	};
+	/** A cell that prints the kind and message of whatever `statement` raises, or "ok". */
+	const caughtPy = (statement: string) => `try:\n    ${statement}\n    print("ok")\nexcept Exception as error:\n    print(type(error).__name__ + ": " + str(error))`;
+	/** What recipes.py does to wait for a tool call from a plain function, with and without the cell's context. */
+	const SETTLE = [
+		"def settle(awaitable, keep_context=True):",
+		"    import threading",
+		"    context = contextvars.copy_context()",
+		"    outcome = {}",
+		"    async def wait():",
+		"        return await awaitable",
+		"    def work():",
+		"        try:",
+		'            outcome["value"] = context.run(asyncio.run, wait()) if keep_context else asyncio.run(wait())',
+		"        except BaseException as error:",
+		'            outcome["error"] = error',
+		"    worker = threading.Thread(target=work)",
+		"    worker.start()",
+		"    worker.join()",
+		'    if "error" in outcome:',
+		'        raise outcome["error"]',
+		'    return outcome["value"]',
+	].join("\n");
+
+	test("the name re is taken in a Python cell: omp's prelude runs in the cell namespace and leaves the standard library's regex module, json, os, math and Path there", async () => {
+		expect(await pyOut(h, 'print(" ".join(name + ":" + type(globals().get(name)).__name__ for name in ["re", "json", "os", "math", "asyncio", "inspect", "contextvars", "Path"]))')).toBe(
+			"re:module json:module os:module math:module asyncio:module inspect:module contextvars:module Path:type",
+		);
+		expect(await pyOut(h, 'print(re.__name__, re.sub("a", "b", "aaa"))')).toBe("re bbb");
+		// The helpers a script may count on, by the names the tool description gives.
+		expect(await pyOut(h, 'print(" ".join(str(callable(globals().get(name))) for name in ["read", "write", "display", "env", "output", "log", "phase", "wait", "tool"]))')).toBe(Array(9).fill("True").join(" "));
+	});
+
+	test("tool.<name>(args) answers a coroutine; awaited, it gives what a JavaScript cell gets — a bare string, or a dict of text and details — for arguments passed as a dict, as keywords, or not at all", async () => {
+		expect(await pyOut(h, 'call = tool.c_plain({"say": "hi"})\nprint(type(call).__name__, inspect.isawaitable(call))\nprint(repr(await call))')).toBe("coroutine True\n'plain:hi'");
+		expect(await pyOut(h, 'print(await tool.c_plain(say="hi"), await tool.c_plain({"say": "no"}, say="yes"), repr(await tool.c_plain()))')).toBe("plain:hi plain:yes 'plain:'");
+		expect(await pyOut(h, "print(json.dumps(await tool.c_details(), sort_keys=True))")).toBe('{"details": {"k": 1}, "text": "onetwo\\n[tagged by tool_result]"}');
+		expect(await pyOut(h, caughtPy('await tool.c_plain("hi")'))).toBe("TypeError: tool.c_plain(...) expects a dict of arguments (got str)");
+	});
+
+	test("a tool that throws raises RuntimeError with the tool's own message; a result marked isError comes back as a dict with hasError True; a name that is no tool raises too", async () => {
+		expect(await pyOut(h, caughtPy("await tool.c_throw()"))).toBe("RuntimeError: c_throw: refused in the tool's own words");
+		expect(await pyOut(h, "print(json.dumps(await tool.c_iserror(), sort_keys=True))")).toBe('{"details": {"why": "marked"}, "hasError": true, "text": "soft failure"}');
+		expect(await pyOut(h, caughtPy("await tool.no_such_tool()"))).toBe("RuntimeError: Unknown tool from js runtime: no_such_tool");
+		expect(await pyOut(h, caughtPy("await tool.c_required()"))).toStartWith('RuntimeError: Validation failed for tool "c_required"');
+	});
+
+	test("a cell runs inside a running event loop: top-level await works and asyncio.run() is refused, so a plain function cannot wait for a tool call there", async () => {
+		expect(await pyOut(h, "print(asyncio.get_running_loop().is_running())")).toBe("True");
+		expect(await pyOut(h, "pending = asyncio.sleep(0)\ntry:\n    asyncio.run(pending)\nexcept RuntimeError as error:\n    print(error)\nawait pending")).toBe("asyncio.run() cannot be called from a running event loop");
+	});
+
+	test("a tool call can be settled from a plain function on another thread under a copy of the cell's context; without the copy the bridge refuses it: Missing session/run/name", async () => {
+		const before = eventsOf("c_plain").length;
+		expect(await pyOut(h, `${SETTLE}\nprint(settle(tool.c_plain(say="from a thread")))`)).toBe("plain:from a thread");
+		// It is the same call as any other: announced to tool_call handlers, with the arguments given.
+		expect(eventsOf("c_plain").slice(before).map((event) => [event.kind, event.input])).toEqual([
+			["call", { say: "from a thread" }],
+			["result", { say: "from a thread" }],
+		]);
+		expect(await pyOut(h, caughtPy('settle(tool.c_plain(say="no context"), keep_context=False)'))).toBe("RuntimeError: Missing session/run/name");
+		expect(await pyOut(h, caughtPy("settle(tool.c_throw())"))).toBe("RuntimeError: c_throw: refused in the tool's own words");
+	});
+
+	test("a Python cell past its deadline is interrupted, not killed: a plain function waiting on a tool call is stopped, the call's signal is aborted, and the namespace is still there", async () => {
+		expect(await pyOut(h, 'marker = "before"\nprint(marker)')).toBe("before");
+		sleeps.length = 0;
+		const started = Date.now();
+		const late = await py(h, 'settle(tool.c_sleep({"ms": 10000}))\nprint("finished")', { timeout: 1 });
+		expect(late.isError).toBe(true);
+		expect(late.text).toStartWith("[eval cell timed out after 1s; kernel interrupted but remains running.");
+		expect(late.text).not.toContain("finished");
+		expect(Date.now() - started).toBeLessThan(8000);
+		expect(sleeps).toEqual(["aborted:TimeoutError"]);
+		expect(await pyOut(h, "print(marker, callable(settle))")).toBe("before True");
+	}, 20_000);
+
+	test("%load skill://<name>/<path> runs a Python file in the cell namespace: the output is what it printed, and omp sets __file__ and puts the script's directory on sys.path", async () => {
+		expect(await pyOut(h, 'print("__file__" in globals(), "omp_re" in globals())')).toBe("False False");
+		const loaded = await py(h, "%load skill://re-triage/recipes.py");
+		expect(loaded.isError).toBe(false);
+		// The source is not echoed; a script says what it did by printing.
+		expect(loaded.text).toStartWith("omp-re recipes loaded: omp_re.triage, ");
+		expect(loaded.text.split("\n").length).toBe(1);
+		expect((loaded.details as { cells: { code: string }[] }).cells[0]!.code).toBe("%load skill://re-triage/recipes.py");
+		expect(await pyOut(h, `import sys\nprint(__file__, ${JSON.stringify(join(SKILLS, "re-triage"))} in sys.path, "omp_re" in globals())`)).toBe(`${RECIPES_PY} True True`);
+		// The refusals are %load's own, the same for either language.
+		expect((await py(h, '%load skill://re-triage/recipes.py\nprint("more")')).text).toBe("Use %load, %pip, %bun, and %environment as standalone cells; run subsequent code in another eval call.");
+		expect((await py(h, "%load skill://no-such-skill/x.py")).text).toBe("Unknown skill: no-such-skill\nAvailable: re-triage");
+	});
+
+	test('read("artifact://<id>") is synchronous in Python and returns the artifact whole; offset and limit select lines; read("skill://…") goes through the read tool', async () => {
+		expect(await pyOut(h, 'spilled = await tool.c_spill({"lines": 2000})\nprint(spilled["text"].split("\\n")[0], spilled["details"]["truncated"], type(spilled["details"]["artifactId"]).__name__)')).toBe("header True str");
+		expect(await pyOut(h, 'whole = read("artifact://" + spilled["details"]["artifactId"])\nprint(type(whole).__name__, len(whole.encode()), whole.count("\\n"), whole[:6], whole[-10:] == "x" * 10)')).toBe(
+			`str ${"header\n".length + 2000 * (row(0).length + 1) - 1} 2000 header True`,
+		);
+		expect(await pyOut(h, 'print(repr(read("artifact://" + spilled["details"]["artifactId"], offset=2, limit=1)))')).toBe(`'${row(0)}\\n'`);
+		expect(await pyOut(h, 'print(read("skill://re-triage/recipes.py").split("\\n")[0])')).toBe(`[Skill file: ${RECIPES_PY}]`);
+	});
+
+	test("in a session that is not on disk, read of an artifact id raises RuntimeError: No session - artifacts unavailable", async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		// The directory has to exist: the Python kernel is a subprocess started in the session's working directory.
+		await mkdir(join(work, "memory-py"), { recursive: true });
+		const session = await boot(SessionManager.inMemory(join(work, "memory-py")));
+		try {
+			expect(await pyOut(session, 'spilled = await tool.c_spill({"lines": 10})\nprint(spilled["details"]["artifactId"])')).toBe("0");
+			expect(await pyOut(session, caughtPy('read("artifact://0")'))).toBe("RuntimeError: No session - artifacts unavailable");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	test("a string left as a cell's last expression is shown as its repr — one quoted line — while print() shows the text; any value is shown by its __repr__", async () => {
+		expect(await pyOut(h, '"two\\nlines"')).toBe("'two\\nlines'");
+		expect(await pyOut(h, 'print("two\\nlines")')).toBe("two\nlines");
+		expect(await pyOut(h, 'class Shown(str):\n    def __repr__(self):\n        return str(self)\nShown("two\\nlines")')).toBe("two\nlines");
+	});
+
+	test("a line that begins with % is rewritten as a magic even inside brackets, so a script cannot start a line with a string format's %", async () => {
+		const broken = await py(h, 'text = ("%d items"\n    % (5,))\nprint(text)');
+		expect(broken.isError).toBe(true);
+		expect(broken.text).toContain("SyntaxError");
+		expect(await pyOut(h, 'text = "%d items" % (\n    5,\n)\nprint(text)')).toBe("5 items");
 	});
 });
 

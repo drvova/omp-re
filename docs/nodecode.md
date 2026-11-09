@@ -103,9 +103,11 @@ the evidence id it rests on, so its lines can be cited in `record_finding`
 and re-run by `/re verify`. A recipe says what was observed and what is worth
 a look; it never states a conclusion. The tables behind them (which imports,
 which constants) are data in `recipes/tables.json`, shared with the omp
-plugin's twin of these functions, `skills/re-triage/recipes.js`, which omp's
-`eval` loads with `%load skill://re-triage/recipes.js` (`await re.triage()`
-and so on); a test compares the two outputs line for line.
+plugin's twins of these functions — `skills/re-triage/recipes.js` for the
+JavaScript kernel of omp's `eval` and `skills/re-triage/recipes.py` for its
+Python kernel, loaded with `%load skill://re-triage/recipes.js` (`await
+re.triage()` and so on) or `%load skill://re-triage/recipes.py`
+(`omp_re.triage()`); a test compares the outputs of all three line for line.
 
 ## `/re`
 
