@@ -1,5 +1,847 @@
-;;;; carry.lisp --- (to be ported)
+;;;; carry.lisp --- /re carry: replay a report's manifest against another build.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
+;;;;
+;;;; Ported from omp-re's carry.ts, the relocation half of anchor.ts (its
+;;;; fingerprint half is report.lisp's REPORT-ANCHOR-FINGERPRINT) and the
+;;;; `carry' case of index.ts's /re command.
+;;;;
+;;;; A report's verification manifest (`<report>.manifest.json', report.lisp)
+;;;; is already a test suite: claim, exact read-only rizin command, canonical
+;;;; output hash. /re verify runs it against the SAME binary to prove
+;;;; reproducibility; carry runs it against whatever binary is open now — the
+;;;; next sample of a family, a firmware update, a patched build — and
+;;;; classifies each piece of evidence, then each claim:
+;;;;
+;;;; - holds: the re-run's canonical output hash is identical, or identical
+;;;;   once positional addresses are masked — the code did not change, the
+;;;;   build just moved it.
+;;;; - relocated: the anchor vanished (a renamed symbol) or a numeric anchor
+;;;;   now points elsewhere, but the function it named was found again by its
+;;;;   fingerprint and the command re-run there says the same thing.
+;;;; - drifted: the command still runs but its output changed. The recorded
+;;;;   excerpt is line-diffed against the new one with addresses masked, so
+;;;;   the diff keeps to what really changed.
+;;;; - broken: the anchor is gone and nothing matches its fingerprint, or the
+;;;;   command now produces nothing.
+;;;; - unchecked: the evidence had no reproducible hash, or its command is no
+;;;;   longer runnable in this rizin.
+;;;;
+;;;; A claim takes the worst status among its checked evidence. Read-only
+;;;; like /re verify: the manifest is untrusted input, so every command goes
+;;;; back through the policy gate and every address through VALIDATE-ADDR, and
+;;;; a line is sent to the process directly, never through CALL-TOOL, so
+;;;; carrying records nothing — until --inherit, which re-proves the findings
+;;;; that held and records them here as rizin_command itself would.
+;;;;
+;;;; The TypeScript speaks through a UI when it has one. This host has none,
+;;;; so what is ported is its headless branch: the summary and, under it, the
+;;;; agenda are the answer, and a broken claim fails the line — which is what
+;;;; makes a report a regression test for the next build.
 
 (in-package #:nodecode-re)
+
+(defparameter +carry-command-seconds+ 120)
+
+(defparameter +max-diff-lines+ 40
+  "The most diff lines shown for one drifted record. An excerpt is at most
+20 lines a side, so this only bites on a total rewrite.")
+
+(defparameter +excerpt-max-characters+ 1024
+  "CANONICAL-EXCERPT's cap: an excerpt this long was cut mid-line.")
+
+;;; --- finding an anchor's function again (anchor.ts) --------------------------------------------
+
+(defparameter +max-candidates+ 64
+  "The most functions scored for one relocation; the size and block-count
+prefilter usually leaves far fewer.")
+
+(defparameter +relocate-threshold+ 4/5
+  "The least mnemonic-sequence similarity at which a candidate counts as the
+same function.")
+
+(defun mnemonics-at (rz offset)
+  "The mnemonic sequence of the function starting at OFFSET
+=> (values MNEMONICS T), or (values NIL NIL) when rizin has no function
+there — which is not the same as a function with no instructions."
+  (let* ((listing (rz-cmdj rz (format nil "pdfj @ ~a" (ea-from-offset offset))))
+         (ops (and (hash-table-p listing) (gethash "ops" listing))))
+    (if (and (vectorp ops) (not (stringp ops)))
+        (let ((mnemonics (loop for op across ops
+                               for text = (jstring op "disasm")
+                               when (and text (not (equal (jget op "type") "invalid")))
+                                 collect (string-downcase (or (first (words text)) "")))))
+          (values (subseq mnemonics 0 (min +max-mnemonics+ (length mnemonics))) t))
+        (values nil nil))))
+
+(defun sequence-similarity (a b)
+  "How alike the lists A and B are: 2·LCS / (|A| + |B|), a rational in [0, 1]."
+  (if (and (null a) (null b))
+      1
+      (let* ((b (coerce b 'simple-vector))
+             (width (length b))
+             (previous (make-array (1+ width) :initial-element 0)))
+        (dolist (item a)
+          (let ((current (make-array (1+ width) :initial-element 0)))
+            (loop for j from 1 to width
+                  do (setf (aref current j)
+                           (if (equal item (aref b (1- j)))
+                               (1+ (aref previous (1- j)))
+                               (max (aref previous j) (aref current (1- j))))))
+            (setf previous current)))
+        (/ (* 2 (aref previous width)) (+ (length a) width)))))
+
+(defun relocate-anchor (rz fingerprint)
+  "The function of the open build that best matches FINGERPRINT => an object
+of its name (\"function\"), its start (\"offset\"), where to re-run the
+command — the start plus the recorded delta (\"addr\") — and the
+\"similarity\"; NIL when nothing is alike enough. Never signals.
+
+The function list is first cut to sizes within half the recorded size and
+block counts within half (and 2) of the recorded count, ranked by how close
+both are, and only the nearest are scored by mnemonics: mnemonics, never
+operands, because a rebuild changes addresses and registers long before it
+changes the instruction mix. A tie goes to the function with the recorded name."
+  (ignore-errors
+   (let* ((size (jnumber fingerprint "size"))
+          (nbbs (jnumber fingerprint "nbbs"))
+          (name (jstring fingerprint "function"))
+          (wanted (jlist fingerprint "mnemonics"))
+          (functions (rz-cmdj rz "aflj"))
+          (near (remove-if-not
+                 (lambda (function)
+                   (and (hash-table-p function)
+                        (jnumber function "offset") (jnumber function "size") (jnumber function "nbbs")
+                        (<= (abs (- (jnumber function "size") size)) (* size 1/2))
+                        (<= (abs (- (jnumber function "nbbs") nbbs)) (+ (* nbbs 1/2) 2))))
+                 (and (vectorp functions) (not (stringp functions)) (coerce functions 'list))))
+          (ranked (stable-sort near #'<
+                               :key (lambda (function)
+                                      (+ (if (zerop size)
+                                             0
+                                             (/ (abs (- (jnumber function "size") size)) size))
+                                         (abs (- (jnumber function "nbbs") nbbs))))))
+          (best nil)
+          (best-similarity nil))
+     (dolist (function (subseq ranked 0 (min +max-candidates+ (length ranked))))
+       (multiple-value-bind (mnemonics found) (mnemonics-at rz (jnumber function "offset"))
+         (when found
+           (let ((similarity (sequence-similarity wanted mnemonics)))
+             (when (or (null best)
+                       (> similarity best-similarity)
+                       (and (= similarity best-similarity) (equal (jstring function "name") name)))
+               (setf best function best-similarity similarity))))))
+     (when (and best (>= best-similarity +relocate-threshold+))
+       (let ((thousandths (floor (+ (* best-similarity 1000) 1/2))))
+         (obj "function" (or (jstring best "name") "")
+              "offset" (ea-from-offset (jnumber best "offset"))
+              "addr" (ea-from-offset (+ (jnumber best "offset") (jnumber fingerprint "delta")))
+              ;; Three places, and a whole number written as one, as JavaScript prints it.
+              "similarity" (if (zerop (mod thousandths 1000))
+                               (/ thousandths 1000)
+                               (/ thousandths 1000d0))))))))
+
+;;; --- reading a manifest --------------------------------------------------------------------------
+
+(defstruct (manifest-entry (:copier nil))
+  "One entry of a manifest, as read back. Everything but the id may be
+missing: a manifest is untrusted, and may be older than a member."
+  (evidence-id "" :type string)
+  (tool "unknown" :type string)
+  (args nil)                            ; {command, addr?} or NIL
+  (command nil)
+  (commands '())                        ; the recorded lines, as a list
+  (repro-hash nil)
+  (canonical-excerpt nil)
+  (shift-hash nil)
+  (anchor nil)                          ; a fingerprint object or NIL
+  (binary-sha256 nil)
+  (claims '()))
+
+(defstruct (manifest-finding (:copier nil))
+  "One finding of a manifest's `findings' — what --inherit re-proves."
+  (id "" :type string)
+  (claim "" :type string)
+  (evidence-ids '())
+  (addr nil)
+  (confidence "likely"))
+
+(defstruct (carry-manifest (:copier nil))
+  (binary-sha256 nil)
+  (entries '())
+  (findings '()))                       ; none on a manifest older than findings
+
+(defun member-string (object key)
+  "OBJECT's member KEY when it is a string, else NIL."
+  (let ((value (gethash key object)))
+    (and (stringp value) value)))
+
+(defun member-strings (object key)
+  "The strings of OBJECT's array member KEY, as a list."
+  (let ((value (gethash key object)))
+    (and (json-array-p value) (remove-if-not #'stringp (coerce value 'list)))))
+
+(defun parse-anchor (raw)
+  "RAW as a fingerprint, or NIL when it is not one — the entry then just
+cannot be relocated. Untrusted: the name and the offset are only shown, the
+delta becomes part of an address (so it must be a small whole number) and
+the mnemonics only feed the similarity score."
+  (flet ((whole (key most)
+           (let ((value (gethash key raw)))
+             (and (realp value) (= value (ffloor value)) (<= 0 value most) (truncate value)))))
+    (when (hash-table-p raw)
+      (let ((delta (whole "delta" (ash 1 24)))
+            (size (whole "size" (ash 1 30)))
+            (nbbs (whole "nbbs" (ash 1 24)))
+            (mnemonics (gethash "mnemonics" raw)))
+        (when (and (member-string raw "anchor") (member-string raw "function") (member-string raw "offset")
+                   delta size nbbs
+                   (json-array-p mnemonics) (plusp (length mnemonics)) (every #'stringp mnemonics))
+          (obj "anchor" (member-string raw "anchor")
+               "function" (member-string raw "function")
+               "offset" (member-string raw "offset")
+               "delta" delta "size" size "nbbs" nbbs
+               "mnemonics" mnemonics))))))
+
+(defun parse-manifest (text)
+  "TEXT as a manifest. Anything that is not one is refused in words that say
+which file to pass; an entry or a finding that is malformed is dropped, a
+member that is missing is read as absent."
+  (let ((raw (flet ((refuse (detail)
+                      (fail "omp-re: carry: manifest is not valid JSON (~a)" detail)))
+               ;; The engine's reader stops after the first value. Read as the
+               ;; one item of an array, text after the value is refused too,
+               ;; as JSON.parse refuses it.
+               (let ((values (handler-case (json-decode (format nil "[~a]" text))
+                               (json-refusal (condition) (refuse (json-refusal-detail condition))))))
+                 (unless (= 1 (length values))
+                   (refuse (if (zerop (length values))
+                               "the text ends where a value belongs"
+                               "text after the value")))
+                 (aref values 0)))))
+    (unless (and (hash-table-p raw) (json-array-p (gethash "entries" raw)))
+      (fail "omp-re: carry: not a verification manifest (no `entries` array) — pass the <report>.manifest.json written by /re report <path>"))
+    (make-carry-manifest
+     :binary-sha256 (member-string raw "binarySha256")
+     :entries
+     (loop for row across (gethash "entries" raw)
+           when (and (hash-table-p row) (member-string row "evidenceId"))
+             collect (let ((args (gethash "args" row)))
+                       (make-manifest-entry
+                        :evidence-id (member-string row "evidenceId")
+                        :tool (or (member-string row "tool") "unknown")
+                        :args (and (hash-table-p args) (member-string args "command")
+                                   (obj "command" (member-string args "command")
+                                        "addr" (if (plusp (length (member-string args "addr")))
+                                                   (member-string args "addr")
+                                                   :absent)))
+                        :command (member-string row "command")
+                        :commands (member-strings row "commands")
+                        :repro-hash (member-string row "reproHash")
+                        :canonical-excerpt (member-string row "canonicalExcerpt")
+                        :shift-hash (member-string row "shiftHash")
+                        :anchor (parse-anchor (gethash "anchor" row))
+                        :binary-sha256 (member-string row "binarySha256")
+                        :claims (member-strings row "claims"))))
+     :findings
+     (let ((findings (gethash "findings" raw)))
+       (loop for row across (if (json-array-p findings) findings #())
+             when (and (hash-table-p row) (member-string row "id") (member-string row "claim")
+                       (json-array-p (gethash "evidenceIds" row)))
+               collect (make-manifest-finding
+                        :id (member-string row "id")
+                        :claim (member-string row "claim")
+                        :evidence-ids (member-strings row "evidenceIds")
+                        :addr (member-string row "addr")
+                        :confidence (if (member (gethash "confidence" row) '("confirmed" "speculative")
+                                                :test #'equal)
+                                        (gethash "confidence" row)
+                                        "likely")))))))
+
+(defun entry-request (entry)
+  "The {command, addr} to re-run for ENTRY, or NIL when it recorded nothing
+re-runnable. The structured args win (every manifest since carry shipped);
+failing those the recorded line is split at its trailing ` @ <addr>' — what
+the policy gate appends — leaving `@!<blocksize>' alone, since that is part
+of the command and not a seek."
+  (or (manifest-entry-args entry)
+      (let ((line (if (= 1 (length (manifest-entry-commands entry)))
+                      (first (manifest-entry-commands entry))
+                      (manifest-entry-command entry))))
+        (when (plusp (length line))
+          (let ((line (trimmed line)))
+            (multiple-value-bind (matched parts)
+                (ppcre:scan-to-strings (js-scanner "^(.*\\S)\\s+@\\s+([^!\\s]\\S*)$") line)
+              (if matched
+                  (obj "command" (aref parts 0) "addr" (aref parts 1))
+                  (obj "command" line))))))))
+
+;;; --- a diff a person can start from --------------------------------------------------------------
+
+(defun line-diff (before after &optional (key #'identity))
+  "A line diff (LCS) of two short texts: an unchanged line begins `  ', a
+removed one `- ', an added one `+ '. Lines are matched on KEY of the line
+and printed as written, so under an address mask a line that only moved
+shows as unchanged, in its new form."
+  (let* ((a (coerce (if (string= before "") '() (split-lines before)) 'simple-vector))
+         (b (coerce (if (string= after "") '() (split-lines after)) 'simple-vector))
+         (key-a (map 'simple-vector key a))
+         (key-b (map 'simple-vector key b))
+         (lcs (make-array (list (1+ (length a)) (1+ (length b))) :initial-element 0))
+         (out '())
+         (i 0)
+         (j 0))
+    (loop for i from (1- (length a)) downto 0
+          do (loop for j from (1- (length b)) downto 0
+                   do (setf (aref lcs i j)
+                            (if (string= (aref key-a i) (aref key-b j))
+                                (1+ (aref lcs (1+ i) (1+ j)))
+                                (max (aref lcs (1+ i) j) (aref lcs i (1+ j)))))))
+    (loop while (and (< i (length a)) (< j (length b)))
+          do (cond ((string= (aref key-a i) (aref key-b j))
+                    (push (format nil "  ~a" (aref b j)) out)
+                    (incf i)
+                    (incf j))
+                   ((>= (aref lcs (1+ i) j) (aref lcs i (1+ j)))
+                    (push (format nil "- ~a" (aref a i)) out)
+                    (incf i))
+                   (t
+                    (push (format nil "+ ~a" (aref b j)) out)
+                    (incf j))))
+    (loop while (< i (length a))
+          do (push (format nil "- ~a" (aref a i)) out)
+             (incf i))
+    (loop while (< j (length b))
+          do (push (format nil "+ ~a" (aref b j)) out)
+             (incf j))
+    (nreverse out)))
+
+(defun compact-diff (diff &optional (context 2))
+  "DIFF cut to its changed lines and CONTEXT unchanged lines around each,
+the rest elided as `  …': a hunk view of a LINE-DIFF."
+  (let* ((diff (coerce diff 'simple-vector))
+         (changed (map 'simple-vector (lambda (line) (not (starts-with "  " line))) diff))
+         (out '()))
+    (dotimes (i (length diff) (nreverse out))
+      (cond ((find t changed :start (max 0 (- i context)) :end (min (length diff) (+ i context 1)))
+             (push (aref diff i) out))
+            ((not (equal (first out) "  …"))
+             (push "  …" out))))))
+
+;;; --- classifying the evidence -----------------------------------------------------------------------
+
+(defun carry-row (entry status detail &key command relocation rerun diff)
+  "One evidence row of a carry: a JSON object, since `--out' writes the
+rows as they stand. COMMAND is the exact line re-run, or that would have
+been. RELOCATION is set when the anchor was found again elsewhere by its
+fingerprint; RERUN, on a row that reproduced, is the {command, addr} that
+did — what --inherit runs to record fresh evidence; DIFF, on a drifted row,
+is the recorded excerpt against the new one."
+  (obj "evidenceId" (manifest-entry-evidence-id entry)
+       "tool" (manifest-entry-tool entry)
+       "command" (or command :absent)
+       "status" status
+       "detail" detail
+       "relocation" (or relocation :absent)
+       "rerun" (or rerun :absent)
+       "diff" (if diff (coerce diff 'simple-vector) :absent)))
+
+(defun compare-output (entry output binary-path)
+  "Whether a re-run's OUTPUT still says what ENTRY recorded => the words for
+how it holds, or NIL when it really changed. The exact canonical hash, or —
+when the manifest carries one — the address-masked hash, which forgives a
+rebuild that only moved code."
+  (cond ((equal (canonical-hash output binary-path) (manifest-entry-repro-hash entry))
+         "output identical")
+        ((and (plusp (length (manifest-entry-shift-hash entry)))
+              (equal (shift-hash output binary-path) (manifest-entry-shift-hash entry)))
+         "output identical apart from shifted addresses")))
+
+(defun excerpt-diff (recorded-excerpt output binary-path)
+  "The line diff of RECORDED-EXCERPT against OUTPUT's own excerpt, capped;
+NIL when the two say the same — the change then lies further down."
+  (let ((new-excerpt (canonical-excerpt output binary-path)))
+    (unless (string= recorded-excerpt new-excerpt)
+      ;; An excerpt that hit its cap ends mid-line, at a different column on
+      ;; each side; that partial line is dropped so it never shows as a change.
+      (flet ((whole (excerpt)
+               (if (>= (length excerpt) +excerpt-max-characters+)
+                   (subseq excerpt 0 (or (position #\Newline excerpt :from-end t) 0))
+                   excerpt)))
+        (let ((diff (line-diff (whole recorded-excerpt) (whole new-excerpt) #'mask-addresses)))
+          (when (notevery (lambda (line) (starts-with "  " line)) diff)
+            (if (> (length diff) +max-diff-lines+)
+                (append (subseq diff 0 +max-diff-lines+)
+                        (list (format nil "  … ~d more diff line(s)" (- (length diff) +max-diff-lines+))))
+                diff)))))))
+
+(defun try-relocated (rz entry request fingerprint binary-path)
+  "Find the anchor's function in this build by FINGERPRINT and re-run the
+command there => a row — relocated when the output then matches, drifted
+with the relocation noted and a diff when it does not — or NIL when nothing
+matches the fingerprint or the relocated line may not run. The new
+function's name is folded back to the recorded one before comparing, so a
+pure rename compares equal."
+  (let* ((found (relocate-anchor rz fingerprint))
+         (line (and found
+                    (handler-case (check-rizin-command (load-catalog) (jstring request "command")
+                                                       (jstring found "addr"))
+                      (re-error () nil)))))
+    (when line
+      (let* ((output (rz-run rz line :seconds +carry-command-seconds+))
+             (old-name (jstring fingerprint "function"))
+             (new-name (jstring found "function"))
+             (old-offset (jstring fingerprint "offset"))
+             (new-offset (jstring found "offset"))
+             (renamed (string/= new-name old-name))
+             (moved (string/= (normalize-addr new-offset) (normalize-addr old-offset)))
+             (folded (if renamed (replace-all output new-name old-name) output))
+             (similarity (js-number (gethash "similarity" found)))
+             (relocation (obj "from" (format nil "~a @ ~a" old-name old-offset)
+                              "to" (format nil "~a @ ~a" new-name new-offset)
+                              "addr" (jstring found "addr")
+                              "similarity" (gethash "similarity" found)))
+             (where (format nil "~a ~a (code similarity ~a)" old-name
+                            (cond ((and renamed moved) (format nil "moved to ~a @ ~a" new-name new-offset))
+                                  (renamed (format nil "renamed to ~a" new-name))
+                                  (moved (format nil "moved from ~a to ~a" old-offset new-offset))
+                                  (t (format nil "found at ~a" new-offset)))
+                            similarity))
+             (same (compare-output entry folded binary-path)))
+        (if same
+            (carry-row entry "relocated" (format nil "~a; ~a" where same)
+                       :command line :relocation relocation
+                       :rerun (obj "command" (jstring request "command") "addr" (jstring found "addr")))
+            (let ((diff (excerpt-diff (or (manifest-entry-canonical-excerpt entry) "") folded binary-path)))
+              (carry-row entry "drifted"
+                         (format nil "~a; output changed~:[ beyond the recorded 20-line excerpt~;~]" where diff)
+                         :command line :relocation relocation :diff diff)))))))
+
+(defun carry-entry (entry binary-path)
+  "Re-run ENTRY on the open binary and classify it => a row. Never signals:
+whatever goes wrong with one entry leaves that entry unchecked (the engine's
+trouble) or broken (the anchor is gone)."
+  (let* ((request (and (string= (manifest-entry-tool entry) "rizin_command") (entry-request entry)))
+         (command (jstring request "command"))
+         (addr (jstring request "addr"))
+         (fingerprint (manifest-entry-anchor entry))
+         (recorded-excerpt (or (manifest-entry-canonical-excerpt entry) ""))
+         (line nil))
+    (when (or (null request) (zerop (length (manifest-entry-repro-hash entry))))
+      (return-from carry-entry
+        (carry-row entry "unchecked"
+                   (if (manifest-entry-commands entry)
+                       "provenance-only: no reproducible hash to compare (re-run by hand)"
+                       "legacy: no reproducible hash recorded")
+                   :command (manifest-entry-command entry))))
+    (handler-case
+        (setf line (check-rizin-command (load-catalog) command (and addr (validate-addr addr))))
+      (error (condition)
+        (return-from carry-entry
+          (carry-row entry "unchecked" (format nil "not runnable here: ~a" condition) :command command))))
+    (handler-case
+        (let ((rz (ensure-rizin))
+              ;; A numeric anchor always "resolves", so it is judged by its
+              ;; output, and relocated by fingerprint when that output changed.
+              (numeric (and addr (js-scan "(?i)^(0x[0-9a-f]+|\\d+)$" addr))))
+          (flet ((relocated ()
+                   (and fingerprint (try-relocated rz entry request fingerprint binary-path))))
+            ;; A symbolic anchor (sym.decrypt_config, a flag) that no longer
+            ;; resolves means the thing the claim is about is gone under that
+            ;; name. With a fingerprint it may only have been renamed, so it
+            ;; is looked for before it is called broken.
+            (when (and addr (not numeric)
+                       (not (ignore-errors (resolve-numeric-addr rz addr))))
+              (return-from carry-entry
+                (or (relocated)
+                    (carry-row entry "broken"
+                               (format nil "anchor `~a` no longer resolves in this binary~:[~; and no function matching its fingerprint was found~]"
+                                       addr fingerprint)
+                               :command line))))
+            (multiple-value-bind (output stderr) (rz-run rz line :seconds +carry-command-seconds+)
+              (when (blank-p output)
+                (let ((errors (clean-stderr stderr)))
+                  (when (or (plusp (length errors)) (not (blank-p recorded-excerpt)))
+                    (return-from carry-entry
+                      (or (and numeric (relocated))
+                          (carry-row entry "broken"
+                                     (format nil "command now produces no output~@[: ~a~]"
+                                             (and (plusp (length errors))
+                                                  (car (last (split-lines errors)))))
+                                     :command line))))))
+              (let ((same (compare-output entry output binary-path)))
+                (when same
+                  (return-from carry-entry
+                    (carry-row entry "holds" same :command line :rerun request))))
+              ;; Drifted at a numeric anchor: the code it named may simply have
+              ;; moved. The drift is kept only if that code is found nowhere else.
+              (when numeric
+                (let ((moved (relocated)))
+                  (when (and moved (not (equal (jstring moved "relocation" "addr") (normalize-addr addr))))
+                    (return-from carry-entry moved))))
+              (let ((diff (excerpt-diff recorded-excerpt output binary-path)))
+                (carry-row entry "drifted"
+                           (format nil "~a~@[; ~a~]"
+                                   (if diff
+                                       "output changed"
+                                       "output changed beyond the recorded 20-line excerpt (re-run to see it)")
+                                   (and numeric
+                                        (format nil "pinned to numeric address ~a~:[ — the code it named may have moved in this build~;; no function matching its fingerprint was found elsewhere~]"
+                                                addr fingerprint)))
+                           :command line :diff diff)))))
+      (error (condition)
+        (carry-row entry "unchecked" (format nil "re-run failed: ~a" condition) :command line)))))
+
+(defparameter +carry-rank+
+  '(("unchecked" . 0) ("holds" . 1) ("relocated" . 2) ("drifted" . 3) ("broken" . 4)))
+
+(defun carry-rank (status)
+  (cdr (assoc status +carry-rank+ :test #'string=)))
+
+(defun roll-up-claims (manifest evidence)
+  "The EVIDENCE rows' statuses rolled up to MANIFEST's claims: the worst
+checked status wins, and a claim with nothing checked stays unchecked.
+Claims come in the order the manifest first names them."
+  (let ((claims '()))                   ; (text . ids), first seen first
+    (dolist (entry (carry-manifest-entries manifest))
+      (dolist (text (manifest-entry-claims entry))
+        (let ((held (assoc text claims :test #'string=)))
+          (cond ((null held)
+                 (setf claims (append claims (list (list text (manifest-entry-evidence-id entry))))))
+                ((not (member (manifest-entry-evidence-id entry) (cdr held) :test #'string=))
+                 (setf (cdr held) (append (cdr held) (list (manifest-entry-evidence-id entry)))))))))
+    (mapcar (lambda (claim)
+              (let ((status "unchecked"))
+                (dolist (id (cdr claim))
+                  (let* ((row (find id evidence :key (lambda (row) (jstring row "evidenceId"))
+                                                :test #'string= :from-end t))
+                         (said (if row (jstring row "status") "unchecked")))
+                    (when (> (carry-rank said) (carry-rank status)) (setf status said))))
+                (obj "text" (car claim) "status" status
+                     "evidenceIds" (coerce (cdr claim) 'simple-vector))))
+            claims)))
+
+(defun build-carry (manifest &optional (session *session*))
+  "Re-run every reproducible entry of MANIFEST against the binary open now
+=> the carry's result, a JSON object: the two binaries' hashes, the path
+carried onto, a row for each distinct piece of evidence and one for each claim."
+  (let ((binary-path (or (session-binary-path session)
+                         (fail "omp-re: carry: no binary open — /re open <the new build> first, or pass --against <path>")))
+        (seen '())
+        (evidence '()))
+    (dolist (entry (carry-manifest-entries manifest))
+      (unless (member (manifest-entry-evidence-id entry) seen :test #'string=)
+        (push (manifest-entry-evidence-id entry) seen)
+        (push (carry-entry entry binary-path) evidence)))
+    (setf evidence (nreverse evidence))
+    (obj "fromSha256" (or (carry-manifest-binary-sha256 manifest) :null)
+         "toSha256" (or (session-binary-sha256 session)
+                        (ignore-errors (sha256-file binary-path))
+                        :null)
+         "toPath" binary-path
+         "evidence" (coerce evidence 'simple-vector)
+         "claims" (coerce (roll-up-claims manifest evidence) 'simple-vector))))
+
+;;; --- saying it ----------------------------------------------------------------------------------------
+
+(defparameter +carry-statuses+ '("holds" "relocated" "drifted" "broken" "unchecked"))
+
+(defun carry-count (status rows)
+  (count status rows :key (lambda (row) (jstring row "status")) :test #'string=))
+
+(defun short-sha (sha)
+  (if (plusp (length sha))
+      (format nil "~a…" (subseq sha 0 (min 12 (length sha))))
+      "unknown"))
+
+(defun format-carry-summary (result)
+  "The one-line summary and a line for each claim, those that do not hold first."
+  (let ((claims (jlist result "claims"))
+        (from (jstring result "fromSha256"))
+        (to (jstring result "toSha256")))
+    (join-lines
+     (append
+      (list (format nil "omp-re: carry ~a → ~a — ~d hold, ~d relocated, ~d drifted, ~d BROKEN, ~d unchecked (of ~d claim(s))"
+                    (short-sha from) (short-sha to)
+                    (carry-count "holds" claims) (carry-count "relocated" claims)
+                    (carry-count "drifted" claims) (carry-count "broken" claims)
+                    (carry-count "unchecked" claims) (length claims)))
+      (when (and (plusp (length from)) (equal from to))
+        (list "  (same binary the report was written against — this is /re verify; open the new build to carry onto it)"))
+      (loop for status in '("broken" "drifted" "unchecked" "relocated" "holds")
+            append (loop for claim in claims
+                         when (string= status (jstring claim "status"))
+                           collect (format nil "  ~9a ~a" (string-upcase status) (jstring claim "text"))))))))
+
+(defun format-carry-markdown (result manifest-path)
+  "The whole carry as markdown: the claim matrix, then each piece of
+evidence with what became of it and, where it drifted, the diff."
+  (let* ((claims (jlist result "claims"))
+         (evidence (jlist result "evidence"))
+         (lines '()))
+    (flet ((say (&rest more) (dolist (line more) (push line lines)))
+           (cell (text)
+             (replace-all (replace-all text "|" "\\|") (string #\Newline) " "))
+           (status-of (id)
+             (let ((row (find id evidence :key (lambda (row) (jstring row "evidenceId"))
+                                          :test #'string= :from-end t)))
+               (if row (jstring row "status") "unchecked"))))
+      (say "# Carry Report"
+           ""
+           (format nil "- **Manifest:** `~a`" manifest-path)
+           (format nil "- **From binary:** `~a`" (or (jstring result "fromSha256") "unknown"))
+           (format nil "- **To binary:** `~a`~@[ (~a)~]" (or (jstring result "toSha256") "unknown")
+                   (let ((path (jstring result "toPath"))) (and (plusp (length path)) path)))
+           (format nil "- **Claims:** ~d hold · ~d relocated · ~d drifted · ~d broken · ~d unchecked"
+                   (carry-count "holds" claims) (carry-count "relocated" claims)
+                   (carry-count "drifted" claims) (carry-count "broken" claims)
+                   (carry-count "unchecked" claims))
+           ""
+           "## Claims"
+           ""
+           "| Status | Claim | Evidence |"
+           "| --- | --- | --- |")
+      (dolist (claim claims)
+        (say (format nil "| ~a | ~a | ~{~a~^, ~} |" (jstring claim "status") (cell (jstring claim "text"))
+                     (mapcar (lambda (id) (format nil "`~a` ~a" (short-id id) (status-of id)))
+                             (jlist claim "evidenceIds")))))
+      (say "" "## Evidence" "")
+      (dolist (row evidence)
+        (say (format nil "### `~a` — ~a" (short-id (jstring row "evidenceId")) (jstring row "status"))
+             ""
+             (format nil "- **Tool:** ~a" (jstring row "tool")))
+        (when (plusp (length (jstring row "command")))
+          (say (format nil "- **Command:** `~a`" (jstring row "command"))))
+        (let ((relocation (jget row "relocation")))
+          (when relocation
+            (say (format nil "- **Relocated:** ~a → ~a (similarity ~a)"
+                         (jstring relocation "from") (jstring relocation "to")
+                         (js-number (gethash "similarity" relocation))))))
+        (say (format nil "- **Detail:** ~a" (jstring row "detail")) "")
+        (when (jlist row "diff")
+          (say "```diff")
+          (apply #'say (compact-diff (jlist row "diff")))
+          (say "```" ""))))
+    (join-lines (nreverse lines))))
+
+;;; --- --inherit: this build's starting point -----------------------------------------------------------
+
+(defun follow-relocation (addr relocation)
+  "ADDR mapped through RELOCATION: the old function's name becomes the new
+name, its old start the new start; anything else is left where it was (NIL)."
+  (flet ((halves (text)
+           (let ((at (search " @ " text)))
+             (if at
+                 (values (subseq text 0 at)
+                         (let ((rest (subseq text (+ at 3))))
+                           (subseq rest 0 (or (search " @ " rest) (length rest)))))
+                 (values text nil)))))
+    (multiple-value-bind (from-name from-offset) (halves (jstring relocation "from"))
+      (multiple-value-bind (to-name to-offset) (halves (jstring relocation "to"))
+        (cond ((and (string= addr from-name) (plusp (length to-name))) to-name)
+              ((and (plusp (length from-offset)) (plusp (length to-offset))
+                    (string= (normalize-addr addr) (normalize-addr from-offset)))
+               to-offset))))))
+
+(defun inherit-findings (manifest result &optional (session *session*))
+  "Turn the carry into this build's starting point => the outcome object.
+For each finding of MANIFEST whose claim holds or relocated, every evidence
+row that reproduced is run again through rizin_command's own body and
+recorded as fresh evidence bound to THIS binary — never copied from the
+manifest — and the finding is recorded citing only that evidence, with where
+it came from. A finding with nothing reproduced, or one that drifted or
+broke, goes on the agenda instead. A claim already live here is not
+inherited twice."
+  (let ((claims (jlist result "claims"))
+        (rows (jlist result "evidence"))
+        (present (mapcar (lambda (finding) (jstring finding "claim")) (live-findings session)))
+        (inherited '())
+        (agenda '())
+        (already-present 0))
+    (dolist (finding (carry-manifest-findings manifest))
+      (let* ((claim (manifest-finding-claim finding))
+             (claim-row (find claim claims :key (lambda (row) (jstring row "text"))
+                                           :test #'string= :from-end t))
+             (status (if claim-row (jstring claim-row "status") "unchecked"))
+             (cited (loop for id in (manifest-finding-evidence-ids finding)
+                          for row = (find id rows :key (lambda (row) (jstring row "evidenceId"))
+                                                  :test #'string= :from-end t)
+                          when row collect row))
+             (reproduced (remove-if-not (lambda (row)
+                                          (and (member (jstring row "status") '("holds" "relocated")
+                                                       :test #'string=)
+                                               (jget row "rerun")))
+                                        cited)))
+        (flet ((put-on-agenda (status)
+                 (push (obj "fromId" (manifest-finding-id finding) "claim" claim "status" status
+                            "rows" (coerce cited 'simple-vector))
+                       agenda)))
+          (cond
+            ((member claim present :test #'string=) (incf already-present))
+            ((or (not (member status '("holds" "relocated") :test #'string=)) (null reproduced))
+             (put-on-agenda status))
+            (t
+             (let ((new-evidence
+                     (loop for row in reproduced
+                           for rerun = (jget row "rerun")
+                           for run = (run-rizin-command (jstring rerun "command") (jstring rerun "addr") session)
+                           unless (result-failed run)
+                             collect (record-evidence "rizin_command" rerun (result-text run)
+                                                      (result-details run) session))))
+               (if (null new-evidence)
+                   (put-on-agenda "unchecked")
+                   ;; An address the finding was about follows its evidence's
+                   ;; anchor when that anchor relocated.
+                   (let* ((relocation (some (lambda (row) (jget row "relocation")) reproduced))
+                          (addr (manifest-finding-addr finding))
+                          (followed (and relocation (plusp (length addr))
+                                         (follow-relocation addr relocation)))
+                          (open-sha (session-binary-sha256 session))
+                          (id (uuid)))
+                     (append-entry
+                      "re.finding"
+                      (obj "id" id
+                           "claim" claim
+                           "evidenceIds" (coerce new-evidence 'simple-vector)
+                           "addr" (cond (followed followed)
+                                        ((plusp (length addr)) addr)
+                                        (t :absent))
+                           "confidence" (manifest-finding-confidence finding)
+                           "audit" (obj "verdict" "inherited"
+                                        "reason" "re-verified by /re carry; the report's support audit re-checks it")
+                           "binarySha256" (if (plusp (length open-sha)) open-sha :absent)
+                           "inherited" (obj "fromBinarySha256" (or (carry-manifest-binary-sha256 manifest) :null)
+                                            "fromFindingId" (manifest-finding-id finding)
+                                            "carryStatus" status
+                                            "relocation" (if relocation
+                                                             (obj "from" (jstring relocation "from")
+                                                                  "to" (jstring relocation "to")
+                                                                  "similarity" (gethash "similarity" relocation))
+                                                             :absent)))
+                      session)
+                     (push claim present)
+                     (push (obj "fromId" (manifest-finding-id finding) "toId" id "claim" claim "status" status)
+                           inherited)))))))))
+    (obj "inherited" (coerce (nreverse inherited) 'simple-vector)
+         "agenda" (coerce (nreverse agenda) 'simple-vector)
+         "alreadyPresent" already-present)))
+
+(defun format-agenda-prompt (outcome to-sha256)
+  "The agenda as a prompt for the model: each finding that no longer holds
+as written, with what became of its evidence under it."
+  (join-lines
+   (append
+    (list (format nil "These findings from the earlier report do not carry over unchanged to this build~@[ (`~a…`)~]. For each one, re-examine it with the RE tools, then record_finding a revised claim on fresh evidence, or leave it out if it no longer stands:"
+                  (and (plusp (length to-sha256)) (subseq to-sha256 0 (min 12 (length to-sha256)))))
+          "")
+    (loop for item in (jlist outcome "agenda")
+          for number from 1
+          append (cons (format nil "~d. [~a] ~a" number (jstring item "status") (jstring item "claim"))
+                       (loop for row in (jlist item "rows")
+                             append (cons (format nil "   - evidence ~a~@[ `~a`~]: ~a — ~a"
+                                                  (short-id (jstring row "evidenceId"))
+                                                  (let ((command (jstring row "command")))
+                                                    (and (plusp (length command)) command))
+                                                  (jstring row "status") (jstring row "detail"))
+                                          (when (jlist row "diff")
+                                            (append (list "     ```diff")
+                                                    (mapcar (lambda (line) (format nil "     ~a" line))
+                                                            (compact-diff (jlist row "diff")))
+                                                    (list "     ```"))))))))))
+
+;;; --- /re carry ----------------------------------------------------------------------------------------
+
+(defun read-manifest-file (path)
+  "The text of the manifest at PATH — the user's own path, read against the
+process's directory when relative — or a refusal that names it."
+  (let ((file (merge-pathnames (uiop:parse-native-namestring path) (uiop:getcwd))))
+    (flet ((refuse (why)
+             (fail "omp-re: carry: could not read manifest ~a: ~a" path why)))
+      (cond ((uiop:directory-exists-p (uiop:ensure-directory-pathname file))
+             (refuse "EISDIR: illegal operation on a directory, read"))
+            ((not (uiop:file-exists-p file))
+             (refuse (format nil "ENOENT: no such file or directory, open '~a'" path)))
+            (t
+             (handler-case
+                 (with-open-file (in file :external-format '(:utf-8 :replacement #\?))
+                   (let ((text (make-string (file-length in))))
+                     (subseq text 0 (read-sequence text in))))
+               (error (condition) (refuse condition))))))))
+
+(defun carry-manifest-file (manifest-path &key strict out inherit resolve (session *session*))
+  "Carry the manifest at MANIFEST-PATH onto the open binary and say what
+became of its claims => (values TEXT FAILED-P RESULT). A broken claim fails;
+under STRICT so does a relocated, drifted or unchecked one. OUT also writes
+the markdown carry report and, beside it, `<out>.json' with the whole
+result. INHERIT re-proves the manifest's findings here.
+
+RESOLVE asks for the agenda to go straight to the model as a turn of its
+own. A command cannot start a turn on this host any more than under
+`omp -p', so the TypeScript's headless answer stands: the line says so and
+the agenda follows the summary, to be passed on as the next prompt."
+  (let* ((manifest (parse-manifest (read-manifest-file manifest-path)))
+         (result (build-carry manifest session))
+         (claims (jlist result "claims"))
+         (failed (or (plusp (carry-count "broken" claims))
+                     (and strict
+                          (or (plusp (carry-count "relocated" claims))
+                              (plusp (carry-count "drifted" claims))
+                              (plusp (carry-count "unchecked" claims))))))
+         (lines (list (format-carry-summary result)))
+         (agenda-prompt nil))
+    (when inherit
+      (let* ((outcome (inherit-findings manifest result session))
+             (agenda (length (jlist outcome "agenda")))
+             (already-present (gethash "alreadyPresent" outcome)))
+        (setf (gethash "inheritance" result) outcome)
+        (push (format nil "inherit: ~d finding(s) re-proven on this build and recorded, ~d need another look~[~:;, ~:*~d already present~]~:[~; (this manifest has no findings — record them with record_finding before /re report)~]"
+                      (length (jlist outcome "inherited")) agenda already-present
+                      (null (carry-manifest-findings manifest)))
+              lines)
+        (when (plusp agenda)
+          (setf agenda-prompt (format-agenda-prompt outcome (jstring result "toSha256"))))))
+    (when (plusp (length out))
+      (push (handler-case
+                (progn
+                  (write-report-file out (format-carry-markdown result manifest-path))
+                  (write-report-file (format nil "~a.json" out)
+                                     (format nil "~a~%" (json-encode result :indent 2)))
+                  (format nil "carry report written to ~a (+ ~a.json)" out out))
+              (error (condition)
+                (format nil "carry report not written: ~a" condition)))
+            lines))
+    (when (and resolve inherit agenda-prompt)
+      (push (format nil "resolve: a headless run cannot start a model turn from a command — the agenda for ~d finding(s) follows; pass it to the model as the next prompt (e.g. omp -c -p \"<agenda>\")"
+                    (length (jlist result "inheritance" "agenda")))
+            lines))
+    (when agenda-prompt (push agenda-prompt lines))
+    (values (join-lines (nreverse lines)) (and failed t) result)))
+
+(define-slash "carry" (:usage "<manifest>"
+                       :description "replay a report on another build (--against, --inherit, --resolve, --strict, --out)")
+    (words)
+  ;; A flag that takes a value takes the next word; everything else joins
+  ;; back into the manifest's path.
+  (let ((against nil) (out nil) (strict nil) (inherit nil) (resolve nil) (path '()))
+    (loop while words
+          do (let ((word (pop words)))
+               (cond ((string= word "--strict") (setf strict t))
+                     ((string= word "--inherit") (setf inherit t))
+                     ((string= word "--resolve") (setf resolve t))
+                     ((string= word "--against") (setf against (pop words)))
+                     ((string= word "--out") (setf out (pop words)))
+                     (t (push word path)))))
+    (if (null path)
+        (values "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]"
+                t)
+        ;; The open says something only when it put annotations back, as the
+        ;; TypeScript's does; otherwise the carry's own lines are the answer.
+        (let ((opened (and against (open-binary against))))
+          (multiple-value-bind (text failed)
+              ;; --resolve implies --inherit: re-prove what holds, then hand over the rest.
+              (carry-manifest-file (rest-of-line (nreverse path))
+                                   :strict strict :out out :inherit (or inherit resolve) :resolve resolve)
+            (values (if (and opened (search "Re-applied " opened))
+                        (format nil "~a~%~a" opened text)
+                        text)
+                    failed))))))

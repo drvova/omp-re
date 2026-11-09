@@ -3,8 +3,8 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; Config, a sibling top-level key of ~/.nodecode/config.jsonc:
-;;;;   "re": {"surface": "eval", "rizin_path": "", "state_dir": "",
-;;;;          "debugger": false, "idle_minutes": 30}
+;;;;   "re": {"rizin_path": "", "state_dir": "",
+;;;;          "allowed_dirs": [], "debugger": false, "idle_minutes": 30}
 ;;;; A vetoed section ("enabled": false) installs nothing. There is no secret
 ;;;; here: the audit log's signing key stays the engine's own environment
 ;;;; variable, OMPRE_AUDIT_HMAC_KEY.
@@ -31,6 +31,15 @@ it from eval, as verbs in the RE package; each answers a string, but re:json.
                             rizin_cli, rizin_emulate, analyze, apply_signatures, map_file,
                             export_project. :max-depth spells max_depth; false is :false; an
                             array is a list.
+  Reads composed for you — plain functions over (re:cmd), each line naming the evidence id it
+  rests on, so what they show can be cited:
+  (re:triage)               identity, build protections, sections with entropy, notable imports
+                            and strings, the largest functions, entry points. Start here.
+  (re:scan-imports)         imports a reviewer stops at, why, and who calls them; what the
+                            program can reach, by what it links.
+  (re:inspect-function \"main\")   one function's shape, variables, callers, callees, strings.
+  (re:find-comparisons \"main\")   what it compares and which way each branch goes.
+  (re:find-crypto)          cryptographic constants and key material, with what refers to them.
   (re:tools)                the tools, one line each.   (re:doc \"tool\")  one tool's arguments.
   (re:slash \"functions\")    a /re line: functions, strings, imports, evidence [id], cite <id>,
                             findings [id], undo, verify [--strict], report [path], carry <manifest>.
@@ -88,26 +97,24 @@ record is on disk and its next call restores it."
             (if (plusp (length named)) (nlk:expand-home named) (nlk:home "omp-re/"))))
         ;; Read through *RE*, not SETTING: a stopped cell answers "unset", it does not refuse.
         *configured-rizin* (lambda () (and *re* (setting :rizin-path)))
-        *debugger-setting* (lambda () (and *re* (setting :debugger))))
+        *debugger-setting* (lambda () (and *re* (setting :debugger)))
+        *allowed-directories* (lambda () (and *re* (setting :allowed-dirs))))
   (nle:on-stop #'shutdown-sessions)
   (let* ((idle (* 60 (setting :idle-minutes)))
          (worker (nlk:worker-start "nodecode-re idle sessions"
                                    (lambda () (reap-idle-sessions idle))
                                    :wake 60)))
-    (nle:on-stop (lambda () (nlk:worker-stop worker))))
-  (when (string= (setting :surface) "tools")
-    (let ((names (register-surface-tools)))
-      (nle:on-stop (lambda () (mapc #'nle:unregister-tool names))))))
+    (nle:on-stop (lambda () (nlk:worker-stop worker)))))
 
 (nle:define-cell re
   (:section ("re")
     (:guide "install rizin (https://rizin.re); nothing else is required. (re:status) says what the engine found")
-    ("surface" :choice :options '("eval" "tools") :default "eval"
-     :doc "eval: the model reaches the engine through the re: verbs only; tools: every engine tool is also a tool of its own, named re_<name>")
     ("rizin_path" :string :default ""
      :doc "the rizin to run when it is not the one on PATH (the engine's OMPRE_RIZIN_PATH)")
     ("state_dir" :string :default ""
      :doc "where session records, evidence, the audit log and reports are kept; omp-re/ under the home when empty")
+    ("allowed_dirs" :list :default '()
+     :doc "directories binaries and other input files may be opened from; empty allows any file the organism can read")
     ("debugger" :boolean :default nil
      :doc "offer rizin_debug, which EXECUTES the binary under analysis on this machine; leave off outside a sandbox")
     ("idle_minutes" :integer :default 30 :min 1

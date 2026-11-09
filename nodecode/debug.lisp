@@ -102,9 +102,6 @@ libc.so.6 pass."
 (defun json-object-p (value)
   (hash-table-p value))
 
-(defun json-array-p (value)
-  (and (vectorp value) (not (stringp value))))
-
 (defun build-debug-target (attach)
   "The `-d <target>' string an attach object spells: a pid (\"1234\") or a
 remote stub's URI (gdb://host:port, windbg://...); NIL when ATTACH is :ABSENT

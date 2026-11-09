@@ -22,6 +22,8 @@
   (:export
    ;; model-facing vocabulary (see the primer in cell.lisp)
    #:open #:cmd #:json #:call #:tools #:doc #:slash #:status
+   ;; recipes: reads composed once (recipes.lisp)
+   #:triage #:scan-imports #:inspect-function #:find-comparisons #:find-crypto
    ;; the one condition
    #:re-error))
 

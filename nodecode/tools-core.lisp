@@ -200,8 +200,10 @@ nothing, which is not an error message."
 
 (defun run-rizin-command (command addr &optional (session *session*))
   "The body of rizin_command: gate the line through the read-only policy,
-run it, and build the result with its reproducibility fields. /re carry
-re-runs a carried command through this, so it is recorded as the tool would."
+run it, and build the result with its reproducibility fields
+=> (values RESULT RAW-OUTPUT). /re carry re-runs a carried command through
+this, so it is recorded as the tool would; a recipe reads RAW-OUTPUT, which
+is whole where the result's text may be cut."
   ;; No binary is said before the catalog is read, so the guidance needs no rizin.
   (let ((binary-path (require-binary session)))
     (let* ((line (check-rizin-command (load-catalog) command addr))
@@ -211,17 +213,19 @@ re-runs a carried command through this, so it is recorded as the tool would."
       (multiple-value-bind (output stderr) (rz-run rz line :seconds +rizin-command-seconds+)
         (if (blank-p output)
             (let ((errors (clean-stderr stderr)))
-              (if (plusp (length errors))
-                  (failed-result (format nil "~a~%(no output; rizin said:)~%~a" header errors) ea)
-                  (plain-result (format nil "~a~%(no output)" header) ea)))
+              (values (if (plusp (length errors))
+                          (failed-result (format nil "~a~%(no output; rizin said:)~%~a" header errors) ea)
+                          (plain-result (format nil "~a~%(no output)" header) ea))
+                      ""))
             ;; The hashes are over the RAW output, canonicalized and bound to
             ;; the binary's path, so /re verify can re-run this exact line and
             ;; compare; what the model reads is still the trimmed, cut text.
-            (text-result header (string-right-trim '(#\Newline) output)
-                         :ea ea :tool "rizin_command" :commands (list line)
-                         :repro-hash (canonical-hash output binary-path)
-                         :canonical-excerpt (canonical-excerpt output binary-path)
-                         :shift-hash (shift-hash output binary-path)))))))
+            (values (text-result header (string-right-trim '(#\Newline) output)
+                                 :ea ea :tool "rizin_command" :commands (list line)
+                                 :repro-hash (canonical-hash output binary-path)
+                                 :canonical-excerpt (canonical-excerpt output binary-path)
+                                 :shift-hash (shift-hash output binary-path))
+                    output))))))
 
 (define-tool "rizin_help"
     (:label "rizin help" :tier :read
@@ -242,6 +246,7 @@ re-runs a carried command through this, so it is recorded as the tool would."
       (let ((result (text-result "omp-re manual" +manual+)))
         (setf (gethash "manual" (result-details result)) t)
         result)
+      ;; Both values: the result, and the whole output for code that composes reads.
       (run-rizin-command (jstring arguments "command") (jstring arguments "addr"))))
 
 ;;; --- which decompiler this rizin has ----------------------------------------------------------
@@ -374,6 +379,15 @@ in order after the core's: how a tool group says its own state.")
                            (mapcar #'decompiler-label (rest present))))))))
       (if (session-binary-path session)
           (append (list (format nil "binary: ~a" (session-binary-path session)))
+                  ;; The record binds evidence to the bytes that were opened. A
+                  ;; file rebuilt since then is a different binary under the
+                  ;; same name, and reading on would mix the two.
+                  (let ((opened (session-binary-sha256 session))
+                        (now (ignore-errors (sha256-file (session-binary-path session)))))
+                    (cond ((null now)
+                           (list "  the file is no longer readable there"))
+                          ((and opened (string/= opened now))
+                           (list "  CHANGED ON DISK since it was opened: evidence so far is of the earlier bytes — /re open it again to analyze what is there now"))))
                   (unless (rz-alive-p (session-rz session))
                     (list "rizin process: not running (starts on next use)")))
           (list "binary: none — /re open <path>"))

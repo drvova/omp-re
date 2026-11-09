@@ -233,6 +233,10 @@ read as NIL; NIL as soon as a step is not an object."
   (let ((value (apply #'jget object path)))
     (and (vectorp value) (not (stringp value)) (coerce value 'list))))
 
+(defun json-array-p (value)
+  "Whether VALUE is a decoded JSON array: a vector that is not a string."
+  (and (vectorp value) (not (stringp value))))
+
 (defun format-json (data)
   "JSON for a model's context: an array is one compact row a line, anything
 else is pretty-printed. Both are valid JSON."

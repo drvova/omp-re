@@ -47,5 +47,7 @@
                (:file "report")
                (:file "carry")
                (:file "debug")
+               (:file "recipe-data")
+               (:file "recipes")
                (:file "verbs")
                (:file "cell")))

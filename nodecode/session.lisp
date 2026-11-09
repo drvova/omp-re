@@ -528,26 +528,29 @@ never coerced; null reads as absent."
            (setf (session-last-used ,it) (get-universal-time))
            ,@body)))))
 
-(defun call-tool (session name arguments)
-  "Run the tool NAME for SESSION with the JSON object ARGUMENTS
-=> (values TEXT FAILED-P). A failure is an answer, never a signal: TEXT is
-then what went wrong, in words the model can act on."
-  (let ((tool (find-tool name)))
+(defun call-tool-in-session (name arguments)
+  "Run the tool NAME with the JSON object ARGUMENTS for *SESSION*, whose lock
+the caller holds => (values TEXT FAILED-P RAW). RAW is the tool's second
+value, when it has one: the whole of what rizin printed, where TEXT may be
+cut. This is the whole pipeline — the `/re off' gate, the audit line, the
+body, the evidence record — so code that composes reads (a recipe, a verb)
+makes each of them a tool call in its own right, not a way around one."
+  (let ((tool (find-tool name))
+        (session *session*))
     (unless tool
-      (return-from call-tool
+      (return-from call-tool-in-session
         (values (format nil "omp-re: no tool named ~a — (re:tools) lists them" (js-string name)) t)))
     (handler-case
         (let ((arguments (check-arguments tool (or arguments (obj)))))
-          (with-session (session)
-            (when (session-tools-off session)
-              (return-from call-tool
-                (values "omp-re: RE tools are off for this session — the user can re-enable them with /re on" t)))
-            (let ((call-id (format nil "~a-~d" (file-safe (session-id session))
-                                   (incf (session-calls session)))))
-              (append-audit-line session call-id name arguments)
-              (let* ((result (funcall (tool-function tool) arguments))
-                     (text (result-text result)))
-                (cond ((result-failed result) (values text t))
+          (when (session-tools-off session)
+            (return-from call-tool-in-session
+              (values "omp-re: RE tools are off for this session — the user can re-enable them with /re on" t)))
+          (let ((call-id (format nil "~a-~d" (file-safe (session-id session))
+                                 (incf (session-calls session)))))
+            (append-audit-line session call-id name arguments)
+            (multiple-value-bind (result raw) (funcall (tool-function tool) arguments)
+              (let ((text (result-text result)))
+                (cond ((result-failed result) (values text t raw))
                       ((and (tool-evidence tool) (not (jget (result-details result) "manual")))
                        ;; The id rides on its own trailing line, so a *j
                        ;; result's body stays valid JSON between the header
@@ -557,9 +560,17 @@ then what went wrong, in words the model can act on."
                                    (error (condition)
                                      (warn "omp-re: evidence recording failed: ~a" condition)
                                      nil))))
-                         (values (if id (format nil "~a~%~a" text (evidence-tag id)) text) nil)))
-                      (t (values text nil)))))))
+                         (values (if id (format nil "~a~%~a" text (evidence-tag id)) text) nil raw)))
+                      (t (values text nil raw)))))))
       (re-error (condition)
         (values (princ-to-string condition) t))
       (error (condition)
         (values (format nil "omp-re: ~a failed: ~a" name condition) t)))))
+
+(defun call-tool (session name arguments)
+  "Run the tool NAME for SESSION with the JSON object ARGUMENTS
+=> (values TEXT FAILED-P). A failure is an answer, never a signal: TEXT is
+then what went wrong, in words the model can act on."
+  (with-session (session)
+    (multiple-value-bind (text failed) (call-tool-in-session name arguments)
+      (values text failed))))

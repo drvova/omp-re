@@ -87,9 +87,6 @@ its threads runs the debugger, so every thread's list is read."
            (multiple-value-bind (text failed)
                (re::call-tool (re::find-session (fresh-session)) "rizin_debug" (re::obj "action" "stop"))
              (and failed (has "no tool named" text)))))
-  (with-cell (:surface "tools")
-    (check "nor is it registered top-level while off"
-           (null (find "re_rizin_debug" nle:*tools* :key #'first :test #'string=))))
   (with-cell (:debugger t)
     (check "with the debugger on the tool is offered"
            (and (has "rizin_debug — Dynamic analysis" (re:tools))
@@ -109,13 +106,7 @@ its threads runs the debugger, so every thread's list is read."
   (with-environment ("OMPRE_ENABLE_DEBUGGER" "1")
     (with-cell ()
       (check "OMPRE_ENABLE_DEBUGGER switches it on as the setting does"
-             (has "rizin_debug" (re:tools)))))
-  (with-cell (:debugger t :surface "tools")
-    (check "surface \"tools\" registers it as re_rizin_debug when on"
-           (let ((entry (find "re_rizin_debug" nle:*tools* :key #'first :test #'string=)))
-             (and entry
-                  (equalp #("action")
-                          (gethash "required" (getf (second entry) :parameters))))))))
+             (has "rizin_debug" (re:tools))))))
 
 ;;; --- the builders ---------------------------------------------------------------------
 

@@ -387,13 +387,50 @@ target's bits, or NIL when they match or either side is unknown."
       (format nil "rizin build is ~d-bit but the target is ~d-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_~d to a matching build."
               build target target))))
 
-(defun resolve-binary-path (input)
-  "INPUT resolved to an absolute, existing, readable file."
+(defvar *allowed-directories* nil
+  "A function answering the directories files may be opened from, as a list
+of strings, or NIL for no restriction. Set by the cell at start.")
+
+(defun allowed-directories ()
+  "The operator's allow-list: the cell's allowed_dirs, else OMPRE_ALLOWED_DIRS
+(comma-separated). Empty means any file the organism can read."
+  (remove-if #'blank-p
+             (or (and *allowed-directories* (funcall *allowed-directories*))
+                 (mapcar #'trimmed
+                         (uiop:split-string (or (env "OMPRE_ALLOWED_DIRS") "") :separator '(#\,))))))
+
+(defun assert-path-allowed (file)
+  "FILE — an existing file's true name, links already followed — when it lies
+under one of the allowed directories, or when there is no allow-list. The
+comparison is against each directory's own true name plus a separator, so
+neither a link that points out of an allowed folder nor a sibling folder
+whose name merely starts the same (/samples-evil beside /samples) passes."
+  (let ((allowed (allowed-directories)))
+    (when allowed
+      (let ((path (native file)))
+        (unless (some (lambda (directory)
+                        (let ((real (ignore-errors
+                                     (probe-file (uiop:ensure-directory-pathname
+                                                  (nlk:expand-home directory))))))
+                          (and real (starts-with (native real) path))))
+                      allowed)
+          (fail "omp-re: ~a is outside the directories files may be opened from (the re section's allowed_dirs: ~{~a~^, ~})"
+                path allowed)))))
+  file)
+
+(defun resolve-readable-file (input)
+  "INPUT resolved to an existing, readable, allowed file's native path, or NIL
+when there is no such file. A file outside the allow-list is a refusal."
   (let ((file (ignore-errors (probe-file (uiop:parse-native-namestring input)))))
-    (unless (and file (not (uiop:directory-pathname-p file))
-                 (ignore-errors (with-open-file (in file :element-type '(unsigned-byte 8)) t)))
-      (fail "omp-re: no such binary: ~a" input))
-    (native file)))
+    (and file
+         (not (uiop:directory-pathname-p file))
+         (ignore-errors (with-open-file (in file :element-type '(unsigned-byte 8)) t))
+         (native (assert-path-allowed file)))))
+
+(defun resolve-binary-path (input)
+  "INPUT resolved to an absolute, existing, readable file the operator allows."
+  (or (resolve-readable-file input)
+      (fail "omp-re: no such binary: ~a" input)))
 
 ;;; --- rizin's own catalog of commands --------------------------------------------------
 

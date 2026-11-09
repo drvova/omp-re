@@ -104,7 +104,7 @@
 (with-cell ()
   (check "the help topic and the /re command are contributed"
          (and (assoc :re nle:*help*) (assoc "re" nle:*commands* :test #'string=)))
-  (check "no tool is registered top-level under the default surface" (null nle:*tools*))
+  (check "no tool is registered with nodecode" (null nle:*tools*))
   (check "(re:tools) lists the engine's tools"
          (let ((text (re:tools))) (and (has "rizin_command" text) (has "open_binary" text) (has "rizin_help" text))))
   (check "(re:doc) spells a tool's parameters as eval keywords"
@@ -135,22 +135,10 @@
            (and (has "RE tools are off" (refusal (lambda () (re:cmd ""))))
                 (progn (re:slash "on") (has "omp-re manual" (re:cmd "")))))))
 
-(with-cell (:surface "tools")
-  (check "surface \"tools\" registers every engine tool as re_<name>"
-         (and (find "re_rizin_command" nle:*tools* :key #'first :test #'string=)
-              (= (length nle:*tools*) (length (re::offered-tools)))))
-  (let* ((entry (find "re_open_binary" nle:*tools* :key #'first :test #'string=))
-         (schema (getf (second entry) :parameters)))
-    (check "each with a JSON Schema derived from the tool's own parameters"
-           (and (equal "object" (gethash "type" schema))
-                (equalp #("path") (gethash "required" schema))
-                (equalp #(8 16 32 64) (gethash "enum" (gethash "bits" (gethash "properties" schema)))))))
-  (let ((nle:*failed* nil)
-        (entry (find "re_rizin_command" nle:*tools* :key #'first :test #'string=)))
-    (check "a failed top-level call answers its text through NLE:FAILURE"
-           (and (has "command is required" (funcall (third entry) (re::obj))) nle:*failed*))))
-(check "stop takes the tools, the help topic and the command back"
-       (and (null nle:*tools*) (null nle:*help*) (null nle:*commands*)))
+(check "the cell registers no tool with nodecode: its model has one, eval, and the verbs live in it"
+       (null nle:*tools*))
+(check "stop takes the help topic and the command back"
+       (and (null nle:*help*) (null nle:*commands*)))
 
 ;;; --- with rizin -----------------------------------------------------------------------
 

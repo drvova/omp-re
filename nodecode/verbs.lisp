@@ -186,28 +186,3 @@ ARGUMENTS: (re:call \"set_comment\" :addr \"main\" :text \"entry\")."
 (define-verb status ()
   "The engine's state for this session: rizin, the open binary, evidence and findings."
   (values (run-slash-line (current-session) "status")))
-
-;;; --- the same tools, top-level ------------------------------------------------------
-;;; For the operator who sets surface to "tools": every engine tool becomes a
-;;; tool of its own, named re_<name>, its schema derived from the same
-;;; parameter list the verbs check against.
-
-(defun surface-name (name)
-  (concatenate 'string "re_" name))
-
-(defun run-surface-tool (name arguments)
-  "One top-level call => the text, recorded failed when the engine says so."
-  (multiple-value-bind (text failed)
-      (call-tool (current-session) name (if (hash-table-p arguments) arguments (obj)))
-    (if failed (nle:failure text) text)))
-
-(defun register-surface-tools ()
-  "Register every engine tool => the names registered."
-  (loop for tool in (offered-tools)
-        for registered = (surface-name (tool-name tool))
-        do (let ((name (tool-name tool)))
-             (nle:register-tool registered
-                                (list :description (tool-description tool)
-                                      :parameters (tool-schema tool))
-                                (lambda (arguments) (run-surface-tool name arguments))))
-        collect registered))

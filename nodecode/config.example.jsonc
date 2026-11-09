@@ -6,12 +6,12 @@
 {
   "re": {
     "enabled": true,
-    // "eval": the re: verbs only. "tools": also one top-level tool per engine tool, named re_<name>.
-    "surface": "eval",
     // The rizin to run when it is not the one on PATH.
     "rizin_path": "",
     // Where session records, evidence, the audit log and reports go. Empty: omp-re/ under the home.
     "state_dir": "",
+    // Directories binaries and other input files may be opened from. Empty: any file the organism can read.
+    "allowed_dirs": [],
     // Offers rizin_debug, which EXECUTES the binary under analysis. Leave off outside a sandbox.
     "debugger": false,
     // Close the rizin process of a session unused this long; its next call restores it.

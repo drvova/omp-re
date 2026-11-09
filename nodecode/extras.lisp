@@ -499,11 +499,8 @@ minimal build may lack some. Asked each time, so one installed later is seen."
 
 (defun resolve-existing-file (label value)
   "VALUE resolved to an existing, readable file, or the refusal naming LABEL."
-  (let ((file (ignore-errors (probe-file (uiop:parse-native-namestring value)))))
-    (unless (and file (not (uiop:directory-pathname-p file))
-                 (ignore-errors (with-open-file (in file :element-type '(unsigned-byte 8)) t)))
-      (fail "omp-re: invalid ~a: ~a" label value))
-    (native file)))
+  (or (resolve-readable-file value)
+      (fail "omp-re: invalid ~a: ~a" label value)))
 
 (defun capa-findings (parsed)
   "Each matched rule's name with its ATT&CK/MBC mapping. capa's top-level
