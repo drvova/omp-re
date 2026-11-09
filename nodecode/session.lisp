@@ -158,15 +158,13 @@ only the first eight characters, so what the model retypes is a prefix."
 
 (defun write-blob (content)
   "Store CONTENT in the content-addressed blob store => its SHA-256. Written
-to a temporary file and renamed, so a reader never sees half a blob; a blob
-already there is left alone."
+through a temporary file and one rename, so a reader never sees half a blob;
+a blob already there is left alone."
   (let* ((hash (sha256-hex content))
          (target (blob-path hash)))
     (unless (probe-file target)
-      (let ((temporary (merge-pathnames (format nil ".~a.~a.tmp" hash (uuid)) target)))
-        (write-text-file temporary content)
-        ;; Not RENAME-FILE, which would lend the target the temporary's file type.
-        (uiop:rename-file-overwriting-target temporary target)))
+      (ensure-directories-exist target)
+      (nlk:write-file-atomically target content))
     hash))
 
 (defun read-blob (hash)

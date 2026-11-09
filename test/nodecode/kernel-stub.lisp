@@ -17,7 +17,7 @@
   (:use #:cl)
   (:nicknames #:nlk)
   (:export #:define-peripheral #:spawn-program #:child-exit #:kill-tree #:run-bounded
-           #:worker-start #:worker-stop
+           #:worker-start #:worker-stop #:write-file-atomically
            #:home #:expand-home #:find-session-cwd
            #:*stub-home* #:*stub-session-cwd*))
 
@@ -41,6 +41,18 @@
   (if (uiop:string-prefix-p "~/" text)
       (merge-pathnames (subseq text 2) (user-homedir-pathname))
       (uiop:parse-native-namestring text)))
+
+(defun write-file-atomically (path content &key mode directory-mode (parents t))
+  "CONTENT, a string, to PATH through a temporary file beside it and one rename."
+  (declare (ignore mode directory-mode))
+  (let* ((native (if (stringp path) path (sb-ext:native-namestring path)))
+         (temporary (format nil "~a.~a.~a.tmp" native (sb-posix:getpid) (random 1000000))))
+    (when parents (ensure-directories-exist (uiop:parse-native-namestring native)))
+    (with-open-file (out (uiop:parse-native-namestring temporary) :direction :output
+                         :if-exists :supersede :external-format :utf-8)
+      (write-string content out))
+    (sb-posix:rename temporary native)
+    path))
 
 (defun find-session-cwd (session-id)
   (declare (ignore session-id))
