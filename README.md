@@ -132,7 +132,10 @@ defines `re.triage()`, `re.scanImports()`, `re.inspectFunction(addr)`,
 `re.findComparisons(addr)` and `re.findCrypto()`. Each composes
 `tool.rizin_command` — so every read is approved, audited and recorded as
 evidence like any other — and returns a report whose every line names the
-evidence id it rests on, ready to cite in `record_finding`.
+evidence id it rests on, ready to cite in `record_finding`. What the recipes
+and the tools take from `eval` — `tool.<name>()`, `%load`, `skill://`,
+`artifact://` — omp's site does not document;
+[`docs/omp-eval.md`](docs/omp-eval.md) does, from omp's source.
 
 A tool call made from `eval` returns its `{ text, details }` to your code; omp
 renders the eval cell (your `print`/`display` output), not a per-tool card — the
@@ -522,6 +525,7 @@ Three environment variables, all optional:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
 - [`docs/nodecode.md`](docs/nodecode.md) — running omp-re as a nodecode cell: verbs, configuration, the Lisp engine and how it is held to this one.
 - [`docs/tools.md`](docs/tools.md) — the `rizin_command` read map and parameter tables for the stateful tools.
+- [`docs/omp-eval.md`](docs/omp-eval.md) — omp's `eval` as this plugin uses it: cells, `tool.<name>()`, `%load`, `skill://` and `artifact://`, read from omp's source and pinned by a test.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

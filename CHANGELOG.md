@@ -62,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `record_finding`, `adopt_finding` and `/re report` ask the model a side
   question with no tools, as omp's does; `audit` and `audit_seconds` in the
   `re` section turn it off and bound its wait.
+- `docs/omp-eval.md`: the part of omp's `eval` this plugin stands on and omp.sh does not describe (cells and what ends a kernel, `tool.<name>()`, `%load`, `skill://`, `artifact://`, `xd://`), read from omp 18.11.1's source and pinned claim by claim in `test/omp-eval-contract.test.ts`.
 
 ### Changed
 

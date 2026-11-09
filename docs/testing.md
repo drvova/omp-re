@@ -43,6 +43,17 @@ since they are `xd://` devices rather than top-level tools. It is the suite that
 changed `getAllTools()` to return tool objects, which broke `/re on` while
 every stub-based test stayed green. It runs in CI.
 
+`omp-eval-contract.test.ts` pins the host itself. omp-re leans on behaviours
+of omp's `eval` that omp.sh does not document — what `tool.<name>()` returns
+and when it throws, that such a call is approved and fires
+`tool_call`/`tool_result`, `%load` and `skill://`, `artifact://` and when it
+cannot be read, what ends a kernel — and [`omp-eval.md`](omp-eval.md) writes
+them down from omp's source. This file holds that page to the installed omp,
+one test per claim and named for it, so an omp upgrade that changes one fails
+in the claim's own words; its first test fails until the page names the new
+version. It uses a probe extension registered inline rather than the RE
+tools, so it needs no rizin and runs whole in CI (53 tests).
+
 **The default fixture is `/bin/ls`**, which exists on every Linux host and on
 macOS, so the integration suites need nothing but rizin. Point them at
 another binary with `OMPRE_TEST_BINARY=/path/to/binary`. Ground truth is read
