@@ -50,7 +50,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json .omp-plugin/marketplace.json CHANGELOG.md
+          git add package.json .omp-plugin/marketplace.json nodecode-re.asd CHANGELOG.md
           git commit -m "chore(release): v${V}"
           git tag -a "v${V}" -m "v${V}"
           git push origin HEAD:main

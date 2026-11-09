@@ -3,8 +3,8 @@
  * Conventional-Commits version bump.
  *
  * Looks at the commits in a range, decides whether they warrant a release and
- * at what level, and — if so — bumps the version in `package.json` and
- * `.omp-plugin/marketplace.json` (kept in lock-step) and stamps a dated
+ * at what level, and — if so — bumps the version in `package.json`,
+ * `.omp-plugin/marketplace.json` and `nodecode-re.asd` (kept in lock-step) and stamps a dated
  * section in `CHANGELOG.md`. It only edits files; the workflow does the git
  * commit / tag / push. Run it locally with `--dry-run` to preview a decision
  * without touching anything.
@@ -38,6 +38,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = join(ROOT, "package.json");
 const MARKET = join(ROOT, ".omp-plugin", "marketplace.json");
 const CHANGELOG = join(ROOT, "CHANGELOG.md");
+// The nodecode cell's system definition carries the same version (see docs/nodecode.md).
+const ASD = join(ROOT, "nodecode-re.asd");
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
@@ -179,6 +181,7 @@ if (dryRun) {
 
 writeFileSync(PKG, setJsonVersion(pkgRaw, next));
 writeFileSync(MARKET, setJsonVersion(readFileSync(MARKET, "utf8"), next));
+writeFileSync(ASD, readFileSync(ASD, "utf8").replace(/^(\s*:version\s+")[^"]*(")/m, `$1${next}$2`));
 
 const date = new Date().toISOString().slice(0, 10);
 const changelog = readFileSync(CHANGELOG, "utf8");

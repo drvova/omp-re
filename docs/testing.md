@@ -158,15 +158,35 @@ literal in the same commit, and give any conditional assertion an explicit
 healthy run if a branch silently produces a different total than every
 other branch.
 
+## nodecode cell — `bun run test:nodecode`
+
+`sbcl --non-interactive --load test/nodecode/smoke.lisp` loads the real
+`nodecode-re` system (`nodecode-re.asd`, `nodecode/*.lisp`) and drives the
+real bridge (`bun nodecode/bridge.ts`) through the cell's Lisp: the argument
+mapping, every verb, `/re`, a deadline, overlapping sessions, the top-level
+tool surface, an engine killed and replaced, start and stop. Needs SBCL, bun
+and `bun install`. The rizin half (open, read, findings, verify, restore after
+a kill) runs when rizin and the test binary are present and prints `SKIPPED`
+when they are not.
+
+It runs on `test/nodecode/kernel-stub.lisp`, a stand-in for the names the cell
+uses from nodecode's kernel. That proves the cell's own code, not nodecode's
+side of the seam: loading the folder in a nodecode build is a manual check
+(`docs/nodecode.md`). The TypeScript half — the headless host and the bridge's
+protocol — is `test/nodecode-bridge.test.ts`, part of `bun test`.
+
 ## What CI actually runs
 
-Two jobs:
+Three jobs:
 
 - **`check`** — `bun install --ignore-scripts && bun run check` (`tsc
   --noEmit`). Needs nothing beyond Bun.
 - **`test`** — `bun install --ignore-scripts && bun test`. Does **not**
   install rizin, so the rizin-dependent suites skip as described above and
   the run exits 0. Never add a malware sample to CI.
+- **`nodecode`** — installs SBCL and runs `bun run test:nodecode`. No rizin
+  here either, so the smoke test's rizin half prints `SKIPPED`; everything
+  that needs only the bridge runs.
 
 Both tmux tiers (`test/tui.sh`, `test/tui-qa.sh`) are **local/self-hosted
 only**: both hard-exit 0 when a prerequisite is missing, which would make

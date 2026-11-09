@@ -139,6 +139,36 @@ evidence store hook, and comes back tagged with its `[evidence xxxxxxxx]` id
 for `record_finding`. (With omp's `tools.xdev` setting off, omp lists the same
 tools top-level instead; nothing else changes.)
 
+## Also a nodecode cell
+
+The same engine runs under [nodecode](https://nodecode.ai), whose model has one
+tool — `eval`, evaluating Lisp — and whose extensions are *cells*. This
+repository is one: clone it into the cells folder and install the engine's
+dependencies once.
+
+```sh
+git clone https://github.com/drvova/omp-re ~/.nodecode/cells/nodecode-re
+cd ~/.nodecode/cells/nodecode-re && bun install
+```
+
+The cell is native Lisp — verbs in the `RE` package, a `/re` command, a
+`(help :re)` manual, a config section — and adds no tool schemas by default,
+the nodecode counterpart of the one-tool surface above:
+
+```lisp
+(re:open "/bin/ls")                  ; open and analyze
+(re:cmd "pdg" "main")                ; one read-only rizin command, at an address
+(re:json "aflj")                     ; a *j command, as data to loop over
+(re:call "record_finding" :claim "…" :evidence '("1a2b3c4d"))
+(re:slash "report analysis.md")      ; a /re line
+```
+
+It drives `extensions/re` itself through a stdio bridge rather than
+reimplementing it, so evidence, the audit log, findings and the report gate
+are the same code on both hosts. See [`docs/nodecode.md`](docs/nodecode.md)
+for the verbs, configuration, and what differs from omp (no approval tiers, no
+panels, no branch following).
+
 ## What's omp-native
 
 `omp-re` uses omp's own extension surfaces rather than working around them:
@@ -476,6 +506,7 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
+- [`docs/nodecode.md`](docs/nodecode.md) — running omp-re as a nodecode cell: verbs, configuration, how the bridge works.
 - [`docs/tools.md`](docs/tools.md) — the `rizin_command` read map and parameter tables for the stateful tools.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.

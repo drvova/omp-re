@@ -124,6 +124,26 @@ no host-level hot-unload — the host does not offer one.
 | `ui.ts` | Status band, overlay panels, evidence helpers |
 | `report.ts` / `annotations.ts` / `entries.ts` / `disasm.ts` / `format.ts` / `render.ts` | Report gate, annotation replay, branch entry helpers, disassembly, result formatting, tool renderers |
 
+## A second host: nodecode (`nodecode/`)
+
+The engine above needs a host, not omp in particular. `nodecode/host.ts` is a
+headless one: it implements the part of `ExtensionAPI` the engine uses — tool
+and command registration, the event listeners, `appendEntry`/`getBranch` over
+an append-only file per session, an artifact store, argv exec — and runs the
+same `tool_call` → execute → `tool_result` pipeline omp's tool wrapper does, so
+the audit log and the evidence store cannot tell the two hosts apart. It has
+no UI (`hasUI` is false), so the engine takes its own headless branches; what
+those print is captured per request (`AsyncLocalStorage`) and returned as the
+command's text, and the `process.exitCode` they set is read back as that
+command's failure and cleared.
+
+`nodecode/bridge.ts` serves that host over stdin/stdout, one JSON object per
+line, with request ids, per-session ordering, cancellation and an idle reaper.
+`nodecode-re.asd` and `nodecode/*.lisp` are the nodecode cell that spawns it
+and presents the engine as eval verbs. Nothing under `extensions/re` imports
+from `nodecode/`; the dependency points one way. See
+[`nodecode.md`](nodecode.md).
+
 ## Data that outlives a process
 
 Evidence, annotations, and the open binary are persisted as omp **custom

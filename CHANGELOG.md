@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **omp-re is now also a [nodecode](https://nodecode.ai) cell.** Clone the
+  repository into `~/.nodecode/cells/nodecode-re`, run `bun install`, and a
+  nodecode agent gets the same engine: `(re:open "path")`, `(re:cmd "pdg")`,
+  `(re:json "aflj")`,
+  `(re:call "record_finding" …)`, `(re:tools)`, `(re:doc "tool")`,
+  `(re:slash "report out.md")`, `(re:status)`, a `/re` command and a
+  `(help :re)` manual. The surface is native to nodecode — verbs composed in
+  its one tool, `eval`, with no tool schemas added by default
+  (`"surface": "tools"` registers each engine tool as `re_<name>` too).
+- **A headless host for the engine** (`nodecode/host.ts`) and a stdio bridge
+  (`nodecode/bridge.ts`). The cell does not reimplement omp-re: it runs
+  `extensions/re` unchanged behind a second, UI-less implementation of the
+  part of omp's `ExtensionAPI` the engine uses, so the audit log, the evidence
+  store, gated findings, `/re verify` and the report gate are the same code on
+  both hosts. A session's record is an append-only file, so the open binary,
+  annotations, evidence and findings survive the engine exiting and are
+  replayed into a fresh rizin.
+- Tests for both halves: `test/nodecode-bridge.test.ts` (host and bridge
+  protocol, part of `bun test`) and `bun run test:nodecode`, an SBCL suite
+  that drives the real bridge through the cell's Lisp over a stand-in for
+  nodecode's kernel. A new `nodecode` CI job runs the latter.
+- `docs/nodecode.md`: install, verbs, configuration, and what differs from omp
+  (no approval tiers, no panels, no branch following, no claim-audit side
+  turn).
+
+### Changed
+
+- `scripts/release.mjs` now bumps `nodecode-re.asd` in lock-step with
+  `package.json` and the marketplace manifest.
+
 ## [0.9.1] - 2026-10-30
 
 ### Changed

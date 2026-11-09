@@ -1,0 +1,22 @@
+// The section ~/.nodecode/config.jsonc may carry for this cell —
+// documentation, not config: the folder gets pushed and holds no secret.
+// The declaration in nodecode/cell.lisp is the authority; this is an
+// illustration of it. A present section is enabled; "enabled": false vetoes
+// it. Every member is optional.
+{
+  "re": {
+    "enabled": true,
+    // The argv prefix that runs the engine's TypeScript.
+    "command": ["bun"],
+    // One call's ceiling, in seconds. Full analysis of a large binary is slow.
+    "timeout_seconds": 600,
+    // "eval": the re: verbs only. "tools": also one top-level tool per engine tool, named re_<name>.
+    "surface": "eval",
+    // The rizin to run when it is not the one on PATH.
+    "rizin_path": "",
+    // Where session records, evidence, the audit log and reports go. Empty: omp-re/ under the home.
+    "state_dir": "",
+    // Offers rizin_debug, which EXECUTES the binary under analysis. Leave off outside a sandbox.
+    "debugger": false
+  }
+}
