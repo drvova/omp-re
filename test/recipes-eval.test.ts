@@ -275,8 +275,8 @@ describe("recipes.js in omp's eval (no rizin needed)", () => {
 	});
 
 	test("arguments of the wrong shape are refused in words before any read", async () => {
-		expect((await evalJs(h.session, caught("await re.inspectFunction(4096)"))).text).toBe("a function is named by a string, not 4096");
-		expect((await evalJs(h.session, caught("await re.findComparisons()"))).text).toBe("a function is named by a string, not null");
+		expect((await evalJs(h.session, caught("await re.inspectFunction(4096)"))).text).toBe("omp-re: inspect_function: a function is named by a string, not 4096");
+		expect((await evalJs(h.session, caught("await re.findComparisons()"))).text).toBe("omp-re: find_comparisons: a function is named by a string, not null");
 		expect((await evalJs(h.session, caught("await re.triage(5)"))).text).toBe("omp-re: triage: options are one object, e.g. { maxItems: 20 }, not 5");
 	});
 });
@@ -388,8 +388,8 @@ describe.skipIf(!canRunPython)("recipes.py in omp's Python kernel (no rizin need
 	});
 
 	test("arguments of the wrong shape are refused before any read: an address in recipes.js's words, an option in Python's own", async () => {
-		expect((await evalPy(h.session, caughtPy("omp_re.inspect_function(4096)"))).text).toBe("TypeError: a function is named by a string, not 4096");
-		expect((await evalPy(h.session, caughtPy("omp_re.find_comparisons()"))).text).toBe("TypeError: a function is named by a string, not null");
+		expect((await evalPy(h.session, caughtPy("omp_re.inspect_function(4096)"))).text).toBe("TypeError: omp-re: inspect_function: a function is named by a string, not 4096");
+		expect((await evalPy(h.session, caughtPy("omp_re.find_comparisons()"))).text).toBe("TypeError: omp-re: find_comparisons: a function is named by a string, not null");
 		// Options are keyword arguments here, so Python itself refuses a stray positional one or a misspelt name — naming the recipe as it is called.
 		expect((await evalPy(h.session, caughtPy("omp_re.triage(5)"))).text).toBe("TypeError: omp_re.triage() takes 0 positional arguments but 1 was given");
 		expect((await evalPy(h.session, caughtPy("omp_re.triage(maxStrings=5)"))).text).toStartWith("TypeError: omp_re.triage() got an unexpected keyword argument 'maxStrings'");

@@ -153,6 +153,11 @@
                   (has "sym.imp." function))
            (check "an address that is no function is refused in words"
                   (has "no function at" (refusal (lambda () (re:inspect-function "0x1")))))
+           (check "a function named by something other than a string is refused in the engine's voice, naming the recipe"
+                  (and (has "omp-re: inspect_function: a function is named by a string"
+                            (refusal (lambda () (re:inspect-function 4096))))
+                       (has "omp-re: find_comparisons: a function is named by a string"
+                            (refusal (lambda () (re:find-comparisons nil))))))
            (check "an address that could open another command never reaches rizin"
                   (has "invalid address" (refusal (lambda () (re:inspect-function "main;!id"))))))
 

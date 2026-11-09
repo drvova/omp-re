@@ -308,7 +308,8 @@ decided at its call site, which is what the callers are listed for."
             (cons (format nil "Imports worth a reviewer's look ~a" (cite imports-id))
                   (or (loop for (import bare category severity why) in risky
                             for address = (jnumber import "plt")
-                            for linked = (jstring import "name")
+                            ;; An import rizin gives no name is its own bare name: nothing to say it was linked as.
+                            for linked = (or (jstring import "name") bare)
                             append (cons (format nil "  [~a] ~a~:[ (linked as ~a)~;~*~] (~a)~@[ @ ~a~] — ~a"
                                                  severity bare (string= bare linked) linked category
                                                  (and address (ea-from-offset address)) why)
@@ -342,7 +343,7 @@ signature, its variables, who calls it and what it calls, and the strings it
 refers to — the context to read before its code. ADDR is its address or
 name; MAX-ITEMS (default 30) bounds each list. Follow it with
 (re:cmd \"pdg\" addr) for the code itself."
-    (let* ((addr (validate-addr (if (stringp addr) addr (fail "a function is named by a string, not ~s" addr))))
+    (let* ((addr (validate-addr (if (stringp addr) addr (fail "omp-re: inspect_function: a function is named by a string, not ~s" addr))))
            (limit (bounded max-items 30 1 300)))
       (multiple-value-bind (info info-id) (observe-json "afij" addr)
         (let ((info (first (rows info))))
@@ -438,7 +439,7 @@ call to something that compares or validates, and the strings on the way —
 the static skeleton of validation logic, with no emulation and nothing run.
 MAX-ITEMS (default 80) bounds the list. It lists what is compared, not what
 the comparison means."
-    (let ((addr (validate-addr (if (stringp addr) addr (fail "a function is named by a string, not ~s" addr))))
+    (let ((addr (validate-addr (if (stringp addr) addr (fail "omp-re: find_comparisons: a function is named by a string, not ~s" addr))))
           (limit (bounded max-items 80 1 1000)))
       (multiple-value-bind (body body-id) (observe-json "pdfj" addr)
         (let ((ops (function-ops body)))

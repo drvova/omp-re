@@ -888,10 +888,10 @@ def _omp_re_recipes():
         """What one call of a recipe keeps: the reads it took, and the function list once a caller had to be named."""
         return {"name": name, "evidence": [], "functions": None}
 
-    def function_name(addr):
+    def function_name(recipe, addr):
         """The address or name a function was asked for by. The engine judges what may follow `@` on every read, so that rule is not kept twice."""
         if not isinstance(addr, str):
-            raise TypeError("a function is named by a string, not " + encode(addr))
+            raise TypeError("omp-re: %s: a function is named by a string, not %s" % (recipe, encode(addr)))
         return addr
 
     # --- what an import is called -------------------------------------------------------------
@@ -1118,7 +1118,10 @@ def _omp_re_recipes():
         risky_lines = []
         for entry, bare, verdict in risky:
             address = num(entry, "plt")
+            # An import rizin gives no name is its own bare name: nothing to say it was linked as.
             linked = string(entry, "name")
+            if linked is None:
+                linked = bare
             risky_lines.append(
                 "  [%s] %s%s (%s)%s — %s" % (verdict["severity"], bare, "" if bare == linked else " (linked as %s)" % linked, verdict["category"], "" if address is None else " @ " + hexa(address), verdict["why"])
             )
@@ -1171,7 +1174,7 @@ def _omp_re_recipes():
         addr: the function's name or address, a string; max_items (default 30, 1..300) bounds each list.
         """
         run = start("inspect_function")
-        at = function_name(addr)
+        at = function_name("inspect_function", addr)
         limit = bounded(max_items, 30, 1, 300)
         info_data, info_id = observe_json(run, "afij", at)
         info = rows(info_data)[0] if rows(info_data) else None
@@ -1267,7 +1270,7 @@ def _omp_re_recipes():
         addr: the function's name or address, a string; max_items (default 80, 1..1000) bounds each list.
         """
         run = start("find_comparisons")
-        at = function_name(addr)
+        at = function_name("find_comparisons", addr)
         limit = bounded(max_items, 80, 1, 1000)
         body, body_id = observe_json(run, "pdfj", at)
         ops = function_ops(body)

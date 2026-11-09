@@ -731,8 +731,8 @@ const TABLES = {
 	}
 
 	/** The address or name a function was asked for by. The engine judges what may follow `@` on every read, so that rule is not kept twice. */
-	function functionName(addr) {
-		if (typeof addr !== "string") throw new Error(`a function is named by a string, not ${encode(addr) ?? String(addr)}`);
+	function functionName(recipe, addr) {
+		if (typeof addr !== "string") throw new Error(`omp-re: ${recipe}: a function is named by a string, not ${encode(addr) ?? String(addr)}`);
 		return addr;
 	}
 
@@ -932,7 +932,8 @@ const TABLES = {
 		const riskyLines = [];
 		for (const { entry, bare, verdict } of risky) {
 			const address = num(entry, "plt");
-			const linked = str(entry, "name");
+			// An import rizin gives no name is its own bare name: nothing to say it was linked as.
+			const linked = str(entry, "name") ?? bare;
 			riskyLines.push(
 				`  [${verdict.severity}] ${bare}${bare === linked ? "" : ` (linked as ${linked})`} (${verdict.category})${address === undefined ? "" : ` @ ${hex(address)}`} — ${verdict.why}`,
 			);
@@ -981,7 +982,7 @@ const TABLES = {
 	async function inspectFunction(addr, given) {
 		const { maxItems } = options("inspect_function", given);
 		const run = start("inspect_function");
-		const at = functionName(addr);
+		const at = functionName("inspect_function", addr);
 		const limit = bounded(maxItems, 30, 1, 300);
 		const { data: infoData, id: infoId } = await observeJson(run, "afij", at);
 		const info = rows(infoData)[0];
@@ -1061,7 +1062,7 @@ const TABLES = {
 	async function findComparisons(addr, given) {
 		const { maxItems } = options("find_comparisons", given);
 		const run = start("find_comparisons");
-		const at = functionName(addr);
+		const at = functionName("find_comparisons", addr);
 		const limit = bounded(maxItems, 80, 1, 1000);
 		const { data: body, id: bodyId } = await observeJson(run, "pdfj", at);
 		const ops = functionOps(body);
