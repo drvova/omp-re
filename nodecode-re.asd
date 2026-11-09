@@ -37,8 +37,11 @@
                (:file "policy")
                (:file "session")
                (:file "tools-core")
-               (:file "annotate")
+               ;; extras before annotate: on a fresh rizin, mapped files, analysis
+               ;; passes and signatures are put back before the annotations that
+               ;; may name what they recovered (replay runs in load order).
                (:file "extras")
+               (:file "annotate")
                (:file "findings")
                (:file "verify")
                (:file "report")

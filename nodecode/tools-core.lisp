@@ -34,8 +34,8 @@ choice so a later start restores it => the text that says what happened."
          ;; an unbound session, it never blocks the open.
          (sha256 (ignore-errors (sha256-file resolved)))
          (failures (nth-value 1 (spawn-rizin resolved :load load :session session)))
-         (replayed (if *annotation-fingerprint*
-                       (length (binary-entries "re.annotation" resolved session))
+         (replayed (if *live-annotations*
+                       (length (funcall *live-annotations* resolved session))
                        0))
          (missing (ignore-errors (missing-required-commands (load-catalog)))))
     (setf (session-binary-sha256 session) sha256)
@@ -65,6 +65,65 @@ choice so a later start restores it => the text that says what happened."
      ("format" :string :doc "Force the bin plugin (rizin -F), e.g. elf, pe, mach0, or `any` to open raw bytes with no format."))
     (arguments)
   (plain-result (open-binary (jstring arguments "path") :load (load-object arguments))))
+
+;;; --- the one directory the engine writes files to --------------------------------------------
+;;; Ported from output.ts. The engine never writes to the sample on disk. A
+;;; few tools must emit a separate file — a project, a signature file, a dump
+;;; of a live process's memory. Those go here and nowhere else: one dedicated
+;;; directory, never a path the model chose, so a tool cannot traverse out of
+;;; it or overwrite an arbitrary file.
+
+(defun output-directory ()
+  "OMPRE_OUTPUT_DIR when set, else omp-re-out under the system's temporary directory."
+  (uiop:ensure-directory-pathname
+   (let ((configured (env "OMPRE_OUTPUT_DIR")))
+     (if configured
+         (merge-pathnames (uiop:parse-native-namestring configured) (uiop:getcwd))
+         (merge-pathnames "omp-re-out/" (uiop:temporary-directory))))))
+
+(defun safe-basename (name)
+  "NAME when it is a bare file name of safe characters: no separator, no
+`..', not absolute. This is the guard that keeps a chosen name inside the
+output directory."
+  (let ((name (trimmed name)))
+    (when (member name '("" "." "..") :test #'string=)
+      (fail "omp-re: invalid output filename ~a" (js-string name)))
+    (unless (and (ppcre:scan "^[A-Za-z0-9._-]+$" name) (not (search ".." name)))
+      (fail "omp-re: invalid output filename ~a — use a bare name of letters, digits, '.', '_' or '-' (no path separators)"
+            (js-string name)))
+    name))
+
+(defun to-rizin-path (path)
+  "PATH with forward slashes, which rizin accepts on every platform."
+  (substitute #\/ #\\ (if (stringp path) path (native path))))
+
+(defun rizin-path-arg (path)
+  "PATH as one single-quoted rizin argument, so rizin takes every byte of it
+literally — a `~' in a Windows short name is otherwise its grep operator."
+  (rz-quote (to-rizin-path path)))
+
+(defun prepare-output-path (basename)
+  "The native path for BASENAME inside the output directory, which is created."
+  (let* ((directory (output-directory))
+         (full (merge-pathnames (safe-basename basename) directory)))
+    (ensure-directories-exist full)
+    (native full)))
+
+(defun rizin-output-path (basename)
+  "Like PREPARE-OUTPUT-PATH, for a file rizin itself writes: the path must
+survive the pipe, and the one thing quoting cannot carry is a line break."
+  (let ((full (prepare-output-path basename)))
+    (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) full)
+      (fail "omp-re: the output path ~a contains a line break or NUL" (js-string full)))
+    full))
+
+(defun output-subdirectory (basename &optional create)
+  "The native path of the folder BASENAME inside the output directory, made
+when CREATE."
+  (let ((full (uiop:ensure-directory-pathname
+               (merge-pathnames (safe-basename basename) (output-directory)))))
+    (when create (ensure-directories-exist full))
+    (string-right-trim "/" (native full))))
 
 ;;; --- rizin_help and rizin_command -----------------------------------------------------------
 

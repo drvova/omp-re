@@ -326,6 +326,11 @@ those registered before it. Registering a name again replaces it in place."
   "A function of (SESSION BINARY-PATH) answering a string that names the set
 of annotations in effect, or NIL when no annotation module is loaded.")
 
+(defvar *live-annotations* nil
+  "A function of (BINARY-PATH SESSION) answering the annotations in effect
+for that binary as a list of their recorded data objects, or NIL when no
+annotation module is loaded. Set by annotate.lisp.")
+
 (defun spawn-rizin (binary-path &key load (session *session*))
   "Spawn and analyze a fresh rizin for BINARY-PATH, replay the record into
 it, and make it SESSION's process => (values RZ FAILURES). The process it
