@@ -14,9 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `(re:open "path")`, `(re:cmd "pdg" "main")`, `(re:json "aflj")`,
   `(re:call "record_finding" …)`, `(re:tools)`, `(re:doc "tool")`,
   `(re:slash "report out.md")`, `(re:status)`, a `/re` command and a
-  `(help :re)` manual. The surface is native to nodecode — verbs composed in
-  its one tool, `eval`, with no tool schemas added by default
-  (`"surface": "tools"` registers each engine tool as `re_<name>` too).
+  `(help :re)` manual. The surface is native to nodecode: its model has one
+  tool, `eval`, and everything the cell adds is a function inside it. No tool
+  is registered.
 - **The engine itself is ported** (`nodecode-re.asd`, `nodecode/*.lisp`): the
   NUL-framed rizin pipe, the read-only command policy, the session record,
   the content-addressed evidence store, the HMAC-signable audit log, the
@@ -25,6 +25,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   engine, and a session's record is an append-only file, so the open binary,
   annotations, evidence and findings survive rizin dying or nodecode
   restarting and are replayed into a fresh process.
+- **Recipes: the reads every analysis opens with, composed once.**
+  `triage`, `scan-imports`, `inspect-function`, `find-comparisons` and
+  `find-crypto` — what the binary is and how it was built, which imports a
+  reviewer stops at and who calls them, one function from every side, what a
+  function compares and branches on, where cryptographic constants lie. They
+  are not tools: under nodecode they are `re:` functions, under omp a script
+  loaded into `eval` with `%load skills/re-triage/recipes.js`, and on both
+  each read is an ordinary `rizin_command` call — audited, recorded as
+  evidence — with every line naming the evidence id it rests on. Their tables
+  live once, in `recipes/tables.json`.
+- **A directory allow-list** for the nodecode cell (`allowed_dirs`, or
+  `OMPRE_ALLOWED_DIRS`): binaries and other input files open only from the
+  listed directories, with links resolved first; and `/re status` says when
+  the open binary has changed on disk since it was opened.
 - **Two engines, held together.** `scripts/gen-nodecode-policy.ts` generates
   the Lisp engine's policy data from `catalog.ts`, and
   `test/nodecode-parity.test.ts` asks both engines the same questions — which

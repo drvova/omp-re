@@ -152,14 +152,15 @@ git clone https://github.com/drvova/omp-re ~/.nodecode/cells/nodecode-re
 
 The cell is pure Common Lisp (`nodecode-re.asd`, `nodecode/*.lisp`): omp-re's
 engine ported from `extensions/re`, presented the nodecode way — verbs in the
-`RE` package, a `/re` command, a `(help :re)` manual, a config section — with
-no tool schemas added by default, the counterpart of the one-tool surface
-above:
+`RE` package, a `/re` command, a `(help :re)` manual, a config section. It
+registers no tools: nodecode's model has one, `eval`, and everything here is
+a function inside it — the counterpart of the one-tool surface above:
 
 ```lisp
 (re:open "/bin/ls")                  ; open and analyze
 (re:cmd "pdg" "main")                ; one read-only rizin command, at an address
 (re:json "aflj")                     ; a *j command, as data to loop over
+(re:triage)                          ; the first dozen reads, composed, each line citing its evidence
 (re:call "record_finding" :claim "…" :evidence '("1a2b3c4d"))
 (re:slash "report analysis.md")      ; a /re line
 ```

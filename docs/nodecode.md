@@ -39,9 +39,9 @@ Then, in a session:
 ## The surface: verbs in `eval`
 
 omp-re's design under omp is "one tool to read the binary, composed in the
-host's code tool". nodecode's design is "one tool, `eval`". They are the same
-idea, so the cell adds **no tools by default** — it adds verbs in the `RE`
-package that an eval form calls, loops over and builds helpers around. Every
+host's code tool". nodecode's design is "one tool, `eval`", whose helpers are
+functions inside it. They are the same idea, so the cell registers **no
+tools** — it adds verbs in the `RE` package that an eval form calls, loops over and builds helpers around. Every
 verb answers a string, except `re:json`, which answers data.
 
 | Verb | What it does |
@@ -84,14 +84,27 @@ carrying the engine's own words, which eval reports as the form's error.
 The model learns all of this from the cell's manual: one summary line rides
 every request and `(help :re)` answers the full primer.
 
-### Top-level tools, if you want them
+### Recipes: reads composed once
 
-Set `"surface": "tools"` and every engine tool is also registered as a tool of
-its own, named `re_<name>` (`re_rizin_command`, `re_record_finding`, …), with
-its description and a JSON Schema derived from the same parameter list the
-verbs are checked against. The verbs stay. Use this for a
-model that calls tools more reliably than it writes Lisp; the default keeps
-thirty schemas out of every request.
+Every analysis opens with the same dozen reads. The recipes are those reads
+and a plain reading of them — ordinary functions over `(re:cmd …)`, not tools:
+
+| Function | What it answers |
+| --- | --- |
+| `(re:triage &key max-strings max-functions)` | What the binary is, which protections the build has (canary, NX, PIE, RELRO, fortify), its sections with entropy and what stands out about them, what its imports say it can reach, the strings worth a first look, its largest functions, its entry points. |
+| `(re:scan-imports &key callers max-callers)` | The imports a reviewer stops at — unbounded copies, shell and exec calls, format sinks, race-prone file calls, weak randomness — each with why and who calls it. |
+| `(re:inspect-function "main" &key max-items)` | One function from every side: size, complexity, signature, variables, callers, callees, the strings it refers to. |
+| `(re:find-comparisons "main" &key max-items)` | What a function decides on: each compare with the branch that follows and where it goes, calls that compare or validate, the strings on the way. Static; nothing is run. |
+| `(re:find-crypto &key references)` | rizin's search for keys and certificates, and the published constants of common algorithms (AES, SHA-1/256/512, MD5, CRC-32, ChaCha/Salsa20, Blowfish, TEA, DES, Base64), with what refers to each hit. |
+
+Each read a recipe makes is a `rizin_command` call in its own right — gated,
+audited, recorded as evidence — and every section of what it answers names
+the evidence id it rests on, so its lines can be cited in `record_finding`
+and re-run by `/re verify`. A recipe says what was observed and what is worth
+a look; it never states a conclusion. The tables behind them (which imports,
+which constants) are data in `recipes/tables.json`, shared with the omp
+plugin's twin of these functions, `skills/re-triage/recipes.js`, which omp's
+`eval` loads with `%load`.
 
 ## `/re`
 
@@ -108,7 +121,7 @@ A section of `~/.nodecode/config.jsonc`; every member is optional (see
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `surface` | `"eval"` | `"eval"`: verbs only. `"tools"`: also one `re_<name>` tool per engine tool. |
+| `allowed_dirs` | `[]` | Directories binaries and other input files may be opened from, links resolved. Empty: any file the organism can read. `OMPRE_ALLOWED_DIRS` (comma-separated) is the same. |
 | `rizin_path` | `""` | The rizin to run when it is not the one on `PATH`. |
 | `state_dir` | `""` | Where session records, evidence, the audit log and reports go. Empty: `omp-re/` under the nodecode home (it follows a profile). |
 | `debugger` | `false` | Offer `rizin_debug`, which **executes the sample**. Leave off outside a sandbox. |
@@ -181,15 +194,17 @@ nodecode/verify.lisp       /re verify
 nodecode/report.lisp       /re report and its verification manifest
 nodecode/carry.lisp        /re carry
 nodecode/debug.lisp        rizin_debug (only when `debugger` is set)
-nodecode/verbs.lisp        the verbs, the argument mapping, the top-level surface
+nodecode/recipe-data.lisp  GENERATED from recipes/tables.json — the recipes' tables
+nodecode/recipes.lisp      re:triage, re:scan-imports, re:inspect-function, re:find-comparisons, re:find-crypto
+nodecode/verbs.lisp        the verbs and the argument mapping
 nodecode/cell.lisp         the primer, /re, the nle:define-cell declaration
 ```
 
 Each file names the TypeScript it ports in its header. The shape is the
 engine's own: a **session** is the open binary, the rizin process analyzing it
 and the session's **record**; the record is the truth and the process a cache
-of it. Every tool call, whoever makes it — a verb, a top-level tool, `/re` —
-goes through one function that checks the arguments against the tool's
+of it. Every call, whoever makes it — a verb, a recipe, `/re` — goes through
+one function that checks the arguments against the tool's
 declared parameters, refuses while `/re off`, writes the audit line, runs the
 body, and for a read records the evidence.
 
@@ -222,6 +237,9 @@ A port drifts unless something holds it. Three things do:
   truncation.
 - **The records are the same shape**, so evidence taken under one engine
   verifies under the other.
+- **The recipes' tables are generated too**, from `recipes/tables.json` into
+  both hosts' code (`bun run gen:nodecode`), and a test compares what the
+  Lisp functions and the omp script print for the same binary.
 
 ## Tests, and what they prove
 
