@@ -2,12 +2,12 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; This is NOT nodecode. It is the two dozen names nodecode/*.lisp uses from
-;;;; NODECODE.KERNEL (nlk) and NODECODE.EVOLVED (nle), written to the
-;;;; contract nodecode's own docs/CELLS.md and docstrings state, so that the
-;;;; cell's Lisp — its transport, its argument mapping, its verbs — can be
-;;;; compiled and run under a bare SBCL against the real engine, with no
-;;;; nodecode build in the loop. It proves the cell's own code; it cannot
+;;;; This is NOT nodecode. It is the dozen and a half names nodecode/*.lisp
+;;;; uses from NODECODE.KERNEL (nlk) and NODECODE.EVOLVED (nle), written to
+;;;; the contract nodecode's own docs/CELLS.md and docstrings state, so that
+;;;; the cell — the whole engine and its verbs — can be compiled and run
+;;;; under a bare SBCL against a real rizin, with no nodecode build in the
+;;;; loop. It proves the cell's own code; it cannot
 ;;;; prove nodecode's side of the seam. smoke.lisp is what runs on it.
 
 (require :asdf)
@@ -16,9 +16,9 @@
 (defpackage #:nodecode.kernel
   (:use #:cl)
   (:nicknames #:nlk)
-  (:export #:define-peripheral #:spawn-program #:child-exit #:kill-tree #:environment-with
-           #:decode-json #:encode-json-object #:make-json-object #:json-value
-           #:home #:expand-home #:trimmed #:find-session-cwd
+  (:export #:define-peripheral #:spawn-program #:child-exit #:kill-tree #:run-bounded
+           #:worker-start #:worker-stop
+           #:home #:expand-home #:find-session-cwd
            #:*stub-home* #:*stub-session-cwd*))
 
 (defpackage #:nodecode.evolved
@@ -30,9 +30,6 @@
 (in-package #:nodecode.kernel)
 
 ;;; --- text and paths ---------------------------------------------------------------
-
-(defun trimmed (text)
-  (string-trim '(#\Space #\Tab #\Return #\Newline) text))
 
 (defvar *stub-home* nil "The scratch home the test runs in, a directory pathname.")
 (defvar *stub-session-cwd* nil "What FIND-SESSION-CWD answers.")
@@ -49,150 +46,7 @@
   (declare (ignore session-id))
   *stub-session-cwd*)
 
-;;; --- JSON: objects EQUAL hash tables, arrays simple vectors, true T, false NIL, null :NULL
-
-(defun decode-json (source)
-  (let ((index 0) (end (length source)))
-    (labels ((peek () (and (< index end) (char source index)))
-             (skip () (loop while (and (< index end)
-                                       (member (char source index) '(#\Space #\Tab #\Newline #\Return)))
-                            do (incf index)))
-             (expect (word value)
-               (unless (and (<= (+ index (length word)) end)
-                            (string= word source :start2 index :end2 (+ index (length word))))
-                 (error "JSON: expected ~a at ~a" word index))
-               (incf index (length word))
-               value)
-             (read-string ()
-               (incf index)
-               (with-output-to-string (out)
-                 (loop
-                   (let ((char (char source index)))
-                     (incf index)
-                     (case char
-                       (#\" (return))
-                       (#\\ (let ((escape (char source index)))
-                              (incf index)
-                              (case escape
-                                (#\n (write-char #\Newline out))
-                                (#\t (write-char #\Tab out))
-                                (#\r (write-char #\Return out))
-                                (#\b (write-char #\Backspace out))
-                                (#\f (write-char #\Page out))
-                                (#\u (let ((code (parse-integer source :start index :end (+ index 4) :radix 16)))
-                                       (incf index 4)
-                                       (when (and (<= #xd800 code #xdbff)
-                                                  (string= "\\u" source :start2 index :end2 (+ index 2)))
-                                         (let ((low (parse-integer source :start (+ index 2) :end (+ index 6) :radix 16)))
-                                           (incf index 6)
-                                           (setf code (+ #x10000 (ash (- code #xd800) 10) (- low #xdc00)))))
-                                       (write-char (code-char code) out)))
-                                (t (write-char escape out)))))
-                       (t (write-char char out)))))))
-             (read-number ()
-               (let ((start index))
-                 (loop while (and (< index end) (find (char source index) "+-0123456789.eE"))
-                       do (incf index))
-                 (let ((text (subseq source start index)))
-                   (if (find-if (lambda (char) (find char ".eE")) text)
-                       (let ((*read-default-float-format* 'double-float))
-                         (with-standard-io-syntax (read-from-string text)))
-                       (parse-integer text)))))
-             (read-value ()
-               (skip)
-               (case (peek)
-                 (#\{ (incf index)
-                  (let ((object (make-hash-table :test #'equal)))
-                    (skip)
-                    (if (eql (peek) #\}) (incf index)
-                        (loop
-                          (skip)
-                          (let ((key (read-string)))
-                            (skip) (expect ":" nil)
-                            (setf (gethash key object) (read-value)))
-                          (skip)
-                          (if (eql (peek) #\,) (incf index) (progn (expect "}" nil) (return)))))
-                    object))
-                 (#\[ (incf index)
-                  (let ((items '()))
-                    (skip)
-                    (if (eql (peek) #\]) (incf index)
-                        (loop
-                          (push (read-value) items)
-                          (skip)
-                          (if (eql (peek) #\,) (incf index) (progn (expect "]" nil) (return)))))
-                    (coerce (nreverse items) 'simple-vector)))
-                 (#\" (read-string))
-                 (#\t (expect "true" t))
-                 (#\f (expect "false" nil))
-                 (#\n (expect "null" :null))
-                 (t (read-number)))))
-      (read-value))))
-
-(defun write-json (value out)
-  (cond ((eq value t) (write-string "true" out))
-        ((null value) (write-string "false" out))
-        ((eq value :null) (write-string "null" out))
-        ((stringp value)
-         (write-char #\" out)
-         (loop for char across value
-               do (case char
-                    (#\" (write-string "\\\"" out))
-                    (#\\ (write-string "\\\\" out))
-                    (#\Newline (write-string "\\n" out))
-                    (#\Return (write-string "\\r" out))
-                    (#\Tab (write-string "\\t" out))
-                    (t (if (< (char-code char) 32)
-                           (format out "\\u~4,'0x" (char-code char))
-                           (write-char char out)))))
-         (write-char #\" out))
-        ((integerp value) (format out "~d" value))
-        ((realp value) (format out "~f" value))
-        ((hash-table-p value)
-         (write-char #\{ out)
-         (let ((first t))
-           (maphash (lambda (key member)
-                      (if first (setf first nil) (write-char #\, out))
-                      (write-json key out) (write-char #\: out) (write-json member out))
-                    value))
-         (write-char #\} out))
-        ((vectorp value)
-         (write-char #\[ out)
-         (loop for item across value for first = t then nil
-               do (unless first (write-char #\, out)) (write-json item out))
-         (write-char #\] out))
-        (t (error "JSON: cannot encode ~s" value))))
-
-(defun encode-json-object (object)
-  (with-output-to-string (out) (write-json object out)))
-
-(defun make-json-object (&rest pairs &aux (object (make-hash-table :test #'equal)))
-  (loop for (key value) on pairs by #'cddr do (setf (gethash key object) value))
-  object)
-
-(defun json-value (object type &rest path &aux (value object) (present t))
-  (dolist (key path)
-    (if (hash-table-p value)
-        (multiple-value-setq (value present) (gethash key value))
-        (setf value nil present nil)))
-  (values (ecase type
-            (:any (if (eq value :null) nil value))
-            (:string (and (stringp value) value))
-            (:text (and (stringp value) (plusp (length value)) value))
-            (:integer (and (integerp value) value))
-            (:number (and (realp value) value))
-            (:boolean (eq value t))
-            (:object (and (hash-table-p value) value))
-            (:array (and (vectorp value) (not (stringp value)) value)))
-          present))
-
 ;;; --- processes --------------------------------------------------------------------
-
-(defun environment-with (overrides &optional (environment (sb-ext:posix-environ)))
-  (flet ((name (entry) (subseq entry 0 (or (position #\= entry) (length entry)))))
-    (let ((names (mapcar #'name overrides)))
-      (append (remove-if-not (lambda (entry) (find #\= entry)) overrides)
-              (remove-if (lambda (entry) (member (name entry) names :test #'string=)) environment)))))
 
 (defun spawn-program (argv &key directory environment (output :stream) (error-output :stream) (input :null))
   "=> (values PID OUTPUT-STREAM ERROR-STREAM PROCESS INPUT-STREAM)"
@@ -202,7 +56,8 @@
                                      :output output
                                      :error (if (pathnamep error-output) (uiop:native-namestring error-output) error-output)
                                      :if-error-exists :append
-                                     :external-format :utf-8
+                                     ;; What a binary prints is not always UTF-8: never signal on it.
+                                     :external-format '(:utf-8 :replacement #\?)
                                      :directory (and directory (uiop:native-namestring directory))
                                      :environment (or environment (sb-ext:posix-environ)))))
     (values (sb-ext:process-pid process)
@@ -210,6 +65,68 @@
             (sb-ext:process-error process)
             process
             (sb-ext:process-input process))))
+
+(defun run-bounded (argv &key (seconds 60) directory environment input
+                             (output :string) (error-output :string))
+  "Run ARGV to completion or SECONDS => (values OUTPUT ERROR-OUTPUT STATUS),
+STATUS the exit code or :TIMEOUT."
+  (declare (ignore output error-output))
+  ;; stdout is read here to its end; stderr goes to a file so a child that
+  ;; fills one pipe while the other is read cannot wedge; a watchdog thread
+  ;; enforces the bound.
+  (let* ((errors (uiop:native-namestring
+                  (merge-pathnames (format nil "run-bounded-~a-~a.err" (sb-posix:getpid) (random 1000000))
+                                   (uiop:temporary-directory))))
+         (process (sb-ext:run-program (first argv) (rest argv)
+                                      :search t :wait nil
+                                      :input (if input :stream nil)
+                                      :output :stream :error errors :if-error-exists :supersede
+                                      :external-format '(:utf-8 :replacement #\?)
+                                      :directory (and directory (uiop:native-namestring directory))
+                                      :environment (or environment (sb-ext:posix-environ))))
+         (timed-out nil)
+         (watchdog (sb-thread:make-thread
+                    (lambda ()
+                      (loop repeat (ceiling (* seconds 20))
+                            while (sb-ext:process-alive-p process)
+                            do (sleep 0.05))
+                      (when (sb-ext:process-alive-p process)
+                        (setf timed-out t)
+                        (sb-ext:process-kill process sb-posix:sigkill))))))
+    (when input
+      (ignore-errors (write-string input (sb-ext:process-input process))
+                     (close (sb-ext:process-input process))))
+    (let ((out (with-output-to-string (collected)
+                 (loop for char = (read-char (sb-ext:process-output process) nil nil)
+                       while char do (write-char char collected)))))
+      (sb-ext:process-wait process)
+      (sb-thread:join-thread watchdog :default nil)
+      (close (sb-ext:process-output process))
+      (let ((err (or (ignore-errors (uiop:read-file-string errors)) "")))
+        (ignore-errors (delete-file errors))
+        (values out err (if timed-out :timeout (sb-ext:process-exit-code process)))))))
+
+(defstruct worker thread (stopping nil) (semaphore (sb-thread:make-semaphore)))
+
+(defun worker-start (name step &key (wake 60) prime &aux (worker (make-worker)))
+  "A thread NAME running STEP whenever WAKE seconds pass, until stopped."
+  (declare (ignore prime))
+  (setf (worker-thread worker)
+        (sb-thread:make-thread
+         (lambda ()
+           (loop
+             (sb-thread:wait-on-semaphore (worker-semaphore worker) :timeout wake)
+             (when (worker-stopping worker) (return))
+             (handler-case (funcall step) (error (condition) (warn "~a: ~a" name condition)))))
+         :name name))
+  worker)
+
+(defun worker-stop (worker &key (timeout 5))
+  (when worker
+    (setf (worker-stopping worker) t)
+    (sb-thread:signal-semaphore (worker-semaphore worker))
+    (sb-thread:join-thread (worker-thread worker) :default nil :timeout timeout))
+  nil)
 
 (defun child-exit (pid process)
   (declare (ignore pid))

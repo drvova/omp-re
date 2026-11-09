@@ -10,6 +10,10 @@
 ;;;; Every exported verb returns a STRING — but JSON, which answers the
 ;;;; decoded data — and every refusal is RE-ERROR, which the eval snippet
 ;;;; renders as "ERROR: ..." with the detail.
+;;;;
+;;;; The engine underneath is this package too: omp-re's own, ported from the
+;;;; TypeScript the omp plugin runs (extensions/re) file by file. It needs
+;;;; rizin and nothing else.
 
 (defpackage #:nodecode-re
   (:use #:cl)
@@ -23,8 +27,7 @@
 
 (in-package #:nodecode-re)
 
-;;; RE-ERROR and FAIL; *RE*, RUNNING-SETTINGS and DEFINE-VERB; *LOCK* and
-;;; WITH-RE-LOCK, which guards the one bridge process. SETTING comes from the
-;;; NLE:DEFINE-CELL declaration in cell.lisp, which loads last; the files
-;;; between read the section through it.
-(nlk:define-peripheral re :not-running t :lock "nodecode-re bridge")
+;;; RE-ERROR and FAIL; *RE*, RUNNING-SETTINGS and DEFINE-VERB. SETTING comes
+;;; from the NLE:DEFINE-CELL declaration in cell.lisp, which loads last; the
+;;; files between read the section through it.
+(nlk:define-peripheral re :not-running t)
