@@ -64,6 +64,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `re` section turn it off and bound its wait.
 - `docs/omp-eval.md`: the part of omp's `eval` this plugin stands on and omp.sh does not describe (cells and what ends a kernel, `tool.<name>()`, `%load`, `skill://`, `artifact://`, `xd://`), read from omp 18.11.1's source and pinned claim by claim in `test/omp-eval-contract.test.ts`.
 
+### Fixed
+
+- **A long read through omp was cut twice.** The engine cut a result's body
+  to exactly omp's 50 KB tool-result limit, so the header line, the truncation
+  note and the evidence tag pushed it just over; omp then elided the middle of
+  what had been kept and named a second artifact holding the already-cut text.
+  The body limit is now 48 KiB, leaving the headroom those lines need.
+- The skill and README now say that an `eval` cell has a 30-second deadline
+  that tool time counts toward — so opening a large binary needs a `timeout` —
+  and that a killed cell loses what eval had defined.
+
 ### Changed
 
 - `scripts/release.mjs` now bumps `nodecode-re.asd` in lock-step with

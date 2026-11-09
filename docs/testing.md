@@ -12,7 +12,7 @@ bun install --ignore-scripts
 bun test
 ```
 
-Sixteen test files. The `bun install` dev dependencies pin omp **18.11.1**,
+The `bun install` dev dependencies pin omp **18.11.1**,
 so the host APIs under test are the ones users run. Tests that need a real
 `rizin` and a test binary **skip** (not fail) when either is missing:
 
@@ -34,7 +34,6 @@ so the host APIs under test are the ones users run. Tests that need a real
 | `rizin-cli.test.ts` | Its catalog and tool tests (policy and help search run without) | 24 |
 | `rzcli.test.ts` | Its integration tests (the flag-policy tests run without) | 11 |
 | `debug.test.ts` | Its integration tests (the enable-gate tests run without) | 9 |
-| **Total** | | **184** |
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
 extension runner (no model is called) and drives `/re` commands and tools
@@ -83,7 +82,7 @@ matrix surfaced:
   runs for real; on a locked-down box without that, only that one test can't
   attach.
 
-Expected shape with rizin present: **184 pass, 0 fail, 0 skip**. Without
+Expected shape with rizin present: **every test passes, none fails, none is skipped** (the table above lists the suites that predate the nodecode and eval work; `bun test` prints the current count). Without
 rizin: **102 pass, 98 skip, 0 fail** (200 reported — bun counts skipped
 `describe` blocks slightly differently from executed ones). This is CI's
 permanent shape, not a degraded state to "fix".

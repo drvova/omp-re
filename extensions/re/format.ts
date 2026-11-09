@@ -15,7 +15,15 @@ import { createHash } from "node:crypto";
 import type { AgentToolResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 const MAX_LINES = 2000;
-const MAX_BYTES = 50 * 1024;
+/**
+ * Two KiB under omp's own tool-result limit, on purpose. omp cuts any tool
+ * result past 50 KB itself — from the middle — and appends a note of its own.
+ * A body cut to exactly 50 KiB here, plus the header line, this module's
+ * truncation note and the evidence tag, lands just over that limit, so omp
+ * then cut a hole in what was kept and named a second, already-cut artifact.
+ * The headroom is for those lines; see docs/omp-eval.md.
+ */
+const MAX_BYTES = 48 * 1024;
 
 /** `details` every omp-re tool result carries: the address it concerns (for evidence keying), a short summary, and the header line renderers show. */
 export interface ReToolDetails {

@@ -114,6 +114,11 @@ through one tool, `rizin_command`**, and compose rizin's own commands in `eval`:
   the body (JSON for a `*j` command), and the `[evidence xxxxxxxx]` tag on the
   last line. Failures throw, so the code can `try`/`catch`. To keep helpers
   across sessions, write them to a script and `%load` it — omp's own mechanism.
+- **Mind the cell deadline.** An `eval` cell is killed after 30 seconds unless
+  it sets a `timeout`, and time spent inside a tool counts. Analysis on open
+  can take minutes: give that cell `timeout: 600`. A killed cell loses what
+  eval had defined (load helpers again); rizin and its analysis are untouched.
+  [`docs/omp-eval.md`](docs/omp-eval.md) has the details.
 
 ```js
 // eval — read with rizin_command; a call returns { text, details } to your code.

@@ -34,15 +34,24 @@ families and the other tools), and `rizin_help` to look up a command's arguments
   throws; `try`/`catch` it.
 - End statements with `;` in `eval`: it rewrites top-level destructuring, and
   without the semicolon the line can join the one before it.
-- Functions you define in `eval` persist for the session (across compaction).
-  To keep RE helpers across sessions, write them to a script and `%load` it.
+- Functions you define in `eval` persist across cells and across compaction,
+  until the kernel is lost: a cell that passes its deadline or is interrupted
+  is killed with everything defined in it, and so is a resumed session's. Then
+  define them again. To keep RE helpers, write them to a script and `%load` it.
+- **A cell has a deadline — 30 seconds unless you set one — and the time a
+  tool takes counts.** `open_binary` runs full analysis, which on a large
+  binary takes minutes; a decompile can too. Give such a cell a `timeout` (in
+  seconds, e.g. `timeout: 600` for an open), and keep a slow call in a cell of
+  its own so a loss costs one call. rizin and its analysis survive a killed
+  cell; only what eval held is gone.
 - `eval`, `xd://`, and top-level calls are the same tool calls: each is
   recorded as evidence, audited, and approved the same way.
 
 ## Recipes
 
 The reads every analysis opens with are already composed, in a script that
-ships beside this file. Load it once a session, in a standalone JavaScript
+ships beside this file. Load it once — and again whenever the kernel was lost
+(`re is not defined`) — in a standalone JavaScript
 `eval` cell (omp resolves `skill://<this skill's name>/<file>` to the skill's
 own directory, wherever the plugin is installed):
 

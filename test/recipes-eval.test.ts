@@ -295,6 +295,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 		await h.shutdown();
 	});
 
+
 	test("triage says what the binary is, which protections the build has, and lists sections, imports, strings, functions and entry points", () => {
 		const triage = text(omp.triage);
 		expect(triage.split("\n")[0]).toMatch(/^triage: \/.+/);
@@ -482,5 +483,34 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 			expect(refusal(omp.findComparisonsNone)).toBe(refusal(lisp.findComparisonsNone));
 			expect(refusal(omp.inspectFunctionNone).replace('await tool.rizin_command({ command: "aflj" })', '(re:json "aflj")')).toBe(refusal(lisp.inspectFunctionNone));
 		});
+	});
+});
+
+describe.skipIf(!canRunRizin)("a long read through omp's eval is cut once", () => {
+	let h: Harness;
+
+	beforeAll(async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		h = await boot(SessionManager.create(tmpdir(), join(agentDir, "sessions-long-read")));
+		await h.session.sessionManager.ensureOnDisk();
+		expect((await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`)).isError).toBe(false);
+	}, 120_000);
+
+	afterAll(async () => {
+		await h.shutdown();
+	});
+
+	test("the engine's own cut stays under omp's limit, so omp cuts no second hole in it", async () => {
+		// Regression: a body cut to exactly omp's 50 KB tool-result limit, plus the header line, the truncation note and the
+		// evidence tag, landed just over it. omp then elided the middle of what the engine had kept and named a second
+		// artifact holding the already-cut text. format.ts now leaves headroom; docs/omp-eval.md has the mechanism.
+		const out = await evalJs(
+			h.session,
+			'const r = await tool.rizin_command({ command: "pd 3000", addr: "entry0" }); print("NOTES=" + (r.text.match(/\\[Output truncated/g) || []).length + " HOLE=" + /elided|\\[Showing lines/.test(r.text) + " BYTES=" + new TextEncoder().encode(r.text).length + " TAG=" + /\\[evidence [0-9a-f]{8}/.test(r.text.split("\\n").at(-1)));',
+		);
+		expect(out.isError).toBe(false);
+		expect(out.text).toContain("NOTES=1 HOLE=false");
+		expect(out.text).toContain("TAG=true");
+		expect(Number(/BYTES=(\d+)/.exec(out.text)![1])).toBeLessThanOrEqual(50 * 1024);
 	});
 });

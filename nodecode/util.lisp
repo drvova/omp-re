@@ -221,7 +221,11 @@ model-supplied comment or signature can end the command and start another."
 ;;; --- truncation ---------------------------------------------------------------------
 
 (defparameter +max-lines+ 2000 "The most lines of a result the model is sent.")
-(defparameter +max-octets+ (* 50 1024) "The most bytes of a result the model is sent.")
+(defparameter +max-octets+ (* 48 1024)
+  "The most bytes of a result's body the model is sent: the TypeScript
+engine's limit, which sits two KiB under its host's so that a header, a
+truncation note and an evidence tag never push a result past it. Kept equal
+here so the two engines cut at the same line.")
 
 (defun format-size (octets)
   (cond ((< octets 1024) (format nil "~dB" octets))
