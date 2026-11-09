@@ -57,8 +57,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   citation in the input box where there is one, and conditions that last
   stand as the cell's notice.
 - `docs/nodecode.md`: install, verbs, configuration, how the engine is built,
-  and what differs from omp (no approval tiers, no panels, no claim-support
-  audit yet).
+  and what differs from omp (no approval tiers, no panels).
+- **The claim-support audit under nodecode** (`nodecode/audit-claims.lisp`):
+  `record_finding`, `adopt_finding` and `/re report` ask the model a side
+  question with no tools, as omp's does; `audit` and `audit_seconds` in the
+  `re` section turn it off and bound its wait.
 
 ### Changed
 

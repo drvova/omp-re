@@ -134,6 +134,8 @@ A section of `~/.nodecode/config.jsonc`; every member is optional (see
 | `state_dir` | `""` | Where session records, evidence, the audit log and reports go. Empty: `omp-re/` under the nodecode home (it follows a profile). |
 | `debugger` | `false` | Offer `rizin_debug`, which **executes the sample**. Leave off outside a sandbox. |
 | `idle_minutes` | `30` | Close the rizin process of a session unused this long. Nothing is lost: its next call restores it from the record. |
+| `audit` | `true` | Ask the model, in a side question, whether a finding's (and a report claim's) evidence supports it. Each question is a model turn and costs tokens; `false` records findings and writes reports `unaudited`. |
+| `audit_seconds` | `120` | How long a support audit waits for its answer before the claim goes `unaudited`. |
 
 The engine's environment variables (`OMPRE_DECOMPILER`,
 `OMPRE_ANALYSIS_TIMEOUT_MS`, `OMPRE_AUDIT_HMAC_KEY`, `OMPRE_OUTPUT_DIR`, …; see
@@ -179,10 +181,20 @@ Different, because the host is:
   ([SECURITY.md](../SECURITY.md)).
 - **No panels, renderers or status band** — those are omp's terminal UI. The
   `/re` lists are text.
-- **No claim-support audit yet** (`/re report --audit`). Under omp it asks
-  the model a side question; nodecode has the means (`nle:submit` to a fork
-  with no tools), but the cell does not use it yet, so findings are stored as
-  `unaudited` and the report runs with the evidence gate alone.
+- **The claim-support audit is a side question to a session of its own.**
+  `record_finding`, `adopt_finding` and `(re:slash "report …")` put the claim
+  and its quoted evidence to the model with `nle:submit … :tools '()`, in a
+  detached child of the asking session named `re: support audit` (source
+  `re-audit`): none of its history, its model, no tool it may call. That is
+  one model turn per finding and one per report, so it costs tokens; `audit`
+  turns it off and `audit_seconds` bounds the wait. The sessions are kept —
+  nodecode has no hidden session — and go with their parent, or with a prune
+  by source. `unaudited` means nobody judged the claim, never that it failed:
+  `audit` is off, there is no store, the turn failed, was cancelled, ran past
+  `audit_seconds` or answered nothing readable — the reason is recorded, and
+  `--audit=strict` withholds on a verdict only. `/re report` typed as a
+  command does not wait on a model turn, so its report is `unaudited` and
+  says so; ask for it from eval to have it audited.
 - **A cut result names a file**, not `artifact://N`: the whole output is kept
   beside the session's record and `(re:json …)` reads it for you.
 - **The `re-analyst` subagent and the `re-triage` skill** are omp assets; the
@@ -203,6 +215,7 @@ nodecode/session.lisp      the session record, the process lifecycle, evidence, 
 nodecode/tools-core.lisp   open_binary, rizin_help, rizin_command, /re, status, the output directory
 nodecode/extras.lisp       map_file, analyze, signatures, export_project, rizin_cli, triage, rizin_emulate
 nodecode/annotate.lisp     the fifteen annotation tools, undo, replay
+nodecode/audit-claims.lisp the support audit: its prompt, its reply parser, the judge's seam
 nodecode/findings.lisp     record_finding, adopt_finding, retract_finding
 nodecode/verify.lisp       /re verify
 nodecode/report.lisp       /re report and its verification manifest

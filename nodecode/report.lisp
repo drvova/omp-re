@@ -2,9 +2,8 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's report.ts, the fingerprint half of anchor.ts the
-;;;; manifest needs, and the audit-claims.ts outcome a host with no side
-;;;; model turn has.
+;;;; Ported from omp-re's report.ts and the fingerprint half of anchor.ts the
+;;;; manifest needs.
 ;;;;
 ;;;; A report has two hard properties: IOCs are defanged, and the write gate
 ;;;; refuses to emit a report containing any claim with zero backing
@@ -14,12 +13,13 @@
 ;;;; beside it, the file /re carry and omp itself read: same members, same
 ;;;; order, same spelling as the TypeScript writes.
 ;;;;
-;;;; The third gate, the claim-support audit, asks a side model turn whether
-;;;; each claim's evidence supports it. This host has none, and the
-;;;; TypeScript's answer to that (ctx.runEphemeralTurn absent) is ported as
-;;;; it stands: the audit fails open. Nothing is flagged, nothing is withheld
-;;;; even under --audit=strict, and a report with evidence-backed claims says
-;;;; under them that their support went unaudited.
+;;;; The third gate, the claim-support audit (audit-claims.lisp), asks the
+;;;; model in a side question whether each claim's evidence supports it. It
+;;;; is advisory by default: a claim judged unsupported or overreaching is
+;;;; flagged where it stands and the report is still written.
+;;;; --audit=strict withholds the report on such a verdict, and on nothing
+;;;; else: an audit that could not run fails open, and the report says under
+;;;; its claims that their support went unaudited.
 
 (in-package #:nodecode-re)
 
@@ -305,13 +305,54 @@ report: a partial or annotated report is no substitute, the point of the
 gate is that an ungrounded report never reaches a ticket."
   (remove-if #'report-claim-evidence-ids (report-claims report)))
 
-(defun auditable-claims (report)
-  "How many claims the support audit would be put: those citing at least
-one evidence RECORD — an annotation's id carries no tool output to judge."
-  (count-if (lambda (claim)
-              (some (lambda (id) (gethash id (built-report-evidence-by-id report)))
-                    (report-claim-evidence-ids claim)))
-            (report-claims report)))
+(defun audit-inputs (report with-full-text)
+  "What the support audit is put: one item for each claim citing at least
+one evidence RECORD — an annotation's id carries no tool output to judge —
+with each record's summary and canonical excerpt and, WITH-FULL-TEXT (only
+when a judge will run), the output itself where it is short. An item's
+index is the claim's flat position in the report, which the verdicts come
+back on and the markdown flags by."
+  (let ((items '())
+        (texts (make-hash-table :test #'equal))
+        (index 0))
+    (dolist (claim (report-claims report))
+      (let ((evidence '()))
+        (dolist (id (report-claim-evidence-ids claim))
+          (let ((record (gethash id (built-report-evidence-by-id report))))
+            (when record
+              (when (and with-full-text (not (nth-value 1 (gethash id texts))))
+                (let ((raw (evidence-output record)))
+                  (setf (gethash id texts) (and (plusp (length raw)) (<= (length raw) 1200) raw))))
+              (push (obj "id" (jstring record "id")
+                         "tool" (jstring record "tool")
+                         "summary" (jstring record "summary")
+                         "canonicalExcerpt" (string-member record "canonicalExcerpt")
+                         "fullText" (or (gethash id texts) :absent))
+                    evidence))))
+        (when evidence
+          (push (make-audit-item :index index :claim-text (report-claim-text claim)
+                                 :evidence (nreverse evidence))
+                items))
+        (incf index)))
+    (nreverse items)))
+
+(defun claim-audit-lines (outcome)
+  "The support audit's summary note. Prose, never a claim, so the gate does
+not see it. Nothing when nothing was audited; else one line of counts, or
+the note that says the audit could not run. A claim's own flag is rendered
+beside the claim."
+  (cond ((zerop (audit-outcome-item-count outcome)) '())
+        ((not (audit-outcome-audited outcome))
+         (list (format nil "> _Claim–evidence support unaudited — ~a._"
+                       (or (audit-outcome-unaudited-reason outcome) "side turn unavailable"))
+               ""))
+        (t
+         (let ((verdicts (audit-outcome-by-index outcome)))
+           (list (format nil "> _Claim–evidence support audit: ~d supported, ~d flagged, ~d unaudited._"
+                         (count "supported" verdicts :key #'claim-audit-verdict :test #'string=)
+                         (count-if #'flagged-p verdicts)
+                         (count "unaudited" verdicts :key #'claim-audit-verdict :test #'string=))
+                 "")))))
 
 ;;; --- the markdown --------------------------------------------------------------------------------
 
@@ -343,12 +384,11 @@ not see it."
                cited)
        (list "")))))
 
-(defun format-markdown (report audited-claims)
-  "REPORT as markdown. AUDITED-CLAIMS is how many claims were put to the
-support audit — none when it was switched off; when there were some, the
-note under the claims says their support went unaudited, which on this host
-is all the audit can answer."
-  (let ((lines (list "" (format nil "# ~a" (built-report-title report)))))
+(defun format-markdown (report &optional outcome)
+  "REPORT as markdown. OUTCOME is the support audit's: a claim it flagged
+says so under its evidence, and a note under the claims sums it up."
+  (let ((lines (list "" (format nil "# ~a" (built-report-title report))))
+        (claim-index 0))
     (flet ((say (&rest more) (dolist (line more) (push line lines))))
       (dolist (section (built-report-sections report))
         (say (format nil "## ~a" (report-section-title section)) "")
@@ -364,10 +404,15 @@ is all the audit can answer."
                            (mapcar (lambda (id)
                                      (format nil "[~a:~a]"
                                              (or (gethash id (built-report-tool-by-id report)) "unknown") id))
-                                   (report-claim-evidence-ids claim))))))
+                                   (report-claim-evidence-ids claim)))))
+            (let ((audit (and outcome (outcome-verdict outcome claim-index))))
+              (when (and audit (flagged-p audit))
+                (say (format nil "  _⚠ Support audit: ~a — ~a_"
+                             (claim-audit-verdict audit) (claim-audit-reason audit)))))
+            (incf claim-index))
           (say "")))
-      (when (plusp audited-claims)
-        (say (format nil "> _Claim–evidence support unaudited — ~a._" +unaudited-reason+) ""))
+      (when outcome
+        (apply #'say (claim-audit-lines outcome)))
       (apply #'say (manifest-table-lines report)))
     (format nil "~a~%" (string-right-trim '(#\Space #\Tab #\Newline #\Return)
                                           (join-lines (nreverse lines))))))
@@ -496,9 +541,12 @@ markdown itself when there is none => (values TEXT FAILED-P).
 
 The write gate is hard: if any claim has no evidence id, the whole report is
 withheld — never partly written — and the answer says which claims are
-ungrounded. AUDIT is the claim-support audit's mode, \"off\", \"advisory\"
-or \"strict\"; with no side turn to run it every mode writes the same
-report, but for the unaudited note, which \"off\" leaves out."
+ungrounded. Then the third gate, the semantic one: does each grounded claim's evidence
+support it? AUDIT is its mode. \"advisory\" flags claims and never blocks;
+\"strict\" withholds the whole report on an explicit unsupported or
+overreach verdict, and fails open when the audit could not run, so a strict
+report stays emittable with no model to ask; \"off\" skips it. The two
+deterministic gates block in every mode."
   (let* ((report (build-report session))
          (ungrounded (ungrounded-claims report)))
     (when ungrounded
@@ -506,10 +554,27 @@ report, but for the unaudited note, which \"off\" leaves out."
         (values (format nil "omp-re: report withheld — ~d claim(s) without evidence:~%~{  - ~a~^~%~}"
                         (length ungrounded) (mapcar #'report-claim-text ungrounded))
                 t)))
-    ;; The support audit would run here. There is no judge, so its outcome is
-    ;; fixed: nothing flagged — strict has nothing to withhold on, and fails
-    ;; open as it does for any audit that could not run.
-    (let ((markdown (format-markdown report (if (equal audit "off") 0 (auditable-claims report)))))
+    (let* ((judge (and (not (equal audit "off")) *claim-judge*))
+           (outcome (audit-claims (and (not (equal audit "off")) (audit-inputs report (and judge t)))
+                                  audit judge))
+           (flagged (and (equal audit "strict") (flagged-verdicts outcome)))
+           (markdown (and (null flagged) (format-markdown report outcome))))
+      (when flagged
+        (return-from write-report
+          (values (let ((claims (report-claims report)))
+                    (format nil "omp-re: report withheld — ~d claim(s) not supported by their cited evidence:~%~{~a~^~%~}"
+                            (length flagged)
+                            (mapcar (lambda (verdict)
+                                      (let ((index (claim-audit-index verdict)))
+                                        (format nil "  - [~a] ~a — ~a"
+                                                (claim-audit-verdict verdict)
+                                                ;; A verdict for an index the report has no claim at names none.
+                                                (if (and (= index (round index)) (< -1 index (length claims)))
+                                                    (report-claim-text (nth (round index) claims))
+                                                    "")
+                                                (claim-audit-reason verdict))))
+                                    flagged)))
+                  t)))
       (if (null output-path)
           (values markdown nil)
           (let ((manifest-path (format nil "~a.manifest.json" output-path)))

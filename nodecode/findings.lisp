@@ -13,28 +13,22 @@
 ;;;;
 ;;;; - record_finding takes a claim and the evidence ids it rests on. It is
 ;;;;   gated at record time, while the model can still act on the answer:
-;;;;   every id must resolve in this session's record (existence) and have
-;;;;   been taken against the open binary (binding).
+;;;;   every id must resolve in this session's record (existence), have been
+;;;;   taken against the open binary (binding), and the claim goes to the
+;;;;   same support audit /re report uses (audit-claims.lisp) — an
+;;;;   unsupported or overreaching claim is refused with the auditor's
+;;;;   reason unless the model overrides it with a written justification,
+;;;;   which is kept and shown.
 ;;;; - adopt_finding re-proves a finding made elsewhere by re-running its
 ;;;;   commands here, so the claim rests on evidence this session observed.
 ;;;; - retract_finding withdraws one; `supersedes' revises one.
 ;;;;
 ;;;; Findings are re.finding / re.finding.retract entries of the record, read
 ;;;; back from it like all other state, so they survive a restart.
-;;;;
-;;;; The TypeScript puts every claim to a third gate, a support audit run as
-;;;; a side model turn (audit-claims.ts). This host has no side turn, which
-;;;; is a case the TypeScript itself handles — ctx.runEphemeralTurn absent —
-;;;; by failing open: the finding is recorded with an audit of "unaudited".
-;;;; That branch is the one ported, word for word.
 
 (in-package #:nodecode-re)
 
 ;;; --- reading the record --------------------------------------------------------------------
-
-(defparameter +unaudited-reason+ "no model / side turns unavailable"
-  "auditClaims' reason when there is no judge to ask: the only audit outcome
-this host can have, written into every finding and under every report.")
 
 (defparameter +confidences+ '("confirmed" "likely" "speculative"))
 
@@ -153,46 +147,71 @@ parameter types cannot say — in the words the spine uses for the rest."
   (unless (<= least (length text) most)
     (schema-refusal tool "~a must be ~d to ~d characters (was ~d)" name least most (length text))))
 
-(defun gate-and-record (tool resolved &key claim addr confidence supersedes adopted-from)
-  "Record CLAIM as a finding resting on the RESOLVED evidence records and
-answer the result that says whether it can carry. Shared by record_finding
-and adopt_finding, so the two can never gate differently.
-
-In the TypeScript the claim first goes to the support auditor, and an
-unsupported or overreaching one is refused unless override_audit justifies
-it. With no side turn there is no verdict, nothing is ever refused, and so
-an override is never kept: the audit recorded is `unaudited'."
-  (let* ((id (uuid))
-         (open-sha (session-binary-sha256 *session*))
-         (audit (obj "verdict" "unaudited" "reason" +unaudited-reason+))
+(defun gate-and-record (tool resolved &key claim addr confidence supersedes adopted-from override-audit)
+  "The gate every recorded finding passes once its evidence is resolved:
+the support audit — refused on unsupported or overreach unless
+OVERRIDE-AUDIT justifies it; fails open to `unaudited' — then the re.finding
+entry and a result that says whether the finding can carry. Shared by
+record_finding and adopt_finding, so the two can never gate differently."
+  (let* ((outcome (audit-claims
+                   (list (make-audit-item
+                          :index 0
+                          :claim-text claim
+                          :evidence (mapcar (lambda (record)
+                                              (obj "id" (jstring record "id")
+                                                   "tool" (jstring record "tool")
+                                                   "summary" (jstring record "summary")
+                                                   "canonicalExcerpt" (string-member record "canonicalExcerpt")))
+                                            resolved)))
+                   "advisory"))
+         (verdict (outcome-verdict outcome 0))
+         (refused (and verdict (flagged-p verdict)))
+         (override (and (plusp (length override-audit)) override-audit))
          (evidence-list (format nil "~{~a~^, ~}"
-                                (mapcar (lambda (record) (short-id (jstring record "id"))) resolved)))
-         (reproducible (count "reproducible" resolved :key #'recorded-status :test #'equal)))
-    (append-entry "re.finding"
-                  (obj "id" id
-                       "claim" claim
-                       "evidenceIds" (map 'simple-vector (lambda (record) (jstring record "id")) resolved)
-                       "addr" (if (plusp (length addr)) addr :absent)
-                       "confidence" (or confidence "likely")
-                       "supersedes" (if (plusp (length supersedes)) supersedes :absent)
-                       "audit" audit
-                       "binarySha256" (if (plusp (length open-sha)) open-sha :absent)
-                       "adoptedFrom" (if (plusp (length adopted-from)) adopted-from :absent)))
-    (plain-result
-     (join-lines
-      (append
-       (list (format nil "~a: recorded ~a~@[ (supersedes ~a)~]" tool (short-id id)
-                     (and (plusp (length supersedes)) (short-id supersedes)))
-             (format nil "claim: ~a" claim))
-       (when (plusp (length adopted-from))
-         (list (format nil "adopted from ~a: re-proven in this session on evidence ~a"
-                       adopted-from evidence-list)))
-       (list (format nil "support audit: ~a — ~a" (jstring audit "verdict") (jstring audit "reason"))
-             (if (plusp reproducible)
-                 (format nil "evidence: ~d of ~d machine-reproducible — this finding will carry to the next build (/re carry)"
-                         reproducible (length resolved))
-                 "evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable"))))
-     (and (plusp (length addr)) addr))))
+                                (mapcar (lambda (record) (short-id (jstring record "id"))) resolved))))
+    (when (and refused (not override))
+      (return-from gate-and-record
+        (failed-result
+         (format nil "~a: NOT recorded — the support auditor judged this claim ~a: ~a~%Narrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.~@[~%The re-run evidence was recorded (~a); cite it in record_finding to record a narrower claim.~]"
+                 tool (claim-audit-verdict verdict) (claim-audit-reason verdict)
+                 (and (string= tool "adopt_finding") evidence-list)))))
+    (let* ((id (uuid))
+           (open-sha (session-binary-sha256 *session*))
+           (audit (if verdict
+                      (obj "verdict" (claim-audit-verdict verdict)
+                           "reason" (claim-audit-reason verdict)
+                           "override" (if refused override :absent))
+                      (obj "verdict" "unaudited"
+                           "reason" (or (audit-outcome-unaudited-reason outcome) "side turn unavailable"))))
+           (reproducible (count "reproducible" resolved :key #'recorded-status :test #'equal)))
+      (append-entry "re.finding"
+                    (obj "id" id
+                         "claim" claim
+                         "evidenceIds" (map 'simple-vector (lambda (record) (jstring record "id")) resolved)
+                         "addr" (if (plusp (length addr)) addr :absent)
+                         "confidence" (or confidence "likely")
+                         "supersedes" (if (plusp (length supersedes)) supersedes :absent)
+                         "audit" audit
+                         "binarySha256" (if (plusp (length open-sha)) open-sha :absent)
+                         "adoptedFrom" (if (plusp (length adopted-from)) adopted-from :absent)))
+      (plain-result
+       (join-lines
+        (append
+         (list (format nil "~a: recorded ~a~@[ (supersedes ~a)~]" tool (short-id id)
+                       (and (plusp (length supersedes)) (short-id supersedes)))
+               (format nil "claim: ~a" claim))
+         (when (plusp (length adopted-from))
+           (list (format nil "adopted from ~a: re-proven in this session on evidence ~a"
+                         adopted-from evidence-list)))
+         (list (format nil "support audit: ~a~@[ — ~a~]~:[~; (overridden)~]"
+                       (jstring audit "verdict")
+                       (and (plusp (length (jstring audit "reason"))) (jstring audit "reason"))
+                       refused)
+               (if (plusp reproducible)
+                   (format nil "evidence: ~d of ~d machine-reproducible — this finding will carry to the next build (/re carry)"
+                           reproducible (length resolved))
+                   "evidence: none machine-reproducible — the finding is in the report but cannot carry; cite rizin_command evidence to make it carryable"))))
+       (and (plusp (length addr)) addr)))))
 
 ;;; --- the tools ----------------------------------------------------------------------------------
 
@@ -242,7 +261,8 @@ an override is never kept: the audit recorded is `unaudited'."
                        :claim (jstring arguments "claim")
                        :addr (jstring arguments "addr")
                        :confidence (jstring arguments "confidence")
-                       :supersedes supersedes))))
+                       :supersedes supersedes
+                       :override-audit (jstring arguments "override_audit")))))
 
 (defun adopt-command (text)
   "One of adopt_finding's commands => (values COMMAND ADDR). The TypeScript
@@ -308,7 +328,8 @@ object, so each arrives as a string: the line as the re-analyst writes it in
                      :confidence (if (equal (jstring arguments "confidence") "possible")
                                      "speculative"
                                      (jstring arguments "confidence"))
-                     :adopted-from (or (jstring arguments "source") "an external analysis"))))
+                     :adopted-from (or (jstring arguments "source") "an external analysis")
+                     :override-audit (jstring arguments "override_audit"))))
 
 (define-tool "retract_finding"
     (:label "Retract Finding" :tier :read

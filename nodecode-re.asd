@@ -42,6 +42,9 @@
                ;; may name what they recovered (replay runs in load order).
                (:file "extras")
                (:file "annotate")
+               ;; audit-claims before findings and report, which put claims to it;
+               ;; what it calls of theirs is late-bound.
+               (:file "audit-claims")
                (:file "findings")
                (:file "verify")
                (:file "report")

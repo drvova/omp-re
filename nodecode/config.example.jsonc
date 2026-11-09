@@ -15,6 +15,11 @@
     // Offers rizin_debug, which EXECUTES the binary under analysis. Leave off outside a sandbox.
     "debugger": false,
     // Close the rizin process of a session unused this long; its next call restores it.
-    "idle_minutes": 30
+    "idle_minutes": 30,
+    // Ask the model, in a side question, whether a finding's (and a report claim's) evidence supports it.
+    // Each question is a model turn and costs tokens; false records findings and writes reports unaudited.
+    "audit": true,
+    // How long a support audit waits for its answer before the claim goes unaudited.
+    "audit_seconds": 120
   }
 }
