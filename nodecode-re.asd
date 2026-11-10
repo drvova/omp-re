@@ -24,7 +24,7 @@
   :description "Reverse engineering with rizin: evidence-backed findings, annotations and reports, as eval verbs"
   :author "drvova"
   :license "MIT"
-  :version "0.9.1"
+  :version "0.10.0"
   :depends-on ("nodecode" "cl-ppcre")
   :pathname "nodecode/"
   :serial t
