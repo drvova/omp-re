@@ -12,7 +12,7 @@
   "bugs": {
     "url": "https://github.com/drvova/omp-re/issues"
   },
-  "keywords": ["omp", "plugin", "rizin", "reverse-engineering", "malware-analysis"],
+  "keywords": ["omp", "plugin", "nodecode", "rizin", "reverse-engineering", "malware-analysis"],
   "omp": {
     "extensions": ["./extensions"]
   },
@@ -25,6 +25,8 @@
     "check": "tsc-ts --noEmit -p tsconfig.json",
     "check:tsc": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
+    "test:nodecode": "sbcl --non-interactive --load test/nodecode/run.lisp",
+    "gen:nodecode": "bun scripts/gen-nodecode-policy.ts && bun scripts/gen-recipes.ts",
     "test:tui": "bash test/tui.sh",
     "test:tui:carry": "bash test/tui-carry.sh",
     "test:live": "bash test/live-model.sh",

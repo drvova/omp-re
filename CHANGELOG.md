@@ -6,6 +6,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **omp-re is now also a [nodecode](https://nodecode.ai) cell, in pure Common
+  Lisp.** Clone the repository into `~/.nodecode/cells/nodecode-re` and a
+  nodecode agent gets the engine with nothing but rizin installed:
+  `(re:open "path")`, `(re:cmd "pdg" "main")`, `(re:json "aflj")`,
+  `(re:call "record_finding" …)`, `(re:tools)`, `(re:doc "tool")`,
+  `(re:slash "report out.md")`, `(re:status)`, a `/re` command and a
+  `(help :re)` manual. The surface is native to nodecode: its model has one
+  tool, `eval`, and everything the cell adds is a function inside it. No tool
+  is registered.
+- **The engine itself is ported** (`nodecode-re.asd`, `nodecode/*.lisp`): the
+  NUL-framed rizin pipe, the read-only command policy, the session record,
+  the content-addressed evidence store, the HMAC-signable audit log, the
+  annotation tools with replay, findings, `/re verify`, the report gate and
+  its manifest, and the remaining tools. It writes the same records as this
+  engine, and a session's record is an append-only file, so the open binary,
+  annotations, evidence and findings survive rizin dying or nodecode
+  restarting and are replayed into a fresh process.
+- **Recipes: the reads every analysis opens with, composed once.**
+  `triage`, `scan-imports`, `inspect-function`, `find-comparisons` and
+  `find-crypto` — what the binary is and how it was built, which imports a
+  reviewer stops at and who calls them, one function from every side, what a
+  function compares and branches on, where cryptographic constants lie. They
+  are not tools: under nodecode they are `re:` functions, under omp a script
+  loaded into `eval` with `%load skill://re-triage/recipes.js`, and on both
+  each read is an ordinary `rizin_command` call — audited, recorded as
+  evidence — with every line naming the evidence id it rests on. Their tables
+  live once, in `recipes/tables.json`.
+- **The recipes in omp's Python kernel too.** `%load
+  skill://re-triage/recipes.py` in a `language: "py"` cell defines
+  `omp_re.triage()`, `scan_imports()`, `inspect_function(addr)`,
+  `find_comparisons(addr)` and `find_crypto()` — plain functions with keyword
+  options, answering the same text as `recipes.js` line for line. The global
+  is `omp_re` because `re` is the regex module omp already imports into every
+  Python cell.
+- **A directory allow-list** for the nodecode cell (`allowed_dirs`, or
+  `OMPRE_ALLOWED_DIRS`): binaries and other input files open only from the
+  listed directories, with links resolved first; and `/re status` says when
+  the open binary has changed on disk since it was opened.
+- **Two engines, held together.** `scripts/gen-nodecode-policy.ts` generates
+  the Lisp engine's policy data from `catalog.ts`, and
+  `test/nodecode-parity.test.ts` asks both engines the same questions — which
+  of the installed rizin's commands `rizin_command` runs, every refusal's
+  words, quoting, the canonical and shift hashes, SHA-256, HMAC, JSON,
+  truncation — and fails when they differ.
+- `bun run test:nodecode`: the Lisp suites, run under SBCL against a real
+  rizin over a stand-in for nodecode's kernel. A new `nodecode` CI job runs
+  them and the parity test.
+- **The nodecode record follows the session tree.** Entries are stamped with
+  their turn, and a call reads only those on the current branch, across a
+  fork's lineage: a `/tree` rewind rolls an abandoned branch's annotations
+  back in rizin and its evidence stops grounding findings, `/redo` restores
+  them, and a `/fork` inherits the record up to the fork point.
+- `/re` under nodecode answers a dialog when typed alone, `/re cite` puts the
+  citation in the input box where there is one, and conditions that last
+  stand as the cell's notice.
+- `docs/nodecode.md`: install, verbs, configuration, how the engine is built,
+  and what differs from omp (no approval tiers, no panels).
+- **The claim-support audit under nodecode** (`nodecode/audit-claims.lisp`):
+  `record_finding`, `adopt_finding` and `/re report` ask the model a side
+  question with no tools, as omp's does; `audit` and `audit_seconds` in the
+  `re` section turn it off and bound its wait.
+- `docs/omp-eval.md`: the part of omp's `eval` this plugin stands on and omp.sh does not describe (cells and what ends a kernel, `tool.<name>()`, `%load`, `skill://`, `artifact://`, `xd://`), read from omp 18.11.1's source and pinned claim by claim in `test/omp-eval-contract.test.ts`.
+
+### Fixed
+
+- **A long read through omp was cut twice.** The engine cut a result's body
+  to exactly omp's 50 KB tool-result limit, so the header line, the truncation
+  note and the evidence tag pushed it just over; omp then elided the middle of
+  what had been kept and named a second artifact holding the already-cut text.
+  The body limit is now 48 KiB, leaving the headroom those lines need.
+- The skill and README now say that an `eval` cell has a 30-second deadline
+  that tool time counts toward — so opening a large binary needs a `timeout` —
+  and that a killed cell loses what eval had defined.
+
+### Changed
+
+- `scripts/release.mjs` now bumps `nodecode-re.asd` in lock-step with
+  `package.json` and the marketplace manifest.
+
 ## [0.9.1] - 2026-10-30
 
 ### Changed

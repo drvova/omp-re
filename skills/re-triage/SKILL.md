@@ -34,10 +34,58 @@ families and the other tools), and `rizin_help` to look up a command's arguments
   throws; `try`/`catch` it.
 - End statements with `;` in `eval`: it rewrites top-level destructuring, and
   without the semicolon the line can join the one before it.
-- Functions you define in `eval` persist for the session (across compaction).
-  To keep RE helpers across sessions, write them to a script and `%load` it.
+- Functions you define in `eval` persist across cells and across compaction,
+  until the kernel is lost: a cell that passes its deadline or is interrupted
+  is killed with everything defined in it, and so is a resumed session's. Then
+  define them again. To keep RE helpers, write them to a script and `%load` it.
+- **A cell has a deadline — 30 seconds unless you set one — and the time a
+  tool takes counts.** `open_binary` runs full analysis, which on a large
+  binary takes minutes; a decompile can too. Give such a cell a `timeout` (in
+  seconds, e.g. `timeout: 600` for an open), and keep a slow call in a cell of
+  its own so a loss costs one call. rizin and its analysis survive a killed
+  cell; only what eval held is gone.
 - `eval`, `xd://`, and top-level calls are the same tool calls: each is
   recorded as evidence, audited, and approved the same way.
+
+## Recipes
+
+The reads every analysis opens with are already composed, in a script that
+ships beside this file — one for each of `eval`'s kernels. Load the one for the
+language you are writing, once, in a standalone `eval` cell of that language
+(omp resolves `skill://<this skill's name>/<file>` to the skill's own
+directory, wherever the plugin is installed), and again whenever that kernel
+was lost (`re is not defined`, `name 'omp_re' is not defined`):
+
+| `language` | Load | Global | A call |
+| --- | --- | --- | --- |
+| `"js"` | `%load skill://re-triage/recipes.js` | `re` | `print(await re.triage({ maxStrings: 40 }));` |
+| `"py"` | `%load skill://re-triage/recipes.py` | `omp_re` | `print(omp_re.triage(max_strings=40))` |
+
+**In Python the global is `omp_re`, not `re`:** `re` there is the standard
+library's regex module, which omp has already imported into every Python cell,
+and the recipes leave it alone. Python recipes are plain functions with keyword
+options — no `await` (one is tolerated) — while a Python tool call is still
+awaited and takes a dict: `r = await tool.rizin_command({"command": "aflj"})`,
+then `r["text"]`.
+
+Each function returns its report as a string — `print` it — and `help()` lists
+them. The same five in both, with the same defaults and the same text:
+
+| JavaScript (`await re.…`) | Python (`omp_re.…`) | Answers |
+| --- | --- | --- |
+| `triage({ maxStrings, maxFunctions })` | `triage(max_strings=…, max_functions=…)` | What the binary is, the build's protections, sections with entropy, what the imports reach, notable strings, the largest functions, entry points. The first call on a new binary. |
+| `scanImports({ callers, maxCallers })` | `scan_imports(callers=…, max_callers=…)` | The imports a reviewer stops at (unbounded copies, shell and exec, format sinks, races, weak randomness), why each matters, and who calls it. |
+| `inspectFunction(addr, { maxItems })` | `inspect_function(addr, max_items=…)` | One function's shape, variables, callers, callees and the strings it refers to: the context to read before `pdg` at the same address. |
+| `findComparisons(addr, { maxItems })` | `find_comparisons(addr, max_items=…)` | Every compare with the branch that follows it and where each way leads, calls that compare or validate, strings on the way: the skeleton of validation logic. |
+| `findCrypto({ references })` | `find_crypto(references=…)` | rizin's key and certificate search, and where the published constants of common algorithms lie. |
+
+These are not tools: a recipe is `eval` code over `rizin_command`, so each read
+it makes is its own tool call — approved, audited, recorded as evidence — and
+a recipe reads a list past the size cap whole, from its artifact. Every section
+of a report cites the `[evidence xxxxxxxx]` id of the read it rests on and the
+report ends with the reads it took. A line of a report is a lead to open, not a
+finding: a claim still goes through `record_finding` with those ids, and an
+import or a constant table being present says nothing yet about how it is used.
 
 ## Evidence
 

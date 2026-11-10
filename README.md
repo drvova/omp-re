@@ -114,6 +114,11 @@ through one tool, `rizin_command`**, and compose rizin's own commands in `eval`:
   the body (JSON for a `*j` command), and the `[evidence xxxxxxxx]` tag on the
   last line. Failures throw, so the code can `try`/`catch`. To keep helpers
   across sessions, write them to a script and `%load` it — omp's own mechanism.
+- **Mind the cell deadline.** An `eval` cell is killed after 30 seconds unless
+  it sets a `timeout`, and time spent inside a tool counts. Analysis on open
+  can take minutes: give that cell `timeout: 600`. A killed cell loses what
+  eval had defined (load helpers again); rizin and its analysis are untouched.
+  [`docs/omp-eval.md`](docs/omp-eval.md) has the details.
 
 ```js
 // eval — read with rizin_command; a call returns { text, details } to your code.
@@ -125,6 +130,20 @@ display(rows(await tool.rizin_command({ command: "afij", addr: "main" })));  // 
 print((await tool.rizin_command({ command: "pdg", addr: "main" })).text);    // decompiled C as text
 // A big list (aflj on a large binary) can exceed the size cap and spill to an artifact — read it or narrow.
 ```
+
+**Recipes.** The reads every analysis opens with are written once, as code
+for `eval` rather than as more tools: `%load skill://re-triage/recipes.js`
+defines `re.triage()`, `re.scanImports()`, `re.inspectFunction(addr)`,
+`re.findComparisons(addr)` and `re.findCrypto()`. `eval`'s other kernel has
+the same five: in a Python cell, `%load skill://re-triage/recipes.py` defines
+`omp_re.triage()`, `omp_re.scan_imports()` and the rest (`omp_re`, because
+`re` is Python's regex module there), answering the same text. Each composes
+`tool.rizin_command` — so every read is approved, audited and recorded as
+evidence like any other — and returns a report whose every line names the
+evidence id it rests on, ready to cite in `record_finding`. What the recipes
+and the tools take from `eval` — `tool.<name>()`, `%load`, `skill://`,
+`artifact://` — omp's site does not document;
+[`docs/omp-eval.md`](docs/omp-eval.md) does, from omp's source.
 
 A tool call made from `eval` returns its `{ text, details }` to your code; omp
 renders the eval cell (your `print`/`display` output), not a per-tool card — the
@@ -138,6 +157,42 @@ reason, fires the `tool_call`/`tool_result` events the audit log and the
 evidence store hook, and comes back tagged with its `[evidence xxxxxxxx]` id
 for `record_finding`. (With omp's `tools.xdev` setting off, omp lists the same
 tools top-level instead; nothing else changes.)
+
+## Also a nodecode cell
+
+The same engine runs under [nodecode](https://nodecode.ai), whose model has one
+tool — `eval`, evaluating Lisp — and whose extensions are *cells*. This
+repository is one: clone it into the cells folder. It needs rizin and nothing
+else.
+
+```sh
+git clone https://github.com/drvova/omp-re ~/.nodecode/cells/nodecode-re
+```
+
+The cell is pure Common Lisp (`nodecode-re.asd`, `nodecode/*.lisp`): omp-re's
+engine ported from `extensions/re`, presented the nodecode way — verbs in the
+`RE` package, a `/re` command, a `(help :re)` manual, a config section. It
+registers no tools: nodecode's model has one, `eval`, and everything here is
+a function inside it — the counterpart of the one-tool surface above:
+
+```lisp
+(re:open "/bin/ls")                  ; open and analyze
+(re:cmd "pdg" "main")                ; one read-only rizin command, at an address
+(re:json "aflj")                     ; a *j command, as data to loop over
+(re:triage)                          ; the first dozen reads, composed, each line citing its evidence
+(re:call "record_finding" :claim "…" :evidence '("1a2b3c4d"))
+(re:slash "report analysis.md")      ; a /re line
+```
+
+Evidence, the audit log, findings, annotations with replay, `/re verify` and
+the report gate behave as they do under omp, the records are the same shape,
+and the read-only command policy is generated from this engine's own, so the
+two cannot disagree about what `rizin_command` runs. The record follows
+nodecode's session tree as it follows omp's: after a rewind, an abandoned
+branch's annotations are rolled back and its evidence grounds nothing. See
+[`docs/nodecode.md`](docs/nodecode.md) for the verbs, configuration, how the
+two engines are held together, and what differs from omp (no approval tiers,
+no panels).
 
 ## What's omp-native
 
@@ -476,7 +531,9 @@ Three environment variables, all optional:
 - [`docs/install.md`](docs/install.md) — installing rizin and the decompiler plugins.
 - [`docs/workflow.md`](docs/workflow.md) — the evidence chain, branches, and the report gate.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — process lifecycle (the per-session teardown scope) and subsystem composition.
+- [`docs/nodecode.md`](docs/nodecode.md) — running omp-re as a nodecode cell: verbs, configuration, the Lisp engine and how it is held to this one.
 - [`docs/tools.md`](docs/tools.md) — the `rizin_command` read map and parameter tables for the stateful tools.
+- [`docs/omp-eval.md`](docs/omp-eval.md) — omp's `eval` as this plugin uses it: cells, `tool.<name>()`, `%load`, `skill://` and `artifact://`, read from omp's source and pinned by a test.
 - [`docs/testing.md`](docs/testing.md) — the three test tiers and what each needs.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.

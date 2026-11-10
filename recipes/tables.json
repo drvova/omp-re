@@ -1,0 +1,501 @@
+{
+  "riskyImports": [
+    {
+      "category": "memory",
+      "severity": "high",
+      "why": "copies with no bound at all; any input longer than the buffer overruns it",
+      "names": [
+        "gets"
+      ]
+    },
+    {
+      "category": "memory",
+      "severity": "high",
+      "why": "copies or formats until a terminator with no destination size; safe only if every caller proves the length",
+      "names": [
+        "strcpy",
+        "strcat",
+        "stpcpy",
+        "sprintf",
+        "vsprintf",
+        "wcscpy",
+        "wcscat",
+        "lstrcpyA",
+        "lstrcpyW",
+        "lstrcatA",
+        "lstrcatW",
+        "wsprintfA",
+        "wsprintfW"
+      ]
+    },
+    {
+      "category": "memory",
+      "severity": "medium",
+      "why": "reads into a buffer; a %s or %[ without a width has no bound",
+      "names": [
+        "scanf",
+        "sscanf",
+        "fscanf",
+        "vscanf",
+        "vsscanf",
+        "vfscanf"
+      ]
+    },
+    {
+      "category": "memory",
+      "severity": "medium",
+      "why": "the size comes from the caller and is often attacker-influenced",
+      "names": [
+        "alloca",
+        "realpath",
+        "getwd"
+      ]
+    },
+    {
+      "category": "memory",
+      "severity": "low",
+      "why": "bounded, but the bound is the caller's to get right (and strncpy leaves no terminator when it fills)",
+      "names": [
+        "strncpy",
+        "strncat",
+        "memcpy",
+        "memmove",
+        "bcopy",
+        "wcsncpy",
+        "snprintf",
+        "vsnprintf"
+      ]
+    },
+    {
+      "category": "command",
+      "severity": "high",
+      "why": "hands a string to a shell; anything in it that came from outside is a command",
+      "names": [
+        "system",
+        "popen",
+        "wordexp",
+        "WinExec",
+        "ShellExecuteA",
+        "ShellExecuteW",
+        "ShellExecuteExA",
+        "ShellExecuteExW"
+      ]
+    },
+    {
+      "category": "command",
+      "severity": "medium",
+      "why": "starts another program; what it runs and with which arguments is worth tracing",
+      "names": [
+        "execl",
+        "execlp",
+        "execle",
+        "execv",
+        "execvp",
+        "execve",
+        "execvpe",
+        "posix_spawn",
+        "posix_spawnp",
+        "CreateProcessA",
+        "CreateProcessW"
+      ]
+    },
+    {
+      "category": "format",
+      "severity": "low",
+      "why": "a format string that is not a literal lets its author read and write memory",
+      "names": [
+        "printf",
+        "fprintf",
+        "dprintf",
+        "vprintf",
+        "vfprintf",
+        "syslog",
+        "vsyslog",
+        "err",
+        "errx",
+        "warn",
+        "warnx"
+      ]
+    },
+    {
+      "category": "race",
+      "severity": "high",
+      "why": "chooses a file name before the file exists; another process can take it first",
+      "names": [
+        "mktemp",
+        "tmpnam",
+        "tempnam"
+      ]
+    },
+    {
+      "category": "race",
+      "severity": "low",
+      "why": "checks a path, then uses it; the file can change between the two",
+      "names": [
+        "access",
+        "stat",
+        "lstat"
+      ]
+    },
+    {
+      "category": "integer",
+      "severity": "low",
+      "why": "reports no error and no overflow; a caller cannot tell a bad number from zero",
+      "names": [
+        "atoi",
+        "atol",
+        "atoll",
+        "atof"
+      ]
+    },
+    {
+      "category": "randomness",
+      "severity": "medium",
+      "why": "predictable; unfit for keys, tokens or anything an adversary should not guess",
+      "names": [
+        "rand",
+        "srand",
+        "random",
+        "srandom",
+        "drand48",
+        "lrand48"
+      ]
+    },
+    {
+      "category": "privilege",
+      "severity": "info",
+      "why": "changes the process's identity or root; the order and the error checks matter",
+      "names": [
+        "setuid",
+        "setgid",
+        "seteuid",
+        "setegid",
+        "setreuid",
+        "setregid",
+        "chroot"
+      ]
+    },
+    {
+      "category": "loading",
+      "severity": "medium",
+      "why": "loads code chosen at run time; from where is worth tracing",
+      "names": [
+        "dlopen",
+        "LoadLibraryA",
+        "LoadLibraryW",
+        "LoadLibraryExA",
+        "LoadLibraryExW"
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "capability": "network",
+      "names": [
+        "socket",
+        "connect",
+        "bind",
+        "listen",
+        "accept",
+        "send",
+        "sendto",
+        "recv",
+        "recvfrom",
+        "getaddrinfo",
+        "gethostbyname",
+        "WSAStartup",
+        "InternetOpenA",
+        "InternetOpenW",
+        "InternetOpenUrlA",
+        "InternetOpenUrlW",
+        "InternetConnectA",
+        "InternetConnectW",
+        "HttpSendRequestA",
+        "HttpSendRequestW",
+        "WinHttpOpen",
+        "WinHttpConnect",
+        "WinHttpSendRequest",
+        "URLDownloadToFileA",
+        "URLDownloadToFileW",
+        "curl_easy_perform",
+        "SSL_connect"
+      ]
+    },
+    {
+      "capability": "process control",
+      "names": [
+        "fork",
+        "vfork",
+        "clone",
+        "kill",
+        "ptrace",
+        "prctl",
+        "OpenProcess",
+        "TerminateProcess",
+        "CreateRemoteThread",
+        "CreateToolhelp32Snapshot",
+        "Process32First",
+        "Process32Next"
+      ]
+    },
+    {
+      "capability": "code injection",
+      "names": [
+        "VirtualAllocEx",
+        "WriteProcessMemory",
+        "ReadProcessMemory",
+        "CreateRemoteThread",
+        "NtUnmapViewOfSection",
+        "ZwUnmapViewOfSection",
+        "QueueUserAPC",
+        "SetThreadContext",
+        "SetWindowsHookExA",
+        "SetWindowsHookExW",
+        "process_vm_writev"
+      ]
+    },
+    {
+      "capability": "memory protection",
+      "names": [
+        "mprotect",
+        "mmap",
+        "memfd_create",
+        "VirtualProtect",
+        "VirtualProtectEx",
+        "VirtualAlloc"
+      ]
+    },
+    {
+      "capability": "anti-analysis",
+      "names": [
+        "ptrace",
+        "IsDebuggerPresent",
+        "CheckRemoteDebuggerPresent",
+        "NtQueryInformationProcess",
+        "OutputDebugStringA",
+        "OutputDebugStringW",
+        "NtSetInformationThread",
+        "GetTickCount",
+        "QueryPerformanceCounter"
+      ]
+    },
+    {
+      "capability": "persistence",
+      "names": [
+        "RegSetValueExA",
+        "RegSetValueExW",
+        "RegCreateKeyExA",
+        "RegCreateKeyExW",
+        "CreateServiceA",
+        "CreateServiceW",
+        "StartServiceA",
+        "StartServiceW",
+        "SetFileAttributesA",
+        "SetFileAttributesW"
+      ]
+    },
+    {
+      "capability": "cryptography",
+      "names": [
+        "CryptAcquireContextA",
+        "CryptAcquireContextW",
+        "CryptEncrypt",
+        "CryptDecrypt",
+        "CryptGenKey",
+        "CryptHashData",
+        "BCryptEncrypt",
+        "BCryptDecrypt",
+        "BCryptGenRandom",
+        "EVP_EncryptInit_ex",
+        "EVP_DecryptInit_ex",
+        "EVP_DigestInit_ex",
+        "AES_set_encrypt_key",
+        "AES_encrypt",
+        "MD5_Init",
+        "SHA1_Init",
+        "SHA256_Init",
+        "RC4",
+        "DES_ecb_encrypt",
+        "getrandom",
+        "RAND_bytes"
+      ]
+    },
+    {
+      "capability": "filesystem",
+      "names": [
+        "unlink",
+        "remove",
+        "rename",
+        "chmod",
+        "chown",
+        "opendir",
+        "readdir",
+        "ftw",
+        "nftw",
+        "DeleteFileA",
+        "DeleteFileW",
+        "MoveFileA",
+        "MoveFileW",
+        "FindFirstFileA",
+        "FindFirstFileW",
+        "CopyFileA",
+        "CopyFileW"
+      ]
+    },
+    {
+      "capability": "dynamic resolution",
+      "names": [
+        "dlsym",
+        "GetProcAddress",
+        "LdrGetProcedureAddress"
+      ]
+    }
+  ],
+  "severityOrder": [
+    "high",
+    "medium",
+    "low",
+    "info"
+  ],
+  "stringInterest": [
+    {
+      "kind": "credentials",
+      "pattern": "passw|passphrase|secret|\\btoken\\b|api[_-]?key|private key|credential|\\blogin\\b|\\bauth(?:enticat|oriz)"
+    },
+    {
+      "kind": "network",
+      "pattern": "https?://|ftp://|\\b[a-z0-9-]+\\.(?:com|net|org|io|ru|cn|info|biz|xyz|top)\\b|\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b|user-agent"
+    },
+    {
+      "kind": "commands",
+      "pattern": "/bin/sh|/bin/bash|cmd\\.exe|powershell|wget |curl |chmod |\\bnc \\b|schtasks|reg add"
+    },
+    {
+      "kind": "paths",
+      "pattern": "^/(?:etc|tmp|var|proc|dev|home|root)/|\\\\(?:windows|system32|appdata|temp)\\\\|HKEY_|\\\\Software\\\\"
+    },
+    {
+      "kind": "checks",
+      "pattern": "licen[sc]e|serial|registration|trial|expired|invalid|incorrect|denied|granted|debugger|virtual|sandbox|vmware|vbox"
+    }
+  ],
+  "packerSectionNames": "upx|aspack|themida|vmp|mpress|petite|\\.packed|\\.enigma",
+  "comparingCalls": "\\b(?:str|strn|strcase|strncase|wcs|wcsn|mem|b)cmp\\b|\\bstrstr\\b|\\bstrchr\\b|lstrcmp|CompareString|RtlCompareMemory|\\bcrc|\\bhash|md5|sha\\d|verify|check|valid",
+  "cryptoConstants": [
+    {
+      "algorithm": "AES",
+      "what": "S-box",
+      "hex": "637c777bf26b6fc53001672bfed7ab76"
+    },
+    {
+      "algorithm": "AES",
+      "what": "inverse S-box",
+      "hex": "52096ad53036a538bf40a39e81f3d7fb"
+    },
+    {
+      "algorithm": "AES",
+      "what": "T-table Te0 (big-endian words)",
+      "hex": "c66363a5f87c7c84ee777799f67b7b8d"
+    },
+    {
+      "algorithm": "AES",
+      "what": "T-table Te0 (little-endian words)",
+      "hex": "a56363c6847c7cf8997777ee8d7b7bf6"
+    },
+    {
+      "algorithm": "SHA-256",
+      "what": "round constants (little-endian words)",
+      "hex": "982f8a4291443771cffbc0b5a5dbb5e9"
+    },
+    {
+      "algorithm": "SHA-256",
+      "what": "round constants (big-endian words)",
+      "hex": "428a2f9871374491b5c0fbcfe9b5dba5"
+    },
+    {
+      "algorithm": "SHA-256",
+      "what": "initial state (little-endian words)",
+      "hex": "67e6096a85ae67bb72f36e3c3af54fa5"
+    },
+    {
+      "algorithm": "SHA-512",
+      "what": "round constants (little-endian words)",
+      "hex": "22ae28d7982f8a42cd65ef2391443771"
+    },
+    {
+      "algorithm": "SHA-1 / MD5",
+      "what": "initial state (little-endian words)",
+      "hex": "0123456789abcdeffedcba9876543210"
+    },
+    {
+      "algorithm": "SHA-1",
+      "what": "round constant K1 (little-endian)",
+      "hex": "9979825a"
+    },
+    {
+      "algorithm": "MD5",
+      "what": "sine table (little-endian words)",
+      "hex": "78a46ad756b7c7e8db702024eecebdc1"
+    },
+    {
+      "algorithm": "CRC-32",
+      "what": "table, polynomial 0xEDB88320 (little-endian words)",
+      "hex": "0000000096300777"
+    },
+    {
+      "algorithm": "CRC-32",
+      "what": "table, polynomial 0x04C11DB7 (big-endian words)",
+      "hex": "0000000004c11db7130476dc"
+    },
+    {
+      "algorithm": "ChaCha / Salsa20",
+      "what": "sigma constant",
+      "hex": "657870616e642033322d62797465206b"
+    },
+    {
+      "algorithm": "ChaCha / Salsa20",
+      "what": "tau constant",
+      "hex": "657870616e642031362d62797465206b"
+    },
+    {
+      "algorithm": "Blowfish",
+      "what": "P-array (big-endian words)",
+      "hex": "243f6a8885a308d313198a2e03707344"
+    },
+    {
+      "algorithm": "Blowfish",
+      "what": "P-array (little-endian words)",
+      "hex": "886a3f24d308a3852e8a191344737003"
+    },
+    {
+      "algorithm": "TEA / XTEA",
+      "what": "delta (little-endian)",
+      "hex": "b979379e"
+    },
+    {
+      "algorithm": "TEA / XTEA",
+      "what": "delta (big-endian)",
+      "hex": "9e3779b9"
+    },
+    {
+      "algorithm": "DES",
+      "what": "initial permutation table",
+      "hex": "3a322a221a120a023c342c241c140c04"
+    },
+    {
+      "algorithm": "RC6 / RC5",
+      "what": "P32 and Q32 (little-endian)",
+      "hex": "6351e1b7b979379e"
+    },
+    {
+      "algorithm": "Base64",
+      "what": "standard alphabet",
+      "hex": "4142434445464748494a4b4c4d4e4f505152535455565758595a6162636465666768696a6b6c6d6e6f707172737475767778797a303132333435363738392b2f"
+    },
+    {
+      "algorithm": "Base64",
+      "what": "URL-safe alphabet tail",
+      "hex": "7778797a303132333435363738392d5f"
+    }
+  ]
+}

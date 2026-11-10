@@ -32,3 +32,23 @@ jobs:
       # this job; run the rizin suites locally (they use /bin/ls). See
       # docs/testing.md. Never fetch a malware sample into CI.
       - run: bun test
+
+  # The nodecode cell is omp-re's engine ported to Common Lisp (nodecode/*.lisp).
+  # This job loads the real system under SBCL and runs its suites
+  # (test/nodecode/run.lisp), then lets `bun test` hold the Lisp engine to the
+  # TypeScript one (test/nodecode-parity.test.ts needs sbcl to do it). The
+  # suites run over a stand-in for nodecode's kernel, so they prove the cell's
+  # own code; see docs/testing.md. No rizin here: each suite's rizin half
+  # prints SKIPPED, and the parity test judges a fixed list of command names
+  # instead of the installed catalog.
+  nodecode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
+      - run: bun install --ignore-scripts
+      - run: bun run test:nodecode
+      - run: bun test test/nodecode-parity.test.ts

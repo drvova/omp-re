@@ -12,7 +12,7 @@ bun install --ignore-scripts
 bun test
 ```
 
-Sixteen test files. The `bun install` dev dependencies pin omp **18.11.1**,
+The `bun install` dev dependencies pin omp **18.11.1**,
 so the host APIs under test are the ones users run. Tests that need a real
 `rizin` and a test binary **skip** (not fail) when either is missing:
 
@@ -34,7 +34,6 @@ so the host APIs under test are the ones users run. Tests that need a real
 | `rizin-cli.test.ts` | Its catalog and tool tests (policy and help search run without) | 24 |
 | `rzcli.test.ts` | Its integration tests (the flag-policy tests run without) | 11 |
 | `debug.test.ts` | Its integration tests (the enable-gate tests run without) | 9 |
-| **Total** | | **184** |
 
 `extension-sdk.test.ts` loads `extensions/re` through omp's real SDK and
 extension runner (no model is called) and drives `/re` commands and tools
@@ -42,6 +41,17 @@ the way a session does — the tools through omp's own `eval` (`tool.<name>()`),
 since they are `xd://` devices rather than top-level tools. It is the suite that catches host API drift: omp 18
 changed `getAllTools()` to return tool objects, which broke `/re on` while
 every stub-based test stayed green. It runs in CI.
+
+`omp-eval-contract.test.ts` pins the host itself. omp-re leans on behaviours
+of omp's `eval` that omp.sh does not document — what `tool.<name>()` returns
+and when it throws, that such a call is approved and fires
+`tool_call`/`tool_result`, `%load` and `skill://`, `artifact://` and when it
+cannot be read, what ends a kernel — and [`omp-eval.md`](omp-eval.md) writes
+them down from omp's source. This file holds that page to the installed omp,
+one test per claim and named for it, so an omp upgrade that changes one fails
+in the claim's own words; its first test fails until the page names the new
+version. It uses a probe extension registered inline rather than the RE
+tools, so it needs no rizin and runs whole in CI (53 tests).
 
 **The default fixture is `/bin/ls`**, which exists on every Linux host and on
 macOS, so the integration suites need nothing but rizin. Point them at
@@ -72,7 +82,7 @@ matrix surfaced:
   runs for real; on a locked-down box without that, only that one test can't
   attach.
 
-Expected shape with rizin present: **184 pass, 0 fail, 0 skip**. Without
+Expected shape with rizin present: **every test passes, none fails, none is skipped** (the table above lists the suites that predate the nodecode and eval work; `bun test` prints the current count). Without
 rizin: **102 pass, 98 skip, 0 fail** (200 reported — bun counts skipped
 `describe` blocks slightly differently from executed ones). This is CI's
 permanent shape, not a degraded state to "fix".
@@ -158,15 +168,43 @@ literal in the same commit, and give any conditional assertion an explicit
 healthy run if a branch silently produces a different total than every
 other branch.
 
+## nodecode cell — `bun run test:nodecode`
+
+The nodecode cell is this engine ported to Common Lisp (`nodecode/*.lisp`).
+`sbcl --non-interactive --load test/nodecode/run.lisp` loads the real
+`nodecode-re` system and runs every `test/nodecode/suite-*.lisp` against a
+real rizin: SHA-256/HMAC against published vectors, the policy, every verb and
+tool, `/re`, the audit log and evidence store, a rizin killed and replaced, a
+session forgotten and restored from its record, an interrupted command, a
+timeout, start and stop. Needs SBCL and cl-ppcre (`apt-get install sbcl
+cl-ppcre`). Each suite's rizin half runs when rizin and the test binary are
+present and prints `SKIPPED` when they are not.
+`OMPRE_TEST_SUITES=core,annotate` runs a subset.
+
+The suites run on `test/nodecode/kernel-stub.lisp`, a stand-in for the names
+the cell uses from nodecode's kernel. That proves the cell's own code, not
+nodecode's side of the seam: loading the folder in a nodecode build is a
+manual check (`docs/nodecode.md`).
+
+`test/nodecode-parity.test.ts`, part of `bun test`, holds the two engines to
+each other: `nodecode/policy-data.lisp` must be current with `catalog.ts`
+(`bun run gen:nodecode` regenerates it), and — when SBCL and cl-ppcre are
+installed; skipped otherwise — both engines must give the same answers for
+the same policy, quoting, hashing and formatting cases.
+
 ## What CI actually runs
 
-Two jobs:
+Three jobs:
 
 - **`check`** — `bun install --ignore-scripts && bun run check` (`tsc
   --noEmit`). Needs nothing beyond Bun.
 - **`test`** — `bun install --ignore-scripts && bun test`. Does **not**
   install rizin, so the rizin-dependent suites skip as described above and
   the run exits 0. Never add a malware sample to CI.
+- **`nodecode`** — installs SBCL and cl-ppcre, runs `bun run test:nodecode`,
+  then the parity test (which needs SBCL to compare). No rizin here either,
+  so each Lisp suite's rizin half prints `SKIPPED` and the parity test judges
+  a fixed list of command names instead of the installed catalog.
 
 Both tmux tiers (`test/tui.sh`, `test/tui-qa.sh`) are **local/self-hosted
 only**: both hard-exit 0 when a prerequisite is missing, which would make

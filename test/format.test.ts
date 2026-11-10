@@ -3,7 +3,7 @@ import { jsonResult, prefixedTextResult, textResult } from "../extensions/re/for
 import { makeHarness, textOf } from "./helpers.ts";
 
 const MAX_LINES = 2000;
-const MAX_BYTES = 50 * 1024;
+const MAX_BYTES = 48 * 1024;
 
 describe("textResult", () => {
 	test("passes an under-cap body through unchanged", async () => {
