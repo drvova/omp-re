@@ -110,7 +110,7 @@ function probe(pi: ExtensionAPI): void {
 	});
 	// A result of exactly `bytes` bytes of text, with details of its own.
 	tool("c_bytes", { parameters: z.object({ bytes: z.number() }) }, async (_id, params: { bytes: number }) => ({ content: [text(rows(Math.ceil(params.bytes / 51)).slice(0, params.bytes))], details: { mine: true } }));
-	// What extensions/re/format.ts does past its own cap: keep the whole output as a session artifact, answer the cut text and the id.
+	// What the engine does past its own cap, through the extension: keep the whole output as a session artifact, answer the cut text and the id.
 	tool("c_spill", { parameters: z.object({ lines: z.number() }) }, async (_id, params: { lines: number }, _signal, ctx: { sessionManager: { saveArtifact(content: string, toolType: string): Promise<string | undefined> } }) => {
 		const full = `header\n${rows(params.lines)}`;
 		const artifactId = await ctx.sessionManager.saveArtifact(full, "c_spill");
@@ -124,7 +124,7 @@ function probe(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event) => {
 		const body = event.content.map((part) => (part.type === "text" ? part.text : "")).join("");
 		seen.push({ kind: "result", tool: event.toolName, id: event.toolCallId, input: event.input, isError: event.isError, text: body });
-		// As extensions/re/evidence.ts tags a read: one more text block after the tool's own.
+		// A handler adding one more text block after the tool's own.
 		if (event.toolName === "c_throw_rewritten") return { content: [{ type: "text" as const, text: "the handler's replacement" }] };
 		return event.toolName === "c_details" ? { content: [...event.content, { type: "text" as const, text: "\n[tagged by tool_result]" }] } : undefined;
 	});
