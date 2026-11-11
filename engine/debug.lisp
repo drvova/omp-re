@@ -217,9 +217,11 @@ afterwards ends the session regardless."
 (contribute "debugger" :order 40
   :status (lambda (session)
             (list (if (debugger-enabled-p)
-                      (format nil "debugger: enabled~:[ (the re section's debugger setting); executes the sample~; — a process is running under it~]"
-                              (rz-alive-p (session-dbg session)))
-                      "debugger: off (set the re section's debugger to true to enable dynamic analysis — it executes the sample)")))
+                      (if (rz-alive-p (session-dbg session))
+                          "debugger: enabled — a process is running under it"
+                          (format nil "debugger: enabled (~a); executes the sample" (voice :debugger-switch)))
+                      (format nil "debugger: off (~a to enable dynamic analysis — it executes the sample)"
+                              (voice :debugger-enable)))))
   :close (lambda (session)
            (kill-debuggee (session-dbg session))
            (stop-debug session)))
@@ -306,13 +308,9 @@ dump at what was read, which the caller reports."
 ;;; --- the tool --------------------------------------------------------------------------
 
 (defun object-argument (arguments name)
-  "The member NAME of ARGUMENTS, which the tool takes as the text of a JSON
-object, decoded; :ABSENT when it was not given. Text that is not JSON is
-answered as it stands, so the builder refuses it as not an object."
-  (multiple-value-bind (text present) (gethash name arguments)
-    (if present
-        (or (json-parse text) text)
-        :absent)))
+  "The object ARGUMENTS holds under NAME, or :ABSENT when it was not given."
+  (multiple-value-bind (object present) (gethash name arguments)
+    (if present object :absent)))
 
 (defun debug-start (arguments)
   "Action `start': launch the open binary under the debugger, or attach."
@@ -622,8 +620,39 @@ names, or T."
            (t
             (fail "omp-re: debug: unknown action ~a" (js-string action)))))))))
 
+(defun debug-approval-reason ()
+  "What an approval prompt says of one rizin_debug call: an attach by what
+it attaches to, anything else by what its action does to the process."
+  (flet ((of (action)
+           (cond ((string= action "start") "Launch the target under a debugger — this EXECUTES it on this machine.")
+                 ((string= action "stop") "Terminate the debugged process.")
+                 ((string= action "trace_start") "Start recording a debug trace session (enables stepping backward).")
+                 ((string= action "trace_stop") "Stop the debug trace session.")
+                 ((string= action "trace_save") "Write the recorded debug trace session to a directory in omp-re's output directory.")
+                 ((string= action "trace_load") "Load a previously saved debug trace session from omp-re's output directory.")
+                 ((member action '("step_back" "continue_back") :test #'string=)
+                  (format nil "Move the debugged process backward through the recorded trace (~a)." action))
+                 ((member action '("continue" "continue_until" "continue_to_syscall" "continue_to_call"
+                                   "continue_to_ret" "step" "step_over")
+                          :test #'string=)
+                  (format nil "Resume execution of the debugged process (~a)." action))
+                 ((member action '("write_register" "write_memory" "watch_add" "break_add_hw") :test #'string=)
+                  (format nil "Modify the debugged process (~a)." action))
+                 ((string= action "dump_memory")
+                  "Read a region of the debugged process's live memory and write it to a file in omp-re's output directory.")
+                 (t (format nil "Inspect the debugged process (~a)." action)))))
+    `(:cases
+      ((("action" "start") ("attach.pid" :number))
+       "Attach the debugger to running PID {attach.pid!} — it will control that process.")
+      ((("action" "start") ("attach.remote" :string))
+       ("Connect the debugger to the remote target " ,(approval-slot '("attach.remote")) "."))
+      ,@(loop for action in +debug-actions+ collect (list (list (list "action" action)) (list (of action))))
+      (() "Drive the debugged process."))))
+
 (define-tool "rizin_debug"
     (:label "debugger" :tier :exec
+     :reason (debug-approval-reason)
+     :render '(:subject "action")
      :description "Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, reverse-step (record a trace with trace_start, then step_back / continue_back), read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected."
      ;; Opt-in only: without the operator's switch the sample is never executed.
      :available (lambda () (debugger-enabled-p)))
@@ -651,11 +680,24 @@ stop: kill the process and end the debug session.")
      ("command" :string :doc "A read-only rizin command for break_command to run each time the breakpoint is hit (e.g. `drj` to log registers, `dmj` maps, `dbtj` backtrace). Restricted to vetted debugger-state reads plus the static print/info/search reads — never shell, writes, config, or debugger control.")
      ("lib" :string :doc "Library name for resolve_symbol (optional), e.g. libc.")
      ("name" :string :doc "Symbol name for resolve_symbol, e.g. system — resolves its live (post-ASLR) address.")
-     ;; The engine's schema has these two as nested objects, which a tool's
-     ;; parameter types here cannot spell: each is the text of a JSON object,
-     ;; decoded and held to the same rules.
-     ("run" :string :doc "rz-run environment for start: the target's arguments, env, cwd, stdio redirections, and limits. Only read alongside action 'start' when launching (not with attach). A JSON object as text, e.g. {\"args\":[\"-l\"],\"env\":{\"LANG\":\"C\"},\"aslr\":false}. Members: args — program arguments (arg0..argN); env — environment variables for the debuggee; cwd — working directory for the debuggee; stdin / stdout / stderr — file to read the debuggee's stdin from / write its stdout / stderr to; input — string passed to the debuggee via stdin; aslr — enable or disable ASLR for the debuggee; maxstack — maximum stack size (bytes); maxfd — maximum number of file descriptors; maxproc — maximum number of processes; timeout — seconds before the debuggee is killed.")
-     ("attach" :string :doc "For action 'start': attach to a running pid or a remote stub instead of launching the open binary. Exactly one of pid/remote; not combined with run. The open binary is used as the symbol source. A JSON object as text, e.g. {\"pid\":1234} or {\"remote\":\"gdb://127.0.0.1:1234\"}. Members: pid — attach to this already-running process id instead of launching the open binary; remote — connect to a remote debug stub instead of launching: a gdb:// or windbg:// URI (e.g. a sample running in an isolated VM)."))
+     ("run" :object
+      :doc "rz-run environment for start: the target's arguments, env, cwd, stdio redirections, and limits. Only read alongside action 'start' when launching (not with attach)."
+      :properties (("args" :strings :doc "Program arguments (arg0..argN).")
+                   ("env" :string-map :doc "Environment variables for the debuggee.")
+                   ("cwd" :string :doc "Working directory for the debuggee.")
+                   ("stdin" :string :doc "File to read the debuggee's stdin from.")
+                   ("stdout" :string :doc "File to write the debuggee's stdout to.")
+                   ("stderr" :string :doc "File to write the debuggee's stderr to.")
+                   ("input" :string :doc "String passed to the debuggee via stdin.")
+                   ("aslr" :boolean :doc "Enable or disable ASLR for the debuggee.")
+                   ("maxstack" :number :doc "Maximum stack size (bytes).")
+                   ("maxfd" :number :doc "Maximum number of file descriptors.")
+                   ("maxproc" :number :doc "Maximum number of processes.")
+                   ("timeout" :number :doc "Seconds before the debuggee is killed.")))
+     ("attach" :object
+      :doc "For action 'start': attach to a running pid or a remote stub instead of launching the open binary. Exactly one of pid/remote; not combined with run. The open binary is used as the symbol source."
+      :properties (("pid" :number :doc "Attach to this already-running process id instead of launching the open binary.")
+                   ("remote" :string :doc "Connect to a remote debug stub instead of launching: a gdb:// or windbg:// URI (e.g. a sample running in an isolated VM)."))))
     (arguments)
   (let ((action (jstring arguments "action")))
     (action-case action

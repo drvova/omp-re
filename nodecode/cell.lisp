@@ -68,6 +68,78 @@ The operator has the same lines as /re: /re open <path>, /re status, /re report.
   "What (help :re) answers while the cell runs: the omp plugin's re-triage
 skill, in the cell's voice.")
 
+(defparameter +manual+
+  "omp-re — reverse engineering with rizin, driven from code.
+
+You observe the binary by running rizin's own commands through one tool,
+rizin_command, which eval reaches as (re:cmd \"command\" &optional addr), or as
+(re:json \"command\" &optional addr) for a *j command's decoded data. Define
+helpers in eval and reuse them: what you define there stays.
+
+Start here
+  1. (re:open \"/path/to/binary\")        — spawn rizin + analyze (aaa).
+     Every command acts on the binary opened last in this session.
+  2. (re:call \"rizin_help\" :query \"<prefix or keywords>\")  — find the command
+     (e.g. \"entropy\", \"call graph\", \"pdf\") and its exact arguments for THIS rizin.
+  3. (re:cmd \"aflj\")                     — run it. Put an address in the second
+     argument (sent as `@ addr`), never `@` in the command.
+
+Reading the binary (prefer the JSON `*j` forms; they canonicalize for /re verify)
+  functions   aflj            one function  afij  @ <fn>     decompile  pdg  @ <fn>  (or pdd)
+  disassemble pdfj  @ <fn>     xrefs to      axtj @ <addr>   xrefs from axfj @ <addr>
+  strings     izj              imports       iij             exports    iEj
+  symbols     isj              sections      iSj             headers    iHj
+  types       tsj              entropy       ph entropy      hexdump    px <n> @ <addr>
+  search      /xj <hex>  /Rj (ROP)  /vj (value)             info       ij
+  il lift     aoj @ <addr>  (esil+rzil)  esil calc  ae <rpn>  (ae 0x41,0x13,^)
+  Anything else: rizin_help first, then rizin_command. Read-only; writes are refused here.
+  Driving the RzIL VM (stateful) is the separate rizin_emulate tool.
+
+How a result reads
+  A read is recorded as evidence, so its text is: the header line (rizin> <cmd>),
+  the body (JSON for a *j command), then a trailing [evidence …] tag line.
+  (re:json …) parses the body for you and answers the evidence id as its second
+  value. A big list (aflj, izj on a large binary) is cut at the size cap and ends
+  with [Output truncated … Full output: <file>]: (re:json …) reads that file
+  itself; otherwise read it, or run a narrower command.
+
+The other (stateful) tools — (re:call \"<name>\" :key value …); (re:tools) lists
+them and (re:doc \"<name>\") shows one's arguments
+  open_binary, map_file, export_project            — session: open/overlay/save.
+  rename_function, rename_variable, set_comment, set_prototype, set_variable_type,
+  define_function, define_global, set_flag, set_calling_convention, set_arch_hint, …
+                                                   — annotate; recorded and REPLAYED on restart.
+  apply_signatures, create_signature               — FLIRT.        analyze — extra recovery passes.
+  record_finding, adopt_finding, retract_finding   — gate report claims on evidence ids.
+  rizin_cli                                        — the rz-* programs (rz-bin, rz-diff, rz-hash, …).
+  triage_capa/floss/die/yara                       — external triage (present only when installed).
+  rizin_debug (opt-in, executes the sample), rizin_emulate (RzIL)  — dynamic analysis.
+
+Evidence & reports
+  Every rizin_command read is recorded as evidence ((re:slash \"evidence\")); cite its
+  [evidence xxxxxxxx] id in record_finding to gate a claim. (re:slash \"report\") writes
+  the evidence-gated report; (re:slash \"verify\") re-runs cited commands to confirm they
+  still reproduce.
+
+Config
+  the re section of config.jsonc (rizin_path, debugger, state_dir) ·
+  OMPRE_DECOMPILER (pdg/pdd order) · OMPRE_AUDIT_HMAC_KEY.  (re:status) for live state."
+  "What rizin_command answers for an empty command: usable before any binary is open.")
+
+(defparameter +nodecode-voice+
+  `((:open-first . "use /re open <path>, (re:open \"path\") or the open_binary tool first")
+    (:list-tools . " — (re:tools) lists them")
+    (:read-more . "read the rest with (re:cmd …)")
+    (:debugger-switch . "the re section's debugger setting")
+    (:debugger-enable . "set the re section's debugger to true")
+    (:allowed-dirs . "the re section's allowed_dirs")
+    (:rizin-path . "set the re section's rizin_path (or OMPRE_RIZIN_PATH)")
+    (:launcher . "An organism launched from a desktop")
+    (:manual . ,+manual+))
+  "The engine's phrases (host.lisp, +VOICE+) as this host says them: the
+operator's settings are a config section, and the model reaches the tools
+as verbs in eval.")
+
 ;;; --- the operator's command ----------------------------------------------------------
 
 (defun re-dialog ()
@@ -242,6 +314,7 @@ the session's record is on disk and its next call restores it."
    ;; Read through *RE*, not SETTING: a stopping cell answers "unset", it does not refuse.
    :setting (lambda (name) (if *re* (values (setting name) t) (values nil nil)))
    :home (lambda () (nlk:home))
+   :voice (lambda (key) (cdr (assoc key +nodecode-voice+)))
    :turn #'nle:turn
    ;; A session nodecode does not know — the one a call outside any turn is
    ;; for — has no directory, and its paths are read as written.

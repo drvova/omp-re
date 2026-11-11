@@ -17,6 +17,7 @@
   (name "" :type string)
   usage description
   (order 1000)                          ; where /re help lists it
+  immediate                             ; answers from what the session holds now, not after a call that holds it
   row                                   ; (POSITION LABEL &key detail ask placeholder verb), or NIL for no row
   function)                             ; (lambda (WORDS LINE)) => (values TEXT FAILED REPLY)
 
@@ -35,7 +36,8 @@ one, and what the line then says instead of its text."
                      #'< :key #'slash-order))
   (slash-name slash))
 
-(defmacro define-slash (name (&key usage description (order 1000) row) (words &optional (line (gensym "LINE")))
+(defmacro define-slash (name (&key usage description (order 1000) row immediate)
+                        (words &optional (line (gensym "LINE")))
                         &body body)
   "Define the /re subcommand NAME. The body runs in the session, with WORDS
 bound to the words after the subcommand and LINE to the text after it as it
@@ -46,17 +48,22 @@ not what failing or not implies) and :USER-MESSAGE (text to send the model
 as the operator's next message). ORDER
 places it in /re help; ROW, (POSITION LABEL &key detail ask placeholder
 verb), is its row in the dialog of what /re offers: one that runs the line,
-or with ASK one that asks for a word first."
+or with ASK one that asks for a word first. IMMEDIATE is for a line that
+needs nothing of rizin — help, status, on, off: while a long call holds the
+session (a large binary still being analyzed) it answers at once, from what
+the session holds, instead of after it."
   `(register-slash
     (make-slash :name ,name :usage ,usage :description ,description :order ,order :row ',row
+                :immediate ,immediate
                 :function (lambda (,words ,line) (declare (ignorable ,words ,line)) ,@body))))
 
 (defun slash-help ()
   (join-lines
-   (loop for slash in *slash-commands*
-         collect (format nil "/re ~22a ~a"
-                         (format nil "~a~@[ ~a~]" (slash-name slash) (slash-usage slash))
-                         (slash-description slash)))))
+   (append (loop for slash in *slash-commands*
+                 collect (format nil "/re ~22a ~a"
+                                 (format nil "~a~@[ ~a~]" (slash-name slash) (slash-usage slash))
+                                 (slash-description slash)))
+           (and (voice :help-keys) (list (voice :help-keys))))))
 
 (defun run-slash-line (session line &key by-model)
   "One /re LINE in SESSION — a session or the id of one
@@ -73,7 +80,7 @@ never gated."
          (slash (find name *slash-commands* :key #'slash-name :test #'string=)))
     (if (null slash)
         (values (format nil "omp-re: unknown /re subcommand ~a — try /re help" (js-string name)) t)
-        (in-session (session (format nil "/re ~a" name))
+        (in-session (session (format nil "/re ~a" name) :wait (not (slash-immediate slash)))
           (when (and by-model (session-tools-off *session*))
             (fail +tools-off+))
           (multiple-value-bind (text failed reply) (funcall (slash-function slash) (words rest) rest)

@@ -625,14 +625,17 @@ that names it."
 
 (defun carry-manifest-file (manifest-path &key strict out inherit resolve (session *session*))
   "Carry the manifest at MANIFEST-PATH onto the open binary and say what
-became of its claims => (values TEXT FAILED-P RESULT). A broken claim fails;
-under STRICT so does a relocated, drifted or unchecked one. OUT also writes
-the markdown carry report and, beside it, `<out>.json' with the whole
-result. INHERIT re-proves the manifest's findings here.
+became of its claims => (values TEXT FAILED-P RESULT REPLY), REPLY what
+else a /re line's answer carries (DEFINE-SLASH). A broken claim fails; under
+STRICT so does a relocated, drifted or unchecked one. OUT also writes the
+markdown carry report and, beside it, `<out>.json' with the whole result.
+INHERIT re-proves the manifest's findings here.
 
-RESOLVE asks for the agenda to go straight to the model as a turn of its
-own. A command cannot start a turn itself, so the line says so and the
-agenda follows the summary, to be passed on as the next prompt."
+What is left to re-examine is an agenda for the model. Where an operator is
+watching it is offered as a draft, or with RESOLVE asked to be sent as
+their next message. Where nobody is, a command cannot start a turn: the
+line says so and the agenda follows the summary, to be passed on as the
+next prompt."
   (let* ((manifest (parse-manifest (read-manifest-file manifest-path)))
          (result (build-carry manifest session))
          (claims (jlist result "claims"))
@@ -648,6 +651,14 @@ agenda follows the summary, to be passed on as the next prompt."
              (agenda (length (jlist outcome "agenda")))
              (already-present (gethash "alreadyPresent" outcome)))
         (setf (gethash "inheritance" result) outcome)
+        ;; Findings recorded by a line, with no model turn to follow: a host
+        ;; that writes a session lazily is asked to write this one now.
+        (when (jlist outcome "inherited")
+          (ignore-errors
+           (ask-host :keep-session session
+                     (format nil "re carry ~a~@[ → ~a~]" (file-namestring manifest-path)
+                             (and (session-binary-path session)
+                                  (file-namestring (session-binary-path session)))))))
         (push (format nil "inherit: ~d finding(s) re-proven on this build and recorded, ~d need another look~[~:;, ~:*~d already present~]~:[~; (this manifest has no findings — record them with record_finding before /re report)~]"
                       (length (jlist outcome "inherited")) agenda already-present
                       (null (carry-manifest-findings manifest)))
@@ -664,12 +675,29 @@ agenda follows the summary, to be passed on as the next prompt."
               (error (condition)
                 (format nil "carry report not written: ~a" condition)))
             lines))
-    (when (and resolve inherit agenda-prompt)
-      (push (format nil "resolve: a headless run cannot start a model turn from a command — the agenda for ~d finding(s) follows; pass it to the model as the next prompt (e.g. omp -c -p \"<agenda>\")"
-                    (length (jlist result "inheritance" "agenda")))
-            lines))
-    (when agenda-prompt (push agenda-prompt lines))
-    (values (join-lines (nreverse lines)) (and failed t) result)))
+    (let* ((watched (ignore-errors (ask-host :has-ui)))
+           (resolving (and resolve inherit agenda-prompt))
+           (level (cond (failed :error)
+                        ((plusp (carry-count "drifted" claims)) :warning)
+                        (t :info))))
+      (cond ((and resolving watched)
+             (push (format nil "resolve: sent ~d finding(s) to the model to re-examine"
+                           (length (jlist result "inheritance" "agenda")))
+                   lines))
+            (resolving
+             (push (format nil "resolve: a headless run cannot start a model turn from a command — the agenda for ~d finding(s) follows; pass it to the model as the next prompt (e.g. omp -c -p \"<agenda>\")"
+                           (length (jlist result "inheritance" "agenda")))
+                   lines)))
+      (let ((summary (join-lines (reverse lines))))
+        (values (if (and agenda-prompt (not watched))
+                    (format nil "~a~%~a" summary agenda-prompt)
+                    summary)
+                (and failed t)
+                result
+                (append (list :level level)
+                        (cond ((and resolving watched) (list :user-message agenda-prompt))
+                              ((and agenda-prompt watched)
+                               (list :draft (make-draft :text agenda-prompt :notice summary))))))))))
 
 (define-slash "carry" (:usage "<manifest>"
                        :description "replay a report on another build (--against, --inherit, --resolve, --strict, --out)"
@@ -683,13 +711,15 @@ agenda follows the summary, to be passed on as the next prompt."
         ;; The open says something only when it put something back;
         ;; otherwise the carry's own lines are the answer.
         (let ((opened (and (getf flags :--against) (open-binary (getf flags :--against)))))
-          (multiple-value-bind (text failed)
+          (multiple-value-bind (text failed result reply)
               ;; --resolve implies --inherit: re-prove what holds, then hand over the rest.
               (carry-manifest-file path
                                    :strict (getf flags :--strict) :out (getf flags :--out)
                                    :inherit (or (getf flags :--inherit) (getf flags :--resolve))
                                    :resolve (getf flags :--resolve))
+            (declare (ignore result))
             (values (if (and opened (search "Re-applied " opened))
                         (format nil "~a~%~a" opened text)
                         text)
-                    failed))))))
+                    failed
+                    reply))))))

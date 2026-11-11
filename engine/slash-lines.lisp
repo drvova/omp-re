@@ -4,7 +4,7 @@
 
 (in-package #:omp-re)
 
-(define-slash "help" (:description "show this list" :order 150 :row (140 "Help")) (words)
+(define-slash "help" (:immediate t :description "show this list" :order 150 :row (140 "Help")) (words)
   (slash-help))
 
 (define-slash "open" (:usage "<path>" :description "open a binary and analyze it with rizin" :order 10
@@ -12,15 +12,16 @@
     (words path)
   (if (null words)
       (values "Usage: /re open <path>" t)
-      (open-binary path)))
+      (multiple-value-bind (text failures) (open-binary path)
+        (values text nil (and (plusp failures) (list :level :warning))))))
 
-(define-slash "on" (:description "enable the RE tools for this session" :order 130
+(define-slash "on" (:immediate t :description "enable the RE tools for this session" :order 130
                     :row (130 "Turn the tools on"))
     (words)
   (setf (session-tools-off *session*) nil)
   "omp-re: RE tools enabled for this session")
 
-(define-slash "off" (:description "disable the RE tools for this session" :order 140
+(define-slash "off" (:immediate t :description "disable the RE tools for this session" :order 140
                      :row (120 "Turn the tools off"))
     (words)
   (setf (session-tools-off *session*) t)
@@ -79,7 +80,7 @@
                 (list "rizin process: not running (starts on next use)")))
       (list "binary: none — /re open <path>")))
 
-(define-slash "status" (:description "rizin, decompiler, binary, and evidence status" :order 120
+(define-slash "status" (:immediate t :description "rizin, decompiler, binary, and evidence status" :order 120
                         :row (20 "Status" :detail "rizin, the open binary, evidence and findings"))
     (words)
   (join-lines
@@ -96,8 +97,8 @@
 (defun clip-list (title lines)
   (let ((text (format nil "~a~%~a" title (if lines (join-lines lines) "(nothing to show)"))))
     (if (> (length text) +list-characters+)
-        (format nil "~a~%… cut at ~d characters; read the rest with (re:cmd …)"
-                (subseq text 0 +list-characters+) +list-characters+)
+        (format nil "~a~%… cut at ~d characters; ~a"
+                (subseq text 0 +list-characters+) +list-characters+ (voice :read-more))
         text)))
 
 (define-slash "functions" (:description "the functions rizin found, with address and size" :order 20
@@ -140,8 +141,7 @@
 (defun evidence-detail (record)
   (format nil "[~a:~a]~%~%~a~@[~%~%full output: ~a~]"
           (jstring record "tool") (or (jstring record "ea") "?") (jstring record "summary")
-          (and (jstring record "artifactId")
-               (uiop:native-namestring (artifact-path (jstring record "artifactId"))))))
+          (and (jstring record "artifactId") (locate-artifact (jstring record "artifactId")))))
 
 (define-slash "evidence" (:usage "[id]" :description "evidence recorded on this branch" :order 50
                           :row (60 "Evidence" :detail "what has been observed on this branch"))
@@ -169,8 +169,7 @@
         (if (null record)
             (values why-not t)
             (let* ((shown (shown-id (jstring record "id")))
-                   (text (format nil "Re: evidence ~a (~a @ ~a)~%~%~a" shown (jstring record "tool")
-                                 (or (jstring record "ea") "?") (jstring record "summary"))))
+                   (text (cite-text record)))
               (values text nil
                       (list :draft (make-draft :text (format nil "~a~%~%" text)
                                                :notice (format nil "Evidence ~a is in your draft."

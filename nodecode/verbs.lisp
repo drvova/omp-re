@@ -20,21 +20,27 @@
 
 ;;; --- Lisp arguments onto the engine's JSON ------------------------------------------
 
-(defun wire-value (value)
+(defun wire-value (value &optional schema)
   "VALUE as JSON: a string, a number and T as themselves, :FALSE as false, a
-keyword as its lowercase name, a list or vector as an array."
+keyword as its lowercase name, a list or vector as an array. Where the
+tool's SCHEMA says the parameter is an object, a keyword plist is one —
+(:pid 1234) — and where it says an array of objects, a list of those."
   (cond ((eq value :false) nil)
         ((member value '(t :null)) value)
         ((stringp value) value)
         ((keywordp value) (string-downcase (symbol-name value)))
         ((hash-table-p value) value)
-        ((or (listp value) (vectorp value)) (map 'simple-vector #'wire-value value))
+        ((and (equal (jstring schema "type") "object") (listp value))
+         (wire-arguments value schema))
+        ((or (listp value) (vectorp value))
+         (map 'simple-vector (lambda (item) (wire-value item (jget schema "items"))) value))
         ((realp value) value)
         (t (fail "~s has no JSON form: pass a string, a number, T, :false, or a list of those" value))))
 
-(defun wire-arguments (plist)
-  "The JSON object a keyword PLIST of tool arguments spells. A NIL value is a
-parameter left out — false is :FALSE, an empty array is #()."
+(defun wire-arguments (plist &optional schema)
+  "The JSON object a keyword PLIST of tool arguments spells, read against
+the tool's SCHEMA. A NIL value is a parameter left out — false is :FALSE, an
+empty array is #()."
   (unless (evenp (length plist))
     (fail "tool arguments are keyword and value pairs; ~s has an odd one out" plist))
   (let ((object (obj)))
@@ -42,7 +48,14 @@ parameter left out — false is :FALSE, an empty array is #()."
           do (unless (or (keywordp key) (stringp key))
                (fail "a tool argument is named by a keyword, not ~s" key))
              (unless (null value)
-               (setf (gethash (engine-name key) object) (wire-value value))))
+               ;; A map's keys are the caller's own (an environment variable's
+               ;; name); a parameter's are spelled the engine's way.
+               (let ((name (if (and schema (null (jget schema "properties")))
+                               (string key)
+                               (engine-name key))))
+                 (setf (gethash name object)
+                       (wire-value value (or (jget schema "properties" name)
+                                             (jget schema "additionalProperties")))))))
     object))
 
 ;;; --- one call ---------------------------------------------------------------------
@@ -54,7 +67,8 @@ parameter left out — false is :FALSE, an empty array is #()."
       (jstring answer "text")))
 
 (defun call-for-turn (name arguments)
-  (engine-call (turn-session-id) name (wire-arguments arguments)))
+  (let ((tool (find name (engine-tools) :key (lambda (tool) (jstring tool "name")) :test #'string=)))
+    (engine-call (turn-session-id) name (wire-arguments arguments (and tool (jget tool "parameters"))))))
 
 (defun first-sentence (text)
   "TEXT up to its first full stop, on one line."
@@ -73,6 +87,15 @@ takes, what it means."
                                 (type (jstring property "type")))
                             (cond (enum (format nil "one of ~{~a~^, ~}" (mapcar #'json-encode enum)))
                                   ((equal type "boolean") "t or :false")
+                                  ((equal type "object")
+                                   (format nil "a list of keys and values~@[ (~{:~a~^ ~})~]"
+                                           (and (jget property "properties")
+                                                (loop for key being the hash-keys of (jget property "properties")
+                                                      collect (substitute #\- #\_ key)))))
+                                  ((and (equal type "array") (equal (jstring property "items" "type") "object"))
+                                   (format nil "list of lists of keys and values (~{:~a~^ ~})"
+                                           (loop for key being the hash-keys of (jget property "items" "properties")
+                                                 collect (substitute #\- #\_ key))))
                                   ((equal type "array") "list of strings")
                                   (t type)))
                           (member name required :test #'equal)

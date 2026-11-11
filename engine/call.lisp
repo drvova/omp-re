@@ -52,6 +52,13 @@ not be kept: a result then stays truncated, never fails."
          (write-text-file (artifact-path id session) content)
          (values id (uiop:native-namestring (artifact-path id session)))))))
 
+(defun locate-artifact (id &optional (session *session*))
+  "How a reader is told to find the artifact ID: the host's name for it
+where the host keeps artifacts, else the file's path."
+  (if (host-service :locate-artifact)
+      (ask-host :locate-artifact session id)
+      (uiop:native-namestring (artifact-path id session))))
+
 (defun read-artifact (id &optional (session *session*))
   "The whole text kept under the artifact ID, or NIL when it cannot be read."
   (ignore-errors
@@ -99,10 +106,12 @@ an artifact and the result names the file that holds it."
 (defstruct (tool (:copier nil))
   (name "" :type string)
   (label nil)                           ; what a host that lists tools to a person calls it
-  (description "" :type string)
-  (parameters '())                      ; ((NAME TYPE &key required doc enum) ...)
+  (description "")                      ; a string, or a function answering one where a host's voice is in it
+  (parameters '())                      ; ((NAME TYPE &key required doc enum properties) ...)
   (function nil)                        ; (lambda (ARGS)) => a RESULT
   (tier :exec)                          ; :read observes, :write annotates, :exec runs code or writes files
+  (reason nil)                          ; what an approval prompt says of one call: see APPROVAL-CASES
+  (render nil)                          ; (&key title subject body): how a host that draws results shows one
   (evidence nil)                        ; a successful result is recorded as evidence
   (available nil))                      ; NIL, or a predicate: offered only while it answers true
 
@@ -113,20 +122,35 @@ an artifact and the result names the file that holds it."
                         (list tool)))
   tool)
 
-(defmacro define-tool (name (&key label description (tier :exec) evidence available) parameters
-                       (arguments) &body body)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun parameter-form (parameter)
+    "The form that builds PARAMETER as DEFINE-TOOL spells it: its options are
+evaluated, and the members of an object are parameters in turn."
+    (destructuring-bind (name type &rest options) parameter
+      `(list ,name ,type
+             ,@(loop for (key value) on options by #'cddr
+                     append (list key (if (eq key :properties)
+                                          `(list ,@(mapcar #'parameter-form value))
+                                          value)))))))
+
+(defmacro define-tool (name (&key label description (tier :exec) reason render evidence available)
+                       parameters (arguments) &body body)
   "Define the engine tool NAME. PARAMETERS is a list of
-(\"name\" TYPE &key required doc enum) with TYPE one of :string, :integer,
-:number, :boolean and :strings (an array of strings); the body runs with
-ARGUMENTS bound to the validated JSON object and *SESSION* to the session,
-and answers a RESULT."
+(\"name\" TYPE &key required doc enum properties) with TYPE one of :string,
+:integer, :number, :boolean, :strings (an array of strings), :string-map (an
+object whose values are strings), :object and :objects (an object, an array
+of objects, whose members PROPERTIES lists the same way); the body runs
+with ARGUMENTS bound to the validated JSON object and *SESSION* to the
+session, and answers a RESULT. REASON is what an approval prompt says of
+one call (APPROVAL-CASES); RENDER, (&key title subject body), how a host
+that draws a result shows it: under TITLE (the label when there is none),
+naming the argument SUBJECT, the text shown as BODY says — :text, :json or
+:none."
   `(register-engine-tool
     (make-tool :name ,name :label ,label :description ,description :tier ,tier
+               :reason ,reason :render ,render
                :evidence ,evidence :available ,available
-               :parameters (list ,@(mapcar (lambda (parameter)
-                                             `(list ,(first parameter) ,(second parameter)
-                                                    ,@(cddr parameter)))
-                                           parameters))
+               :parameters (list ,@(mapcar #'parameter-form parameters))
                :function (lambda (,arguments) (declare (ignorable ,arguments)) ,@body))))
 
 (defun tool-offered-p (tool)
@@ -134,6 +158,10 @@ and answers a RESULT."
 
 (defun offered-tools ()
   (remove-if-not #'tool-offered-p *tools*))
+
+(defun tool-description-text (tool)
+  (let ((description (tool-description tool)))
+    (if (functionp description) (funcall description) description)))
 
 (defun engine-name (designator)
   "DESIGNATOR — a string, a keyword, a symbol — as the engine spells a tool,
@@ -145,72 +173,184 @@ a parameter or a /re subcommand: lowercase, words joined by underscores. So
   (let ((tool (find name *tools* :key #'tool-name :test #'string=)))
     (and tool (tool-offered-p tool) tool)))
 
-(defun parameter-schema (parameter)
-  (destructuring-bind (name type &key doc enum &allow-other-keys) parameter
-    (declare (ignore name))
-    (let ((schema (ecase type
-                    (:string (obj "type" "string"))
-                    (:integer (obj "type" "integer"))
-                    (:number (obj "type" "number"))
-                    (:boolean (obj "type" "boolean"))
-                    (:strings (obj "type" "array" "items" (obj "type" "string"))))))
-      (when enum (setf (gethash "enum" schema) (coerce enum 'simple-vector)))
-      (when doc (setf (gethash "description" schema) doc))
-      schema)))
-
-(defun tool-schema (tool)
-  "TOOL's parameters as the JSON Schema a provider is shown."
+(defun members-schema (parameters)
   (let ((properties (obj))
         (required '()))
-    (dolist (parameter (tool-parameters tool))
+    (dolist (parameter parameters)
       (setf (gethash (first parameter) properties) (parameter-schema parameter))
       (when (getf (cddr parameter) :required) (push (first parameter) required)))
     (obj "type" "object"
          "properties" properties
          "required" (if required (coerce (nreverse required) 'simple-vector) :absent))))
 
+(defun parameter-schema (parameter)
+  (destructuring-bind (name type &key doc enum properties &allow-other-keys) parameter
+    (declare (ignore name))
+    (let ((schema (ecase type
+                    (:string (obj "type" "string"))
+                    (:integer (obj "type" "integer"))
+                    (:number (obj "type" "number"))
+                    (:boolean (obj "type" "boolean"))
+                    (:strings (obj "type" "array" "items" (obj "type" "string")))
+                    (:string-map (obj "type" "object" "additionalProperties" (obj "type" "string")))
+                    (:object (members-schema properties))
+                    (:objects (obj "type" "array" "items" (members-schema properties))))))
+      (when enum (setf (gethash "enum" schema) (coerce enum 'simple-vector)))
+      (when doc (setf (gethash "description" schema) doc))
+      schema)))
+
+(defun tool-schema (tool)
+  "TOOL's parameters as the JSON Schema a provider is shown."
+  (members-schema (tool-parameters tool)))
+
+(defun check-members (parameters arguments path)
+  "ARGUMENTS held to PARAMETERS => (values CHECKED PROBLEMS): a fresh object
+of the declared members that were given, and a line for each that does not
+fit, named by PATH and its own name."
+  (let ((checked (obj)) (problems '()))
+    (dolist (parameter parameters)
+      (destructuring-bind (name type &key required enum properties &allow-other-keys) parameter
+        (multiple-value-bind (value present) (gethash name arguments)
+          (let ((present (and present (not (eq value :null))))
+                (said (format nil "~a~a" path name)))
+            (flet ((members (object)
+                     (multiple-value-bind (inner inner-problems)
+                         (check-members properties object (format nil "~a." said))
+                       (setf problems (append (reverse inner-problems) problems))
+                       ;; A member the object does not declare is left for
+                       ;; the tool to refuse in its own words: these objects
+                       ;; configure a process, and one silently dropped
+                       ;; would read as one applied.
+                       (maphash (lambda (key member)
+                                  (unless (nth-value 1 (gethash key inner))
+                                    (unless (find key properties :key #'first :test #'string=)
+                                      (setf (gethash key inner) member))))
+                                object)
+                       inner)))
+              (cond ((not present)
+                     (when required (push (format nil "~a is required (was missing)" said) problems)))
+                    ((not (ecase type
+                            (:string (stringp value))
+                            (:integer (integerp value))
+                            (:number (realp value))
+                            (:boolean (member value '(t nil)))
+                            (:strings (and (json-array-p value) (every #'stringp value)))
+                            (:string-map (and (hash-table-p value)
+                                              (loop for member being the hash-values of value
+                                                    always (stringp member))))
+                            (:object (hash-table-p value))
+                            (:objects (and (json-array-p value) (every #'hash-table-p value)))))
+                     (push (format nil "~a must be ~a (was ~a)" said
+                                   (ecase type
+                                     (:string "a string") (:integer "an integer") (:number "a number")
+                                     (:boolean "true or false") (:strings "an array of strings")
+                                     (:string-map "an object of strings") (:object "an object")
+                                     (:objects "an array of objects"))
+                                   (json-encode value))
+                           problems))
+                    ((and enum (not (member value enum :test #'equal)))
+                     (push (format nil "~a must be one of ~{~a~^, ~} (was ~a)" said
+                                   (mapcar #'json-encode enum) (json-encode value))
+                           problems))
+                    (t (setf (gethash name checked)
+                             (case type
+                               (:object (members value))
+                               (:objects (map 'simple-vector #'members value))
+                               (t value))))))))))
+    (values checked (nreverse problems))))
+
 (defun check-arguments (tool arguments)
   "ARGUMENTS held to TOOL's parameters => a fresh object of exactly the
-declared members that were given. A member of the wrong type is refused,
+declared members that were given; an object among them keeps what it does
+not declare, for its tool to judge. A member of the wrong type is refused,
 never coerced; null reads as absent."
-  (let ((checked (obj)) (problems '()))
-    (dolist (parameter (tool-parameters tool))
-      (destructuring-bind (name type &key required enum &allow-other-keys) parameter
-        (multiple-value-bind (value present) (gethash name arguments)
-          (let ((present (and present (not (eq value :null)))))
-            (cond ((not present)
-                   (when required (push (format nil "~a is required (was missing)" name) problems)))
-                  ((not (ecase type
-                          (:string (stringp value))
-                          (:integer (integerp value))
-                          (:number (realp value))
-                          (:boolean (member value '(t nil)))
-                          (:strings (and (json-array-p value) (every #'stringp value)))))
-                   (push (format nil "~a must be ~a (was ~a)" name
-                                 (ecase type
-                                   (:string "a string") (:integer "an integer") (:number "a number")
-                                   (:boolean "true or false") (:strings "an array of strings"))
-                                 (json-encode value))
-                         problems))
-                  ((and enum (not (member value enum :test #'equal)))
-                   (push (format nil "~a must be one of ~{~a~^, ~} (was ~a)" name
-                                 (mapcar #'json-encode enum) (json-encode value))
-                         problems))
-                  (t (setf (gethash name checked) value)))))))
+  (multiple-value-bind (checked problems) (check-members (tool-parameters tool) arguments "")
     (when problems
       (fail "omp-re: ~a was called with arguments that do not fit its schema: ~{~a~^; ~}"
-            (tool-name tool) (nreverse problems)))
+            (tool-name tool) problems))
     checked))
+
+;;; --- what an approval prompt says ----------------------------------------------------------
+;;; A host that asks its operator before a call shows a sentence about that
+;;; call — which function is renamed to what, which command is run. The host
+;;; may have to say it without asking the engine (omp computes it in a
+;;; synchronous callback), so the sentence is data: cases tried in order, each
+;;; a list of parts, a part a literal or a slot filled from the arguments.
+
+(defun approval-slot (pieces &key (quote t) clip)
+  "A slot: the arguments named by PIECES run together — each an argument's
+path (\"addr\", \"attach.pid\") or (PATH &key prefix missing): PREFIX goes
+before a value that is there, MISSING stands for one that is not — then cut
+to CLIP characters and, with QUOTE, written as a JSON string."
+  (obj "pieces" (map 'simple-vector
+                     (lambda (piece)
+                       (destructuring-bind (path &key prefix missing) (if (listp piece) piece (list piece))
+                         (obj "arg" path "prefix" (or prefix :absent) "missing" (or missing :absent))))
+                     pieces)
+       "quote" (if quote t :absent)
+       "clip" (or clip :absent)))
+
+(defun approval-parts (template)
+  "TEMPLATE as parts. In a string, {addr} is the argument addr quoted and
+cut at 80 characters, ? when it is not given; {addr!} is its value as it
+stands. A list is parts already: strings and slots."
+  (if (listp template)
+      (coerce template 'simple-vector)
+      (let ((parts '()) (at 0))
+        (loop
+          (let* ((open (position #\{ template :start at))
+                 (close (and open (position #\} template :start open))))
+            (when (null close)
+              (when (< at (length template)) (push (subseq template at) parts))
+              (return))
+            (when (< at open) (push (subseq template at open) parts))
+            (let* ((name (subseq template (1+ open) close))
+                   (raw (uiop:string-suffix-p name "!"))
+                   (path (if raw (subseq name 0 (1- (length name))) name)))
+              (push (if raw
+                        (approval-slot (list (list path :missing "?")) :quote nil)
+                        (approval-slot (list (list path :missing "?")) :clip 80))
+                    parts))
+            (setf at (1+ close))))
+        (coerce (nreverse parts) 'simple-vector))))
+
+(defun approval-cases (reason)
+  "REASON, as DEFINE-TOOL takes it, as the data a host is given: a vector of
+{when?, parts}. REASON is one template, or (:cases (WHEN TEMPLATE) ...)
+tried in order, WHEN a list of (PATH VALUE) — the argument is VALUE — and
+(PATH :string) or (PATH :number) — it is one of those; the first case whose
+WHEN all hold is the sentence."
+  (map 'simple-vector
+       (lambda (one)
+         (destructuring-bind (conditions template) one
+           (obj "when" (if conditions
+                           (map 'simple-vector
+                                (lambda (condition)
+                                  (destructuring-bind (path test) condition
+                                    (if (keywordp test)
+                                        (obj "arg" path "type" (string-downcase test))
+                                        (obj "arg" path "equals" test))))
+                                conditions)
+                           :absent)
+                "parts" (approval-parts template))))
+       (if (and (consp reason) (eq (first reason) :cases))
+           (rest reason)
+           (list (list nil reason)))))
 
 ;;; --- the audit log -------------------------------------------------------------------------
 
-(defun append-audit-line (session call-id tool arguments)
-  "Append one line for this call to the session's audit log, signed when
-OMPRE_AUDIT_HMAC_KEY is set. Never signals: the log is a mirror for the
-operator, and must not abort the call it records."
+(defun append-audit-line (session call-id tool &key (arguments nil arguments-p) (approved nil approved-p) reason)
+  "Append one line to the session's audit log, signed when
+OMPRE_AUDIT_HMAC_KEY is set: for a call, its ARGUMENTS; for what a host's
+approval gate decided of one, APPROVED and the REASON given. Never signals:
+the log is a mirror for the operator, and must not abort the call it
+records."
   (handler-case
       (let* ((base (obj "ts" (iso-now) "sessionId" (session-id session)
-                        "toolCallId" call-id "tool" tool "args" arguments))
+                        "toolCallId" call-id "tool" tool
+                        "args" (if arguments-p arguments :absent)
+                        "approved" (if approved-p (and approved t) :absent)
+                        "reason" (or reason :absent)))
              (canonical (json-encode base))
              (key (setting-value :audit-hmac-key)))
         (cond (key
@@ -240,7 +380,7 @@ operator, and must not abort the call it records."
 
 ;;; --- one call --------------------------------------------------------------------------------
 
-(defun call-tool (session name arguments)
+(defun call-tool (session name arguments &key call-id)
   "Run the tool NAME with the JSON object ARGUMENTS in SESSION — a session
 or the id of one => (values TEXT FAILED RAW EVIDENCE-ID ARTIFACT-PATH
 DETAILS). TEXT
@@ -248,19 +388,24 @@ is what the model reads: for a failure, what went wrong in words it can act
 on. RAW is the tool's second value when it has one — the whole of what rizin
 printed, where TEXT may be cut. EVIDENCE-ID is the record this call left,
 whose tag TEXT ends with; ARTIFACT-PATH where all of a TEXT that was cut is
-kept; DETAILS the result's own details object. This is the whole pipeline — the `/re off' gate, the audit
-line, the body, the evidence record — so code that composes reads makes each
-of them a tool call in its own right, not a way around one."
+kept; DETAILS the result's own details object. CALL-ID is the host's own id
+for the call, where it has one: the audit line carries it, so what the
+host's approval gate decided of the call can be paired with it. This is the
+whole pipeline — the `/re off' gate, the audit line, the body, the evidence
+record — so code that composes reads makes each of them a tool call in its
+own right, not a way around one."
   (in-session (session name)
     (let* ((session *session*)
            (tool (or (find-tool name)
-                     (fail "omp-re: no tool named ~a — (re:tools) lists them" (js-string name))))
+                     (fail "omp-re: no tool named ~a~a" (js-string name) (voice :list-tools))))
            (arguments (check-arguments tool (or arguments (obj)))))
       (when (session-tools-off session)
         (fail +tools-off+))
       (append-audit-line session
-                         (format nil "~a-~d" (file-safe (session-id session)) (incf (session-calls session)))
-                         name arguments)
+                         (or call-id
+                             (format nil "~a-~d" (file-safe (session-id session))
+                                     (incf (session-calls session))))
+                         name :arguments arguments)
       (multiple-value-bind (result raw) (funcall (tool-function tool) arguments)
         (let* ((text (result-text result))
                (details (result-details result))

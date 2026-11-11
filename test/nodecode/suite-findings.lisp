@@ -199,12 +199,12 @@ module is or is not loaded, and put back after."
                   (refusal (lambda () (re:call "record_finding" :claim "x" :evidence '("11111111"))))))
       (check "adopt_finding refuses a finding made on another binary before anything runs"
              (has "omp-re: adopt_finding: the finding was made on binary eeeeeeeeeeee… but cccccccccccc… is open — open the same binary first."
-                  (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '("pdf @ sym.f")
+                  (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '((:command "pdf" :addr "sym.f"))
                                                                :expect-sha256 (sha-of #\e))))))
       (check "adopt_finding needs one to eight commands"
              (has "commands must hold 1 to 8 commands (was 9)"
                   (refusal (lambda () (re:call "adopt_finding" :claim "c"
-                                                               :commands (make-list 9 :initial-element "pdf"))))))))
+                                                               :commands (make-list 9 :initial-element '(:command "pdf")))))))))
 
   (check "a finding's note carries inheritance, adoption and an audit override"
          (string= "confidence: likely · at `sym.fibonacci` · inherited from `aaaaaaaaaaaa…`, re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd) · adopted from re-analyst, re-proven in this session · recorded over a support-audit \"overreach\" verdict — justification: it is djb2"
@@ -454,7 +454,7 @@ module is or is not loaded, and put back after."
            ;; adopt_finding: re-prove on this binary, then gate like record_finding.
            (let* ((before (length (re::evidence-records session)))
                   (text (re:call "adopt_finding" :claim "entry0 begins with endbr64."
-                                                 :commands '("pd 2 @ entry0" "{\"command\":\"iej\"}")
+                                                 :commands '((:command "pd 2" :addr "entry0") (:command "iej"))
                                                  :addr "entry0" :confidence "possible" :source "re-analyst"
                                                  :expect-sha256 (string-upcase sha)))
                   (finding (third (live id)))
@@ -488,16 +488,16 @@ module is or is not loaded, and put back after."
                   (let ((findings (length (live id))))
                     (and (has "omp-re: adopt_finding: `pdf @ sym.no_such_function` failed here: rizin> pdf @ sym.no_such_function"
                               (refusal (lambda () (re:call "adopt_finding" :claim "c"
-                                                                           :commands '("pdf @ sym.no_such_function")))))
+                                                                           :commands '((:command "pdf" :addr "sym.no_such_function"))))))
                          (has "not available here"
-                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '("wx 90 @ entry0")))))
+                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '((:command "wx 90" :addr "entry0"))))))
                          (has "open the same binary first"
-                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '("iIj")
+                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '((:command "iIj"))
                                                                            :expect-sha256 (sha-of #\e)))))
                          (= findings (length (live id))))))
            (check "with no source the finding is adopted from an external analysis"
                   (has "adopted from an external analysis: re-proven"
-                       (re:call "adopt_finding" :claim "It has imports." :commands '("iij"))))
+                       (re:call "adopt_finding" :claim "It has imports." :commands '((:command "iij")))))
 
            ;; supersede and retract.
            (let ((external (fourth (live id))))

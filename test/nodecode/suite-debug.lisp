@@ -274,20 +274,20 @@ its threads runs the debugger, so every thread's list is read."
                   (has "action is required" (debug-refusal :addr "entry0"))))
       (check "a bad attach is refused before anything starts"
              (and (has "gdb:// or windbg://"
-                       (debug-refusal :action "start" :attach "{\"remote\":\"http://nope\"}"))
-                  (has "positive integer" (debug-refusal :action "start" :attach "{\"pid\":0}"))
-                  (has "exactly one" (debug-refusal :action "start" :attach "{}"))
+                       (debug-refusal :action "start" :attach '(:remote "http://nope")))
+                  (has "positive integer" (debug-refusal :action "start" :attach '(:pid 0)))
+                  (has "exactly one" (debug-refusal :action "start" :attach (re::obj)))
                   (has "attach must be an object" (debug-refusal :action "start" :attach "4242"))
                   (has "attach must be an object" (debug-refusal :action "start" :attach "not json"))))
       (check "attach cannot be combined with run"
              (equal "omp-re: debug: attach cannot be combined with run (there is no new process to configure)"
-                    (debug-refusal :action "start" :attach "{\"pid\":4242}" :run "{\"args\":[\"x\"]}")))
+                    (debug-refusal :action "start" :attach '(:pid 4242) :run '(:args ("x")))))
       (check "bad run settings are refused before anything launches"
              (and (has "does not accept command targets"
-                       (debug-refusal :action "start" :run "{\"stdout\":\"!id\"}"))
+                       (debug-refusal :action "start" :run '(:stdout "!id")))
                   (has "run must be an object" (debug-refusal :action "start" :run "-R"))
                   (has "is not a supported rz-run setting"
-                       (debug-refusal :action "start" :run "{\"system\":\"id\"}"))))
+                       (debug-refusal :action "start" :run '(:system "id")))))
       (check "and none of those refusals started a process"
              (null (re::session-dbg (re::find-session id))))
       (check "the calls were audited, and none is evidence"
@@ -367,7 +367,7 @@ done
              (in-session (id)
                (setf (re::session-binary-path session) *binary*)
                (let ((text (debug-call :action "start"
-                                       :run "{\"args\":[\"-l\",\"two words\"],\"env\":{\"LANG\":\"C\"},\"cwd\":\"/tmp\",\"aslr\":false}")))
+                                       :run '(:args ("-l" "two words") :env ("LANG" "C") :cwd "/tmp" :aslr :false))))
                  (check "start spawns rizin with the shared flags, each directive as -R, then -d <binary>"
                         (equal (append (shared-flags)
                                        (list "-R" "arg0=-l" "-R" "arg1=two words" "-R" "setenv=LANG=C"
@@ -392,7 +392,7 @@ done
                  (check "the status line says a process is running under the debugger"
                         (has "debugger: enabled — a process is running under it" (re:status)))
                  (check "start again answers the one already running, and launches nothing"
-                        (and (equal '("dr rip") (sent :action "start" :run "{\"args\":[\"again\"]}"))
+                        (and (equal '("dr rip") (sent :action "start" :run '(:args ("again"))))
                              (equal (format nil "debug: already running~%rip = 0x0000000000401000")
                                     (debug-call :action "start"))
                              (eq dbg (re::session-dbg session))
@@ -668,7 +668,7 @@ done
                         (equal "debug: no debug session to stop" (debug-call :action "stop"))))
 
                (suite "debug: an attach, against a stand-in")
-               (let ((text (debug-call :action "start" :attach "{\"pid\":4242}")))
+               (let ((text (debug-call :action "start" :attach '(:pid 4242))))
                  (check "attaching to a pid spawns rizin -d <pid> <binary>: no directives, no load flags"
                         (equal (append (shared-flags) (list "-d" "4242" *binary*)) (log-lines ".argv")))
                  (check "the result says what is controlled, with the warning and no bits note"
@@ -677,7 +677,7 @@ done
                                     text)
                              (not (has "rizin build is" text)))))
                (debug-call :action "stop")
-               (let ((text (debug-call :action "start" :attach "{\"remote\":\"gdb://127.0.0.1:1234\"}")))
+               (let ((text (debug-call :action "start" :attach '(:remote "gdb://127.0.0.1:1234"))))
                  (check "a remote stub is -d <uri> <binary>"
                         (and (equal (append (shared-flags) (list "-d" "gdb://127.0.0.1:1234" *binary*))
                                     (log-lines ".argv"))
@@ -686,14 +686,14 @@ done
 
                (suite "debug: a raw target, against a stand-in")
                (setf (re::session-load-options session) (re::obj "arch" "x86" "bits" bits "map" "0x400000"))
-               (debug-call :action "start" :run "{\"args\":[\"x\"]}")
+               (debug-call :action "start" :run '(:args ("x")))
                (check "a launch loads the target as the static session did: load flags, then -R, then -d"
                       (equal (append (shared-flags)
                                      (list "-a" "x86" "-b" (princ-to-string bits) "-m" "0x400000"
                                            "-R" "arg0=x" "-d" *binary*))
                              (log-lines ".argv")))
                (debug-call :action "stop")
-               (debug-call :action "start" :attach "{\"pid\":77}")
+               (debug-call :action "start" :attach '(:pid 77))
                (check "an attach drops them: the target brings its own arch and memory"
                       (equal (append (shared-flags) (list "-d" "77" *binary*)) (log-lines ".argv")))
                (debug-call :action "stop")

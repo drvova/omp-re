@@ -41,8 +41,8 @@ whose name merely starts the same (/samples-evil beside /samples) passes."
                                                   (expand-home directory))))))
                           (and real (uiop:string-prefix-p (uiop:native-namestring real) path))))
                       allowed)
-          (fail "omp-re: ~a is outside the directories files may be opened from (the re section's allowed_dirs: ~{~a~^, ~})"
-                path allowed)))))
+          (fail "omp-re: ~a is outside the directories files may be opened from (~a: ~{~a~^, ~})"
+                path (voice :allowed-dirs) allowed)))))
   file)
 
 (defun resolve-readable-file (input)

@@ -74,6 +74,12 @@ the end of the replay."
 
 (define-tool "map_file"
     (:label "Map File" :tier :exec
+     :reason '(:cases
+                ((("path" :string))
+                 "Map {path} into the session's address space at {addr!} (read-only; re-applied on respawn). The file on disk is not modified.")
+                (()
+                 "Map a file into the session's address space at {addr!} (read-only; re-applied on respawn). The file on disk is not modified."))
+     :render '(:title "Map file" :subject "path")
      :description "Open an additional file into the current session at a virtual address (`o <file> <addr>`), alongside the primary binary — e.g. overlay a dumped/unpacked region over the packed image, or map a library for cross-module analysis. The file is mapped read-only (never written on disk) and the map is re-applied automatically on resume/respawn. To just analyze a dump on its own, use open_binary instead. Not an undoable annotation: reopen the binary to drop the map.")
     (("path" :string :required t :doc "Path to the file to map into the session (a memory dump, a library, a raw blob).")
      ("addr" :string :required t :doc "Virtual address to map it at, e.g. 0x50000 — pick a range the primary binary doesn't already occupy.")
@@ -148,6 +154,12 @@ unknown or failing pass is a failure line, never the end of the replay."
 
 (define-tool "analyze"
     (:label "Analyze" :tier :exec
+     :reason '(:cases
+                ((("pass" :string))
+                 "Run rizin analysis pass {pass} — this changes the analysis (it adds functions, xrefs, names, or types).")
+                (()
+                 "Run rizin analysis pass ? — this changes the analysis (it adds functions, xrefs, names, or types)."))
+     :render '(:title "analyze" :subject "pass")
      :description "Re-run a rizin analysis pass to recover more than open_binary's baseline `aaa` found: prelude scans for stripped code, Go/Objective-C recovery, pointer and call/xref analysis, recursive type matching, or per-function emulation. Reports the function count before and after. The pass is re-run automatically on resume/respawn; it is not an undoable annotation (reopen the binary to return to the baseline). Some passes (emulate_functions) can be slow.")
     (("pass" :string :required t :enum (mapcar #'car +analysis-passes+)
       :doc (join-lines
@@ -223,6 +235,12 @@ A file that no longer applies is a failure line, never the end of the replay."
 
 (define-tool "apply_signatures"
     (:label "Apply Signatures" :tier :exec
+     :reason '(:cases
+                ((("source" "file") ("path" :string))
+                 "Apply the FLIRT signature file {path} — this renames matched functions.")
+                (()
+                 "Re-apply rizin's built-in signature database — this renames matched functions."))
+     :render '(:title "Apply signatures" :subject "source")
      :description "Name library functions from FLIRT signatures. source 'sigdb' re-applies rizin's built-in signature database (already applied once by open_binary's analysis); source 'file' applies a custom .sig/.pat file you provide, which open_binary can't know about. This renames matched functions (it changes analysis). A custom file is re-applied automatically on resume/respawn. List the built-in database with rizin_command Flt.")
     (("source" :string :required t :enum '("sigdb" "file")
       :doc "sigdb: re-apply rizin's built-in signature database. file: apply a custom FLIRT .sig/.pat file (path required).")
@@ -254,6 +272,8 @@ A file that no longer applies is a failure line, never the end of the replay."
 
 (define-tool "create_signature"
     (:label "Create Signature" :tier :exec
+     :reason "Create a FLIRT signature file from the current analysis in omp-re's output directory — the analysis and the sample are not modified."
+     :render '(:title "create_signature" :subject "file")
      :description "Build a FLIRT signature file (`Fc`) from the current binary's analyzed functions, to recognize those same functions in other samples (e.g. tracking a routine across a malware family). Written to omp-re's output directory as a `.pat` (text patterns) or `.sig` (compiled). Apply it elsewhere with apply_signatures (source 'file'). Reads the analysis and writes a file — it does not modify the analysis or the sample.")
     (("file" :string :doc "Output filename (a bare name, no path) written to omp-re's output directory; omit for one derived from the binary's name. End it `.pat` (text patterns, the default) or `.sig` (compiled)."))
     (arguments)
@@ -288,6 +308,8 @@ A file that no longer applies is a failure line, never the end of the replay."
 
 (define-tool "export_project"
     (:label "Export Project" :tier :exec
+     :reason "Write the current analysis to a rizin project file in omp-re's output directory — the sample and the analysis are not modified."
+     :render '(:title "export_project" :subject "file")
      :description "Save the current analysis as a rizin project (.rzdb) — functions, names, comments, flags, and types, including every annotation omp-re has applied — so it can be opened in interactive rizin or Cutter (`Po <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re does not load projects (it manages analysis state through its own session log). Returns the file path and size.")
     (("file" :string :doc "Project filename (a bare name, no path) written to omp-re's output directory; omit for one derived from the binary's name. `.rzdb` is appended if missing."))
     (arguments)
@@ -427,6 +449,8 @@ minimal build may lack some. Asked each time, so one installed later is seen."
 
 (define-tool "rizin_cli"
     (:label "rizin CLI" :tier :exec
+     :reason (list "Run " (approval-slot '(("tool" :missing "?") ("args" :prefix " ")) :clip 160) ".")
+     :render '(:subject "tool")
      :description "Run one of rizin's standalone command-line tools (rz-bin, rz-diff, rz-hash, rz-find, rz-asm, rz-ax) with its own arguments, for analysis the in-core tools don't cover: quick binary info without full analysis, diffing two binaries, hashing and entropy, raw pattern search, standalone (dis)assembly, and base conversion. Argv only, no shell. Flags that write files, run code, fetch over the network, or open interactive views are refused. Pass `args: [\"-h\"]` for a tool's full help."
      ;; A tool that cannot run is worse than an absent one.
      :available (lambda () (and (available-rz-cli-tools) t)))
@@ -540,6 +564,8 @@ non-zero exit must not read as \"0 findings\"."
 
 (define-tool "triage_capa"
     (:label "Triage: capa" :tier :exec
+     :reason "Run capa against the open binary."
+     :render '(:body :json)
      :description "Run capa rules against the binary to detect capabilities and ATT&CK techniques."
      :available (lambda () (program-available-p "capa")))
     ()
@@ -548,6 +574,8 @@ non-zero exit must not read as \"0 findings\"."
 
 (define-tool "triage_floss"
     (:label "Triage: floss" :tier :exec
+     :reason "Run floss against the open binary."
+     :render '(:body :json)
      :description "Extract obfuscated strings (stack, decoded, static) from the binary using FLOSS."
      :available (lambda () (program-available-p "floss")))
     ()
@@ -557,6 +585,8 @@ non-zero exit must not read as \"0 findings\"."
 ;; Detect It Easy's console program is diec; the tool keeps the short name.
 (define-tool "triage_die"
     (:label "Triage: die" :tier :exec
+     :reason "Run diec against the open binary."
+     :render '(:body :json)
      :description "Detect packers, compilers, and file types using Detect It Easy."
      :available (lambda () (program-available-p "diec")))
     ()
@@ -575,6 +605,8 @@ array of objects. A line with no space (a warning) is skipped, not misread."
 
 (define-tool "triage_yara"
     (:label "Triage: yara" :tier :exec
+     :reason (list "Run yara with rules " (approval-slot '(("rules_path" :missing "?"))) " against the open binary.")
+     :render '(:subject "rules_path" :body :json)
      :description "Scan the binary with user-supplied YARA rules."
      :available (lambda () (program-available-p "yara")))
     (("rules_path" :string :required t :doc "Path to a YARA rules file."))
@@ -619,8 +651,20 @@ optional 0x taken off."
       (fail "omp-re: emulate: bad bytes ~a — use an even number of hex digits, e.g. 41424344" (js-string value)))
     (string-downcase hex)))
 
+(defun emulate-approval-reason ()
+  '(:cases
+    ((("action" "init")) "Set up the RzIL emulation state (no OS process runs — the code is interpreted inside rizin).")
+    ((("action" "set_var")) "Set up the RzIL emulation state (no OS process runs — the code is interpreted inside rizin).")
+    ((("action" "set_mem")) "Seed the RzIL VM's memory image (an io.cache overlay in memory — nothing is written to the file on disk).")
+    ((("action" "step")) "Run the target's code logic inside rizin's RzIL VM (interpreted, no OS process).")
+    ((("action" "step_until")) "Run the target's code logic inside rizin's RzIL VM (interpreted, no OS process).")
+    ((("action" "vars")) "Read the RzIL VM state.")
+    (() "Drive the RzIL emulation.")))
+
 (define-tool "rizin_emulate"
     (:label "emulator" :tier :exec
+     :reason (emulate-approval-reason)
+     :render '(:subject "action")
      :description "Emulate code with rizin's RzIL VM: init at an address, step instructions and watch register/flag changes, step until an address, read and set VM variables, and seed the VM's memory (set_mem) so a routine can read an input buffer. No process runs — the target's logic is interpreted inside rizin, and the VM state lives in the analysis session (init resets registers; set_mem writes an in-memory overlay that persists and never touches the file on disk). External calls and syscalls are not emulated; keep runs small (a decryptor loop, an argument computation). To execute the real process instead, use the debugger tool.")
     (("action" :string :required t :enum '("init" "step" "step_until" "vars" "set_var" "set_mem")
       :doc (join-lines

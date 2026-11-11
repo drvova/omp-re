@@ -211,7 +211,7 @@ of the group NAME: a tool has just applied the one thing that changed."
 
 (defun require-binary (&optional (session *session*))
   (or (session-binary-path session)
-      (fail "omp-re: no binary open — use /re open <path>, (re:open \"path\") or the open_binary tool first")))
+      (fail "omp-re: no binary open — ~a" (voice :open-first))))
 
 (defun spawn-rizin (binary-path &key load (session *session*))
   "Spawn and analyze a fresh rizin for BINARY-PATH, replay the record into
@@ -333,33 +333,63 @@ that stops doing so."
          (worker (start-worker "omp-re idle sessions" (lambda () (reap-idle-sessions idle)) 60)))
     (lambda () (stop-worker worker))))
 
+(defun close-session (id)
+  "End what runs for the session ID and forget the session; its record stays."
+  (let ((session (sb-thread:with-mutex (*sessions-lock*)
+                   (prog1 (gethash id *sessions*) (remhash id *sessions*)))))
+    (when session (close-session-processes session))
+    t))
+
+(defun rekey-session (from to)
+  "Carry the session FROM, its rizin with it, over to the id TO: a host
+whose branch writes a new session with the same history up to the branch
+point goes on with the process it has. Nothing happens when FROM is not
+known or TO already is."
+  (sb-thread:with-mutex (*sessions-lock*)
+    (let ((session (gethash from *sessions*)))
+      (when (and session (string/= from to) (null (gethash to *sessions*)))
+        (remhash from *sessions*)
+        (setf (session-id session) to
+              (gethash to *sessions*) session))))
+  to)
+
 ;;; --- acting in a session -------------------------------------------------------------------
 
-(defun hold-session (session thunk)
+(defun hold-session (session thunk &key (wait t))
   "Call THUNK with SESSION as *SESSION*. The session's lock is taken, and
 the session brought in line with its branch, only when this thread does not
 hold it already: a verb called inside a recipe or a /re line's body acts in
-the session its caller holds."
-  (if (sb-thread:holding-mutex-p (session-lock session))
-      (let ((*session* session))
-        (funcall thunk))
-      (sb-thread:with-mutex ((session-lock session))
-        (let ((*session* session))
-          (setf (session-last-used session) (get-universal-time))
-          (sync-to-branch session)
-          (funcall thunk)))))
+the session its caller holds. Without WAIT, a session another call holds is
+not waited for: THUNK runs beside that call, on what the session holds now."
+  (flet ((act () (let ((*session* session)) (funcall thunk))))
+    (cond ((sb-thread:holding-mutex-p (session-lock session)) (act))
+          ((or (sb-thread:grab-mutex (session-lock session) :waitp nil)
+               (and wait
+                    ;; Waited for in short steps, so a caller that gave up
+                    ;; while another call holds the session leaves the queue.
+                    (loop until (sb-thread:grab-mutex (session-lock session) :timeout 0.05)
+                          do (check-cancelled "the call")
+                          finally (return t))))
+           (unwind-protect
+                (progn
+                  (setf (session-last-used session) (get-universal-time))
+                  (sync-to-branch session)
+                  (act))
+             (sb-thread:release-mutex (session-lock session))))
+          (t (act)))))
 
-(defun act-in-session (session what thunk)
-  (handler-case (hold-session (if (stringp session) (find-session session) session) thunk)
+(defun act-in-session (session what thunk &key (wait t))
+  (handler-case (hold-session (if (stringp session) (find-session session) session) thunk :wait wait)
     (re-error (condition)
       (values (princ-to-string condition) t))
     (error (condition)
       (values (format nil "omp-re: ~a failed: ~a" what condition) t))))
 
-(defmacro in-session ((session what) &body body)
+(defmacro in-session ((session what &key (wait t)) &body body)
   "BODY acting in SESSION — a session or the id of one — with *SESSION*
 bound to it => BODY's values, the first of them the text of an answer. This
 is the one place a refusal becomes text: an RE-ERROR in BODY answers
 (values ITS-WORDS T), and anything else that goes wrong answers the same way
-as `omp-re: WHAT failed: ...'. A failure is an answer, never a signal."
-  `(act-in-session ,session ,what (lambda () ,@body)))
+as `omp-re: WHAT failed: ...'. A failure is an answer, never a signal. WAIT
+as HOLD-SESSION takes it."
+  `(act-in-session ,session ,what (lambda () ,@body) :wait ,wait))

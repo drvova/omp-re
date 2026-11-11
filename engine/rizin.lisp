@@ -99,6 +99,11 @@ call starts clean. WHAT names the command for that message."
                (rz-close rz)
                (fail "omp-re: rizin process exited~a" (stderr-detail rz)))
               ((null char)
+               ;; A caller that gave up leaves here, while nothing is coming:
+               ;; the frame so far stays on the session and the marker's name
+               ;; with it, so the next command reads up to it and the process
+               ;; survives.
+               (check-cancelled (format nil "rizin command ~a" (js-string what)))
                (let ((remaining (- deadline (now-seconds))))
                  (when (<= remaining 0)
                    (let ((detail (stderr-detail rz)))
@@ -259,7 +264,7 @@ shared flags (the debugger's launch)."
 
 (defun find-on-path (name)
   "NAME resolved against PATH => its full path, or NIL."
-  (dolist (directory (uiop:split-string (or (uiop:getenv "PATH") "")
+  (dolist (directory (uiop:split-string (or (getenv "PATH") "")
                                         :separator #+win32 '(#\;) #-win32 '(#\:)))
     (when (plusp (length directory))
       (dolist (candidate (list name #+win32 (concatenate 'string name ".exe")))
@@ -324,7 +329,8 @@ found on PATH."
 
 (defun assert-rizin-available ()
   (unless (program-available-p (resolve-rizin-path))
-    (fail "omp-re: rizin not found on PATH or common install locations — install rizin (https://rizin.re), or set the re section's rizin_path (or OMPRE_RIZIN_PATH) to its full path (the output of `which rizin` in your shell). An organism launched from a desktop may not inherit your shell's PATH, so rizin can work in your terminal yet be invisible here.")))
+    (fail "omp-re: rizin not found on PATH or common install locations — install rizin (https://rizin.re), or ~a to its full path (the output of `which rizin` in your shell). ~a may not inherit your shell's PATH, so rizin can work in your terminal yet be invisible here."
+          (voice :rizin-path) (voice :launcher))))
 
 (defun resolve-rizin-tool (tool)
   "The path of a sibling rizin program (rz-bin, rz-diff, ...): beside the

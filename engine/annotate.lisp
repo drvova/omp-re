@@ -446,6 +446,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "rename_function"
     (:label "Rename Function" :tier :write
+     :reason "Rename function {addr} to {new}. Reversible with /re undo."
+     :render '(:title "Rename function" :subject "addr" :body :none)
      :description "Rename the function at an address, verifying the rename actually landed before reporting success.")
     (("addr" :string :required t :doc "Function address or name.")
      ("new" :string :required t :doc "New function name (identifier characters only)."))
@@ -462,6 +464,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "rename_variable"
     (:label "Rename Variable" :tier :write
+     :reason "Rename variable {old} to {new} in {addr}. Reversible with /re undo."
+     :render '(:title "Rename variable" :subject "addr" :body :none)
      :description "Rename a local variable or argument within a function, verifying the rename actually landed before reporting success.")
     (("addr" :string :required t :doc "Function address or name.")
      ("old" :string :required t :doc "Current variable name.")
@@ -487,6 +491,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_comment"
     (:label "Set Comment" :tier :write
+     :reason "Set the comment at {addr}. Reversible with /re undo."
+     :render '(:title "Comment" :subject "addr" :body :none)
      :description "Set (or clear, with empty text) the comment at an address, replacing any existing comment, and verify it landed before reporting success.")
     (("addr" :string :required t :doc "Address (or name) to comment.")
      ("text" :string :required t :doc "Comment text (single line); empty string clears the comment."))
@@ -504,6 +510,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_prototype"
     (:label "Set Prototype" :tier :write
+     :reason "Set the prototype of {addr} to {sig}. Reversible with /re undo."
+     :render '(:title "Prototype" :subject "addr" :body :none)
      :description "Set a function's C prototype, e.g. `int parse_config(const char *path, int flags)`. The name in the prototype becomes the function's name. Verifies what rizin stored and reports it if rizin's C parser normalized it differently.")
     (("addr" :string :required t :doc "Function address or name.")
      ("sig" :string :required t :doc "New C-style prototype, without a trailing semicolon."))
@@ -521,6 +529,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_variable_type"
     (:label "Set Variable Type" :tier :write
+     :reason "Set the type of {var} in {addr} to {type}. Reversible with /re undo."
+     :render '(:title "Variable type" :subject "addr" :body :none)
      :description "Set a local variable's or argument's C type, verifying it actually landed before reporting success.")
     (("addr" :string :required t :doc "Function address or name.")
      ("var" :string :required t :doc "Variable name.")
@@ -542,6 +552,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "define_variable"
     (:label "Define Variable" :tier :write
+     :reason "Define {storage} variable {name} in {addr}. Reversible with /re undo."
+     :render '(:title "Define variable" :subject "addr" :body :none)
      :description "Define a local variable or argument in a function that rizin's analysis didn't recover — a stack slot (`afvs`, by frame delta) or a register variable (`afvr`, by register) — so the decompiler and disassembly name it instead of showing a raw offset. Refuses when a variable of that name already exists, verifies the new one landed, and is reversible with /re undo (which runs `afv-`).")
     (("addr" :string :required t :doc "Function address or name.")
      ("storage" :string :required t :enum '("stack" "reg")
@@ -568,6 +580,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "define_global"
     (:label "Define Global" :tier :write
+     :reason "Define global {name} at {addr}. Reversible with /re undo."
+     :render '(:title "Define global" :subject "addr" :body :none)
      :description "Define a global variable at a data address (`avga`), giving it a name and a C type so disassembly, xrefs, and the decompiler show the name and typed accesses instead of a raw address. Refuses when a global of that name already exists, verifies it landed, and is reversible with /re undo (which runs `avgm`).")
     (("addr" :string :required t :doc "Data address (or name/expression) where the global variable lives.")
      ("name" :string :required t :doc "Global variable name (identifier characters).")
@@ -588,6 +602,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "define_function"
     (:label "Define Function" :tier :write
+     :reason "Define a function at {addr}. Reversible with /re undo."
+     :render '(:title "Define function" :subject "addr" :body :none)
      :description "Define a function at an address rizin's auto-analysis missed (obfuscated call targets, hand-written stubs, code reached only indirectly). Runs `af`, then verifies a function now begins exactly there. Reversible with /re undo (which runs `af-`).")
     (("addr" :string :required t
       :doc "Address (or name/expression) where a function begins that rizin's auto-analysis missed."))
@@ -606,6 +622,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_calling_convention"
     (:label "Set Calling Convention" :tier :write
+     :reason "Set the calling convention of {addr} to {cc}. Reversible with /re undo."
+     :render '(:title "Calling convention" :subject "addr" :body :none)
      :description "Set a function's calling convention (how arguments and the return value are passed), which corrects argument recovery in the decompiler and call sites. Verifies what rizin stored; an unknown convention is rejected with rizin's own error (list them with rizin_command afcl). Reversible with /re undo.")
     (("addr" :string :required t :doc "Function address or name.")
      ("cc" :string :required t
@@ -624,6 +642,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_flag"
     (:label "Set Flag" :tier :write
+     :reason "Flag {addr} as {name}. Reversible with /re undo."
+     :render '(:title "Flag" :subject "addr" :body :none)
      :description "Name an address with a flag (rizin's named label), so disassembly, xrefs, and your own commands can refer to it by name. Replaces any flag already at that address. Verifies the flag landed. Reversible with /re undo.")
     (("addr" :string :required t :doc "Address (or name/expression) to label.")
      ("name" :string :required t
@@ -642,6 +662,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_arch_hint"
     (:label "Set Arch Hint" :tier :write
+     :reason "Hint arch/bits at {addr}. Reversible with /re undo."
+     :render '(:title "Arch hint" :subject "addr" :body :none)
      :description "Hint the architecture and/or word size to disassemble from an address, for a region that differs from the file's default — most often ARM/Thumb switches (bits 16) or mixed-arch firmware. Sets `aha`/`ahb`, verifies the hint landed, and is reversible with /re undo (which deletes it).")
     (("addr" :string :required t :doc "Address (or name/expression) where the hint applies.")
      ("arch" :string :doc "Architecture to disassemble as from here, e.g. `arm`, `x86` (sets an `aha` hint).")
@@ -668,6 +690,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_hint"
     (:label "Set Hint" :tier :write
+     :reason "Set the {hint} hint at {addr}. Reversible with /re undo."
+     :render '(:title "Hint" :subject "addr" :body :none)
      :description "Set an analysis hint at an instruction that corrects how rizin reads it: the display base of an immediate (hex/decimal/char/string/syscall/IP-relative), the opcode type, the opcode byte-length (to realign disassembly), the real target of an indirect jump/call, or a function's return value. Verifies the hint landed and records what rizin stored; reversible with /re undo (which deletes it or restores the prior hint).")
     (("addr" :string :required t :doc "Instruction address (or name/expression) the hint applies to.")
      ("hint" :string :required t :enum +hint-kinds+
@@ -696,6 +720,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_data"
     (:label "Set Data" :tier :write
+     :reason "Mark data at {addr}. Reversible with /re undo."
+     :render '(:title "Data" :subject "addr" :body :none)
      :description "Mark bytes as a data element (or an array, with `count`) so disassembly and xrefs stop rendering data as code. Verifies the mark landed; reversible with /re undo.")
     (("addr" :string :required t :doc "Address (or name/expression) to mark as data.")
      ("size" :number :required t :doc "Size in bytes of one data element.")
@@ -715,6 +741,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_string"
     (:label "Set String" :tier :write
+     :reason "Mark a string at {addr}. Reversible with /re undo."
+     :render '(:title "String" :subject "addr" :body :none)
      :description "Mark bytes as a string where rizin's auto-analysis missed one, so it shows in the disassembly and string views. Omit `size` to autodetect encoding and length. Verifies it landed; reversible with /re undo.")
     (("addr" :string :required t :doc "Address (or name/expression) where a string begins.")
      ("size" :number
@@ -732,6 +760,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
 
 (define-tool "set_format"
     (:label "Set Format" :tier :write
+     :reason "Overlay a format at {addr}. Reversible with /re undo."
+     :render '(:title "Format" :subject "addr" :body :none)
      :description "Overlay a struct format (a pf format string, optionally with field names) on a memory region, so the disassembly shows named, typed fields instead of raw bytes — one of the highest-leverage annotations for data structures. Display-only (doesn't perturb analysis). Verifies it landed; reversible with /re undo.")
     (("addr" :string :required t :doc "Address (or name/expression) to overlay a struct format on.")
      ("size" :number :required t :doc "Total size in bytes the format covers.")

@@ -197,6 +197,7 @@ record_finding and adopt_finding, so the two can never gate differently."
 
 (define-tool "record_finding"
     (:label "Record Finding" :tier :read
+     :render '(:title "record_finding" :subject "claim")
      :description "Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it — each RE tool result ends with an `[evidence xxxxxxxx]` tag; cite those ids. Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.")
     (("claim" :string :required t :doc "The conclusion, stated as narrowly as the evidence supports — one finding per claim.")
      ("evidence" :strings :required t :doc "Evidence ids the claim rests on: the 8-character id in the `[evidence xxxxxxxx]` tag at the end of each RE tool result.")
@@ -244,27 +245,15 @@ record_finding and adopt_finding, so the two can never gate differently."
                        :supersedes supersedes
                        :override-audit (jstring arguments "override_audit")))))
 
-(defun adopt-command (text)
-  "One of adopt_finding's commands => (values COMMAND ADDR). A tool's
-parameter types have no object, so each arrives as a string: the line as the re-analyst writes it in
-`reproduce' — `pdf @ sym.f', split at its ` @ ' — or that object as JSON."
-  (let ((object (and (uiop:string-prefix-p "{" (trimmed text)) (json-parse text))))
-    (cond ((hash-table-p object)
-           (unless (jstring object "command")
-             (schema-refusal "adopt_finding" "a command given as an object needs a string `command` (was ~a)"
-                             (json-encode object)))
-           (values (jstring object "command") (jstring object "addr")))
-          (t
-           (let ((at (search " @ " text)))
-             (if at
-                 (values (trimmed (subseq text 0 at)) (trimmed (subseq text (+ at 3))))
-                 (values text nil)))))))
-
 (define-tool "adopt_finding"
     (:label "Adopt Finding" :tier :read
+     :render '(:title "adopt_finding" :subject "claim")
      :description "Adopt a finding made elsewhere — typically one returned by the re-analyst subagent, whose evidence lives in its own session — by re-proving it here: each given rizin command is re-run read-only on the open binary and recorded as evidence in THIS session, then the claim passes the same gates as record_finding (support audit included). Refused if expect_sha256 doesn't match the open binary or a command fails. Use the subagent's `reproduce` lines as the commands.")
     (("claim" :string :required t :doc "The finding's claim, as narrowly as its evidence supports.")
-     ("commands" :strings :required t :doc "The rizin command(s) that reproduce the finding's evidence — re-run here and recorded as this session's evidence. Each is a read-only rizin command line, e.g. `pdf @ sym.decrypt_config` or `px 64 @ 0x4012a0` (the address after ` @ `), or a JSON object {\"command\": \"pdf\", \"addr\": \"sym.decrypt_config\"}.")
+     ("commands" :objects :required t
+      :doc "The rizin command(s) that reproduce the finding's evidence — re-run here and recorded as this session's evidence."
+      :properties (("command" :string :required t :doc "A read-only rizin command, e.g. `pdf` or `px 64`.")
+                   ("addr" :string :doc "Where to run it (address or name).")))
      ("addr" :string :doc "The address or function the finding is about.")
      ("confidence" :string :enum '("confirmed" "likely" "speculative" "possible") :doc "How sure the claim is (default likely); the re-analyst's `possible` is taken as speculative.")
      ("source" :string :doc "Who made the finding originally, e.g. \"re-analyst\".")
@@ -287,8 +276,9 @@ parameter types have no object, so each arrives as a string: the line as the re-
     ;; and is recorded exactly as a live rizin_command result, bound to the
     ;; open binary. A claim is adopted only on evidence this session observed
     ;; itself — and that evidence stays in the record whatever becomes of the claim.
-    (dolist (text commands)
-      (multiple-value-bind (command addr) (adopt-command text)
+    (dolist (given commands)
+      (let ((command (jstring given "command"))
+            (addr (jstring given "addr")))
         (let* ((addr (and (plusp (length addr)) addr))
                (result (run-rizin-command command addr)))
           (when (result-failed result)
@@ -312,6 +302,7 @@ parameter types have no object, so each arrives as a string: the line as the re-
 
 (define-tool "retract_finding"
     (:label "Retract Finding" :tier :read
+     :render '(:title "retract_finding" :subject "id")
      :description "Withdraw a finding recorded earlier with record_finding (it leaves the report). Give the reason; to revise rather than withdraw, call record_finding with supersedes instead.")
     (("id" :string :required t :doc "Id (or ≥6-char prefix) of the finding to withdraw.")
      ("reason" :string :required t :doc "Why it no longer stands."))

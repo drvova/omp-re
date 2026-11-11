@@ -310,7 +310,7 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
           (re:open *binary*)
           (with-service (:judge (judge-saying "overreach" "a prologue, not a parser"))
             (let ((text (refusal (lambda () (re:call "adopt_finding" :claim "entry0 parses the arguments."
-                                                                     :commands '("pd 2 @ entry0"))))))
+                                                                     :commands '((:command "pd 2" :addr "entry0")))))))
             (check "adopt_finding is refused the same way, and says the re-run evidence was kept"
                    (and (has "adopt_finding: NOT recorded — the support auditor judged this claim overreach: a prologue, not a parser" text)
                         (has (format nil "~%The re-run evidence was recorded (~a); cite it in record_finding to record a narrower claim."

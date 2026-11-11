@@ -51,9 +51,17 @@ setting may have either or both — and TYPE one of :path, :directory,
 :secret, which is taken byte for byte: a signing key is not trimmed, or
 logs signed before would no longer verify.")
 
+(defun getenv (name)
+  "The environment variable NAME as the host's process has it. A host that
+runs the engine in a process of its own (the stdio server) says what its
+environment holds; otherwise it is this process's."
+  (if (host-service :environment)
+      (values (ask-host :environment name))
+      (uiop:getenv name)))
+
 (defun env (name)
   "The environment variable NAME, trimmed, or NIL when unset or blank."
-  (let ((value (uiop:getenv name)))
+  (let ((value (getenv name)))
     (and value (not (blank-p value)) (trimmed value))))
 
 (defun env-on-p (name)
@@ -78,7 +86,7 @@ nothing. A :path or :directory may arrive as a string or a pathname."
 (defun environment-value (type variable)
   (ecase type
     ((:path :directory :string) (env variable))
-    (:secret (let ((value (uiop:getenv variable)))
+    (:secret (let ((value (getenv variable)))
                (and value (plusp (length value)) value)))
     (:list (remove-if #'blank-p
                       (mapcar #'trimmed
@@ -143,6 +151,11 @@ section is taken over OMPRE_RIZIN_PATH. With no host there is no section."
 start and cleared at stop. Every one is optional.
   :SETTING       (NAME)        the operator's section's value for the setting
                                NAME => (values VALUE PRESENT-P)
+  :ENVIRONMENT   (NAME)        the environment variable NAME, where the
+                               operator's environment is the host's process
+                               and not this one => the value or NIL
+  :VOICE         (KEY)         the host's own words for the phrase KEY (see
+                               +VOICE+), or NIL for the engine's
   :HOME          ()            the directory a relative state_dir is under
   :TURN          ()            who is calling on this thread, a plist of
                                :SESSION-ID and :TURN-ID (the turn or leaf an
@@ -164,22 +177,30 @@ start and cleared at stop. Every one is optional.
                                (values NIL REASON)
   :PROGRESS      (TEXT)        a long analysis is under way (TEXT), or over
                                (NIL)
+  :CANCELLED     ()            whether whoever asked for the call running on
+                               this thread has given up on it
   :SAVE-ARTIFACT (SESSION CONTENT LABEL)
                                keep the whole of a result too large to send
                                => (values ID WHERE), WHERE being how a reader
                                is told to find it
   :READ-ARTIFACT (SESSION ID)  the whole text :SAVE-ARTIFACT kept under ID,
                                or NIL
+  :LOCATE-ARTIFACT (SESSION ID)
+                               how a reader is told to find the artifact ID:
+                               what :SAVE-ARTIFACT answered as WHERE
   :TRANSCRIPT    (SESSION TYPE TEXT DETAILS)
                                show TEXT in the session's transcript as a
                                message of TYPE (re.binary), never sent to
                                the model
-  :SEND-USER-MESSAGE (SESSION TEXT)
-                               send TEXT to the model as the operator's
-                               next message
-  :HAS-UI        ()            whether an operator is watching: without one
-                               a /re line's answer is all that is said
-  :SESSION-NAME  (SESSION-ID)  what the operator calls that session
+  :HAS-UI        ()            whether an operator is watching the call on
+                               this thread and can be handed a draft or have
+                               a message sent for them: without one a /re
+                               line's answer is all that is said
+  :KEEP-SESSION  (SESSION NAME)
+                               what a /re line recorded must outlive the
+                               process even if no model turn follows: write
+                               the session now, and call it NAME where nobody
+                               is watching and it has no name
 With none installed — the engine alone under a test — nothing is configured,
 there is no turn, the record is the session's own file with every entry on
 the branch, a notice is a line on the log, an artifact is a file beside the
@@ -226,6 +247,48 @@ is a warning on the process's log."
                    (re-error () nil)))
       (warn "~a" text))
     text))
+
+;;; --- the host's words ---------------------------------------------------------------------
+;;; A few phrases name what only a host has: how its operator switches the
+;;; debugger on, where a path to rizin is set, how eval reaches a tool. The
+;;; engine's text is otherwise one text; these are said in the host's voice.
+
+(defparameter +voice+
+  '((:open-first . "use /re open <path> or the open_binary tool first")
+    (:list-tools . "")
+    (:read-more . "read the rest with rizin_command")
+    (:debugger-switch . "OMPRE_ENABLE_DEBUGGER")
+    (:debugger-enable . "set OMPRE_ENABLE_DEBUGGER")
+    (:allowed-dirs . "OMPRE_ALLOWED_DIRS")
+    (:rizin-path . "set OMPRE_RIZIN_PATH")
+    (:launcher . "A program launched from a desktop")
+    (:open-binary-note . "")
+    (:help-keys . nil)
+    (:manual . nil))
+  "The phrases a host may say its own way, each with the engine's words for
+it when no host does:
+  :OPEN-FIRST        what to do when no binary is open
+  :LIST-TOOLS        after `no tool named X', how the tools are listed
+  :READ-MORE         after a list was cut, how the rest is read
+  :DEBUGGER-SWITCH   what switched the debugger on
+  :DEBUGGER-ENABLE   how to switch it on
+  :ALLOWED-DIRS      what holds the directories files may be opened from
+  :RIZIN-PATH        how the operator says where rizin is
+  :LAUNCHER          what, started from a desktop, may not see the shell's PATH
+  :OPEN-BINARY-NOTE  a sentence added to open_binary's description
+  :HELP-KEYS         a last line of /re help: the keys the host binds
+  :MANUAL            the manual rizin_command answers for an empty command")
+
+(defun voice (key)
+  (or (and (host-service :voice) (ask-host :voice key))
+      (cdr (or (assoc key +voice+) (error "omp-re has no phrase ~s" key)))))
+
+(defun check-cancelled (what)
+  "Leave, with a refusal naming WHAT was under way, a call whoever asked for
+it has given up on. Called where a call waits — for rizin, for the session,
+for a program — so a wait ends cleanly and nothing is left half-written."
+  (when (and (host-service :cancelled) (ignore-errors (ask-host :cancelled)))
+    (fail "omp-re: ~a aborted" what)))
 
 (defun report-progress (text)
   "Say that a long analysis is under way, or with NIL that it is over.

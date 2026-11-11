@@ -53,4 +53,5 @@
                (:file "report")
                (:file "carry")
                (:file "debug")
+               (:file "views")
                (:file "engine")))
