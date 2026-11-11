@@ -203,6 +203,52 @@
                  (and (equal "notice" (gethash "type" (omp-re:engine-view id "import-callers"
                                                                        (omp-re:obj "addr" "" "name" "free"))))
                       (member (gethash "type" (omp-re:engine-view id "strings")) '("panel") :test #'equal)))
+          (let* ((rz (omp-re::session-rz session))
+                 (imports (omp-re:jlist (omp-re::rz-cmdj rz "iij")))
+                 (panel (omp-re:engine-view id "imports")))
+            (check "/re imports lists the imports by name, each with the address of its stub where it has one"
+                   (let ((lines (omp-re:split-lines (re:slash "imports")))
+                         (first (first imports)))
+                     (and imports
+                          (equal "omp-re: imports" (first lines))
+                          (equal (second lines)
+                                 (format nil "~a~@[  ~a~]" (omp-re:jstring first "name")
+                                         (and (omp-re:jnumber first "plt") (plusp (omp-re:jnumber first "plt"))
+                                              (omp-re:ea-from-offset (omp-re:jnumber first "plt"))))))))
+            (check "as a panel it is a row an import, and choosing one asks who calls its stub"
+                   (and (equal "panel" (gethash "type" panel))
+                        (= (length imports) (length (gethash "rows" panel)))
+                        (every (lambda (row import)
+                                 (and (equal (omp-re:jstring import "name") (gethash "label" row))
+                                      (equal "import-callers" (omp-re:jstring row "enter" "view" "kind"))
+                                      (equal (omp-re:jstring import "name") (omp-re:jstring row "enter" "view" "arg" "name"))))
+                               (coerce (gethash "rows" panel) 'list) imports))))
+          ;; A function something refers to, and where from, as rizin itself says.
+          (destructuring-bind (&optional ea name sites)
+              (let ((rz (omp-re::session-rz session)))
+                (loop for function in (omp-re:jlist (omp-re::rz-cmdj rz "aflj"))
+                      for at = (omp-re:jnumber function "offset")
+                      for from = (and at (remove nil (mapcar (lambda (row) (omp-re:jnumber row "from"))
+                                                             (omp-re:jlist (omp-re::rz-cmdj rz (format nil "axtj @ ~d" at))))))
+                      when from return (list (omp-re:ea-from-offset at) (omp-re:jstring function "name") from)))
+            (check "the references to a function are a panel, a row for each place, named by the function it is in; choosing one opens that code"
+                   (let* ((panel (omp-re:engine-view id "xrefs" (omp-re:obj "addr" ea "name" name "depth" 2)))
+                          (rows (coerce (gethash "rows" panel) 'list)))
+                     (and (equal "panel" (gethash "type" panel))
+                          (equal (format nil "omp-re: xrefs to ~a" name) (gethash "title" panel))
+                          (equal (mapcar #'omp-re:ea-from-offset sites)
+                                 (mapcar (lambda (row) (gethash "value" row)) rows))
+                          (every (lambda (row)
+                                   (and (has (gethash "value" row) (gethash "label" row))
+                                        (equal "code" (omp-re:jstring row "enter" "view" "kind"))
+                                        (equal (gethash "value" row) (omp-re:jstring row "enter" "view" "arg" "addr"))
+                                        (eql 2 (omp-re:jget row "enter" "view" "arg" "depth"))))
+                                 rows)
+                          (some (lambda (row) (ppcre:scan "^\\S+ \\(0x[0-9a-f]+\\)$" (gethash "label" row))) rows)))))
+          (check "an address nothing refers to answers a notice in place of an empty panel"
+                 (let ((none (omp-re:engine-view id "xrefs" (omp-re:obj "addr" "0xdeadbeef00"))))
+                   (and (equal "notice" (gethash "type" none)) (equal "info" (gethash "level" none))
+                        (equal "omp-re: no xrefs to 0xdeadbeef00" (gethash "text" none)))))
           (check "a chain of references is followed eight views deep and no further"
                  (and (equal "code" (gethash "type" (omp-re:engine-view id "code" (omp-re:obj "addr" "main" "depth" 8))))
                       (has "xref chain too deep"

@@ -21,7 +21,8 @@
   (heard '())                           ; (METHOD . PARAMS) of everything the engine sent, newest first
   (records (make-hash-table :test #'equal)) ; session id => list of entries, oldest first
   (artifacts (make-hash-table :test #'equal))
-  (judge nil)                           ; (lambda (prompt)) => reply text, NIL for nobody to ask, :WITHHELD to never answer
+  (judge nil)                           ; (lambda (prompt)) => reply text, NIL for nobody to ask, :WITHHELD to never
+                                        ; answer, (:REASON . TEXT) for a side model that could not be had
   (asked (make-hash-table))             ; request id => its method
   (violations '())                      ; what was said that the protocol does not have
   first-line)
@@ -65,6 +66,7 @@
       ((string= method "judge")
        (let ((reply (and (omp-judge omp) (funcall (omp-judge omp) (gethash "prompt" params)))))
          (cond ((eq reply :withheld) :withheld)
+               ((consp reply) (omp-re:obj "reason" (cdr reply)))
                (reply (omp-re:obj "text" reply))
                (t (omp-re:obj)))))
       ((string= method "saveArtifact")
@@ -112,10 +114,7 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
 
 (defun start-omp (&key variables (state (scratch-path "agent/")) judge)
   "Start the engine as omp does and say hello => the stand-in."
-  (let* ((process (sb-ext:run-program "sbcl"
-                                      (list "--noinform" "--no-sysinit" "--no-userinit" "--disable-debugger"
-                                            "--load" (uiop:native-namestring
-                                                      (merge-pathnames "stdio/serve.lisp" *root*)))
+  (let* ((process (sb-ext:run-program (first *serve-command*) (rest *serve-command*)
                                       :search t :wait nil :input :stream :output :stream :error nil
                                       :external-format :utf-8))
          (omp (make-omp :process process :judge judge)))
@@ -218,14 +217,15 @@ waits for nothing."
 (let ((omp (start-omp)))
   (unwind-protect
        (progn
-         (check "the first line says the engine is ready, and hello answers the protocol and the version"
+         (check "the first line says the engine is ready, and hello answers the protocol, the version, and that this engine was loaded from source"
                 (and (equal (format nil "{\"ready\":~d}" omp-re-stdio:+protocol+) (omp-first-line omp))
                      (let ((hello (omp-ask omp "hello" "protocol" omp-re-stdio:+protocol+
                                                        "stateDir" (scratch-path "agent/")
                                                        "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")))))
                        (and (eql omp-re-stdio:+protocol+ (gethash "protocol" hello))
                             (equal (asdf:component-version (asdf:find-system "omp-re"))
-                                   (gethash "version" hello))))))
+                                   (gethash "version" hello))
+                            (equal "source" (gethash "started" hello))))))
          (check "a line that is not JSON, an empty line and a CRLF line ending do not stop the next request"
                 (progn
                   (omp-write omp "this is not json")
@@ -453,20 +453,31 @@ waits for nothing."
     (check "everything that crossed the pipe, either way, is what stdio/protocol.json describes"
            (null (print-violations omp)))))
 
+(let ((omp (start-omp)))
+  (omp-tell omp "shutdown")
+  (check "told to shut down, the engine leaves cleanly though its input is still open"
+         (and (wait-until (lambda () (not (sb-ext:process-alive-p (omp-process omp)))) 20)
+              (eql 0 (sb-ext:process-exit-code (omp-process omp)))
+              (open-stream-p (sb-ext:process-input (omp-process omp)))))
+  (stop-omp omp))
+
 ;;; --- against rizin -----------------------------------------------------------------------------
 
 (suite "stdio: a session over the wire")
 (if (not *rizin*)
     (format t "  SKIPPED (rizin or ~a is absent)~%" *binary*)
     (let ((omp (start-omp :judge (lambda (prompt)
-                                   (if (search "CLAIM 0: Withheld" prompt)
-                                       :withheld
-                                       (omp-re:json-encode
+                                   (cond
+                                     ((search "CLAIM 0: Withheld" prompt) :withheld)
+                                     ((search "CLAIM 0: Unreachable" prompt)
+                                      (cons :reason (format nil "the provider answered 503~%and a second line")))
+                                     (t
+                                      (omp-re:json-encode
                                         (map 'vector (lambda (line)
                                                        (omp-re:obj "index" (parse-integer line :start 6 :junk-allowed t)
                                                                 "verdict" "supported" "reason" "it says so"))
                                              (remove-if-not (lambda (line) (eql 0 (search "CLAIM " line)))
-                                                            (omp-re:split-lines prompt))))))))
+                                                            (omp-re:split-lines prompt)))))))))
           (children '()))
       (unwind-protect
            (progn
@@ -588,6 +599,26 @@ waits for nothing."
                                  lines)
                            (some (lambda (line) (has "2 evidence item(s), 0 annotation(s) in effect" line)) lines)
                            (some (lambda (line) (has "[likely] main is a function." line)) lines))))
+             ;; After the counts above: these two record evidence and findings of their own.
+             (let ((cut (find-if (lambda (entry) (omp-re:jstring entry "data" "artifactId"))
+                                 (gethash "s1" (omp-records omp)))))
+               (check "a report over a claim that cites a cut result asks omp for the whole of it, by the artifact's id"
+                      (let ((cited (tool-call omp "s1" "record_finding"
+                                              "claim" "The binary has functions."
+                                              "evidence" (vector (omp-re:jstring cut "data" "id")))))
+                        (typed-line omp "s1" "report")
+                        (and (has "record_finding: recorded" (gethash "text" cited))
+                             (find (omp-re:jstring cut "data" "artifactId") (omp-heard-of omp "readArtifact" "s1")
+                                   :key (lambda (params) (gethash "id" params)) :test #'equal)
+                             t))))
+             (check "a side model omp could not reach leaves the finding unaudited, with omp's reason in one line"
+                    (let* ((read (tool-call omp "s1" "rizin_command" "command" "afij" "addr" "main"))
+                           (text (gethash "text" (tool-call omp "s1" "record_finding"
+                                                            "claim" "Unreachable: main is a function."
+                                                            "evidence" (vector (omp-re:jstring read "details" "evidenceId"))))))
+                      (and (has "record_finding: recorded" text)
+                           (has (format nil "~%support audit: unaudited — the audit side turn failed: the provider answered 503~%")
+                                text))))
 
              ;; A session an earlier, TypeScript, version wrote: omp's file
              ;; holds the entries; the engine has never seen the session.

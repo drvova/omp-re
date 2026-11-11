@@ -3,8 +3,8 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; Loaded by run.lisp before the suites. It loads the engine (omp-re.asd)
-;;;; and the nodecode host over it (nodecode-re.asd) on kernel-stub.lisp, and
-;;;; gives the suites their vocabulary:
+;;;; and the nodecode host over it (nodecode-re.asd) on kernel-stub.lisp, runs
+;;;; the suites (RUN-SUITES), and gives them their vocabulary:
 ;;;;
 ;;;;   (suite "name")                      a heading
 ;;;;   (check "what holds" FORM)           FORM must answer true and not signal
@@ -29,15 +29,16 @@
 ;;;;   *scratch*                           the running suite file's own scratch home, a directory pathname
 ;;;;   (scratch-path "name")               a native path in it
 ;;;;   (write-scratch "name" content)      a file in it, of a string or of octets => its native path
-;;;;   (begin-suite-file "name")           what run.lisp does before each suite file: a fresh scratch
+;;;;   (begin-suite-file "name")           what RUN-SUITES does before each suite file: a fresh scratch
 ;;;;                                       home, the stand-in's tables emptied, the engine's sessions forgotten
+;;;;   *serve-command*                     the program and arguments that start the omp host from source
 
 (load (merge-pathnames "kernel-stub.lisp" (or *load-truename* *default-pathname-defaults*)))
 
 (defpackage #:omp-re-test
   (:use #:cl)
   (:export #:suite #:check #:refusal #:has #:with-cell #:*rizin* #:*binary* #:*scratch* #:*root*
-           #:fresh-session #:in-session #:*checks* #:*failures*))
+           #:fresh-session #:in-session #:*checks* #:*failures* #:run-suites #:*serve-command*))
 (in-package #:omp-re-test)
 
 (defparameter *root*
@@ -45,6 +46,16 @@
    (uiop:pathname-parent-directory-pathname
     (uiop:pathname-directory-pathname (or *load-truename* *default-pathname-defaults*))))
   "The repository, two folders above this file.")
+
+(defparameter *suites*
+  (uiop:pathname-directory-pathname (or *load-truename* *default-pathname-defaults*))
+  "The folder of this file and of every suite-*.lisp.")
+
+(defvar *serve-command*
+  (list "sbcl" "--noinform" "--no-sysinit" "--no-userinit" "--disable-debugger"
+        "--load" (uiop:native-namestring (merge-pathnames "stdio/serve.lisp" *root*)))
+  "How the omp host's process is started, as omp's side starts it from source.
+The coverage run (scripts/cover.lisp) puts its own in its place.")
 
 (defvar *checks* 0)
 (defvar *failures* '())
@@ -248,3 +259,32 @@ the engine sees it gone => the dead process."
   (car (last (cited-evidence text))))
 
 (begin-suite-file "harness")
+
+;;; --- the run ---------------------------------------------------------------------------------
+
+(defun run-suites ()
+  "Run the suite-*.lisp files beside this one in name order — all of them,
+or those OMPRE_TEST_SUITES names (core,annotate) — each in a scratch home of
+its own, and say what held => true when every check did."
+  (let* ((wanted (let ((names (uiop:getenv "OMPRE_TEST_SUITES")))
+                   (and names (plusp (length names)) (uiop:split-string names :separator '(#\,)))))
+         (suites (sort (remove-if-not
+                        (lambda (file)
+                          (let ((name (pathname-name file)))
+                            (and (eql 0 (search "suite-" name))
+                                 (or (null wanted) (member (subseq name 6) wanted :test #'string=)))))
+                        (uiop:directory-files *suites* "*.lisp"))
+                       #'string< :key #'pathname-name)))
+    (format t "~&omp-re: ~a, home ~a, rizin ~:[absent~;present~]~%" *root* *scratch-root* *rizin*)
+    (dolist (file suites)
+      (begin-suite-file (pathname-name file))
+      (handler-case (load file)
+        (error (condition)
+          (push (format nil "~a did not load: ~a" (pathname-name file) condition) *failures*)
+          (format t "  FAIL  ~a did not load: ~a~%" (pathname-name file) condition)))))
+  (begin-suite-file "end")
+  (uiop:delete-directory-tree *scratch-root* :validate t :if-does-not-exist :ignore)
+  (format t "~&omp-re: ~a checks, ~a failed~%" *checks* (length *failures*))
+  (dolist (failure (reverse *failures*)) (format t "  failed: ~a~%" failure))
+  (finish-output)
+  (null *failures*))

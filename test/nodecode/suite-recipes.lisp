@@ -126,6 +126,33 @@ through — whatever became of the open after that."
                   (re:scan-imports :callers :false)
                   (equal '("iij") (nthcdr before (recorded-commands id)))))
 
+         (check "scan_imports with callers asks where each import worth a look is called from, and names a place by its function"
+                (let* ((before (length (recorded-commands id)))
+                       (text (re:scan-imports))
+                       (reads (nthcdr before (recorded-commands id)))
+                       (asked (count "axtj" reads :test #'string=))
+                       (said (count-if (lambda (line) (has "called from " line)) (omp-re:split-lines text))))
+                  (and (equal "iij" (first reads))
+                       (<= said asked)
+                       ;; Where anything is called from anywhere, the place reads function+offset.
+                       (or (zerop said) (ppcre:scan "called from \\d+ places? \\[evidence [0-9a-f]{8}\\]: \\S+\\+0x[0-9a-f]+" text))
+                       (every (lambda (short) (omp-re::find-evidence short (omp-re:find-session id)))
+                              (cited-ids text)))))
+
+         (check "inspect_function reads a function's shape, body, variables and callers, and cites each read where it says it"
+                (let* ((before (length (recorded-commands id)))
+                       (text (re:inspect-function "main"))
+                       (reads (nthcdr before (recorded-commands id)))
+                       (ids (cited-ids text)))
+                  (and (starts (format nil "inspect_function: main~%~%Shape [evidence ") text)
+                       (has (format nil "~%~%Body [evidence ") text)
+                       (has (format nil "~%Called from ") text)
+                       (subsetp '("afij" "pdfj" "afvlj" "axtj") reads :test #'string=)
+                       (<= 4 (length ids))
+                       (every (lambda (short) (omp-re::find-evidence short (omp-re:find-session id))) ids)
+                       ;; The list under the report names every read it cites, with its command.
+                       (every (lambda (short) (ppcre:scan (format nil "\\n  ~a  \\S" short) text)) ids))))
+
          (check "an address that is no function is refused in words"
                 (has "no function at" (refusal (lambda () (re:inspect-function "0x1")))))
          (check "a function named by something other than a string is refused in the engine's voice, naming the recipe, before any read"
@@ -171,7 +198,11 @@ through — whatever became of the open after that."
                        (has "0x80  SHA-256" crypto)
                        (has "0xc0  ChaCha / Salsa20" crypto)))
            (check "each hit cites the search that found it: three, and rizin's own search"
-                  (= 4 (length (cited-ids crypto)))))))
+                  (= 4 (length (cited-ids crypto)))))
+         (check "with references, each hit is also asked what refers to it: one read a hit"
+                (let ((before (length (recorded-commands id))))
+                  (re:find-crypto)
+                  (= 3 (count "axtj" (nthcdr before (recorded-commands id)) :test #'string=))))))
 
      ;; The same name, different bytes.
      (let* ((id (fresh-session))

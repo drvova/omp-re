@@ -17,28 +17,4 @@
 ;;;; enough). Exits 0 when every check holds.
 
 (load (merge-pathnames "harness.lisp" (or *load-truename* *default-pathname-defaults*)))
-(in-package #:omp-re-test)
-
-(let* ((here (uiop:pathname-directory-pathname (or *load-truename* *default-pathname-defaults*)))
-       (wanted (let ((names (uiop:getenv "OMPRE_TEST_SUITES")))
-                 (and names (plusp (length names)) (uiop:split-string names :separator '(#\,)))))
-       (suites (sort (remove-if-not
-                      (lambda (file)
-                        (let ((name (pathname-name file)))
-                          (and (eql 0 (search "suite-" name))
-                               (or (null wanted) (member (subseq name 6) wanted :test #'string=)))))
-                      (uiop:directory-files here "*.lisp"))
-                     #'string< :key #'pathname-name)))
-  (format t "~&omp-re: ~a, home ~a, rizin ~:[absent~;present~]~%" *root* *scratch-root* *rizin*)
-  (dolist (file suites)
-    (begin-suite-file (pathname-name file))
-    (handler-case (load file)
-      (error (condition)
-        (push (format nil "~a did not load: ~a" (pathname-name file) condition) *failures*)
-        (format t "  FAIL  ~a did not load: ~a~%" (pathname-name file) condition)))))
-
-(begin-suite-file "end")
-(uiop:delete-directory-tree *scratch-root* :validate t :if-does-not-exist :ignore)
-(format t "~&omp-re: ~a checks, ~a failed~%" *checks* (length *failures*))
-(dolist (failure (reverse *failures*)) (format t "  failed: ~a~%" failure))
-(sb-ext:exit :code (if *failures* 1 0) :abort t)
+(sb-ext:exit :code (if (omp-re-test:run-suites) 0 1) :abort t)
