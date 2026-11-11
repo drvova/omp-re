@@ -5,6 +5,9 @@
  * call them: execute(toolCallId, params, signal, onUpdate, ctx).
  */
 import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 // The schema builder omp 18 injects as `pi.zod` (see pi-coding-agent extensions/loader.ts).
 import * as zod from "@oh-my-pi/omptype/zod";
@@ -22,6 +25,47 @@ export function isRzToolAvailable(tool: string): boolean {
 	const path = resolveRizinTool(tool);
 	return path.includes("/") ? existsSync(path) : Bun.which(path) !== null;
 }
+
+/** The annotation tools: write-tier, each recorded and replayed. */
+const ANNOTATE_TOOLS = [
+	"rename_function",
+	"rename_variable",
+	"set_comment",
+	"set_prototype",
+	"set_variable_type",
+	"define_variable",
+	"define_global",
+	"define_function",
+	"set_calling_convention",
+	"set_flag",
+	"set_arch_hint",
+	"set_hint",
+	"set_data",
+	"set_string",
+	"set_format",
+];
+
+/** The tools the engine offers in every session. rizin_cli, the triage tools and rizin_debug depend on what is installed and switched on. */
+export const ALWAYS_REGISTERED = [
+	...ANNOTATE_TOOLS,
+	"open_binary",
+	"map_file",
+	"export_project",
+	"analyze",
+	"apply_signatures",
+	"create_signature",
+	"record_finding",
+	"adopt_finding",
+	"retract_finding",
+	"rizin_help",
+	"rizin_command",
+	"rizin_emulate",
+];
+
+const RE_TOOLS = new Set([...ALWAYS_REGISTERED, "rizin_cli", "rizin_debug", "triage_capa", "triage_floss", "triage_die", "triage_yara"]);
+
+/** Whether `name` is one of the engine's tools, as opposed to omp's own. */
+export const isReTool = (name: string): boolean => RE_TOOLS.has(name);
 
 export function logSkip(suite: string): void {
 	if (canRunRizin) return;
@@ -153,3 +197,91 @@ export async function captureError(promise: Promise<unknown>): Promise<Error> {
 	}
 	throw new Error("expected the promise to reject, but it resolved");
 }
+
+// --- omp's SDK, with the extension loaded --------------------------------------------------
+
+const EXTENSION = resolve(import.meta.dir, "../extensions/re");
+
+export interface SdkHarness {
+	session: AgentSession;
+	notes: string[];
+	editor: () => string;
+	shutdown: () => Promise<void>;
+}
+
+/** A minimal ExtensionUIContext: records what the extension tells the user, renders nothing. */
+function makeUi(notes: string[], editor: { text: string }) {
+	const noop = () => {};
+	return {
+		notify: (message: string, type?: string) => notes.push(`[${type ?? "info"}] ${message}`),
+		setStatus: noop,
+		setWidget: noop,
+		setWorkingMessage: noop,
+		setEditorText: (text: string) => {
+			editor.text = text;
+		},
+		getEditorText: () => editor.text,
+		custom: async () => undefined,
+		select: async () => undefined,
+		confirm: async () => true,
+		input: async () => undefined,
+		onTerminalInput: () => noop,
+		setFooter: noop,
+		setHeader: noop,
+		setTitle: noop,
+		pasteToEditor: noop,
+		editor: async () => undefined,
+		addAutocompleteProvider: noop,
+		setEditorComponent: noop,
+		getAllThemes: async () => [],
+		getTheme: async () => undefined,
+		setTheme: async () => ({ success: true }),
+		getToolsExpanded: () => false,
+		setToolsExpanded: noop,
+	};
+}
+
+/**
+ * Boot a session with the extension loaded. `headless` boots without a UI, as `omp -p` runs; `flags` sets
+ * extension flags (like `--binary`) before session_start fires.
+ */
+export async function boot(sessionManager: unknown, options: { headless?: boolean; flags?: Record<string, string> } = {}): Promise<SdkHarness> {
+	const sdk = await import("@oh-my-pi/pi-coding-agent");
+	const { initializeExtensions } = await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
+	const notes: string[] = [];
+	const editor = { text: "" };
+	const ui = makeUi(notes, editor);
+	const { session, extensionsResult, setToolUIContext } = await sdk.createAgentSession({
+		cwd: tmpdir(),
+		additionalExtensionPaths: [EXTENSION],
+		disableExtensionDiscovery: true,
+		sessionManager: sessionManager as never,
+	});
+	if (extensionsResult.errors.length > 0) throw new Error(extensionsResult.errors.map((failure) => failure.error).join("\n"));
+	for (const [name, value] of Object.entries(options.flags ?? {})) session.extensionRunner!.setFlagValue(name, value);
+	if (!options.headless) setToolUIContext(ui as never, false);
+	await initializeExtensions(session, {
+		reportSendError: () => {},
+		reportRuntimeError: (error: { error: string }) => notes.push(`[runtime] ${error.error}`),
+		...(options.headless ? {} : { uiContext: ui as never }),
+	});
+	return {
+		session,
+		notes,
+		editor: () => editor.text,
+		shutdown: () => session.dispose(),
+	};
+}
+
+export const activeRe = (session: AgentSession) => session.getActiveToolNames().filter(isReTool);
+export const mountedRe = (session: AgentSession) => session.getMountedXdevToolNames().filter(isReTool);
+
+/** Run one JavaScript cell through omp's own `eval` tool, as the model does. Returns its text output (an error the cell threw comes back as its output, with isError). */
+export async function evalJs(session: AgentSession, code: string): Promise<{ text: string; isError: boolean }> {
+	const result = await session.getToolByName("eval")!.execute(`t-eval-${Math.random().toString(36).slice(2)}`, { language: "js", code } as never);
+	const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+	return { text, isError: (result as { isError?: boolean }).isError === true };
+}
+
+/** A cell that returns the message of whatever `body` throws, or "ok". */
+export const caught = (body: string) => `let m = "ok"; try { ${body} } catch (e) { m = e.message }; m`;

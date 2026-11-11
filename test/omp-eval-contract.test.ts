@@ -501,8 +501,20 @@ describe("%load <path>", () => {
 
 describe("internal URLs, read from a cell", () => {
 	test('read("skill://<name>/<path>") is the file\'s text under a first line naming the file it resolved to; a bare skill://<name> is its SKILL.md', async () => {
-		const viaUrl = await value<string>(h, 'read("skill://re-triage/recipes.js")');
-		expect(viaUrl).toBe(`[Skill file: ${RECIPES}]\n${(await readFile(RECIPES, "utf8")).trimEnd()}`);
+		// A skill made for this test: its file is far under the size omp cuts a read at, whatever becomes of the plugin's own.
+		const sdk = await import("@oh-my-pi/pi-coding-agent");
+		const fixture = join(work, "read-fixture", "skills");
+		const note = join(fixture, "contract-notes", "note.js");
+		await mkdir(join(fixture, "contract-notes"), { recursive: true });
+		await writeFile(join(fixture, "contract-notes", "SKILL.md"), "---\nname: contract-notes\ndescription: a skill with one small file\n---\n");
+		await writeFile(note, "// line one\nglobalThis.note = 1;\n");
+		const { skills } = await sdk.loadSkillsFromDir({ dir: fixture, source: "omp-re:user" });
+		const session = await boot(sdk.SessionManager.inMemory(join(work, "read-fixture")), undefined, skills);
+		try {
+			expect(await value<string>(session, 'read("skill://contract-notes/note.js")')).toBe(`[Skill file: ${note}]\n// line one\nglobalThis.note = 1;`);
+		} finally {
+			await session.dispose();
+		}
 		expect((await value<string>(h, 'read("skill://re-triage")')).split("\n").slice(0, 3)).toEqual([`[Skill file: ${join(SKILLS, "re-triage", "SKILL.md")}]`, "---", "name: re-triage"]);
 		expect(await out(h, caught('await read("skill://no-such-skill/x")'))).toBe("Unknown skill: no-such-skill\nAvailable: re-triage");
 	});

@@ -1,13 +1,13 @@
 /**
  * Loads extensions/re through omp's real SDK and extension runner — the same
- * loader, tool wrappers (approval, tool_call/tool_result events), and command
- * dispatch an interactive session uses — instead of a stub ExtensionAPI.
- * Nothing here calls a model: slash commands are handled locally and tools
- * are executed straight from the session's tool registry.
+ * loader, tool wrappers (approval and tool events), and command dispatch an
+ * interactive session uses — with the real engine behind it: an SBCL child
+ * the extension starts, and, in the second half, a real rizin. Nothing here
+ * calls a model: slash commands are handled locally and tools are executed
+ * straight from the session's tool registry.
  *
- * This is the suite that catches host API drift (e.g. omp 18 changing
- * getAllTools() from names to ToolInfo objects broke `/re on` while every
- * stub-based test stayed green). The rizin-free half runs in CI.
+ * This is the suite that catches host API drift, and that the extension and
+ * the engine still agree on the wire between them.
  *
  * Every RE tool is `discoverable` (render.ts `RE_LOAD_MODE`), so omp mounts it
  * as an `xd://` device rather than listing it top-level, and the model drives
@@ -17,110 +17,13 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
-import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
-import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
+import { activeRe, ALWAYS_REGISTERED, boot, canRunRizin, caught, evalJs, logSkip, mountedRe, rmDirSafe, type SdkHarness, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
-const EXTENSION = resolve(import.meta.dir, "../extensions/re");
-/** The tools registered unconditionally in every session. Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
-const ALWAYS_REGISTERED = [
-	// The read-tier wrappers are no longer registered (one-tool design): reads go through rizin_command.
-	...Object.keys(RE_MUTATE_TOOL_NAMES),
-	...Object.keys(RE_RIZIN_TOOL_NAMES),
-	...Object.keys(RE_EMULATE_TOOL_NAMES),
-	...Object.keys(RE_SIGNATURE_TOOL_NAMES),
-	...Object.keys(RE_ANALYZE_TOOL_NAMES),
-	...Object.keys(RE_SESSION_TOOL_NAMES),
-];
-
-interface Harness {
-	session: AgentSession;
-	notes: string[];
-	editor: () => string;
-	shutdown: () => Promise<void>;
-}
-
-/** A minimal ExtensionUIContext: records what the extension tells the user, renders nothing. */
-function makeUi(notes: string[], editor: { text: string }) {
-	const noop = () => {};
-	return {
-		notify: (message: string, type?: string) => notes.push(`[${type ?? "info"}] ${message}`),
-		setStatus: noop,
-		setWidget: noop,
-		setWorkingMessage: noop,
-		setEditorText: (text: string) => {
-			editor.text = text;
-		},
-		getEditorText: () => editor.text,
-		custom: async () => undefined,
-		select: async () => undefined,
-		confirm: async () => true,
-		input: async () => undefined,
-		onTerminalInput: () => noop,
-		setFooter: noop,
-		setHeader: noop,
-		setTitle: noop,
-		pasteToEditor: noop,
-		editor: async () => undefined,
-		addAutocompleteProvider: noop,
-		setEditorComponent: noop,
-		getAllThemes: async () => [],
-		getTheme: async () => undefined,
-		setTheme: async () => ({ success: true }),
-		getToolsExpanded: () => false,
-		setToolsExpanded: noop,
-	};
-}
-
-/**
- * Boot a session with the extension loaded. `headless` boots without a UI, as `omp -p` runs; `flags` sets
- * extension flags (like `--binary`) before session_start fires.
- */
-async function boot(sessionManager: unknown, options: { headless?: boolean; flags?: Record<string, string> } = {}): Promise<Harness> {
-	const sdk = await import("@oh-my-pi/pi-coding-agent");
-	const { initializeExtensions } = await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
-	const notes: string[] = [];
-	const editor = { text: "" };
-	const ui = makeUi(notes, editor);
-	const { session, extensionsResult, setToolUIContext } = await sdk.createAgentSession({
-		cwd: tmpdir(),
-		additionalExtensionPaths: [EXTENSION],
-		disableExtensionDiscovery: true,
-		sessionManager: sessionManager as never,
-	});
-	expect(extensionsResult.errors).toEqual([]);
-	for (const [name, value] of Object.entries(options.flags ?? {})) session.extensionRunner!.setFlagValue(name, value);
-	if (!options.headless) setToolUIContext(ui as never, false);
-	await initializeExtensions(session, {
-		reportSendError: () => {},
-		reportRuntimeError: (error: { error: string }) => notes.push(`[runtime] ${error.error}`),
-		...(options.headless ? {} : { uiContext: ui as never }),
-	});
-	return {
-		session,
-		notes,
-		editor: () => editor.text,
-		shutdown: () => session.dispose(),
-	};
-}
-
-const activeRe = (session: AgentSession) => session.getActiveToolNames().filter((name) => RE_ALL_TOOL_NAMES[name]);
-const mountedRe = (session: AgentSession) => session.getMountedXdevToolNames().filter((name) => RE_ALL_TOOL_NAMES[name]);
-
-/** Run one JavaScript cell through omp's own `eval` tool, as the model does. Returns its text output (an error the cell threw comes back as its output, with isError). */
-async function evalJs(session: AgentSession, code: string): Promise<{ text: string; isError: boolean }> {
-	const result = await session.getToolByName("eval")!.execute(`t-eval-${Math.random().toString(36).slice(2)}`, { language: "js", code } as never);
-	const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
-	return { text, isError: (result as { isError?: boolean }).isError === true };
-}
-
-/** A cell that returns the message of whatever `body` throws, or "ok". */
-const caught = (body: string) => `let m = "ok"; try { ${body} } catch (e) { m = e.message }; m`;
 
 let agentDir: string;
 let originalAgentDir: string;
@@ -137,7 +40,7 @@ afterAll(async () => {
 });
 
 describe("loaded by omp's SDK (no rizin needed)", () => {
-	let h: Harness;
+	let h: SdkHarness;
 
 	beforeAll(async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
@@ -186,7 +89,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 
 	test("bare /re shows help, an unknown subcommand is an error, and undo with nothing open says so", async () => {
 		await h.session.prompt("/re");
-		expect(h.notes.at(-1)).toContain("/re open <path>      open a binary");
+		expect(h.notes.at(-1)).toContain("/re open <path>            open a binary and analyze it with rizin");
+		expect(h.notes.at(-1)).toContain("alt+g functions");
 		await h.session.prompt("/re bogus");
 		expect(h.notes.at(-1)).toBe('[error] omp-re: unknown /re subcommand "bogus" — try /re help');
 		await h.session.prompt("/re undo");
@@ -278,9 +182,8 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		try {
 			await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`);
 			await h.session.prompt("/re status");
-			// The count is REQUIRED_COMMANDS.length, which grows as tool families
-			// are added; assert the shape, not a frozen number.
-			expect(h.notes.at(-1)).toContain(`rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present`);
+			// How many commands the engine sends grows as tool families are added: the shape, not a frozen number.
+			expect(h.notes.at(-1)).toMatch(/rizin commands: all \d+ omp-re sends are present/);
 			const result = await evalJs(h.session, '(await tool.rizin_command({ command: "pdsf", addr: "main" })).text');
 			expect(result.text.startsWith("rizin> pdsf @ main\n")).toBe(true);
 			// rizin_cli registers through the real runner when the rz-* tools are present (they ship with rizin).

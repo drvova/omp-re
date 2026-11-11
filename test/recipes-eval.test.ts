@@ -36,8 +36,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES } from "../extensions/re/audit.ts";
-import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
+import { canRunRizin, isReTool, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
 
 logSkip("recipes-eval rizin tests");
 
@@ -264,7 +263,7 @@ describe("recipes.js in omp's eval (no rizin needed)", () => {
 		// Recipes are code in eval, not tools: the session's tool set is what it was.
 		expect(h.session.getAllToolNames().sort()).toEqual(tools);
 		for (const name of ["triage", "scan_imports", "inspect_function", "find_comparisons", "find_crypto"]) {
-			expect(RE_ALL_TOOL_NAMES[name]).toBeUndefined();
+			expect(isReTool(name)).toBe(false);
 			expect(h.session.getToolByName(name)).toBeUndefined();
 		}
 	});
