@@ -1,10 +1,15 @@
 name: CI
 
-# One job, on Linux, with everything the repository's checks need: bun, SBCL
-# and cl-ppcre (the engine is Common Lisp, and the omp extension starts it),
-# rizin, python3 (omp's Python eval kernel, for recipes.py) and a C compiler
-# for the fixture. Nothing is skipped for want of a tool here; what the suites
-# still skip is said in docs/testing.md.
+# The `suite` job, on Linux, has everything the repository's checks need: bun,
+# SBCL and cl-ppcre (the engine is Common Lisp, and the omp extension starts
+# it), rizin, python3 (omp's Python eval kernel, for recipes.py) and a C
+# compiler for the fixture. Nothing is skipped for want of a tool here; what
+# the suites still skip is said in docs/testing.md.
+#
+# The `coverage` job runs the Lisp suite a second time, compiled with
+# sb-cover's instrumentation (scripts/cover.lisp), and writes the table to the
+# job's summary. It is a job of its own so that the suite the first job runs
+# is the code as it ships: instrumentation changes how the Lisp is compiled.
 #
 # Never fetch a malware sample into CI: the fixture is a trivial program built
 # from test/fixtures/sample.c on the runner.
@@ -54,6 +59,10 @@ jobs:
         run: bun scripts/gen-recipes.ts --check
       - name: The shim's types and the protocol document's tables are current with stdio/protocol.json
         run: bun scripts/gen-protocol.ts --check
+      # The engine's exported functions are declared in types, and a call that
+      # does not fit one is a compiler warning: here a warning is a failure.
+      - name: The three Lisp systems compile from scratch with no warning
+        run: sbcl --noinform --non-interactive --no-sysinit --no-userinit --load scripts/check-warnings.lisp
       # The engine must need nothing of either host: system omp-re, in a plain SBCL.
       - name: The engine loads alone
         run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames "omp-re.asd" (uiop:getcwd)))' --eval '(asdf:load-system "omp-re")'
@@ -64,3 +73,32 @@ jobs:
       # The extension loaded through omp's real SDK, which starts the engine.
       - name: The bun suites
         run: bun test test/
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SBCL and cl-ppcre
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
+      - name: Install rizin (portable static build; the release has no .deb)
+        run: |
+          set -eux
+          curl -fsSL "https://github.com/rizinorg/rizin/releases/download/v${RIZIN_VERSION}/rizin-v${RIZIN_VERSION}-static-x86_64.tar.xz" -o /tmp/rizin.tar.xz
+          mkdir -p "$HOME/rizin" && tar -xJf /tmp/rizin.tar.xz -C "$HOME/rizin"
+          dirname "$(find "$HOME/rizin" -type f -name rizin | head -1)" >> "$GITHUB_PATH"
+      - name: Build fixture
+        run: |
+          cc -o fixture test/fixtures/sample.c
+          echo "OMPRE_TEST_BINARY=$PWD/fixture" >> "$GITHUB_ENV"
+      # The floor is not a target. The suite ran 91% of the expressions when it
+      # was set, and 56% with rizin absent and every rizin half skipped, which
+      # the suite itself reports as green: 80 tells those two apart and is out
+      # of the way of an ordinary change.
+      - name: The Lisp suite under sb-cover
+        env:
+          OMPRE_COVERAGE_FLOOR: "80"
+        run: sbcl --noinform --non-interactive --no-sysinit --no-userinit --load scripts/cover.lisp
+      - name: The table, in the job's summary
+        if: ${{ always() }}
+        run: if [ -f coverage/summary.md ]; then cat coverage/summary.md >> "$GITHUB_STEP_SUMMARY"; else echo "No coverage summary was written." >> "$GITHUB_STEP_SUMMARY"; fi
