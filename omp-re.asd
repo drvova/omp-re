@@ -49,6 +49,7 @@
                (:file "audit-claims")
                (:file "findings")
                (:file "verify")
+               (:file "anchor")
                (:file "report")
                (:file "carry")
                (:file "debug")

@@ -169,43 +169,23 @@ several commands, and one from before the reproducibility hash."
 (defparameter +read-seconds+ 120
   "One read-only command's ceiling: the first time, and every time it is run again.")
 
-(defun run-read (command addr &optional (session *session*))
-  "Gate COMMAND, at ADDR when given, through the read-only policy and run it
-on SESSION's rizin => (values OUTPUT STDERR LINE), LINE being exactly what
-rizin was sent. The one way a read reaches rizin; a refusal is RE-ERROR."
-  (let ((line (check-rizin-command (load-catalog) command addr)))
-    (multiple-value-bind (output stderr) (rz-run (ensure-rizin session) line :seconds +read-seconds+)
-      (values output stderr line))))
+(defun gate-read (command addr)
+  "COMMAND, at ADDR when given, through the read-only policy => the exact
+line rizin is sent. A refusal is RE-ERROR."
+  (values (check-rizin-command (load-catalog) command addr)))
 
-(defun rerun-evidence-read (record &optional (session *session*))
-  "Take RECORD's read again on the binary SESSION has open => as RUN-READ
-answers. Nothing is recorded."
-  (let ((read (or (evidence-read record)
-                  (fail "omp-re: evidence ~a records no command that can be run again"
-                        (shown-id (or (jstring record "id") "?"))))))
-    (run-read (jstring read "command") (jstring read "addr") session)))
+(defun run-gated-line (line &optional (session *session*))
+  "Run LINE — what GATE-READ answered — on SESSION's rizin
+=> (values OUTPUT STDERR)."
+  (rz-run (ensure-rizin session) line :seconds +read-seconds+))
+
+(defun run-read (command addr &optional (session *session*))
+  "One read of the binary: gated, then run => (values OUTPUT STDERR LINE).
+The one way a read reaches rizin, the first time and every time after."
+  (let ((line (gate-read command addr)))
+    (multiple-value-bind (output stderr) (run-gated-line line session)
+      (values output stderr line))))
 
 (contribute "evidence" :order 50
   :status (lambda (session)
             (list (format nil "evidence on this branch: ~d" (length (evidence-records session))))))
-
-;;; --- names the tool groups still call; removed when they move to the above ---------------
-;;; EVIDENCE-ID-OF text (recipes.lisp)   → CALL-TOOL's fourth value, the id
-;;;     itself; (shown-id id) is what a line cites.
-;;; In the tool groups' own files, to be deleted there for the names above:
-;;;   findings.lisp  COLLECTED-EVIDENCE → EVIDENCE-RECORDS; RESOLVE-ID → FIND-BY-ID;
-;;;                  SHORT-ID → SHOWN-ID; +MIN-ID-PREFIX+ → +SHORTEST-ID-PREFIX+
-;;;   verify.lisp    RECORDED-STATUS → EVIDENCE-STATUS; RECORDED-COMMAND → EVIDENCE-COMMAND;
-;;;                  RECORDED-COMMAND-LINES → EVIDENCE-COMMAND-LINES;
-;;;                  check-rizin-command + rz-run with +VERIFY-COMMAND-SECONDS+ → RERUN-EVIDENCE-READ
-;;;   report.lisp    RIZIN-COMMAND-ARGUMENTS → EVIDENCE-READ
-;;;   carry.lisp     SHORT-SHA's subseq → SHOWN-HASH; its two check-rizin-command + rz-run
-;;;                  with +CARRY-COMMAND-SECONDS+ → RUN-READ
-;;;   every inline (subseq hash 0 (min 12 ...)) → SHOWN-HASH
-
-(defun evidence-id-of (text)
-  "The shown id in TEXT's trailing [evidence xxxxxxxx ...] tag, or NIL."
-  (let ((tag (search "[evidence " text :from-end t)))
-    (and tag
-         (<= (+ tag 10 +shown-id-length+) (length text))
-         (subseq text (+ tag 10) (+ tag 10 +shown-id-length+)))))

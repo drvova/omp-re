@@ -221,6 +221,15 @@ read as NIL; NIL as soon as a step is not an object."
   (let ((value (apply #'jget object path)))
     (and (stringp value) value)))
 
+(defun jstring-or-absent (object &rest path)
+  "The member at PATH when it is a string, else :ABSENT — for OBJ, which
+leaves an absent member out."
+  (or (apply #'jstring object path) :absent))
+
+(defun jstrings (object &rest path)
+  "The strings of the array at PATH, as a list."
+  (remove-if-not #'stringp (apply #'jlist object path)))
+
 (defun jnumber (object &rest path)
   (let ((value (apply #'jget object path)))
     (and (realp value) value)))

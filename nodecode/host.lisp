@@ -168,6 +168,8 @@ start and cleared at stop. Every one is optional.
                                keep the whole of a result too large to send
                                => (values ID WHERE), WHERE being how a reader
                                is told to find it
+  :READ-ARTIFACT (SESSION ID)  the whole text :SAVE-ARTIFACT kept under ID,
+                               or NIL
   :TRANSCRIPT    (SESSION TYPE TEXT DETAILS)
                                show TEXT in the session's transcript as a
                                message of TYPE (re.binary), never sent to
@@ -182,6 +184,12 @@ With none installed — the engine alone under a test — nothing is configured,
 there is no turn, the record is the session's own file with every entry on
 the branch, a notice is a line on the log, an artifact is a file beside the
 record, nobody is watching and there is nobody to ask.")
+
+(defun install-host (&rest services)
+  (setf *host* services))
+
+(defun clear-host ()
+  (setf *host* '()))
 
 (defun host-service (service)
   (getf *host* service))
@@ -238,19 +246,3 @@ directory."
   "A path under the state directory's re/ folder — the layout omp-re keeps
 under omp's agent directory."
   (merge-pathnames (format nil "re/~{~a~^/~}" parts) (state-directory)))
-
-;;; --- names the tool groups still call; removed when they move to the above ---------------
-;;; *CLAIM-JUDGE* (audit-claims.lisp, report.lisp) → (host-service :judge), or
-;;; (ask-host :judge PROMPT). Named through SYMBOL-VALUE because the variable
-;;; is theirs, defined after this file.
-
-(defun install-host (&rest services)
-  (setf *host* services)
-  (when (boundp '*claim-judge*)
-    (setf (symbol-value '*claim-judge*) (getf services :judge)))
-  services)
-
-(defun clear-host ()
-  (when (boundp '*claim-judge*)
-    (setf (symbol-value '*claim-judge*) nil))
-  (setf *host* '()))

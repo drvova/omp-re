@@ -24,18 +24,6 @@
 (defun json-of (text)
   (re::json-decode text))
 
-(defun call-with-environment (name value thunk)
-  "THUNK with the environment variable NAME set to VALUE (unset when NIL),
-and put back after."
-  (let ((before (sb-posix:getenv name)))
-    (unwind-protect
-         (progn (if value (sb-posix:setenv name value 1) (sb-posix:unsetenv name))
-                (funcall thunk))
-      (if before (sb-posix:setenv name before 1) (sb-posix:unsetenv name)))))
-
-(defmacro with-environment ((name value) &body body)
-  `(call-with-environment ,name ,value (lambda () ,@body)))
-
 (defun process-gone-p (process)
   "Whether PROCESS ended, waiting a few seconds for it."
   (loop repeat 60
@@ -99,8 +87,8 @@ its threads runs the debugger, so every thread's list is read."
                   (has ":action  one of \"start\", \"continue\"" text)
                   (has "\"heap_bins\", \"stop\", required" text))))
     (check "it is exec-tier and never evidence"
-           (let ((tool (re::find-tool "rizin_debug")))
-             (and (eq :exec (re::tool-tier tool)) (null (re::tool-evidence tool)))))
+           (let ((tool (described-tool "rizin_debug")))
+             (and (equal "exec" (gethash "approval" tool)) (not (gethash "evidence" tool)))))
     (check "the status line says it is enabled"
            (in-session ((fresh-session)) (has "debugger: enabled" (re:status)))))
   (with-environment ("OMPRE_ENABLE_DEBUGGER" "1")
@@ -242,9 +230,9 @@ its threads runs the debugger, so every thread's list is read."
             (equal "omp-re: debug: watch perm must be r, w, or rw (got \"x\")"
                    (refusal (lambda () (re::validate-watch-perm "x"))))))
 (check "a count is clamped to its range, and floored"
-       (and (= 1 (re::clamp-int nil 1 100000)) (= 16 (re::clamp-int nil 16 1024))
-            (= 1 (re::clamp-int 0 1 100000)) (= 1 (re::clamp-int -5 1 100000))
-            (= 100000 (re::clamp-int 1000000000 1 100000)) (= 3 (re::clamp-int 3.9 1 100000))))
+       (and (= 1 (re::clamped-count nil 1 100000)) (= 16 (re::clamped-count nil 16 1024))
+            (= 1 (re::clamped-count 0 1 100000)) (= 1 (re::clamped-count -5 1 100000))
+            (= 100000 (re::clamped-count 1000000000 1 100000)) (= 3 (re::clamped-count 3.9 1 100000))))
 (check "the build's bits are read from rizin -v's first line"
        (and (eql 64 (re::parse-rizin-version-arch "rizin 0.9.1 @ linux-x86-64"))
             (eql 32 (re::parse-rizin-version-arch "rizin 0.9.1 @ windows-x86-32"))
@@ -256,9 +244,9 @@ its threads runs the debugger, so every thread's list is read."
             (null (re::parse-rizin-version-arch "rizin 0.9.1 @ plan9-mips"))
             (null (re::parse-rizin-version-arch ""))))
 (check "the debug budget is OMPRE_DEBUG_TIMEOUT_MS, 60 seconds when unset or nonsense"
-       (and (with-environment ("OMPRE_DEBUG_TIMEOUT_MS" nil) (= 60 (re::debug-seconds)))
-            (with-environment ("OMPRE_DEBUG_TIMEOUT_MS" "2500") (= 5/2 (re::debug-seconds)))
-            (with-environment ("OMPRE_DEBUG_TIMEOUT_MS" "soon") (= 60 (re::debug-seconds)))))
+       (and (with-environment ("OMPRE_DEBUG_TIMEOUT_MS" nil) (= 60 (re::dynamic-seconds)))
+            (with-environment ("OMPRE_DEBUG_TIMEOUT_MS" "2500") (= 5/2 (re::dynamic-seconds)))
+            (with-environment ("OMPRE_DEBUG_TIMEOUT_MS" "soon") (= 60 (re::dynamic-seconds)))))
 
 ;;; --- the tool with no debug session ---------------------------------------------------
 
@@ -389,7 +377,7 @@ done
                  (check "the launch runs light analysis, then reads the program counter"
                         (equal '("aa" "dr rip") (log-lines ".cmds")))
                  (check "the result opens with the loud warning and says what was launched"
-                        (and (re::starts-with (format nil "debug: started ~a~%~a~%Stopped at entry. Target env: arg0=-l, arg1=two words, setenv=LANG=C, chdir=/tmp, aslr=no."
+                        (and (starts (format nil "debug: started ~a~%~a~%Stopped at entry. Target env: arg0=-l, arg1=two words, setenv=LANG=C, chdir=/tmp, aslr=no."
                                                       *binary* re::+debug-launch-warning+)
                                               text)
                              (has (format nil "~%rip = 0x0000000000401000~%Set breakpoints (break_add), then continue or step.") text)))
@@ -595,7 +583,7 @@ done
                                  (ignore-errors (delete-file (concatenate 'string *stand-in-log* ".cmds")))
                                  (let ((message (debug-refusal :action "dump_memory" :addr "rip" :size 16 :file file)))
                                    (and (has "invalid output filename" message)
-                                        (notany (lambda (command) (re::starts-with "p8" command))
+                                        (notany (lambda (command) (starts "p8" command))
                                                 (log-lines ".cmds")))))
                                '("../escape.bin" "/etc/cron.d/x" "a/b.bin" ".." "sub\\x.bin" "x y.bin" "~root")))
                  (check "and nothing was written outside it"
@@ -630,7 +618,7 @@ done
                                       (debug-call :action "trace_save" :file "t_session")))))
                  (check "trace_save with no name generates one, inside the output directory"
                         (let ((command (first (sent :action "trace_save"))))
-                          (and (re::starts-with (format nil "dtst '~atrace_" output) command)
+                          (and (starts (format nil "dtst '~atrace_" output) command)
                                (ppcre:scan "trace_[0-9]+'$" command))))
                  (check "trace_save and trace_load refuse a name that would leave the output directory"
                         (and (has "invalid output filename" (sent-nothing-p :action "trace_save" :file "../escape"))
@@ -669,7 +657,7 @@ done
                (debug-call :action "start")
                (let ((dbg (re::session-dbg session)))
                  (ignore-errors (delete-file (concatenate 'string *stand-in-log* ".argv")))
-                 (nlk:kill-tree (re::rz-pid dbg))
+                 (sb-ext:process-kill (re::rz-process dbg) 9)
                  (process-gone-p (re::rz-process dbg))
                  (check "a debug process that died is not respawned by the next action"
                         (and (has "no debug session" (debug-refusal :action "registers"))
@@ -694,7 +682,7 @@ done
                  (check "a remote stub is -d <uri> <binary>"
                         (and (equal (append (shared-flags) (list "-d" "gdb://127.0.0.1:1234" *binary*))
                                     (log-lines ".argv"))
-                             (re::starts-with "debug: connected to gdb://127.0.0.1:1234" text))))
+                             (starts "debug: connected to gdb://127.0.0.1:1234" text))))
                (debug-call :action "stop")
 
                (suite "debug: a raw target, against a stand-in")
@@ -732,7 +720,7 @@ done
                  (check "two sessions each own a debug process"
                         (and (every #'re::rz-alive-p processes)
                              (not (eq (first processes) (second processes)))))
-                 (nodecode-re::stop-cell)
+                 (stop-running-cell)
                  (check "stopping the cell leaves no debug process alive"
                         (every (lambda (rz) (process-gone-p (re::rz-process rz))) processes))))))))))
 
@@ -763,12 +751,12 @@ done
                  (failed
                   (format t "  NOTE  the launch failed here (ptrace not permitted?): ~a~%" text)
                   (check "a launch that fails is reported in words, and leaves no debug session"
-                         (and (re::starts-with "omp-re: " text)
+                         (and (starts "omp-re: " text)
                               (null (re::session-dbg session))
                               (has "no debug session" (debug-refusal :action "registers")))))
                  (t
                   (setf started t
-                        rizin-pid (re::rz-pid (re::session-dbg session))
+                        rizin-pid (rizin-pid (re::session-dbg session))
                         debuggees (children-of rizin-pid))
                   (check "start launches the process with the loud warning and a stopped program counter"
                          (and (has re::+debug-launch-warning+ text)
@@ -814,13 +802,10 @@ done
              ;; Once more, left running: the cell's stop must end it.
              (in-session (id)
                (debug-call :action "start")
-               (setf rizin-pid (re::rz-pid (re::session-dbg session))
+               (setf rizin-pid (rizin-pid (re::session-dbg session))
                      debuggees (children-of rizin-pid)))
-             (nodecode-re::stop-cell)
-             ;; What ends the debuggee here is the kernel's KILL-TREE, which
-             ;; signals the debug rizin's whole process group. The stand-in
-             ;; kernel this suite runs on signals rizin alone, and a debuggee
-             ;; whose tracer is gone runs on: this check holds there because
-             ;; the test binary then finishes by itself.
+             (stop-running-cell)
+             ;; The debuggee is killed through rizin first, then rizin and
+             ;; what is left of its children.
              (check "stopping the cell ends the debug rizin, and no process of the session is left"
                     (and debuggees (pid-gone-p rizin-pid) (every #'pid-gone-p debuggees))))))))))

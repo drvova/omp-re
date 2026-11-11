@@ -54,6 +54,6 @@
         (take "blobFindCrypto" (lambda () (re:find-crypto)))
         (take "blobFindCryptoNoReferences" (lambda () (re:find-crypto :references :false))))))
   (re::write-text-file out (re::json-encode answers))
-  (ignore-errors (nodecode-re::stop-cell))
+  (ignore-errors (stop-running-cell))
   (uiop:delete-directory-tree *scratch* :validate t :if-does-not-exist :ignore)
   (sb-ext:exit :code 0 :abort t))

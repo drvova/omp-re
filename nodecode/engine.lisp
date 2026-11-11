@@ -9,7 +9,7 @@
 ;;;;   (engine-tools)                        what tools there are
 ;;;;   (engine-call SESSION NAME ARGUMENTS)  call one
 ;;;;   (engine-commands)                     what /re subcommands there are
-;;;;   (engine-command SESSION LINE)         run one /re line
+;;;;   (engine-command SESSION LINE &key by-model)   run one /re line
 ;;;;
 ;;;; SESSION is the host's id for the session, a string. Neither call
 ;;;; signals: a failure is an answer with "failed" true and the reason as
@@ -75,16 +75,18 @@ with it; any other runs the subcommand as it is. Rows are shown by POSITION."
                         :absent)))
        *slash-commands*))
 
-(defun engine-command (session line)
+(defun engine-command (session line &key by-model)
   "Run one /re LINE — \"status\", \"open /bin/ls\" — in SESSION =>
   {text, failed, level, draft?, userMessage?}
+BY-MODEL is true where the line comes from the model and not the operator:
+`/re off' then refuses it, as it refuses a tool call.
 LEVEL is how loudly to say TEXT: \"info\", \"warning\" or \"error\" — error
 for a line that failed, unless the line says otherwise. DRAFT, {text,
 notice}, is offered by a line such as cite: a host with an input box puts
 DRAFT's text in it and shows the notice instead of TEXT; any other host
 shows TEXT. USER-MESSAGE is text the line asks to have sent to the model as
 the operator's next message."
-  (multiple-value-bind (text failed reply) (run-slash-line session line)
+  (multiple-value-bind (text failed reply) (run-slash-line session line :by-model by-model)
     (destructuring-bind (&key draft level user-message) reply
       (obj "text" text
            "failed" (and failed t)

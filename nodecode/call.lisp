@@ -26,10 +26,13 @@
   "A one-off, untruncated result: a mutation, a hash, session setup."
   (make-result :text text :details (obj "ea" (or ea :absent))))
 
+(defun as-failure (result)
+  "RESULT marked as a failure: its text is still what the model reads."
+  (setf (result-failed result) t)
+  result)
+
 (defun failed-result (text &optional ea)
-  (let ((result (plain-result text ea)))
-    (setf (result-failed result) t)
-    result))
+  (as-failure (plain-result text ea)))
 
 (defun artifact-path (id &optional (session *session*))
   (merge-pathnames (format nil "artifacts/~a.txt" (file-safe id)) (session-directory session)))
@@ -48,6 +51,13 @@ not be kept: a result then stays truncated, never fails."
                          (file-safe label))))
          (write-text-file (artifact-path id session) content)
          (values id (uiop:native-namestring (artifact-path id session)))))))
+
+(defun read-artifact (id &optional (session *session*))
+  "The whole text kept under the artifact ID, or NIL when it cannot be read."
+  (ignore-errors
+   (if (host-service :read-artifact)
+       (ask-host :read-artifact session id)
+       (read-text-file (artifact-path id session)))))
 
 (defun build-result (lead body &key ea tool commands repro-hash canonical-excerpt shift-hash)
   "LEAD then BODY, cut to what a context can take; the whole text is kept as
@@ -225,6 +235,9 @@ operator, and must not abort the call it records."
                               "HMAC-SHA256"
                               "unsigned (set OMPRE_AUDIT_HMAC_KEY)")))))
 
+(defparameter +tools-off+
+  "omp-re: RE tools are off for this session — the user can re-enable them with /re on")
+
 ;;; --- one call --------------------------------------------------------------------------------
 
 (defun call-tool (session name arguments)
@@ -244,7 +257,7 @@ of them a tool call in its own right, not a way around one."
                      (fail "omp-re: no tool named ~a — (re:tools) lists them" (js-string name))))
            (arguments (check-arguments tool (or arguments (obj)))))
       (when (session-tools-off session)
-        (fail "omp-re: RE tools are off for this session — the user can re-enable them with /re on"))
+        (fail +tools-off+))
       (append-audit-line session
                          (format nil "~a-~d" (file-safe (session-id session)) (incf (session-calls session)))
                          name arguments)
@@ -267,10 +280,3 @@ of them a tool call in its own right, not a way around one."
                   id
                   (jstring details "artifactPath")
                   details))))))
-
-;;; --- names the tool groups still call; removed when they move to the above ---------------
-;;; CALL-TOOL-IN-SESSION name arguments (recipes.lisp) → (call-tool *session* name arguments):
-;;;     a call inside a held session takes no lock of its own.
-
-(defun call-tool-in-session (name arguments)
-  (call-tool *session* name arguments))

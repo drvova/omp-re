@@ -28,6 +28,12 @@
 binary routinely runs minutes."
   (/ (setting-value :analysis-timeout-ms) 1000))
 
+(defun dynamic-seconds ()
+  "The budget for one step of something that runs — the debuggee, the RzIL
+VM: a resumed process that never returns, blocked on input, is cut at this
+bound."
+  (/ (setting-value :debug-timeout-ms) 1000))
+
 (defstruct (rz (:copier nil))
   process input output errors
   (lock (sb-thread:make-mutex :name "rizin session"))
@@ -308,13 +314,16 @@ the bare name when none is found, so the not-found refusal fires."
               when (executable-p path) return path)
         "rizin")))
 
-(defun rizin-available-p (&optional (path (resolve-rizin-path)))
-  (if (find-if (lambda (char) (find char "/\\")) path)
-      (executable-p path)
-      (and (find-on-path path) t)))
+(defun program-available-p (program)
+  "Whether PROGRAM can be run: an executable file when it is a path, else
+found on PATH."
+  (and (if (find-if (lambda (char) (find char "/\\")) program)
+           (executable-p program)
+           (find-on-path program))
+       t))
 
 (defun assert-rizin-available ()
-  (unless (rizin-available-p)
+  (unless (program-available-p (resolve-rizin-path))
     (fail "omp-re: rizin not found on PATH or common install locations — install rizin (https://rizin.re), or set the re section's rizin_path (or OMPRE_RIZIN_PATH) to its full path (the output of `which rizin` in your shell). An organism launched from a desktop may not inherit your shell's PATH, so rizin can work in your terminal yet be invisible here.")))
 
 (defun resolve-rizin-tool (tool)
@@ -407,10 +416,3 @@ installing rizin mid-session works."
   (sb-thread:with-mutex (*catalog-lock*)
     (or (gethash rizin-path *catalogs*)
         (setf (gethash rizin-path *catalogs*) (read-catalog rizin-path)))))
-
-;;; --- names the tool groups' suites still call; removed when they move to the above -------
-;;; RZ-PID → (sb-ext:process-pid (rz-process RZ)); to end a session's rizin
-;;; in a test, the harness's KILL-RIZIN.
-
-(defun rz-pid (rz)
-  (sb-ext:process-pid (rz-process rz)))

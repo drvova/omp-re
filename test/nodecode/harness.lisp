@@ -76,6 +76,30 @@
 (defun has (needle text)
   (and (stringp text) (search needle text) t))
 
+(defun set-environment (name value)
+  "Set the environment variable NAME, or with NIL unset it. SBCL has no call
+for this that every platform has, so here is the one place the suites
+differ by platform."
+  #-win32 (if value (sb-posix:setenv name value 1) (sb-posix:unsetenv name))
+  #+win32 (sb-alien:alien-funcall
+           (sb-alien:extern-alien "_putenv" (function sb-alien:int sb-alien:c-string))
+           (format nil "~a=~a" name (or value ""))))
+
+(defmacro with-environment ((name value) &body body)
+  "BODY with the environment variable NAME set to VALUE — unset, for NIL —
+and put back after."
+  (let ((before (gensym "BEFORE")))
+    `(let ((,before (sb-ext:posix-getenv ,name)))
+       (set-environment ,name ,value)
+       (unwind-protect (progn ,@body)
+         (set-environment ,name ,before)))))
+
+(defun starts (prefix text)
+  (and (stringp text) (uiop:string-prefix-p prefix text)))
+
+(defun ends (suffix text)
+  (and (stringp text) (uiop:string-suffix-p text suffix)))
+
 ;;; The system the cell's .asd depends on: its names are the stand-in's, already loaded.
 (asdf:register-preloaded-system "nodecode")
 (push *root* asdf:*central-registry*)
@@ -104,9 +128,14 @@ operator's `re' section — and stopped after."
 
 (defmacro with-open-store (() &body body)
   "BODY with nodecode's store open — sessions can be created and asked a
-side question — and no session tree described."
-  `(let ((nlk:*stub-store-open* t))
+side question — no session tree described, and nothing left of earlier
+sessions; closed and forgotten after. Set, not bound, so a thread BODY starts
+sees it too."
+  `(progn
+     (nlk:stub-forget-sessions)
+     (setf nlk:*stub-store-open* t)
      (unwind-protect (progn ,@body)
+       (setf nlk:*stub-store-open* nil)
        (nlk:stub-forget-sessions))))
 
 ;;; --- scratch ------------------------------------------------------------------------------
@@ -114,7 +143,8 @@ side question — and no session tree described."
 (defparameter *scratch-root*
   (uiop:ensure-directory-pathname
    (uiop:native-namestring
-    (merge-pathnames (format nil "nodecode-re-test-~a/" (sb-posix:getpid)) (uiop:temporary-directory))))
+    (merge-pathnames (format nil "nodecode-re-test-~36r/" (random (expt 36 8) (make-random-state t)))
+                     (uiop:temporary-directory))))
   "Every suite file's scratch home is a folder of this one, deleted when the run ends.")
 
 (defvar *scratch* nil)
@@ -135,7 +165,7 @@ side question — and no session tree described."
   (ensure-directories-exist *scratch*)
   ;; With no cell running the engine keeps its state under the user's data
   ;; directory, which for a suite is its scratch home too.
-  (sb-posix:setenv "XDG_DATA_HOME" (uiop:native-namestring *scratch*) 1)
+  (set-environment "XDG_DATA_HOME" (uiop:native-namestring *scratch*))
   *scratch*)
 
 (defun scratch-path (name)
@@ -154,6 +184,23 @@ scratch home => its native path."
     path))
 
 ;;; --- sessions -------------------------------------------------------------------------------
+
+(defmacro with-service ((service function) &body body)
+  "BODY with the host's SERVICE answered by FUNCTION — the judge a claim is
+put to, a record store that fails — and the host as it was after."
+  (let ((host (gensym "HOST")))
+    `(let ((,host re::*host*))
+       (setf re::*host* (list* ,service ,function ,host))
+       (unwind-protect (progn ,@body)
+         (setf re::*host* ,host)))))
+
+(defun typed (line &optional (session-id nle:*stub-session*))
+  "What the operator's own /re LINE answers, typed in the session SESSION-ID."
+  (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) line session-id))
+
+(defun described-tool (name)
+  "The engine's description of the tool NAME, as a host is given it, or NIL."
+  (find name (re::engine-tools) :key (lambda (tool) (gethash "name" tool)) :test #'string=))
 
 (defvar *session-counter* 0)
 (defun fresh-session ()
@@ -180,6 +227,9 @@ it needs the binary to exist => the session's id."
                                  "binarySha256" sha
                                  "summary" "imul eax, eax, 0x21")))
     id))
+
+(defun rizin-pid (rz)
+  (sb-ext:process-pid (re::rz-process rz)))
 
 (defun kill-rizin (id)
   "Kill the rizin of the session called ID, as a crash would, and wait until

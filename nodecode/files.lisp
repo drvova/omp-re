@@ -61,6 +61,17 @@ when there is no such file. A file outside the allow-list is a refusal."
 
 ;;; --- writing ---------------------------------------------------------------------------------
 
+(defun write-user-file (path text)
+  "Write TEXT to PATH, which the operator named: read against the session's
+directory like any path of theirs, and its folder is not made for it — a
+report written somewhere that does not exist is a mistake to say, not to
+paper over."
+  (with-open-file (out (session-file path)
+                       :direction :output :if-exists :supersede :if-does-not-exist :create
+                       :external-format :utf-8)
+    (write-string text out))
+  path)
+
 (defun output-directory ()
   "OMPRE_OUTPUT_DIR when set, else omp-re-out under the system's temporary directory."
   (uiop:ensure-directory-pathname

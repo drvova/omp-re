@@ -82,17 +82,17 @@ module is or is not loaded, and put back after."
 (suite "verify: what a record says of itself")
 (check "a repro hash bound to a binary is reproducible"
        (string= "reproducible"
-                (re::recorded-status (re::obj "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b)))))
+                (re::evidence-status (re::obj "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b)))))
 (check "a command but no repro hash is provenance-only"
        (string= "provenance-only"
-                (re::recorded-status (re::obj "tool" "get_function" "commands" (vector "afij @ 0x4da0")))))
+                (re::evidence-status (re::obj "tool" "get_function" "commands" (vector "afij @ 0x4da0")))))
 (check "neither is unverifiable (legacy)"
-       (string= "unverifiable (legacy)" (re::recorded-status (re::obj "tool" "list_imports"))))
+       (string= "unverifiable (legacy)" (re::evidence-status (re::obj "tool" "list_imports"))))
 (check "the command shown is the recorded line, else the recorded arguments as a line"
-       (and (string= "a ; b" (re::recorded-command (re::obj "commands" (vector "a" "b"))))
+       (and (string= "a ; b" (re::evidence-command (re::obj "commands" (vector "a" "b"))))
             (string= "pdf @ main"
-                     (re::recorded-command (re::obj "args" (re::obj "command" "pdf" "addr" "main"))))
-            (null (re::recorded-command (re::obj "args" (re::obj))))))
+                     (re::evidence-command (re::obj "args" (re::obj "command" "pdf" "addr" "main"))))
+            (null (re::evidence-command (re::obj "args" (re::obj))))))
 
 ;;; --- the gates, on a record written by hand ---------------------------------------------------
 
@@ -177,7 +177,9 @@ module is or is not loaded, and put back after."
                     (string= (format nil "finding ~a: second~%confidence: likely~%evidence: 11111111"
                                      (subseq second-id 0 8))
                              (re:slash (format nil "findings ~a" (subseq second-id 0 8))))
-                    (has "omp-re: no live finding with id nope"
+                    (has "omp-re: no live finding with id nopenope"
+                         (refusal (lambda () (re:slash "findings nopenope"))))
+                    (has "omp-re: finding id \"nope\" is too short"
                          (refusal (lambda () (re:slash "findings nope"))))))
         (check "retract_finding withdraws one, with the reason, and writes a re.finding.retract entry"
                (let ((text (re:call "retract_finding" :id second-id :reason "wrong function")))
@@ -282,8 +284,8 @@ module is or is not loaded, and put back after."
                (and (has (format nil "Binary SHA-256: `~a`" (sha-of #\a)) markdown)
                     (has "| `11111111` | rizin_command | `pdf @ sym.f` | `bbbbbbbbbbbb…` | reproducible |" markdown)
                     (has "| `ev-strin` | list_strings | — | — | unverifiable (legacy) |" markdown)
-                    (re::ends-with (format nil "|~%") markdown)
-                    (not (re::ends-with (format nil "|~%~%") markdown)))))
+                    (ends (format nil "|~%") markdown)
+                    (not (ends (format nil "|~%~%") markdown)))))
       (check "--no-audit and --audit=off skip the audit, so no note; --audit=strict fails open and still writes"
              (and (not (has "support unaudited" (re:slash "report --no-audit")))
                   (not (has "support unaudited" (re:slash "report --audit=off")))
@@ -300,10 +302,10 @@ module is or is not loaded, and put back after."
              (entry (aref entries 0)))
         (check "the manifest file is JSON.stringify(…, null, 2) and a newline"
                (let ((text (re::read-text-file (format nil "~a.manifest.json" path))))
-                 (and (re::starts-with (format nil "{~%  \"binarySha256\": \"~a\",~%  \"findings\": [~%    {~%      \"id\": "
+                 (and (starts (format nil "{~%  \"binarySha256\": \"~a\",~%  \"findings\": [~%    {~%      \"id\": "
                                                (sha-of #\a))
                                        text)
-                      (re::ends-with (format nil "~%}~%") text))))
+                      (ends (format nil "~%}~%") text))))
         (check "its findings block is what /re carry --inherit re-proves"
                (let ((finding (aref (gethash "findings" manifest) 0)))
                  (and (equal '("id" "claim" "evidenceIds" "addr" "confidence") (keys finding))
@@ -427,7 +429,7 @@ module is or is not loaded, and put back after."
        (in-session (id)
          (re:open *binary*)
          (let* ((info-evidence (nth-value 1 (re:json "iIj")))
-                (entry-evidence (re::evidence-id-of (re:cmd "pd 4" "entry0")))
+                (entry-evidence (tagged-evidence (re:cmd "pd 4" "entry0")))
                 (session (re::find-session id))
                 (sha (re::session-binary-sha256 session)))
            (let ((text (re:call "record_finding" :claim "The binary is a 64-bit ELF."
@@ -436,7 +438,7 @@ module is or is not loaded, and put back after."
                     (and (has "record_finding: recorded " text)
                          (has "evidence: 1 of 1 machine-reproducible" text)
                          (equal sha (gethash "binarySha256" (first (live id))))
-                         (re::starts-with info-evidence
+                         (starts info-evidence
                                           (aref (gethash "evidenceIds" (first (live id))) 0)))))
            (check "one citing an unknown id is refused, and one citing none"
                   (and (has "evidence not found — no id starting \"0badc0de\" on this branch"
@@ -553,7 +555,7 @@ module is or is not loaded, and put back after."
            ;; report.
            (let ((markdown (re:slash "report")))
              (check "/re report with no path answers the report: title, findings, provenance, anchors"
-                    (and (re::starts-with (format nil "# Analysis Report — Session ~a~%~%## Findings~%~%- The binary is a 64-bit ELF.~%  _confidence: confirmed_~%  **Evidence:** [rizin_command:~a"
+                    (and (starts (format nil "# Analysis Report — Session ~a~%~%## Findings~%~%- The binary is a 64-bit ELF.~%  _confidence: confirmed_~%  **Evidence:** [rizin_command:~a"
                                                   id info-evidence)
                                           markdown)
                          (has "  _confidence: likely · at `entry0`_" markdown)
@@ -579,9 +581,9 @@ module is or is not loaded, and put back after."
                          (probe-file (merge-pathnames "rel.md.manifest.json" *scratch*)))))
            (let* ((manifest (re::json-decode (re::read-text-file (format nil "~a.manifest.json" path))))
                   (entries (coerce (gethash "entries" manifest) 'list))
-                  (pinned (find-if (lambda (entry) (re::starts-with entry-evidence (gethash "evidenceId" entry)))
+                  (pinned (find-if (lambda (entry) (starts entry-evidence (gethash "evidenceId" entry)))
                                    entries))
-                  (unpinned (find-if (lambda (entry) (re::starts-with info-evidence (gethash "evidenceId" entry)))
+                  (unpinned (find-if (lambda (entry) (starts info-evidence (gethash "evidenceId" entry)))
                                      entries)))
              (check "the manifest: the binary's hash, the live findings, one entry for each cited read"
                     (and (equal '("binarySha256" "findings" "entries") (keys manifest))
@@ -609,7 +611,7 @@ module is or is not loaded, and put back after."
                       (and (equal '("anchor" "function" "offset" "delta" "size" "nbbs" "mnemonics") (keys anchor))
                            (equal "entry0" (gethash "anchor" anchor))
                            (equal "entry0" (gethash "function" anchor))
-                           (re::starts-with "0x" (gethash "offset" anchor))
+                           (starts "0x" (gethash "offset" anchor))
                            (eql 0 (gethash "delta" anchor))
                            (plusp (gethash "size" anchor))
                            (plusp (gethash "nbbs" anchor))

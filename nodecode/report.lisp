@@ -31,7 +31,7 @@ result was cut (the artifact is whole), else the content-addressed blob.
 NIL when neither can be read — a claim then gets no extra evidence, the
 report never fails for it."
   (or (let ((artifact (jstring record "artifactId")))
-        (and (plusp (length artifact)) (ignore-errors (read-text-file (artifact-path artifact)))))
+        (and (plusp (length artifact)) (read-artifact artifact)))
       (ignore-errors (read-blob (jstring record "outputHash")))))
 
 (defun evidence-json (raw)
@@ -71,17 +71,12 @@ line."
   (findings '()))
 
 (defun report-annotations (&optional (session *session*))
-  "The annotations in effect on the open binary, as the report reads them.
-annotate.lisp owns that answer (after /re undo); with no annotation module
-loaded there are none."
+  "The annotations in effect on the open binary, as the report reads them."
   (let ((binary-path (session-binary-path session)))
     (remove-if-not
      (lambda (annotation)
        (and (hash-table-p annotation) (jstring annotation "kind") (jstring annotation "ea")))
-     (cond ((null binary-path) '())
-           ((fboundp 'live-annotations) (funcall 'live-annotations binary-path session))
-           (*live-annotations* (funcall *live-annotations* binary-path session))
-           (t '())))))
+     (and binary-path (live-annotations binary-path session)))))
 
 ;;; --- indicators of compromise ------------------------------------------------------------------
 
@@ -237,7 +232,7 @@ report. The latest record to name a capability is the one it is anchored to."
 (defun build-report (&optional (session *session*))
   "Read the record into a report: capa's capabilities, the model's findings,
 the indicators, each claim with the ids it rests on."
-  (let* ((evidence (collected-evidence session))
+  (let* ((evidence (evidence-records session))
          (annotations (report-annotations session))
          (findings (live-findings session))
          (report (make-built-report
@@ -326,7 +321,7 @@ back on and the markdown flags by."
               (push (obj "id" (jstring record "id")
                          "tool" (jstring record "tool")
                          "summary" (jstring record "summary")
-                         "canonicalExcerpt" (string-member record "canonicalExcerpt")
+                         "canonicalExcerpt" (jstring-or-absent record "canonicalExcerpt")
                          "fullText" (or (gethash id texts) :absent))
                     evidence))))
         (when evidence
@@ -371,16 +366,16 @@ not see it."
              "| --- | --- | --- | --- | --- |")
        (mapcar (lambda (id)
                  (let* ((record (gethash id (built-report-evidence-by-id report)))
-                        (command (and record (recorded-command record)))
+                        (command (and record (evidence-command record)))
                         (repro (and record (jstring record "reproHash"))))
                    (format nil "| `~a` | ~a | ~a | ~a | ~a |"
-                           (short-id id)
+                           (shown-id id)
                            (or (gethash id (built-report-tool-by-id report)) "unknown")
                            (if command (format nil "`~a`" command) "—")
                            (if (plusp (length repro))
-                               (format nil "`~a…`" (subseq repro 0 (min 12 (length repro))))
+                               (format nil "`~a…`" (shown-hash repro))
                                "—")
-                           (if record (recorded-status record) "unverifiable (legacy)"))))
+                           (if record (evidence-status record) "unverifiable (legacy)"))))
                cited)
        (list "")))))
 
@@ -419,47 +414,6 @@ says so under its evidence, and a note under the claims sums it up."
 
 ;;; --- the manifest beside it ----------------------------------------------------------------------
 
-(defparameter +max-mnemonics+ 512
-  "The most mnemonics kept in a fingerprint: plenty to identify a function,
-few enough to keep the manifest and carry's comparison cheap.")
-
-(defun report-anchor-fingerprint (rz anchor)
-  "A fingerprint of the function containing ANCHOR in the open build — name,
-start, size, block count, the anchor's offset into it and its mnemonic
-sequence — so /re carry can find the code again in another build. NIL when
-the anchor is in no function or does not resolve; never signals. Mnemonics
-only, never operands: a rebuild changes addresses and registers long before
-it changes the instruction mix. (anchor.ts's fingerprintAnchor.)"
-  (ignore-errors
-   (let* ((at (resolve-numeric-addr rz anchor))
-          (functions (rz-cmdj rz (format nil "afij @ ~a" (ea-from-offset at))))
-          (function (and (vectorp functions) (plusp (length functions)) (aref functions 0)))
-          (start (and function (jnumber function "offset"))))
-     (when start
-       (let* ((listing (rz-cmdj rz (format nil "pdfj @ ~a" (ea-from-offset start))))
-              (mnemonics (loop for op in (jlist listing "ops")
-                               for text = (jstring op "disasm")
-                               when (and text (not (equal (jget op "type") "invalid")))
-                                 collect (string-downcase (or (first (words text)) "")))))
-         (when mnemonics
-           (obj "anchor" anchor
-                "function" (or (jget function "name") :absent)
-                "offset" (ea-from-offset start)
-                "delta" (- at start)
-                "size" (or (jget function "size") :absent)
-                "nbbs" (or (jget function "nbbs") :absent)
-                "mnemonics" (coerce (subseq mnemonics 0 (min +max-mnemonics+ (length mnemonics)))
-                                    'simple-vector))))))))
-
-(defun rizin-command-arguments (record)
-  "A rizin_command RECORD's {command, addr} — what /re carry re-runs on
-another binary — or NIL for any other tool or a malformed record."
-  (let ((command (jstring record "args" "command"))
-        (addr (jstring record "args" "addr")))
-    (and (equal (jstring record "tool") "rizin_command")
-         command
-         (obj "command" command "addr" (if (plusp (length addr)) addr :absent)))))
-
 (defun collect-anchors (report &optional (session *session*))
   "A fingerprint for every cited, address-pinned rizin_command record — but
 only while the binary that evidence was taken against is the one open, since
@@ -473,9 +427,9 @@ Best effort: with no rizin the manifest is complete, just without them."
          (let* ((record (gethash id (built-report-evidence-by-id report)))
                 (addr (and record
                            (equal (jstring record "binarySha256") open-sha)
-                           (jstring (rizin-command-arguments record) "addr"))))
+                           (jstring (evidence-read record) "addr"))))
            (when addr
-             (let ((fingerprint (report-anchor-fingerprint (ensure-rizin session) addr)))
+             (let ((fingerprint (anchor-fingerprint (ensure-rizin session) addr)))
                (when fingerprint (setf (gethash id anchors) fingerprint))))))))
     anchors))
 
@@ -483,7 +437,7 @@ Best effort: with no rizin the manifest is complete, just without them."
   "RECORD's commands as the array recorded — an empty one included, which
 the TypeScript writes as [] and not null — or NIL when it recorded none."
   (let ((commands (jget record "commands")))
-    (and (vectorp commands) (not (stringp commands)) (every #'stringp commands) commands)))
+    (and (json-array-p commands) (every #'stringp commands) commands)))
 
 (defun manifest-json (report anchors)
   "The machine-readable manifest: the binary's hash, the findings (what
@@ -512,28 +466,19 @@ index these members by name."
                           (let ((record (gethash id (built-report-evidence-by-id report))))
                             (obj "evidenceId" id
                                  "tool" (or (gethash id (built-report-tool-by-id report)) "unknown")
-                                 "args" (or (and record (rizin-command-arguments record)) :null)
-                                 "command" (or (and record (recorded-command record)) :null)
+                                 "args" (or (and record (evidence-read record)) :null)
+                                 "command" (or (and record (evidence-command record)) :null)
                                  "commands" (or (and record (recorded-commands-array record)) :null)
                                  "reproHash" (or (and record (jstring record "reproHash")) :null)
                                  "canonicalExcerpt" (or (and record (jstring record "canonicalExcerpt")) :null)
                                  "shiftHash" (or (and record (jstring record "shiftHash")) :null)
                                  "anchor" (or (gethash id anchors) :null)
                                  "binarySha256" (or (and record (jstring record "binarySha256")) :null)
-                                 "status" (if record (recorded-status record) "unverifiable (legacy)")
+                                 "status" (if record (evidence-status record) "unverifiable (legacy)")
                                  "claims" (coerce (gethash id claims-by-id) 'simple-vector))))
                         (nreverse ids)))))
 
 ;;; --- writing it ----------------------------------------------------------------------------------
-
-(defun write-report-file (path text)
-  "Write TEXT to PATH, which is the user's own: read against the process's
-directory when relative, and its folder is not made for it."
-  (with-open-file (out (merge-pathnames (uiop:parse-native-namestring path) (uiop:getcwd))
-                       :direction :output :if-exists :supersede :if-does-not-exist :create
-                       :external-format :utf-8)
-    (write-string text out))
-  path)
 
 (defun write-report (&key output-path (audit "advisory") (session *session*))
   "Build the report for SESSION and write it to OUTPUT-PATH, or answer the
@@ -554,7 +499,7 @@ deterministic gates block in every mode."
         (values (format nil "omp-re: report withheld — ~d claim(s) without evidence:~%~{  - ~a~^~%~}"
                         (length ungrounded) (mapcar #'report-claim-text ungrounded))
                 t)))
-    (let* ((judge (and (not (equal audit "off")) *claim-judge*))
+    (let* ((judge (and (not (equal audit "off")) (host-service :judge)))
            (outcome (audit-claims (and (not (equal audit "off")) (audit-inputs report (and judge t)))
                                   audit judge))
            (flagged (and (equal audit "strict") (flagged-verdicts outcome)))
@@ -578,7 +523,7 @@ deterministic gates block in every mode."
       (if (null output-path)
           (values markdown nil)
           (let ((manifest-path (format nil "~a.manifest.json" output-path)))
-            (handler-case (write-report-file output-path markdown)
+            (handler-case (write-user-file output-path markdown)
               (error (condition)
                 (fail "omp-re: could not write report to ~a: ~a" output-path condition)))
             (values
@@ -587,7 +532,7 @@ deterministic gates block in every mode."
                      ;; not be written must not undo that — say so and carry on.
                      (handler-case
                          (progn
-                           (write-report-file
+                           (write-user-file
                             manifest-path
                             (format nil "~a~%" (json-encode (manifest-json report (collect-anchors report session))
                                                             :indent 2)))
@@ -597,14 +542,17 @@ deterministic gates block in every mode."
              nil))))))
 
 (define-slash "report" (:usage "[path] [--audit=strict]"
-                        :description "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)")
-    (words)
-  ;; The flag words are taken out and the rest joins back into the path.
-  (let ((audit "advisory")
-        (path '()))
-    (dolist (word words)
-      (cond ((member word '("--no-audit" "--audit=off") :test #'string=) (setf audit "off"))
-            ((member word '("--audit" "--audit=advisory") :test #'string=) (setf audit "advisory"))
-            ((string= word "--audit=strict") (setf audit "strict"))
-            (t (push word path))))
-    (write-report :output-path (and path (rest-of-line (nreverse path))) :audit audit)))
+                        :description "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)"
+                        :order 90
+                        :row (100 "Write the report" :ask "File" :placeholder "analysis.md" :verb "write"))
+    (words line)
+  (multiple-value-bind (path flags)
+      (line-flags line :switches '("--no-audit" "--audit=off" "--audit" "--audit=advisory" "--audit=strict"))
+    (write-report :output-path (and (plusp (length path)) path)
+                  ;; The last one written wins, as the words were read in order.
+                  :audit (let ((last (first (last (remove-if-not (lambda (word)
+                                                                   (getf flags (intern (string-upcase word) :keyword)))
+                                                                 words)))))
+                           (cond ((member last '("--no-audit" "--audit=off") :test #'equal) "off")
+                                 ((equal last "--audit=strict") "strict")
+                                 (t "advisory"))))))

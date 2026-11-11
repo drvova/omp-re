@@ -103,6 +103,13 @@ an empty last line."
     (finish-output out))
   path)
 
+(defun write-octets-file (path octets)
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :element-type '(unsigned-byte 8)
+                            :if-exists :supersede :if-does-not-exist :create)
+    (write-sequence octets out))
+  path)
+
 (defun read-text-file (path)
   "PATH's text, or NIL when it cannot be read. Bytes that are not UTF-8 read as ?."
   (handler-case
@@ -198,6 +205,24 @@ model-supplied comment or signature can end the command and start another."
   (when (ends-pipe-line-p value)
     (fail "omp-re: invalid text: contains forbidden character"))
   value)
+
+;;; --- what a tool takes from its caller --------------------------------------------------
+
+(defun plain-name-p (text)
+  "Whether TEXT is a bare name — a register, a VM variable: a letter, then
+letters, digits and underscores."
+  (js-scan "^[A-Za-z][A-Za-z0-9_]*$" text))
+
+(defun number-text-p (text)
+  "Whether TEXT is a decimal or 0x hex number, the two forms rizin's
+assignments take."
+  (js-scan "^0x[0-9a-fA-F]+$|^[0-9]+$" text))
+
+(defun clamped-count (value fallback most)
+  "VALUE as a whole number between 1 and MOST; FALLBACK when none was given."
+  (if (realp value)
+      (max 1 (min (floor value) most))
+      fallback))
 
 ;;; --- truncation ---------------------------------------------------------------------
 
@@ -296,17 +321,3 @@ differ only in where the code sits."
   (let* ((lines (split-lines (canonicalize-rizin-output raw binary-path)))
          (head (join-lines (subseq lines 0 (min max-lines (length lines))))))
     (if (<= (length head) max-characters) head (subseq head 0 max-characters))))
-
-;;; --- names the tool groups still call; removed when they move to the above ---------------
-;;; STARTS-WITH  → (uiop:string-prefix-p PREFIX TEXT)
-;;; ENDS-WITH    → (uiop:string-suffix-p TEXT SUFFIX), the arguments the other way round
-;;; NATIVE       → (uiop:native-namestring PATH)
-
-(defun starts-with (prefix text)
-  (and (stringp text) (uiop:string-prefix-p prefix text)))
-
-(defun ends-with (suffix text)
-  (and (stringp text) (uiop:string-suffix-p text suffix)))
-
-(defun native (path)
-  (uiop:native-namestring path))

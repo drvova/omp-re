@@ -102,7 +102,7 @@ as one — or NIL."
   "TEXT without a leading WORD and the white space after it; as it stands
 when it does not open that way."
   (let ((at (length word)))
-    (if (and (starts-with word text) (< at (length text)) (member (char text at) *space*))
+    (if (and (uiop:string-prefix-p word text) (< at (length text)) (member (char text at) *space*))
         (string-left-trim *space* (subseq text at))
         text)))
 
@@ -252,10 +252,10 @@ or comes out empty."
   "One rizin_command call — the same gate, audit line and evidence record as
 any other — answering its whole output => (values RAW EVIDENCE-ID). RAW is
 \"\" when rizin printed nothing; a refused or failed read is RE-ERROR."
-  (multiple-value-bind (text failed raw)
-      (call-tool-in-session "rizin_command" (obj "command" command "addr" (or addr :absent)))
+  (multiple-value-bind (text failed raw evidence-id)
+      (call-tool *session* "rizin_command" (obj "command" command "addr" (or addr :absent)))
     (when failed (fail "~a" text))
-    (let ((id (evidence-id-of text)))
+    (let ((id (and evidence-id (shown-id evidence-id))))
       (when id
         (push (obj "label" (if addr (format nil "~a @ ~a" command addr) command) "id" id) *recipe-evidence*))
       (values (or raw "") id))))
@@ -280,13 +280,13 @@ fortified libc adds are taken off, by the data's rules in their order."
                           (let ((at (search text name)))
                             (if at (subseq name (+ at (length text))) name)))
                          ((string= rule "dropPrefix")
-                          (if (starts-with text name) (subseq name (length text)) name))
+                          (if (uiop:string-prefix-p text name) (subseq name (length text)) name))
                          ((string= rule "dropLeading")
-                          (loop while (starts-with text name)
+                          (loop while (uiop:string-prefix-p text name)
                                 do (setf name (subseq name (length text)))
                                 finally (return name)))
                          ((string= rule "dropSuffix")
-                          (if (ends-with text name) (subseq name 0 (- (length name) (length text))) name)))))
+                          (if (uiop:string-suffix-p name text) (subseq name 0 (- (length name) (length text))) name)))))
     name))
 
 (defun names-it (row bare)
@@ -558,23 +558,25 @@ call cuts into."
                    (if (gethash "flag" option)
                        (not (member value '(nil :false)))
                        (bounded value (gethash "default" option) (gethash "least" option) (gethash "most" option)))))
-    (with-session ((current-session))
-      (let ((*recipe-evidence* '())
-            (*recipe-functions* :unread))
-        (loop for step across (gethash "steps" recipe)
-              do (if (gethash "derive" step)
-                     (funcall (cdr (assoc (gethash "derive" step) *fact-steps* :test #'string=)) facts)
-                     (multiple-value-bind (data id)
-                         (observe-json (gethash "command" step) (and (gethash "at" step) addr))
-                       (set-facts facts (gethash "read" step) data
-                                  (format nil "@~a" (gethash "read" step)) id))))
-        (join-lines
-         (append (written (gethash "title" recipe) facts)
-                 (loop for section across (gethash "sections" recipe)
-                       append (cons "" (section-lines section facts)))
-                 (list "" (table "text" "evidenceTaken"))
-                 (loop for read in (reverse *recipe-evidence*)
-                       append (written (table "text" "evidenceRow") facts read))))))))
+    (multiple-value-bind (text failed)
+        (in-session ((turn-session-id) name)
+        (let ((*recipe-evidence* '())
+              (*recipe-functions* :unread))
+          (loop for step across (gethash "steps" recipe)
+                do (if (gethash "derive" step)
+                       (funcall (cdr (assoc (gethash "derive" step) *fact-steps* :test #'string=)) facts)
+                       (multiple-value-bind (data id)
+                           (observe-json (gethash "command" step) (and (gethash "at" step) addr))
+                         (set-facts facts (gethash "read" step) data
+                                    (format nil "@~a" (gethash "read" step)) id))))
+          (join-lines
+           (append (written (gethash "title" recipe) facts)
+                   (loop for section across (gethash "sections" recipe)
+                         append (cons "" (section-lines section facts)))
+                   (list "" (table "text" "evidenceTaken"))
+                   (loop for read in (reverse *recipe-evidence*)
+                         append (written (table "text" "evidenceRow") facts read))))))
+      (if failed (fail "~a" text) text))))
 
 (defmacro define-recipes ()
   "A verb for each recipe in the data, with the options it lists as keywords."

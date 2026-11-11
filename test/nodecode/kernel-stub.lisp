@@ -12,12 +12,12 @@
 ;;;; the seam.
 
 (require :asdf)
-(require :sb-posix)
+#-win32 (require :sb-posix)
 
 (defpackage #:nodecode.kernel
   (:use #:cl)
   (:nicknames #:nlk)
-  (:export #:define-peripheral #:kill-tree
+  (:export #:define-peripheral
            #:home #:find-session-cwd
            #:store-open-p #:session-visible-turn-set #:session-lineage
            ;; a side question (docs/cell-api.mdx, "Ask a side question")
@@ -198,11 +198,6 @@ an anchor are the two edges and never both."
           (t (error "*stub-judge* says ~s, which is no way for a turn to end" how)))
     (setf (gethash id *stub-turns*) turn)
     id))
-
-;;; KILL-TREE is not the cell's: the suites that have not yet moved to the
-;;; harness's KILL-RIZIN end a session's rizin with it.
-(defun kill-tree (pid)
-  (ignore-errors (sb-posix:kill pid sb-posix:sigkill)))
 
 ;;; --- NLK:DEFINE-PERIPHERAL, to the shape of nodecode's own -------------------------
 

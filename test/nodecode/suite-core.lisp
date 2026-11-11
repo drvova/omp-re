@@ -62,7 +62,7 @@
 (check "truncation keeps whole lines within both limits"
        (multiple-value-bind (kept truncated shown total)
            (re::truncate-head (format nil "~{~a~^~%~}" (loop for i below 5000 collect (format nil "line ~d" i))))
-         (and truncated (= shown 2000) (= total 5000) (not (re::ends-with (string #\Newline) kept)))))
+         (and truncated (= shown 2000) (= total 5000) (not (ends (string #\Newline) kept)))))
 
 ;;; --- the read-only policy -----------------------------------------------------------
 
@@ -155,22 +155,14 @@
               (has "/re status" (re:slash "HELP"))))
   (check "/re off refuses every tool call until /re on"
          (in-session ((fresh-session))
-           (re:slash "off")
+           (typed "off")
            (and (has "RE tools are off" (refusal (lambda () (re:cmd ""))))
-                (progn (re:slash "on") (has "omp-re manual" (re:cmd "")))))))
+                (progn (typed "on") (has "omp-re manual" (re:cmd "")))))))
 
 (check "stop takes the help topic and the command back"
        (and (null nle:*help*) (null nle:*commands*)))
 
 ;;; --- the host port --------------------------------------------------------------------
-
-(defmacro with-variable ((name value) &body body)
-  "BODY with the environment variable NAME set to VALUE, and put back after."
-  (let ((before (gensym "BEFORE")))
-    `(let ((,before (sb-posix:getenv ,name)))
-       (sb-posix:setenv ,name ,value 1)
-       (unwind-protect (progn ,@body)
-         (if ,before (sb-posix:setenv ,name ,before 1) (sb-posix:unsetenv ,name))))))
 
 (suite "settings")
 (check "config.example.jsonc is the declaration's own text"
@@ -178,12 +170,12 @@
                 (re::read-text-file (merge-pathnames "nodecode/config.example.jsonc" *root*))))
 (check "with no host, a setting is its environment variable, else its default"
        (and (null (re::setting-value :rizin-path))
-            (with-variable ("OMPRE_RIZIN_PATH" " /opt/rz/rizin ")
+            (with-environment ("OMPRE_RIZIN_PATH" " /opt/rz/rizin ")
               (string= "/opt/rz/rizin" (re::setting-value :rizin-path)))
             (= 30 (re::setting-value :idle-minutes))))
 (check "the section wins where it says something other than the default, and only there"
-       (with-variable ("OMPRE_RIZIN_PATH" "/from/environment")
-         (with-variable ("OMPRE_ALLOWED_DIRS" "/a, /b")
+       (with-environment ("OMPRE_RIZIN_PATH" "/from/environment")
+         (with-environment ("OMPRE_ALLOWED_DIRS" "/a, /b")
            (and (with-cell (:rizin-path "/from/section")
                   (string= "/from/section" (re::setting-value :rizin-path)))
                 (with-cell ()
@@ -192,13 +184,13 @@
                 (with-cell (:allowed-dirs '("/c"))
                   (equal '("/c") (re::setting-value :allowed-dirs)))))))
 (check "debugger: false is the default and does not veto OMPRE_ENABLE_DEBUGGER; audit: false says something"
-       (and (with-variable ("OMPRE_ENABLE_DEBUGGER" "1")
+       (and (with-environment ("OMPRE_ENABLE_DEBUGGER" "1")
               (with-cell (:debugger nil) (re::setting-value :debugger)))
             (with-cell (:audit nil) (not (re::setting-value :audit)))
             (with-cell () (re::setting-value :audit))))
 (check "the signing key is taken as set: a blank one signs, and the status says so; an empty one is none"
        (flet ((signs-and-says (key)
-                (with-variable ("OMPRE_AUDIT_HMAC_KEY" key)
+                (with-environment ("OMPRE_AUDIT_HMAC_KEY" key)
                   (with-cell ()
                     (let ((id (fresh-session)))
                       (in-session (id)
@@ -210,14 +202,6 @@
               (equal '(nil nil) (signs-and-says "")))))
 
 (suite "the host's services")
-(defmacro with-service ((service function) &body body)
-  "BODY with the running host's SERVICE answered by FUNCTION."
-  (let ((host (gensym "HOST")))
-    `(let ((,host re::*host*))
-       (setf re::*host* (list* ,service ,function ,host))
-       (unwind-protect (progn ,@body)
-         (setf re::*host* ,host)))))
-
 (with-cell ()
   (check "a branch that cannot be read fails the call: nothing is read as if every entry were on it"
          (let ((id (seed-session)))

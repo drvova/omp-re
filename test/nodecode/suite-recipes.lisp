@@ -103,10 +103,10 @@ through — whatever became of the open after that."
                     (and (has "\"command\":\"iSj entropy\"" log) (has "\"command\":\"iej\"" log))))
            (check "/re off stops a recipe at its first read, like any call"
                   (let ((before (length (recorded-commands id))))
-                    (re:slash "off")
+                    (typed "off")
                     (prog1 (and (has "RE tools are off" (refusal (lambda () (re:triage))))
                                 (= before (length (recorded-commands id))))
-                      (re:slash "on"))))
+                      (typed "on"))))
            (check "a finding can cite what triage read, and passes the gate"
                   (stringp (re:call "record_finding"
                                     :claim "The build has a stack canary and non-executable data pages."
@@ -144,7 +144,7 @@ through — whatever became of the open after that."
          (check "in find_crypto every search is a read on the record, the ones that find nothing too"
                 (let ((before (length (recorded-commands id))))
                   (re:find-crypto :references :false)
-                  (let ((searches (remove-if-not (lambda (command) (re::starts-with "/xj " command))
+                  (let ((searches (remove-if-not (lambda (command) (starts "/xj " command))
                                                  (nthcdr before (recorded-commands id)))))
                     (and (plusp (length searches))
                          (= (length searches) (length (remove-duplicates searches :test #'string=)))

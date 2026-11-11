@@ -140,15 +140,8 @@ ARGUMENTS: (re:call \"set_comment\" :addr \"main\" :text \"entry\")."
 (define-verb slash (line)
   "Run one /re line — \"functions\", \"evidence\", \"findings\", \"verify\",
 \"report out.md\", \"undo\", \"help\" — and answer what it says."
-  (answer-text (engine-command (turn-session-id) (or line ""))))
+  (answer-text (engine-command (turn-session-id) (or line "") :by-model t)))
 
 (define-verb status ()
   "The engine's state for this session: rizin, the open binary, evidence and findings."
-  (answer-text (engine-command (turn-session-id) "status")))
-
-;;; --- names the tool groups still call; removed when they move to the above ---------------
-;;; CURRENT-SESSION (recipes.lisp) → (turn-session-id), which IN-SESSION and
-;;;     CALL-TOOL take as it is.
-
-(defun current-session ()
-  (find-session (turn-session-id)))
+  (answer-text (engine-command (turn-session-id) "status" :by-model t)))
