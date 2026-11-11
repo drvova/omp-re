@@ -2,12 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/tools-debug.ts (the rizin_debug tool),
-;;;; the debug half of runtime.ts (startDebug / stopDebug / requireDebug) and
-;;;; the debug half of rizin.ts (spawnDebug's argv, debugTimeoutMs, and the
-;;;; build-bits check: parseRizinVersionArch, rizinBuildBits,
-;;;; rizinBitsMismatch).
-;;;;
 ;;;; Dynamic analysis is a bridge to rizin's debugger, which LAUNCHES the
 ;;;; target process so it can be stepped and inspected while it runs. It is
 ;;;; the one capability that executes the sample, so it is off unless the
@@ -27,7 +21,7 @@
 ;;;; session) go to the output directory under a bare name. Run untrusted
 ;;;; samples only in an isolated, disposable environment; see SECURITY.md.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +max-dump-bytes+ (* 16 1024 1024)
   "The largest memory dump dump_memory pulls over the command pipe (16 MiB);
@@ -198,7 +192,7 @@ there being no new local process to configure."
               (list "-d" binary-path))))
 
 ;;; --- the session's debug process ---------------------------------------------------------
-;;; The spine knows nothing of the debugger: the process is kept on the
+;;; The session knows nothing of the debugger: the process is kept on the
 ;;; session under this group's own name, and what a status says of it and
 ;;; how it ends with the session are this group's to say.
 

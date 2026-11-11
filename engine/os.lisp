@@ -7,7 +7,7 @@
 ;;;; elsewhere. One function differs by platform, KILL-PROCESS-TREE; nothing
 ;;;; else here names a POSIX call.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- child processes ----------------------------------------------------------------
 

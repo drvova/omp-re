@@ -2,14 +2,13 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/rizin.ts (the validators and the
-;;;; quoting every model-supplied value passes through before it reaches
-;;;; rizin's pipe) and extensions/re/format.ts (truncation, and the canonical
-;;;; projection of rizin output that the reproducibility hashes are taken
-;;;; over). The messages are the engine's, word for word: the model has been
-;;;; taught to repair from them.
+;;;; The validators and the quoting every model-supplied value passes through
+;;;; before it reaches rizin's pipe; truncation; and the canonical projection
+;;;; of rizin output that the reproducibility hashes are taken over. The
+;;;; messages are fixed, word for word: the model has been taught to repair
+;;;; from them.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- small things ---------------------------------------------------------------
 
@@ -119,8 +118,8 @@ an empty last line."
     (error () nil)))
 
 ;;; --- patterns, read as JavaScript reads them -----------------------------------------
-;;; The engine's patterns come from the TypeScript engine, and in JavaScript
-;;; `$' is the end of the string and nothing else. In Perl syntax — cl-ppcre's
+;;; The engine's patterns were written for JavaScript, where `$' is the end
+;;; of the string and nothing else. In Perl syntax — cl-ppcre's
 ;;; — `$' also matches before a final newline, so "main\n" would pass a
 ;;; validator anchored with it, and a value ending in a newline ends the pipe
 ;;; line: what follows would run as a command of its own. Every pattern is
@@ -228,10 +227,9 @@ assignments take."
 
 (defparameter +max-lines+ 2000 "The most lines of a result the model is sent.")
 (defparameter +max-octets+ (* 48 1024)
-  "The most bytes of a result's body the model is sent: the TypeScript
-engine's limit, which sits two KiB under its host's so that a header, a
-truncation note and an evidence tag never push a result past it. Kept equal
-here so the two engines cut at the same line.")
+  "The most bytes of a result's body the model is sent: two KiB under omp's
+own limit for a tool result, so that a header, a truncation note and an
+evidence tag never push a result past it.")
 
 (defun format-size (octets)
   (cond ((< octets 1024) (format nil "~dB" octets))
@@ -316,7 +314,12 @@ so a rebuild that only moves code compares equal."
 differ only in where the code sits."
   (sha256-hex (mask-addresses (canonicalize-rizin-output raw binary-path))))
 
-(defun canonical-excerpt (raw &optional binary-path (max-lines 20) (max-characters 1024))
+(defparameter +excerpt-lines+ 20)
+(defparameter +excerpt-characters+ 1024
+  "An excerpt this long was cut, mid-line.")
+
+(defun canonical-excerpt (raw &optional binary-path (max-lines +excerpt-lines+)
+                                                    (max-characters +excerpt-characters+))
   "The first lines of the canonical output, kept for a human to diff."
   (let* ((lines (split-lines (canonicalize-rizin-output raw binary-path)))
          (head (join-lines (subseq lines 0 (min max-lines (length lines))))))

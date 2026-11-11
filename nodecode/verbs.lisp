@@ -16,7 +16,7 @@
 ;;;; failed is RE-ERROR carrying the engine's own words, so eval marks the
 ;;;; form failed and the model reads why.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- Lisp arguments onto the engine's JSON ------------------------------------------
 

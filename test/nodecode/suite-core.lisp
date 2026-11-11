@@ -157,7 +157,14 @@
          (in-session ((fresh-session))
            (typed "off")
            (and (has "RE tools are off" (refusal (lambda () (re:cmd ""))))
-                (progn (typed "on") (has "omp-re manual" (re:cmd "")))))))
+                (progn (typed "on") (has "omp-re manual" (re:cmd ""))))))
+  (check "/re off gates the model's /re lines too — it cannot turn the tools back on — and never the operator's"
+         (in-session ((fresh-session))
+           (typed "off")
+           (and (has "RE tools are off" (refusal (lambda () (re:slash "on"))))
+                (has "RE tools are off" (refusal (lambda () (re:status))))
+                (has "rizin:" (typed "status"))
+                (progn (typed "on") (has "rizin:" (re:status)))))))
 
 (check "stop takes the help topic and the command back"
        (and (null nle:*help*) (null nle:*commands*)))

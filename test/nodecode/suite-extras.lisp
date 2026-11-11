@@ -108,7 +108,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
        (and (string= "o '/tmp/a b; !id' 0x50000 rw" (re::map-file-command "/tmp/a b; !id" "0x50000" "rw"))
             (string= "o '/x' 0x1000" (re::map-file-command "/x" "0x1000"))
             (refusal (lambda () (re::map-file-command "/x" "0x1000;!id")))))
-(check "the thirteen passes are the TypeScript's, each with its rizin command"
+(check "the thirteen passes, each with its rizin command"
        (equal '(("calls" . "aac") ("xrefs" . "aar") ("pointers" . "aav") ("preludes" . "aap")
                 ("all_functions" . "aaf") ("data_refs" . "aad") ("autoname" . "aan") ("types" . "aaft")
                 ("struct_offsets" . "aat") ("golang" . "aalg") ("objc" . "aalor") ("rtti_classes" . "avrr")

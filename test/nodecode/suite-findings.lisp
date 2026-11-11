@@ -3,9 +3,8 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; The first half needs no rizin: the gates read the record, so a record
-;;;; written by hand is enough to hold them to the TypeScript's own cases
-;;;; (test/findings.test.ts, report.test.ts, verify.test.ts). The second
-;;;; half runs the whole loop on the test binary through the verbs.
+;;;; written by hand is enough. The second half runs the whole loop on the
+;;;; test binary through the verbs.
 
 (in-package #:nodecode-re-test)
 
@@ -120,10 +119,10 @@ module is or is not loaded, and put back after."
                (and (has "record_finding: recorded " text)
                     (has "claim: f multiplies by 33." text)
                     (has "evidence: 1 of 1 machine-reproducible — this finding will carry to the next build (/re carry)" text)))
-        (check "with no side turn the support audit fails open: unaudited, in the TypeScript's words"
+        (check "with no side turn the support audit fails open: unaudited, word for word"
                (has "support audit: unaudited — no model / side turns unavailable" text)))
       (let ((entry (car (last (re::entries-of "re.finding" (re::find-session id))))))
-        (check "the re.finding entry has the TypeScript's members, in its order"
+        (check "the re.finding entry has its members in the record's fixed order"
                (and (equal '("id" "claim" "evidenceIds" "addr" "confidence" "audit" "binarySha256") (keys entry))
                     (equalp #("11111111-aaaa-bbbb-cccc-000000000001") (gethash "evidenceIds" entry))
                     (equal "confirmed" (gethash "confidence" entry))
@@ -312,7 +311,7 @@ module is or is not loaded, and put back after."
                       (equal "f multiplies by 33." (gethash "claim" finding))
                       (equal "sym.f" (gethash "addr" finding))
                       (equal "confirmed" (gethash "confidence" finding)))))
-        (check "an entry has every member the TypeScript writes, in its order"
+        (check "a manifest entry has every member, in the manifest's fixed order"
                (equal '("evidenceId" "tool" "args" "command" "commands" "reproHash" "canonicalExcerpt"
                         "shiftHash" "anchor" "binarySha256" "status" "claims")
                       (keys entry)))

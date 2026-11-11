@@ -9,7 +9,7 @@
 ;;;; and recipes.py) say the same thing. recipes.lisp is the code over it;
 ;;;; scripts/gen-recipes.ts says what each part means.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter *recipe-tables*
   (obj

@@ -12,7 +12,7 @@
 ;;;; one, what a record says of its own verifiability and how its command is
 ;;;; run again are all here, once.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- ids and hashes, as they are shown --------------------------------------------------------
 

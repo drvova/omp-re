@@ -36,7 +36,7 @@
 ;;;; the code, tables and wording here are this project's own, written
 ;;;; against rizin's JSON.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defun table (&rest path)
   "The member of the recipes' data at PATH."
@@ -580,7 +580,7 @@ call cuts into."
 
 (defmacro define-recipes ()
   "A verb for each recipe in the data, with the options it lists as keywords."
-  (flet ((name (text) (intern text '#:nodecode-re)))
+  (flet ((name (text) (intern text '#:omp-re)))
     `(progn
        ,@(loop for recipe across (jget *recipe-tables* "recipes")
                for options = (coerce (gethash "options" recipe) 'list)

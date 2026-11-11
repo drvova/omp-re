@@ -3,14 +3,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's tools-mapfile.ts + mapfiles.ts (map_file),
-;;;; tools-analyze.ts + passes.ts (analyze), tools-signatures.ts +
-;;;; signatures.ts (apply_signatures, create_signature), tools-project.ts
-;;;; (export_project), tools-rzcli.ts (rizin_cli), tools-triage.ts
-;;;; (triage_capa, triage_floss, triage_die, triage_yara) and
-;;;; tools-emulate.ts (rizin_emulate), with the three readers of entries.ts
-;;;; that scope a record to the open binary.
-;;;;
 ;;;; Three of these change what the rizin process holds without being
 ;;;; annotations: a mapped file, an extra analysis pass, a custom signature
 ;;;; file. Each is recorded (re.mapfile, re.analysis, re.signature) and put
@@ -22,7 +14,7 @@
 ;;;; None of these tools is evidence: rizin_command is the one way to observe
 ;;;; the binary on the record.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- small things several tools share ------------------------------------------------------
 

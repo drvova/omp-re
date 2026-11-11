@@ -15,7 +15,7 @@
 ;;;; signals: a failure is an answer with "failed" true and the reason as
 ;;;; its text. What the engine in turn asks of the host is in host.lisp.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defun engine-tools ()
   "The tools offered now, in the order defined => a vector of

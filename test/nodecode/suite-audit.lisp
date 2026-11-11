@@ -2,11 +2,10 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Three halves, none needing rizin but one check. The port of
-;;;; audit-claims.ts alone: its prompt, its reply parser, every outcome.
-;;;; Then the audit where the engine wires it — record_finding and
-;;;; /re report — with a judge bound by hand, held to the cases of
-;;;; test/findings.test.ts and test/report.test.ts. Then the cell's own
+;;;; Three halves, none needing rizin but one check. The audit alone: its
+;;;; prompt, its reply parser, every outcome. Then the audit where the
+;;;; engine uses it — record_finding and /re report — with a judge put in
+;;;; the host port by hand. Then the cell's own
 ;;;; judge, which asks nodecode a side question: over the stand-in kernel,
 ;;;; so what is proven is what the cell asks for and what it makes of each
 ;;;; way a turn can end, never nodecode's side of it.
@@ -26,8 +25,8 @@
           (re::audit-outcome-by-index outcome)))
 
 (defun judge-saying (verdict &optional (reason "because"))
-  "A judge that gives every claim it is put VERDICT and REASON, as
-findings.test.ts's judgeSaying does — but as a reply to parse."
+  "A judge that gives every claim it is put VERDICT and REASON, as a reply
+to parse."
   (lambda (prompt)
     (re::json-encode
      (map 'vector (lambda (line)
@@ -246,7 +245,7 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
 
       (let ((judge-now (judge-saying "overreach" "shows a multiply, not a hash")))
         (with-service (:judge judge-now)
-        (check "an overreaching claim is refused in the TypeScript's words, with the auditor's reason"
+        (check "an overreaching claim is refused, word for word, with the auditor's reason"
                (equal (format nil "record_finding: NOT recorded — the support auditor judged this claim overreach: shows a multiply, not a hash~%Narrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.")
                       (refusal (lambda () (re:call "record_finding" :claim "f is the djb2 hash of the C2 key."
                                                                     :evidence '("11111111"))))))

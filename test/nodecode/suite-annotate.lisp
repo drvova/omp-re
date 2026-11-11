@@ -3,10 +3,9 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; The rizin half follows omp-re's test/tools-mutate-registry.test.ts: each
-;;;; tool's change is read back independently, through the read verb, so a
-;;;; wrong command template fails here even where a tool's own check agreed
-;;;; with it.
+;;;; In the rizin half each tool's change is read back independently, through
+;;;; the read verb, so a wrong command template fails here even where a
+;;;; tool's own check agreed with it.
 
 (in-package #:nodecode-re-test)
 

@@ -5,7 +5,7 @@
 ;;;; open_binary, rizin_help and rizin_command. rizin_command is the one way
 ;;;; to read the binary, and the one tool whose results are evidence.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- open ----------------------------------------------------------------------------------
 

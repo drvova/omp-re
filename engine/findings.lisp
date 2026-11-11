@@ -2,10 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's findings.ts, the collectEvidence half of entries.ts
-;;;; it reads through, the `/re findings' panel of ui.ts (its headless
-;;;; branch) and the findings line of index.ts's status text.
-;;;;
 ;;;; A report's other claims come from machinery — capa's capability lines,
 ;;;; IOC strings mined from evidence. The conclusions that matter in reverse
 ;;;; engineering ("checksum is djb2") would otherwise live only in chat,
@@ -26,7 +22,7 @@
 ;;;; Findings are re.finding / re.finding.retract entries of the record, read
 ;;;; back from it like all other state, so they survive a restart.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- reading the record --------------------------------------------------------------------
 
@@ -131,8 +127,8 @@ build differ only in which of these they say."
 
 (defun schema-refusal (tool problem &rest arguments)
   "Refuse a call whose arguments break a bound the tool's schema states —
-the lengths and counts the TypeScript's zod schema holds and the spine's
-parameter types cannot say — in the words the spine uses for the rest."
+the lengths and counts a parameter's type cannot say — in the words the
+engine uses for the rest."
   (fail "omp-re: ~a was called with arguments that do not fit its schema: ~?" tool problem arguments))
 
 (defun check-text-length (tool name text least most)
@@ -249,9 +245,8 @@ record_finding and adopt_finding, so the two can never gate differently."
                        :override-audit (jstring arguments "override_audit")))))
 
 (defun adopt-command (text)
-  "One of adopt_finding's commands => (values COMMAND ADDR). The TypeScript
-takes an object {command, addr?}; the spine's parameter types have no
-object, so each arrives as a string: the line as the re-analyst writes it in
+  "One of adopt_finding's commands => (values COMMAND ADDR). A tool's
+parameter types have no object, so each arrives as a string: the line as the re-analyst writes it in
 `reproduce' — `pdf @ sym.f', split at its ` @ ' — or that object as JSON."
   (let ((object (and (uiop:string-prefix-p "{" (trimmed text)) (json-parse text))))
     (cond ((hash-table-p object)

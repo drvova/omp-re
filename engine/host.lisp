@@ -16,7 +16,7 @@
 ;;;; asked through ASK-HOST. Each has an answer for when no host is
 ;;;; installed, so the core runs alone under a test.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- settings -------------------------------------------------------------------------
 
@@ -48,8 +48,8 @@ min): KEY its member of the `re' section, ENV its environment variable — a
 setting may have either or both — and TYPE one of :path, :directory,
 :string, :list (of strings; comma-separated in the environment), :boolean
 (1, true, yes or on in the environment), :integer (a positive one) and
-:secret, which is taken byte for byte: a signing key is not trimmed, since
-the TypeScript engine signs with it as set.")
+:secret, which is taken byte for byte: a signing key is not trimmed, or
+logs signed before would no longer verify.")
 
 (defun env (name)
   "The environment variable NAME, trimmed, or NIL when unset or blank."
@@ -119,7 +119,7 @@ section is taken over OMPRE_RIZIN_PATH. With no host there is no section."
   (with-output-to-string (out)
     (format out "// The section ~~/.nodecode/config.jsonc may carry for this cell —~%")
     (format out "// documentation, not config: the folder gets pushed and holds no secret.~%")
-    (format out "// Written from the declaration in nodecode/host.lisp, and the Lisp suite~%")
+    (format out "// Written from the declaration in engine/host.lisp, and the Lisp suite~%")
     (format out "// checks the two agree. A present section is enabled; \"enabled\": false~%")
     (format out "// vetoes it. Every member is optional. Where a member names an environment~%")
     (format out "// variable, that variable is read while the member is left at its default.~%")

@@ -2,8 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's audit-claims.ts.
-;;;;
 ;;;; The third grounding gate, after the two deterministic ones (existence: a
 ;;;; claim with no evidence id withholds the report; reproducibility: the
 ;;;; repro hash and /re verify). Those prove a claim is cited and
@@ -23,7 +21,7 @@
 ;;;; unsupported or overreach verdict withholds — a failure of the machinery
 ;;;; never fails closed, so a strict report stays emittable.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +no-judge-reason+ "no model / side turns unavailable"
   "auditClaims' reason when there is no judge to ask.")

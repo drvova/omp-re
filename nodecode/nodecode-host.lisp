@@ -7,7 +7,18 @@
 ;;;; appears. Here is what the engine's port (host.lisp) asks about a
 ;;;; session's record, answered for nodecode.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
+
+;;; Under nodecode the engine's package answers to two more names: the cell's
+;;; system's, which is how the folder loader finds START-CELL in it, and RE,
+;;; so an eval form reads (re:cmd "aflj"). The verbs are its exports; it is
+;;; meant to be used qualified only.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (rename-package '#:omp-re '#:omp-re '(#:nodecode-re #:re))
+  (export '(open cmd json call tools doc slash status
+            triage scan-imports inspect-function find-comparisons find-crypto
+            re-error)
+          '#:omp-re))
 
 ;;; RE-ERROR and FAIL as nodecode makes every peripheral's, in place of the
 ;;; engine's own, so eval renders a refusal as it renders any other; *RE*,

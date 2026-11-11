@@ -7,7 +7,7 @@
 ;;;; the audit log, the body, and for a result that observes the binary an
 ;;;; evidence record whose id is appended to what the model reads.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- what a tool answers -------------------------------------------------------------------
 

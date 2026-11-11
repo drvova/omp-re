@@ -10,7 +10,7 @@
 ;;;; directory and nowhere else, never a path the model chose, so a tool
 ;;;; cannot traverse out of it or overwrite an arbitrary file.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- reading ---------------------------------------------------------------------------------
 

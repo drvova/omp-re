@@ -3,10 +3,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/annotations.ts and tools-mutate.ts,
-;;;; with the annotation half of runtime.ts (markAnnotationsApplied, the
-;;;; replay on spawn) and of index.ts (/re undo, the status line).
-;;;;
 ;;;; An annotation is the analyst's edit to rizin's picture of the binary: a
 ;;;; rename, a comment, a type, a hint. It lives in the rizin process's memory
 ;;;; and nowhere else, so the record is what keeps it: one re.annotation entry
@@ -22,7 +18,7 @@
 ;;;; read-back — never the request — so a tool cannot claim a value that did
 ;;;; not land; a mismatch is a refusal that says what rizin actually holds.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- what may reach the pipe ---------------------------------------------------------
 (defun full-match-p (regex text)

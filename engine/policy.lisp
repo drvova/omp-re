@@ -8,7 +8,7 @@
 ;;;; opens files, runs a shell or changes analysis is refused, and
 ;;;; annotations go through the dedicated, undoable tools.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter *allowed-scanner* (js-scanner +allowed-command+))
 (defparameter *denied-scanner* (js-scanner +denied-command+))

@@ -2,9 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's verify.ts (its sha256File is the spine's
-;;;; SHA256-FILE).
-;;;;
 ;;;; The report gate withholds a report whose claims lack an evidence id.
 ;;;; This is the next guarantee: a claim's evidence is not merely cited but
 ;;;; RE-RUNNABLE — its exact rizin command, run read-only against the same
@@ -20,7 +17,7 @@
 ;;;; policy gate and the session's live rizin, and is sent to the process
 ;;;; directly, never through CALL-TOOL, so verifying records no new evidence.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defun verify-row (record status detail)
   (obj "id" (jstring record "id")

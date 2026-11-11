@@ -20,7 +20,7 @@
 ;;;; (CONTRIBUTE). IN-SESSION is the one way to act in a session, whoever
 ;;;; asks — a tool call, a /re line, a recipe composing reads.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- the session -------------------------------------------------------------------------
 

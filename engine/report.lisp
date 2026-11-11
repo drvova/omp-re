@@ -2,16 +2,13 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's report.ts and the fingerprint half of anchor.ts the
-;;;; manifest needs.
-;;;;
 ;;;; A report has two hard properties: IOCs are defanged, and the write gate
 ;;;; refuses to emit a report containing any claim with zero backing
 ;;;; evidence. Every rendered claim anchors to the evidence it actually came
 ;;;; from (`[tool:id]'), tracked per claim, and the anchors resolve into a
 ;;;; Verification Manifest — in the markdown, and as `<report>.manifest.json'
-;;;; beside it, the file /re carry and omp itself read: same members, same
-;;;; order, same spelling as the TypeScript writes.
+;;;; beside it, the file /re carry reads, and manifests written by earlier
+;;;; versions with it: its members, their order and their spelling are fixed.
 ;;;;
 ;;;; The third gate, the claim-support audit (audit-claims.lisp), asks the
 ;;;; model in a side question whether each claim's evidence supports it. It
@@ -21,7 +18,7 @@
 ;;;; else: an audit that could not run fails open, and the report says under
 ;;;; its claims that their support went unaudited.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- what a piece of evidence recorded ---------------------------------------------------------
 
@@ -435,7 +432,7 @@ Best effort: with no rizin the manifest is complete, just without them."
 
 (defun recorded-commands-array (record)
   "RECORD's commands as the array recorded — an empty one included, which
-the TypeScript writes as [] and not null — or NIL when it recorded none."
+a manifest writes as [] and not null — or NIL when it recorded none."
   (let ((commands (jget record "commands")))
     (and (json-array-p commands) (every #'stringp commands) commands)))
 

@@ -2,7 +2,7 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (define-slash "help" (:description "show this list" :order 150 :row (140 "Help")) (words)
   (slash-help))

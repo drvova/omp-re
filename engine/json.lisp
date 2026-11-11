@@ -13,7 +13,7 @@
 ;;;; for the values the engine writes, which is what lets a record written
 ;;;; here verify under omp and the other way round.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (define-condition json-refusal (error)
   ((detail :initarg :detail :reader json-refusal-detail))

@@ -18,7 +18,7 @@
 ;;;; the process, with its analysis and annotations, survives. Only a
 ;;;; timeout kills it.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +command-seconds+ 60 "One ordinary rizin command's ceiling.")
 (defparameter +stderr-tail+ 4096 "How much of rizin's stderr is kept for an error line.")

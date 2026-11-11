@@ -9,7 +9,7 @@
 ;;;; mnemonics, never operands, because a rebuild changes addresses and
 ;;;; registers long before it changes the instruction mix.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +max-mnemonics+ 512
   "The most mnemonics kept in a fingerprint: plenty to identify a function,

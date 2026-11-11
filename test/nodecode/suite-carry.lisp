@@ -3,7 +3,7 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; The first half needs no rizin: reading a manifest, the diff and the
-;;;; roll-up are held to test/carry.test.ts's own cases. The second half
+;;;; roll-up. The second half
 ;;;; writes a real report on a copy of the test binary and carries it — onto
 ;;;; the same bytes, onto a different program (a copy of /bin/cat), and, for
 ;;;; the classifications two unrelated binaries cannot produce, from
@@ -318,7 +318,7 @@ object (and the text and the failure as further values); a refusal is signalled.
             (re:open other)
             (setf other-sha (re::session-binary-sha256 session))
             (let ((text (refusal (lambda () (re:slash (format nil "carry ~a" manifest-path))))))
-              (check "on another program the gone anchor BREAKS the claim and fails the line, in the TypeScript's lines"
+              (check "on another program the gone anchor BREAKS the claim and fails the line, word for word"
                      (string= (format nil "omp-re: carry ~a… → ~a… — 2 hold, 0 relocated, 1 drifted, 1 BROKEN, 0 unchecked (of 4 claim(s))~%  BROKEN    It holds a string of its own.~%  DRIFTED   Its header is this build's.~%  HOLDS     It targets x86.~%  HOLDS     entry0 begins with endbr64."
                                       (subseq v1-sha 0 12) (subseq other-sha 0 12))
                               text)))
@@ -418,7 +418,7 @@ object (and the text and the failure as further values); a refusal is signalled.
                           (equal '("command" "addr") (carry-keys (gethash "args" (second evidence))))
                           (equalp #("pd 4 @ entry0") (gethash "commands" (second evidence)))
                           (starts "0x" (gethash "ea" (second evidence)))))
-              (check "an inherited finding has the TypeScript's fields, citing only the fresh evidence"
+              (check "an inherited finding has its fields in the record's order, citing only the fresh evidence"
                      (and (= 2 (length findings))
                           (equal '("id" "claim" "evidenceIds" "confidence" "audit" "binarySha256" "inherited")
                                  (carry-keys (first findings)))

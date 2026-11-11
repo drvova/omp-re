@@ -9,7 +9,7 @@
 ;;;; the dialog a host may draw; the help, the dialog and what a host is told
 ;;;; of the command all read that declaration.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- subcommands ---------------------------------------------------------------------------
 

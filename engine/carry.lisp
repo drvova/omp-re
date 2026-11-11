@@ -2,10 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's carry.ts, the relocation half of anchor.ts (its
-;;;; fingerprint half is report.lisp's REPORT-ANCHOR-FINGERPRINT) and the
-;;;; `carry' case of index.ts's /re command.
-;;;;
 ;;;; A report's verification manifest (`<report>.manifest.json', report.lisp)
 ;;;; is already a test suite: claim, exact read-only rizin command, canonical
 ;;;; output hash. /re verify runs it against the SAME binary to prove
@@ -34,19 +30,15 @@
 ;;;; carrying records nothing — until --inherit, which re-proves the findings
 ;;;; that held and records them here as rizin_command itself would.
 ;;;;
-;;;; The TypeScript speaks through a UI when it has one. This host has none,
-;;;; so what is ported is its headless branch: the summary and, under it, the
-;;;; agenda are the answer, and a broken claim fails the line — which is what
-;;;; makes a report a regression test for the next build.
+;;;; The summary and, under it, the agenda are the answer, and a broken claim
+;;;; fails the line — which is what makes a report a regression test for the
+;;;; next build.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +max-diff-lines+ 40
   "The most diff lines shown for one drifted record. An excerpt is at most
 20 lines a side, so this only bites on a total rewrite.")
-
-(defparameter +excerpt-max-characters+ 1024
-  "CANONICAL-EXCERPT's cap: an excerpt this long was cut mid-line.")
 
 ;;; --- reading a manifest --------------------------------------------------------------------------
 
@@ -237,7 +229,7 @@ NIL when the two say the same — the change then lies further down."
       ;; An excerpt that hit its cap ends mid-line, at a different column on
       ;; each side; that partial line is dropped so it never shows as a change.
       (flet ((whole (excerpt)
-               (if (>= (length excerpt) +excerpt-max-characters+)
+               (if (>= (length excerpt) +excerpt-characters+)
                    (subseq excerpt 0 (or (position #\Newline excerpt :from-end t) 0))
                    excerpt)))
         (let ((diff (line-diff (whole recorded-excerpt) (whole new-excerpt) #'mask-addresses)))
@@ -639,9 +631,8 @@ the markdown carry report and, beside it, `<out>.json' with the whole
 result. INHERIT re-proves the manifest's findings here.
 
 RESOLVE asks for the agenda to go straight to the model as a turn of its
-own. A command cannot start a turn on this host any more than under
-`omp -p', so the TypeScript's headless answer stands: the line says so and
-the agenda follows the summary, to be passed on as the next prompt."
+own. A command cannot start a turn itself, so the line says so and the
+agenda follows the summary, to be passed on as the next prompt."
   (let* ((manifest (parse-manifest (read-manifest-file manifest-path)))
          (result (build-carry manifest session))
          (claims (jlist result "claims"))

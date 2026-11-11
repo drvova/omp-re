@@ -1,4 +1,4 @@
-;;;; suite-debug.lisp --- the opt-in debugger (nodecode/debug.lisp).
+;;;; suite-debug.lisp --- the opt-in debugger (engine/debug.lisp).
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
@@ -9,8 +9,7 @@
 ;;;; was started with and every command it was sent, and debugs nothing. That
 ;;;; shows the exact command line of a launch and of an attach, the exact
 ;;;; rizin command of every action, and every refusal, with no process under
-;;;; a debugger. Last, as omp-re's own suite does (test/debug.test.ts), one
-;;;; real session launches the test binary — /bin/ls or /bin/true only —
+;;;; a debugger. Last, one real session launches the test binary — /bin/ls or /bin/true only —
 ;;;; under rizin's debugger, stopped at its entry, and stops it again.
 
 (in-package #:nodecode-re-test)
@@ -725,8 +724,7 @@ done
                         (every (lambda (rz) (process-gone-p (re::rz-process rz))) processes))))))))))
 
   ;;; --- one real launch ----------------------------------------------------------------
-  ;;; As test/debug.test.ts does: the test binary, a benign system program,
-  ;;; is launched under rizin's debugger and held at its entry. Where the
+  ;;; The test binary, a benign system program, is launched under rizin's debugger and held at its entry. Where the
   ;;; sandbox forbids ptrace the launch fails, which must be a clean refusal.
 
   (suite "debug: a real debug session")

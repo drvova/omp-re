@@ -8,7 +8,7 @@
 ;;;; may lean on, so the engine carries the forty lines FIPS 180-4 takes.
 ;;;; test/nodecode checks it against the published vectors and sha256sum.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (deftype octets () '(simple-array (unsigned-byte 8) (*)))
 

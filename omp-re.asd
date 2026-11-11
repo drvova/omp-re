@@ -9,12 +9,12 @@
 ;;;;
 ;;;;   sbcl --eval '(asdf:load-asd "omp-re.asd")' --eval '(asdf:load-system "omp-re")'
 ;;;;
-;;;; A host installs what the engine asks of it (nodecode/host.lisp) and
-;;;; builds on the four functions of nodecode/engine.lisp. nodecode-re.asd
-;;;; is the nodecode host.
+;;;; A host installs what the engine asks of it (engine/host.lisp) and builds
+;;;; on the four functions of engine/engine.lisp. nodecode-re.asd is the
+;;;; nodecode host.
 ;;;;
 ;;;; cl-ppcre is named because the read-only command policy is a set of
-;;;; regular expressions (nodecode/policy-data.lisp).
+;;;; regular expressions (engine/policy-data.lisp).
 
 (defsystem "omp-re"
   :description "Reverse engineering with rizin: evidence-backed findings, annotations and reports"
@@ -22,7 +22,7 @@
   :license "MIT"
   :version "0.9.1"
   :depends-on ("cl-ppcre" (:feature (:not :win32) "sb-posix"))
-  :pathname "nodecode/"
+  :pathname "engine/"
   :serial t
   :components ((:file "package")
                (:file "json")

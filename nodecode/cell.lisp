@@ -10,7 +10,7 @@
 ;;;; secret in it: the audit log's signing key stays the engine's own
 ;;;; environment variable, OMPRE_AUDIT_HMAC_KEY.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +primer+
   "Reverse engineering with rizin is available through the nodecode-re cell (omp-re). You reach
