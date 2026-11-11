@@ -125,7 +125,8 @@ function readKernel(value: unknown): Kernel | undefined {
 	if (value === null || typeof value !== "object") return undefined;
 	const { language, sessionFile, cwd } = value as Record<string, unknown>;
 	if ((language !== "js" && language !== "py") || typeof cwd !== "string") return undefined;
-	if (sessionFile !== undefined && typeof sessionFile !== "string") return undefined;
+	// Python has no way to leave a member out but null.
+	if (sessionFile !== undefined && sessionFile !== null && typeof sessionFile !== "string") return undefined;
 	return { language, cwd, ...(sessionFile ? { sessionFile } : {}) };
 }
 

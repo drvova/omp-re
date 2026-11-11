@@ -701,7 +701,7 @@ as further values; a refusal is signalled."
                            (has "findings on this branch: 2 (2 inherited)" (re:status))))))))))))
 
 ;;; --- on two builds of one program ---------------------------------------------------------------------
-;;; What test/tui-carry.sh drives through omp's terminal, without omp: the
+;;; The whole way from one build's report to the next build's findings: the
 ;;; fixture compiled twice, the second build with one function renamed and
 ;;; one constant changed, as a next release would be.
 

@@ -56,10 +56,10 @@ Addresses travel as strings (`"0x4010"`): a 64-bit address does not survive a JS
 Most of omp's requests are about a session and carry
 
 ```
-"session": {"id": "<omp's session id>", "cwd": "<the session's directory>", "hasUI": true, "memory": {…}}
+"session": {"id": "<omp's session id>", "cwd": "<the session's directory>"}
 ```
 
-`cwd` is what a relative path in an argument is read against. `hasUI` says whether an operator is watching (false under `omp -p`). `memory` is the session's memory as the engine last gave it (see **state**).
+`cwd` is what a relative path in an argument is read against.
 
 ## What omp asks the engine
 
@@ -83,50 +83,25 @@ A member whose name ends in `?` may be absent. A type named by a bare word is in
 
 **hello / environment.** `hello`'s answer says the engine's `version` and how this process `started`: `"source"` when it loaded the engine's source, `"image"` when it is a saved image. Nothing on the wire depends on which. The engine process is started once, so it cannot see omp's environment change. `variables` is omp's environment as the engine reads it: every variable whose name begins with the constant `environmentPrefix`, and `PATH`. `stateDir` is omp's agent directory; the engine keeps its blobs and audit log under `<stateDir>/re/`. omp sends `environment` again whenever either changed, before the request that follows.
 
-**describe.** `tools` is each tool offered now: `name`, `label`, `description`, `parameters` (JSON Schema, handed to omp's `registerTool` as it is), `approval`, `approvalReason?` and `render?`. Which tools are offered depends on the environment (`rizin_debug` needs `OMPRE_ENABLE_DEBUGGER`; the triage tools need their programs on `PATH`), so omp asks once for each session it starts.
+**call.** Run one tool: what `re.cmd`, `re.json`, `re.open` and `re.call` in a cell of omp's `eval` come to (see **The other wire** below). `callId` names the call in the audit log; omp's side sends `<the eval call's id>#<n>` for the n-th request a cell made, and leaves it out when it cannot say which eval call a request came from, in which case the engine counts the session's calls itself. `text` is what the model reads. `failed` is true when the call did not do what was asked, with the reason as `text`. `refused` is true when it never came to a result: the tool is unknown or mis-called, the session could not be had, the caller gave up. `raw` is the whole of what rizin printed, for a tool that reads the binary, where `text` may be cut at the size cap; `evidence` is the id of the evidence record the call left, as it is cited. `details` is the result's own data.
 
-`approvalReason` is the sentence an approval prompt shows for one call, as data, because omp computes it in a callback that cannot wait for the engine. It is a list of cases tried in order; the first whose `when` holds is used.
+**command.** Run one of the engine's lines — `status`, `report out.md`, `carry m.json --inherit`, `tools`, `doc <tool>` — which the engine's text calls `/re` lines. `text` is what the line says and `failed` whether it failed. It is the model that runs a line, as `re.slash(line)`: no operator types one, so an answer carries nothing for an operator.
 
-```
-[{"when": [{"arg": "source", "equals": "file"}, {"arg": "path", "type": "string"}],
-  "parts": ["Apply the FLIRT signature file ",
-            {"pieces": [{"arg": "path", "missing": "?"}], "quote": true, "clip": 80},
-            " — this renames matched functions."]},
- {"parts": ["Re-apply rizin's built-in signature database — this renames matched functions."]}]
-```
-
-A `when` condition names an argument by path (`attach.pid`) and holds when it equals `equals`, or is of `type`. A part is literal text or a slot. A slot runs its `pieces` together: each is the argument at `arg` (a string or number as it is, an array of strings joined by spaces), with `prefix` before it when it is there and `missing` in its place when it is not. The text is then cut to `clip` characters (the last three become `...`) and, with `quote`, written as a JSON string.
-
-`render` is how a transcript shows a result: `title`, the argument that is the call's `subject`, and how the `body` is shown.
-
-`commands` is each `/re` subcommand: `name`, `usage?`, `description`, `view: true` when it is also a list omp may open as a panel, and `completes: "evidence"` when its argument is an evidence id omp can complete from the session's state.
-
-**call.** Run one tool. `callId` is omp's own id for the call and is written to the audit log. `text` is what the model reads. `failed` is true when the call did not do what was asked, with the reason as `text`. `refused` is true when it never came to a result at all: the tools are off, the arguments were wrong, the session could not be had, the caller gave up. omp throws a refused call, so code in `eval` can catch it, and returns any other failure as the tool's result. `details` is the result's own data, for a reader that wants more than text: among it `evidenceId`, the id of the evidence record a read left (the tag that ends `text` shows its first eight characters), and `truncated` with `artifactId` when `text` was cut and the whole was kept.
-
-**command.** Run one `/re` line as the operator typed it, without the `/re`. `level` is how loudly to say `text`. `draft: {text, notice}` asks for `text` to be put in the operator's input box and `notice` said in place of `text`, where there is an input box. `userMessage` asks for that text to be sent to the model as the operator's next message.
-
-**state.** Every `call` and `command` answer, and the answer to an `event` that enters a session, carries what omp holds of the session between calls, so drawing never costs a round trip:
-
-- `band` is the status band above the editor, as the lines to draw, or null when there is nothing to show. omp colours them and cuts them to the screen's width; it does not know what they say.
-- `evidence` is the newest evidence records, newest first, at most the constant `completedEvidence` of them, each `[id as shown, "<tool> @ <address>"]`, for completing an id after `/re cite`.
-- `memory` is what the session holds that is in no record and would be gone with the engine process: today, that `/re off` was said. omp keeps the latest and sends it back as `session.memory` with every request. The engine uses it only for a session it has not met since it started, which is how `/re off` survives the engine ending and another being started. It is the engine's to read; omp only carries it.
+**state.** Every `call` and `command` answer, and the answer to an `event` that enters a session, carries what omp draws of the session between calls, so drawing never costs a round trip: `band` is the status band above the editor, as the lines to draw, or null when there is nothing to show. omp colours them and cuts them to the screen's width; it does not know what they say.
 
 **view.** What a screen shows. `kind` is the name of a command that is a view, or one a row or a code view named, sent back with its `arg` unchanged. The answer is one of three types. A `panel` is a list to pick from. A row's `enter` is what choosing it does: `{draft: text}` puts the text in the input box and closes the list; `{view: {kind, arg}}` asks for that view and shows it over the list, or, when the answer is a notice, says it and closes the list. A `code` view is a function: `disasm` its lines, `decompile` the decompiled side when there is one, `noDecompile` what to say when there is none, `ask` the draft a hand-off to the model starts from, `xrefs` the view of the references to it. A `notice` is something to say and nothing to draw; a failure is a notice at level `error`. Views record no evidence.
 
 **preserved.** The lines to fold into the summary when omp compacts the session's conversation; empty when nothing was reverse engineered in it.
 
-**approval.** What omp's approval gate decided of a call. The engine writes it to the audit log beside the call's own line; a denied call never reaches `call`, so this line is all the log has of it.
-
 **event.** The session's life, as omp reports it.
 
 | `kind` | Engine does |
 |---|---|
-| `start` | brings the session in line with its branch; opens `binary` (omp's `--binary`) unless the branch already has it open, else analyzes again the binary the branch has open |
-| `switch`, `tree` | the same, without `binary` |
+| `start`, `switch`, `tree` | brings the session in line with its branch: the binary the branch has open is analyzed again when no process holds it |
 | `branch` | first carries the session `previous` over to this id, its rizin with it |
 | `before-switch`, `shutdown` | ends the session's rizin and debugger; the record stays |
 
-For the first four the analysis runs after the answer, holding the session, so a call that arrives meanwhile waits for it. When it ends the engine sends `state`, and `tell` if there is something to say. A kind that is not in the table is an error: it is never taken for another.
+For the first four the analysis runs after the answer, holding the session, so a call that arrives meanwhile waits for it. When it ends the engine sends `state`, and `tell` when the binary could not be brought back. A kind that is not in the table is an error: it is never taken for another.
 
 **cancel.** omp gave up on its request `id`. The call leaves at its next wait, answering `failed` with `omp-re: … aborted`. A rizin command under way is left to finish and its output is skipped by the next command, so the process and its analysis survive; an analysis that was cancelled kills its half-analyzed process.
 
@@ -158,9 +133,7 @@ All but `alive` name the `session` they are for, by its id.
 
 **saveArtifact / readArtifact.** A result too large to send is kept whole by omp, which answers the artifact's id; the result then names it `artifact://<id>`.
 
-**keepSession.** A `/re` line recorded something that must outlive the process though no model turn follows: write the session now, and where nobody is watching and it has no name, call it `name`.
-
-**notify** tells the operator something outside any answer. **tell** is said the way a `/re` answer is said (under `omp -p`: standard output, or standard error and a failing exit status for an error). **progress** says a long analysis is under way (`text`) or over (`null`); `request` is omp's request it belongs to, or null for one the engine started itself. **transcript** shows a line in the conversation that is never sent to the model (`re.binary`: `[re: opened <path>]`). **state** is a session's state when it changed outside any answer: after the analysis an `event` started.
+**notify** tells the operator something outside any answer. **tell** is for what a session has to be told when nobody asked — its binary could not be analyzed again when the session came back — and is said so that a pipeline sees it (under `omp -p`: standard output, or standard error, with a failing exit status for an error). **progress** says a long analysis is under way (`text`) or over (`null`); `request` is omp's request it belongs to, or null for one the engine started itself. omp shows it on the session's status line. **transcript** shows a line in the conversation that is never sent to the model: the one that says a binary was opened. **state** is the session's state outside any answer, after a restore.
 
 **alive.** An analysis can run for minutes, so omp cannot bound a request by the clock. It bounds the engine's silence instead. While any of omp's requests is under way the engine says `alive` every `aliveSeconds`, with the ids of the requests it is serving. omp takes an engine that has said nothing at all for six beats, with a request waiting, to be hung: it ends it and fails what was waiting, and the next need starts another. A request that two beats in a row do not name, sent before the first of them, was never received or its answer was lost: omp fails that request alone.
 
@@ -207,8 +180,38 @@ All but `alive` name the `session` they are for, by its id.
 | `a` in a code view | ask the model |
 <!-- /protocol:keys -->
 
-omp's side binds these keys and the engine's `/re help` names them, both from this list.
+omp's side binds these keys from this list. `bridgeVersion` and `bridgeDirectory` are the other wire's (below).
 
 ## When the engine ends unasked
 
-A request that was waiting fails with what the engine last wrote to its log. The next request starts another engine, and a session comes back from its record, with its `memory`. omp does not send a failed request again: a call is not always safe to repeat, and one honest error is better than an annotation made twice.
+A request that was waiting fails with what the engine last wrote to its log. The next request starts another engine, and a session comes back from its record. omp does not send a failed request again: a call is not always safe to repeat, and one honest error is better than an annotation made twice.
+
+## The other wire: a kernel of omp's `eval` to the extension
+
+The model does not speak the protocol above. It runs code in omp's `eval`, in a kernel that is a process of its own, and omp gives a plugin no way to hand that process anything (docs/omp-eval.md). So omp's side listens on the loopback interface (`extensions/re/bridge.ts`), and the library the `re-triage` skill loads into a kernel (`skills/re-triage/recipes.js`, `recipes.py`) asks it over HTTP. This wire is small and has one version, the constant `bridgeVersion`, which is in the path of every request.
+
+**Finding the listener.** It binds `127.0.0.1` on a port the system picks, and writes
+
+```
+{"url": "http://127.0.0.1:<port>", "token": "<64 hex digits>", "pid": <omp's pid>, "bridge": 1}
+```
+
+to `<directory>/<omp's pid>.json`, mode 0600, where `<directory>` is `$XDG_RUNTIME_DIR/<bridgeDirectory>` when that variable is set and else `<the temporary directory>/<bridgeDirectory>-<uid>` (no uid on Windows: `-user`), made 0700. A kernel looks in both for the file of its parent process, then of its own. If neither is there and omp gave it a session file, it asks every other listener it finds whether it knows that file (`whoami`); a session with no file is not looked for that way. A file that is not the kernel's own user's is passed over. The file is removed when the listener stops.
+
+**A request** is `POST <url>/v<bridgeVersion>/<method>` with `Authorization: Bearer <token>` and a JSON body that says who asks:
+
+```
+"kernel": {"language": "js" | "py", "sessionFile": "<the session's file, where omp gave one>", "cwd": "<the session's directory>"}
+```
+
+| Method | Body, beside `kernel` | Answer (200) |
+|---|---|---|
+| `whoami` | | `{bridge: 1}` when the kernel's session is one this listener serves |
+| `call` | `name: string`, `arguments: object` | `{text, failed, refused?, raw?, evidence?}`: the engine's answer to `call`, without `details` and `state` |
+| `command` | `line: string` | `{text, failed}` |
+
+Anything else is answered with a status and `{"error": "<why>"}`: 401 without the token, before the body is read; 404 for another path or verb; 400 for a body that is not a request; 409 when the session cannot be told; 500 with the engine's own failure when it could not be asked.
+
+**Which session.** omp keys a kernel by the session's file and directory, or by the directory alone for a session with no file, and that is all a kernel knows. So a request is for the session of this omp process that has that file — or, with no file, the one session without a file that works in that directory. None is a refusal; so are two, which share the kernel: nothing in a request says which of them a cell belongs to.
+
+**Giving up.** A kernel that stops waiting closes its connection: a JavaScript kernel is killed when its cell times out or is interrupted, a Python cell is interrupted inside the call. omp's side then sends the engine `cancel` for that request. It does the same for a request still open when omp says the `eval` call that made it is over.

@@ -7,7 +7,7 @@
 # real rizin, and a fixture binary (FIXTURE env var; defaults to /bin/ls, so
 # anyone can reproduce the committed screenshots).
 #
-# Reuses test/tui-qa.sh's and test/tui.sh's harness conventions rather than
+# Reuses the harness conventions of the tmux tiers this repository used to have rather than
 # inventing new ones: the readiness handshake, the slash/lit/keys send
 # helpers, the editor_visible guard, and trap-based session teardown. Two of
 # those scripts' hard-won lessons carry over unchanged: a slash command takes
@@ -22,11 +22,9 @@ OUT_DIR="$SHOTGEN_DIR/out"
 SESSION="ompre-shot"
 FIXTURE="${FIXTURE:-/bin/ls}"
 FIXTURE_NAME="$(basename "$FIXTURE")"
-# Function-name substring to filter to for the decompile/xrefs scenes, and
-# an address with no evidence gathered yet for the report-gate scene.
-# Fixture-specific: override both together when using a different FIXTURE.
+# Function-name substring to filter to for the decompile/xrefs scenes.
+# Fixture-specific: override it when using a different FIXTURE.
 DECOMPILE_FN="${DECOMPILE_FN:-main}"
-REPORT_ADDR="${REPORT_ADDR:-0x1000}"
 # Down-arrow presses after filtering, before Enter. The functions panel ranks
 # matches with omp's fuzzy matcher, best first, so an exact name like "main"
 # is already the top row (on /bin/ls, ahead of sym.imp.textdomain and
@@ -63,7 +61,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 cleanup # in case a prior stale session survived a crash
 
-# --- harness helpers, copied from test/tui-qa.sh and test/tui.sh --------
+# --- harness helpers --------------------------------------------------
 
 pane() { tmux capture-pane -t "$SESSION" -p; }
 keys() { tmux send-keys -t "$SESSION" "$@"; }
@@ -91,7 +89,7 @@ wait_idle() {
 
 pane_all() { tmux capture-pane -t "$SESSION" -p -S -3000; }
 
-# A model turn's real completion signal (test/tui-qa.sh's `wait_turn`):
+# A model turn's real completion signal:
 # wait_idle alone samples once and can return true in the gap before omp
 # dispatches the turn and repaints the busy hint, capturing mid-turn instead
 # of after (observed directly: an early hero.ansi capture froze on
@@ -155,7 +153,7 @@ close_overlay() {
 }
 
 # Guards a `lit <filter text>` call against typing before a panel/code view
-# has actually rendered (test/tui-qa.sh's `ensure_panel`, same rationale: a
+# has actually rendered (a
 # render race can otherwise route keystrokes into the chat editor instead of
 # the panel filter). No pass/fail bookkeeping — this script has no assertion
 # total to protect, and a scene that never becomes ready is skipped below
@@ -173,17 +171,9 @@ skip_scene() {
 }
 
 # --- launch --------------------------------------------------------------
-# Launch WITHOUT --binary (the flag omp-re itself registers via
-# pi.registerFlag in extensions/re/index.ts, opened automatically on
-# session_start). Confirmed by direct testing during this pass: on a machine
-# whose startup runs a large MCP server catalog, session_start's automatic
-# open raced that startup storm and the spawned analyzer child died
-# immediately (observed on a busy host, kept as a precaution), while a
-# standalone spawn outside that storm ran
-# `aaa` to completion with no issue. test/tui-qa.sh already avoids --binary
-# for the same class of reason ("opening from inside via /re open is what a
-# human does anyway") — do the same here: launch bare, let the readiness
-# handshake absorb the startup storm, then open explicitly once idle.
+# omp-re has no command and no flag to open a binary with: the model opens
+# it, in eval. So omp is launched bare, the status band says the plugin is
+# up, and the first prompt asks for the open.
 
 tmux new-session -d -s "$SESSION" -x 100 -y 30 -c "$REPO_DIR"
 tmux resize-window -t "$SESSION" -x 100 -y 30 2>/dev/null || true
@@ -191,30 +181,12 @@ tmux send-keys -t "$SESSION" \
 	"omp --approval-mode yolo" Enter
 
 # --- readiness handshake --------------------------------------------------
-# See test/tui-qa.sh for the full rationale: MCP startup can keep swallowing
-# keystrokes well past a naive fixed timeout on a machine with a large MCP
-# tool catalog, so retry the real round-trip rather than trusting one sleep.
+# MCP startup can keep swallowing keystrokes well past a naive fixed timeout
+# on a machine with a large MCP tool catalog, so wait for what the plugin
+# itself draws rather than trusting one sleep.
 
 if ! wait_for '[0-9]+ fn · [0-9]+ findings · [0-9]+ evidence' 120; then
 	echo "capture.sh: readiness — status band never rendered" >&2
-	pane
-	exit 1
-fi
-
-READY=0
-for attempt in $(seq 1 16); do
-	wait_idle
-	ensure_editor
-	keys C-u
-	sleep 1
-	slash "/re help"
-	if wait_for 'disable RE tools' 20; then
-		READY=1
-		break
-	fi
-done
-if [ "$READY" -eq 0 ]; then
-	echo "capture.sh: readiness — /re help never answered after 16 attempts" >&2
 	pane
 	exit 1
 fi
@@ -223,8 +195,7 @@ fi
 # every model reply in a blocking Plan Review overlay (observed directly:
 # the hero scene's capture landed on a "Plan mode - next step: Approve and
 # execute / ..." dialog instead of the finished reply) — leave it if it is
-# on; a no-op on a machine where it is already off. Same check/toggle as
-# test/tui-qa.sh.
+# on; a no-op on a machine where it is already off.
 plan_mode_active() {
 	local status
 	status="$(pane | grep -E '^╭── ' || true)"
@@ -247,12 +218,12 @@ if plan_mode_active; then
 		exit 1
 	fi
 fi
-close_overlay 'disable RE tools' >/dev/null 2>&1 || true
 ensure_editor
 keys C-u
 sleep 1
 
-slash "/re open $FIXTURE"
+say "Load omp-re's library into eval as its re-triage skill says, then open $FIXTURE with it. Say only: opened."
+wait_turn 300
 if ! wait_for "\\[re: opened .*${FIXTURE_NAME}\\]" 240; then
 	echo "capture.sh: readiness — binary-opened announcement never rendered" >&2
 	pane
@@ -274,8 +245,7 @@ wait_for '[1-9][0-9]* evidence' 30 || true
 capture hero
 
 # --- scene: functions --------------------------------------------------
-# "fcn" is rizin's always-present prefix for unnamed functions and is what
-# test/tui-qa.sh's own C4 assertion already filters on.
+# "fcn" is rizin's always-present prefix for unnamed functions.
 
 ensure_editor
 lit $'\x1bg' # alt+g = function navigator
@@ -324,57 +294,6 @@ if pane | grep -Eq '· decompile$|· disasm$'; then
 	fi
 else
 	skip_scene xrefs "no code view open to follow xrefs from"
-fi
-
-# --- scene: evidence-cite ------------------------------------------------
-
-close_overlay 'omp-re: xrefs to' >/dev/null 2>&1 || true
-keys Escape
-sleep 1
-close_overlay 'omp-re: functions' >/dev/null 2>&1 || true
-ensure_editor
-
-slash "/re evidence"
-if wait_for 'omp-re: evidence' 10; then
-	sleep 1
-	EV_ID="$(pane | grep -oE '\[[0-9a-f]{8}\]' | head -1 | tr -d '[]')"
-	close_overlay 'omp-re: evidence' >/dev/null 2>&1 || true
-	if [ -n "$EV_ID" ]; then
-		slash "/re cite $EV_ID"
-		if wait_for "Re: evidence $EV_ID" 15; then
-			sleep 1
-			capture evidence-cite
-		else
-			skip_scene evidence-cite "/re cite never prefilled the editor"
-		fi
-	else
-		skip_scene evidence-cite "no evidence id present in the evidence panel"
-	fi
-else
-	skip_scene evidence-cite "evidence panel never opened"
-fi
-
-ensure_editor
-keys C-u
-sleep 1
-
-# --- scene: report-gate ---------------------------------------------------
-# Deterministically provokes the withhold path: instructs the model to
-# record an IOC-shaped comment at a function no evidence has been gathered
-# for in this session, so buildReport's IOC extraction finds a claim with no
-# backing evidence id. If the model does not comply as instructed (it may
-# reasonably refuse and gather evidence first instead), this scene is
-# skipped rather than staged — per the plan, five scenes is an acceptable
-# outcome.
-
-say "Without calling any other tool first, call set_comment on the function at $REPORT_ADDR with the text: possible C2 server 185.220.101.45. Do not verify or gather evidence for this — I am testing report generation."
-wait_turn 180
-slash "/re report"
-if wait_for 'report withheld' 60; then
-	sleep 1
-	capture report-gate
-else
-	skip_scene report-gate "the model did not produce an ungrounded IOC claim deterministically"
 fi
 
 echo "capture.sh: done"

@@ -1,12 +1,15 @@
 # omp's `eval`, as omp-re uses it
 
-omp-re registers no code tool of its own: the model composes the RE tools in
-omp's `eval`, and the recipes are a script that `eval` loads. That puts a
-number of host behaviours under this plugin — `await tool.<name>(args)`,
-`%load`, `read("artifact://…")`, `skill://` URLs, a kernel that keeps its
-state — and [omp.sh](https://omp.sh) describes almost none of them. This page
-writes them down, with where each comes from, so the plugin's reliance on them
-can be checked.
+omp-re registers nothing with omp that a model calls. The model reaches its
+engine from omp's own `eval`: it loads a library there (`%load
+skill://re-triage/recipes.js`, or `.py`), and that library asks a listener the
+extension keeps on the loopback interface. That puts a number of host
+behaviours under this plugin — what a kernel is and what it is told of its
+session, that it may open a socket, what happens to that socket when a cell
+is stopped, `%load`, `skill://` URLs, a kernel that keeps its state — and
+[omp.sh](https://omp.sh) describes almost none of them. This page writes them
+down, with where each comes from, so the plugin's reliance on them can be
+checked.
 
 **Documented here:** `@oh-my-pi/pi-coding-agent` **18.11.1**, the version this
 repository pins. The installed package was compared with the upstream tag
@@ -45,10 +48,10 @@ there so that a change is noticed.
 
 So "undocumented" needs a qualifier: the website says next to nothing, while
 the package carries a reference page a session can read. That page covers the
-tool's fields, limits and helpers. It does not say what `tool.<name>()` hands
-back for an extension's tool, how such a call is approved and recorded, what
-`skill://` means to `%load`, or what happens to an artifact a session cannot
-keep — which is most of what omp-re depends on. Where it and this page overlap,
+tool's fields, limits and helpers. It does not say that a kernel is a process
+of its own, what that process is told about the session it serves, what
+`skill://` means to `%load`, or what a stopped cell does to a connection it
+had open — which is most of what omp-re depends on. Where it and this page overlap,
 they agree unless [Open questions](#open-questions) says otherwise.
 
 ## Cells
@@ -70,12 +73,9 @@ One `eval` call is one cell (`tools/eval.ts`, `evalSchema`):
 off, and a disabled language is removed from the schema the model sees
 (`eval/settings.ts`; `tools/eval-backends.ts`, `resolveEvalBackends`).
 
-Most of this page is written from the JavaScript kernel, which is where the
-plugin's tools are usually composed. The Python kernel reaches the same tools
-through the same bridge (`eval/py/tool-bridge.ts` forwards to
-`callSessionTool`), so [`tool.<name>()`](#toolnameargs),
-[`%load`](#load-path) and the [internal URLs](#internal-urls) hold for it;
-where it differs — and it does, in ways `recipes.py` has to know — is in
+Most of this page is written from the JavaScript kernel. [`%load`](#load-path)
+and the [internal URLs](#internal-urls) hold for the Python kernel too; where
+it differs — and it does, in ways `recipes.py` has to know — is in
 [The Python kernel](#the-python-kernel).
 
 ### What a cell answers
@@ -157,10 +157,10 @@ the realm…`*
 
 | Global | Signature | omp-re uses it |
 | --- | --- | --- |
-| `tool` | `await tool.<name>(args)` — a session tool; see below. Also `tool(fn, { name?, description?, parameters? })`, `tool.defined()`, `tool.undefine(name)` to define kernel-hosted tools for subagents (`eval.tools.enabled`) | **yes** — `recipes.js`, SKILL.md |
-| `read` | `await read(path, { offset?, limit? })` → string. A plain path is relative to the cwd; `local://` and this session's `artifact://<id>` are read from disk; any other scheme is handed to the `read` tool | **yes** — `recipes.js` reads `artifact://` |
-| `print` | `print(value, …)` — `console.log` | **yes** — how a recipe's report is shown |
-| `display` | `display(value)` — JSON, image or text, shown under `display[n]:` | in README's advice only |
+| `tool` | `await tool.<name>(args)` — a session tool; see below. Also `tool(fn, { name?, description?, parameters? })`, `tool.defined()`, `tool.undefine(name)` to define kernel-hosted tools for subagents (`eval.tools.enabled`) | no — it reaches registered tools, and omp-re registers none |
+| `read` | `await read(path, { offset?, limit? })` → string. A plain path is relative to the cwd; `local://` and this session's `artifact://<id>` are read from disk; any other scheme is handed to the `read` tool | by the model, for a text the size cap cut (SKILL.md) |
+| `print` | `print(value, …)` — `console.log` | **yes** — how a text the library answers is shown |
+| `display` | `display(value)` — JSON, image or text, shown under `display[n]:` | in the agent file's advice only |
 | `write` | `await write(path, data)` → the path written. Plain paths and `local://` only; other schemes are refused | no |
 | `log`, `phase` | `log(message)`, `phase(title)` — status lines on the cell's card | no |
 | `env` | `env(key?, value?)` — read or set a variable for the kernel | no |
@@ -179,137 +179,164 @@ by the host…`* That is true of this realm only: in the Python kernel `re` is
 
 `tool` is a proxy; any property is a function that sends `(name, args ?? {})`
 to the host, where `callSessionTool` (`eval/js/tool-bridge.ts`) looks the tool
-up, validates the arguments and executes it.
+up among the session's *registered* tools — built-in, an extension's, an MCP
+server's — validates the arguments and executes it under that tool's own
+approval. A name that is no registered tool throws `Unknown tool from js
+runtime: <name>`. *contract: `reaches a tool an extension registered, and
+nothing else…`*
 
-### Which tools
+Up to 0.11 this was omp-re's way in: every RE tool was registered, and a cell
+called `tool.rizin_command(…)`. omp-re registers no tool now, so this proxy
+reaches nothing of it, and that is the whole reason for what follows: with no
+tool, and no way for an extension to put a global or a module into a kernel
+([Eval preludes](#eval-preludes)), a cell has to reach the plugin some other
+way.
 
-Every **enabled** tool, by its registered name: the top-level ones and the ones
-mounted as `xd://` devices alike (`session/session-tools.ts`,
-`getToolForEvalBridge` over `getEnabledToolNames`). That is what lets a
-discoverable tool, which the model never sees a schema for, be called from a
-cell. *contract: `reaches a discoverable tool that is mounted as an xd://
-device…`*
+## A kernel is a process of its own
 
-Not reachable: a name that is no tool; a tool that is registered but not
-enabled (`defaultInactive`, or turned off) — both throw `Unknown tool from js
-runtime: <name>`; and `checkpoint` and `rewind`, which the bridge refuses by
-name. *contract: `a name that is not a tool…`, `checkpoint and rewind are
-refused…`*
+This is what omp-re's way from a cell to its engine stands on
+(`extensions/re/bridge.ts`; [`ARCHITECTURE.md`](ARCHITECTURE.md#omp-the-way-in-from-eval)).
+None of it is said to extension authors anywhere.
 
-### Arguments
+### Whose child it is
 
-Validated against the tool's schema before anything else happens; a failure
-throws `Validation failed for tool "<name>": …` and no event fires. Omitted
-arguments are `{}`. The harness's intent key `i` is dropped unless the schema
-declares it. Validation is the lenient kind the model's own calls get: an
-unknown key was seen to pass through to the tool, and `{ command: 5 }` to reach
-a tool whose `command` is a string (`callSessionTool`;
-`validateAgentToolArguments` in `@oh-my-pi/pi-agent-core`, not read further).
-*contract: `arguments are checked against the tool's schema…`*
+The JavaScript kernel is a separate Bun process — `bun <omp's cli>
+__omp_worker_js_eval_process` — spawned by omp, with a channel back to it that
+only omp's own code reads (`eval/js/context-manager.ts`, `acquireSession`;
+`eval/js/process-entry.ts`). Its parent's process id is omp's, and nothing of
+omp's JavaScript realm is in it: a value an extension puts on `globalThis` is
+not there. *contract: `the JavaScript kernel is a child process of omp…`* If
+that process cannot be started omp falls back to a Bun Worker thread inside
+its own process (same file); then the kernel's own process id is omp's. *read,
+not run*
 
-### What comes back
+The Python kernel is a plain `python -u <runner.py>` subprocess of omp
+(`eval/py/kernel.ts`), started in the session's working directory. *contract:
+`is a child process of omp too…`* On Windows, a virtual environment's
+`python.exe` is a launcher that starts the real interpreter as a child of its
+own, so the kernel's parent is that launcher, not omp. *not run; known of
+Python's venv launcher, not read in omp*
 
-`bridgeValueFromToolResult` (`eval/js/tool-bridge.ts`) turns the tool's result
-into the cell's value:
+### What it is told about its session
 
-| The tool's result | The cell gets | Pinned by |
-| --- | --- | --- |
-| text only, `details` undefined, no error | the text, as a bare **string** | *contract: `a result with no details comes back as a bare string`* |
-| has `details` | `{ text, details }` — `details` exactly as the tool gave it | *contract: `a result with details comes back as { text, details }…`* |
-| has images | `{ text, details, images }` | source only |
-| `isError: true`, or `details.isError: true` | `{ text, details, hasError: true }` — it does **not** throw | *contract: `a result the tool marked isError does not throw…`* |
-| the tool throws | the `await` rejects with a plain `Error` whose message is the tool's | *contract: `a tool that throws rejects in the cell…`* |
+Not omp's session id, not the tool call's id, not the branch. Only this:
 
-`text` is every text block of the result joined with nothing between them. A
-block appended by a `tool_result` handler is therefore the end of `text` — the
-handler supplies its own newline. omp-re does not use that: an RE tool's
-result is one text block, written by the engine, and the `[evidence …]` tag is
-its last line.
+- **JavaScript:** a global, `__omp_session__`, `{ cwd, sessionId }`, where
+  `sessionId` is the kernel's own key: `js:session:<session file>:cwd:<cwd>`,
+  or `js:cwd:<cwd>` for a session with no file (`eval/js/shared/runtime.ts`;
+  `eval/session-id.ts`, `defaultEvalSessionId`; `eval/js/index.ts`). *contract:
+  `a JavaScript cell is told its session as __omp_session__…`* The name has
+  two underscores each side because it is omp's internal; it is the only
+  thing in the realm that says which session a cell belongs to.
+- **Python:** environment variables set for each cell, among them
+  `PI_SESSION_FILE`, the session's file, absent for a session with none
+  (`eval/executor-base.ts`, `MANAGED_KERNEL_ENV_KEYS`), and the process's
+  working directory, which is the session's. *contract: `is a child process of
+  omp too, started in the session's directory, and told the session's file as
+  PI_SESSION_FILE…`*
 
-One case moves a throw into the fourth row: when a `tool_result` handler
-replaces the content of a call that threw, the wrapper returns the replacement
-marked as an error instead of rethrowing
-(`extensibility/extensions/wrapper.ts`, `ExtensionToolWrapper.execute`), and
-the cell gets `{ text, hasError: true }`. *contract: `a thrown tool whose
-result a tool_result handler replaced…`* Code that must not miss a failure
-checks `hasError` as well as catching.
+The same two facts — the session's file, else its directory — are what omp
+keys a kernel by ([What persists](#what-persists-and-when-it-is-lost)), so
+they name the session exactly as well as the kernel does: sessions with no
+file in one directory share a kernel and cannot be told apart from inside it.
 
-Calls started together run concurrently, and a call the cell did not await is
-still finished before the cell's result is returned (`context-manager.ts`,
-`settlePending`). *contract: `calls started together run concurrently…`*
+On the extension's side the same session answers
+`ctx.sessionManager.getSessionFile()` and `.getCwd()`, which is how a request
+from a kernel is matched to a session (`extensions/re/host.ts`,
+`sessionOfKernel`).
 
-### How a call is approved and recorded
+### What it may do, and its environment
 
-The tool the bridge executes is the session's registry entry, which is the
-extension wrapper around the tool (`sdk.ts` wraps every tool in
-`ExtensionToolWrapper` when extensions are loaded). So a call from a cell takes
-the same path as one the model makes directly, in this order
-(`ExtensionToolWrapper.execute`):
+Anything its language can: a kernel is not sandboxed. A cell can require
+`node:http`, `node:net` and `node:child_process`, call `fetch`, spawn
+programs; a Python cell has `http.client`, `socket`, `subprocess`. In
+particular a cell can talk to a listener on `127.0.0.1` in omp's process, and
+a request without the listener's token is the listener's to refuse.
+*contract: `a JavaScript cell can ask a loopback listener in omp's process
+with node:http…`, `a Python cell can ask a loopback listener in omp's process
+with http.client…`* omp's own bridge for Python tool calls is the same design:
+a loopback HTTP server with a bearer token (`eval/py/tool-bridge.ts`).
 
-1. A user policy of `deny` (`tools.approval.<name>`) throws `Tool "<name>" is
-   blocked by user policy.` before anything is announced.
-2. `tool_call` fires, with `toolCallId` `js-<name>-<uuid>` and the validated
-   arguments. A handler returning `{ block: true, reason }` makes the call
-   throw `reason`; the tool does not run.
-3. The approval gate: the tool's own tier (`approval`, default `"exec"`)
-   against `tools.approvalMode` (`always-ask` approves `read`, `write` approves
-   up to `write`, `yolo` — the default — approves all), with
-   `tools.approval.<name>` overriding (`tools/approval.ts`, `resolveApproval`).
-   A call that needs a prompt gets one; with no UI it throws `Tool "<name>"
-   requires approval but no interactive UI available.`
-4. The tool runs.
-5. omp's bound on the result's size is applied ([below](#a-tool-result-that-is-too-long)).
-6. `tool_result` fires, with the content, the details and `isError`; a handler
-   may replace the content.
+Two things about *how* to ask, both Bun's and Python's rather than omp's:
+Bun's `fetch` sends even a loopback request to the proxy `HTTP_PROXY` names,
+unless `NO_PROXY` exempts it, and gives up on a silent response after five
+minutes; `node:http` does neither. Python's `urllib` honours the proxy
+variables too; `http.client` does not. So the plugin's library uses
+`node:http` and `http.client`. *seen with the pinned Bun; not pinned by a
+test*
 
-*contract: `tool_call and tool_result fire for a call made from a cell…`, `a
-tool_call handler that blocks…`, `a thrown tool reaches tool_result handlers as
-isError…`, `each tool.<name>() call is approved on its own tier and policy…`,
-`under the default mode (yolo) every tier runs unprompted`*
+The **JavaScript** kernel gets omp's environment as it is when the kernel
+starts (`subprocess/worker-client.ts`). The **Python** kernel gets a filtered
+one: an allowlist (`PATH`, `HOME`, `USER`, `TMPDIR`, `TEMP`, `TMP`,
+`XDG_RUNTIME_DIR`, …), anything beginning `LC_`, `XDG_` or `PI_`, and nothing
+else (`eval/py/runtime.ts`, `filterEnv`). A variable an extension sets under
+its own name does not reach a Python cell. *contract: `its environment is
+filtered…`* That is why the plugin's listener is found through a file and not
+through a variable. The kernels agree with omp on where such a file would be:
+their temporary directory, their user id and `XDG_RUNTIME_DIR` are omp's.
+*contract: `the kernel's temporary directory and user are omp's own…`, `its
+temporary directory, user and runtime directory are omp's own…`*
 
-Two consequences. The cell is itself an `exec`-tier call (`tools.approval.eval`,
-as <https://omp.sh/docs/approvals> says), approved once; each tool it calls is
-then approved again on its own terms, so approving a cell does not approve what
-it does. *contract: `eval itself is an exec-tier tool…`* And nothing is written
-to the transcript per call: the cell's card shows a status line for each
-(`summarizeToolResult`), but the session record has one tool call, the cell.
-Anything that must outlive the cell has to be recorded by the tool or by a
-handler. omp-re's engine does it while the tool's `execute` runs: the audit
-line and the evidence record are written there, whichever way the call came.
+### A cell that is stopped hangs up
 
-### Deadline and abort
+Time a cell spends waiting on a socket counts toward its deadline like any
+other time (only omp's own waits pause it: `eval/bridge-timeout.ts`). When the
+deadline passes, or the user interrupts:
 
-Time spent inside `tool.<name>()` counts toward the cell's deadline. Only
-waits the host owns pause it: agent and completion handles, `judge`, package
-installs, prelude calls (`eval/bridge-timeout.ts`, `withBridgeTimeoutPause`;
-the comment in `tools/eval.ts`, `#runCells`, says "ordinary tool calls all
-count against the budget"). When the deadline passes, or the cell is aborted,
-the signal each in-flight tool was given is aborted — with a `TimeoutError` or
-an `AbortError` — and then the kernel is killed. *contract: `time spent inside
-tool.<name>() counts toward the deadline…`, `aborting a cell kills the kernel
-too…`*
+- the **JavaScript** kernel is killed, so every connection it had open is
+  closed by the operating system, and a server in omp's process sees its
+  request aborted. *contract: `time a cell spends waiting on a socket counts
+  toward its deadline…`, `aborting a cell kills the kernel too, and hangs up
+  the request it was waiting on`*
+- the **Python** kernel is interrupted, not killed
+  ([The deadline in Python](#the-deadline-in-python)): the blocking call the
+  cell was in raises `KeyboardInterrupt`, and a connection closed on the way
+  out (`finally`) is seen as aborted the same way. *contract: `a Python cell
+  past its deadline is interrupted, not killed: the call it was blocked in is
+  stopped by KeyboardInterrupt…`, `aborting a Python cell interrupts it the
+  same way…`*
 
-### A tool result that is too long
+So a listener learns that nobody waits any more without being told by a
+hook. That matters, because a handler of `tool_call` is given no abort signal
+for the cell.
 
-omp bounds every tool result, extension tools included (`tools/output-meta.ts`,
-`spillLargeResultToArtifact`, applied by `wrapToolWithMetaNotice`):
+### What an extension sees of a cell
 
-- At most `tools.artifactSpillThreshold` — 50 KB, i.e. 51200 bytes of text —
-  passes through untouched. *contract: `a result whose text is at most
-  tools.artifactSpillThreshold…`*
-- One byte more and the whole text is saved as a session artifact, the middle
-  is cut out (20 KB of head and 20 KB of tail are kept:
-  `tools.artifactHeadBytes`, `tools.artifactTailBytes`,
-  `tools.artifactTailLines`), a last line is appended — `[Showing lines 1-a and
-  b-N of N; M middle lines (… ) elided. Read artifact://<id> for full output]`
-  — and `details.meta.truncation` (with `artifactId`, `totalBytes`,
-  `direction: "middle"`) is added beside the tool's own details. *contract: `one
-  byte more and omp cuts the middle out…`*
+`tool_call` fires for `eval` before the cell runs, with the tool call's id and
+`input` — `language`, `code`, `title`, `timeout`, `reset` — and a context whose
+`sessionManager` is the session's; `tool_result` fires after, with the
+content, `isError` and the same `input`, and a handler may return a
+replacement `content` (`extensibility/shared-events.ts`, `ToolCallEventResult`,
+`ToolResultEventResult`; `extensibility/extensions/wrapper.ts`). A cell that
+threw is a result too, with `isError`. *contract: `tool_call and tool_result
+fire for a cell…`* omp-re uses the first to know which `eval` call a request
+from a kernel belongs to, for the audit log, and the second to add one line
+under a cell that failed because the library was not loaded: the error text
+of an undefined name is `<name> is not defined` in JavaScript and `NameError:
+name '<name>' is not defined` in Python. *contract: same test; `a name that
+is not defined is NameError in these words…`*
 
-A tool that truncates for itself and stays at or under the threshold is left
-alone: its text, and whatever it put in `details`, reach the cell as written.
-This happens before `tool_result`, so a handler sees the cut text and what it
-appends lands after omp's note. *contract: same test*
+A `tool_call` handler may also return a replacement `input`, which would let
+an extension put a line of its own in front of the model's code. omp-re does
+not: the cell that runs, and that the transcript shows, is the one the model
+wrote. *read; the experiment that showed it works is not in the suite*
+
+`tool_execution_start` and `tool_execution_end` are the agent loop's events
+and do not fire when the tool is executed directly, as the suites do. omp-re
+listens for the second as well as `tool_result`, to know a cell is over.
+*read; not seen in a model's turn*
+
+### How a cell is approved
+
+`eval` is one tool to omp's approval gate, tier `exec`
+(`tools/eval.ts`). Under `tools.approvalMode: always-ask` with no UI a cell is
+refused, naming `tools.approval.eval`; with `tools.approval.eval: allow`, or
+under the default mode, it runs, and nothing it then does over a socket is
+put to the gate. *contract: `eval itself is an exec-tier tool…`, `that is the
+one gate…`* omp.sh says as much about shells: "bash rules do not cover a shell
+spawned through eval". So a plugin reached from inside a cell is approved
+with the cell, as a whole, and has to hold its own line inside it —
+[`SECURITY.md`](../SECURITY.md#what-omp-approves).
 
 ## `%load <path>`
 
@@ -403,7 +430,8 @@ A session on disk keeps an artifacts directory beside its file; an artifact is
 a file `<id>.<tool>.log` in it, `id` a counter starting at 0
 (`session/artifacts.ts`, `ArtifactManager`). Artifacts are made by:
 
-- omp, when a tool result passes 50 KB ([above](#a-tool-result-that-is-too-long));
+- omp, when a tool result passes 50 KB (`tools.artifactSpillThreshold`): it
+  cuts the middle out and names the artifact that has it whole;
 - every `eval` cell, which reserves one for its own output (so ids are not
   consecutive per tool);
 - an extension, with `await ctx.sessionManager.saveArtifact(content, toolType)`,
@@ -428,7 +456,8 @@ truncation note still says `Read artifact://<id>`, but nothing can read it
 back: `getArtifactPath` is `null` and `read("artifact://<id>")` throws `No
 session - artifacts unavailable`. *contract: `a session that is not on disk
 still hands out artifact ids…`* An id is therefore not proof the text can be
-had; `recipes.js` treats a failed read as fatal for that reason.
+had. That is one reason the plugin's library does not get a read's data
+through an artifact: the engine answers what rizin printed beside the text.
 
 ### `xd://<name>`
 
@@ -439,16 +468,11 @@ calls it (`tools/xdev.ts`; `internal-urls/xd-protocol.ts`). `xd://<tool>/<topic>
 is a named doc page of a tool: `xd://eval/helpers` is where the model reads
 about `%load`. *contract: `read("xd://") lists the mounted devices…`*
 
-Which tools mount: those whose `loadMode` is `"discoverable"`, which is what an
-extension's tool gets unless it says `"essential"` (`tools/essential-tools.ts`,
-`defaultLoadModeForToolName`; `isMountableUnderXdev` — `read`, `write`, `todo`,
-`ask`, `grep`, `web_search` and `yield` never mount).
-
-For `tool.<name>()` none of this matters: mounted or top-level, an enabled tool
-is reached the same way and returns the same thing. With `tools.xdev` off the
-tools are listed top-level, `xd://` is "not mounted in this session", and cells
-are unchanged — the presentation changed, as omp.sh says, not what is
-permitted. *contract: `off, the same tools are listed top-level…`*
+A device is a registered tool, and a topic is a registered tool's: there is no
+entry an extension can add without registering one. So omp-re, which
+registers none, is not under `xd://`; what a model would have read there it
+reads from the skill, and from the engine through `re.help()`, `re.tools()`
+and `re.doc(name)`.
 
 ## The Python kernel
 
@@ -505,46 +529,21 @@ limit=…)`, `log`, `phase`, `wait`, `budget`, `agent`, `workpool`, `completion`
 `judge`, `judge_batch`. *contract: same test* (that they are there and
 callable; the signatures were read).
 
-**`tool.<name>(…)` is the exception: it answers a coroutine.**
-`_ToolCallable.__call__` is `async def`; nothing reaches the bridge until it is
-awaited, and a call left un-awaited is shown as `<coroutine object …>` with a
-`RuntimeWarning`. Arguments are one dict, keywords, or both (keywords win);
-anything else positional is a `TypeError`. Awaited, it gives what
-[JavaScript gets](#what-comes-back), as Python values:
+`tool.<name>(…)` is the exception, an `async def` that has to be awaited;
+omp-re does not use it.
 
-| The tool's result | The cell gets | Pinned by |
-| --- | --- | --- |
-| text only, no details | the text, a `str` | *contract: `tool.<name>(args) answers a coroutine; awaited…`* |
-| has `details` | `{"text": …, "details": …}`, a `dict` | same |
-| marked `isError` | the dict with `"hasError": True` — no exception | *contract: `a tool that throws raises RuntimeError…`* |
-| the tool throws, the arguments fail validation, or the name is no tool | `RuntimeError` whose message is the tool's (`Unknown tool from js runtime: <name>` for the last — the wording is the bridge's, whatever the kernel) | same |
-
-Integers arrive as Python `int`s, but they crossed the bridge as JSON written
-by JavaScript: a number in a tool's `details` past 2^53 was already rounded on
-the other side. A tool's *text* is a string and arrives as written, which is
-why `recipes.py` parses rizin's JSON out of the text. *seen; not pinned*
-
-### One event loop, and what a plain function can do in it
+### One event loop, and a blocking call in it
 
 A cell is compiled with top-level `await` allowed and run inside the runner's
-persistent event loop, on the main thread. `asyncio.run(…)` there raises
-`asyncio.run() cannot be called from a running event loop`, so a synchronous
-function cannot wait for a tool call the ordinary way. *contract: `a cell runs
-inside a running event loop…`*
-
-It can on another thread: `asyncio.run` on a thread of its own, entered
-through a copy of the calling context (`contextvars.copy_context().run(…)`),
-while the caller joins the thread. The copy is not optional. The bridge
-attributes a call to the running cell by `__omp_current_run_id__`, which reads
-a context variable (`runner.py`, `_CURRENT_RID`); a fresh thread has an empty
-context and the bridge answers `Missing session/run/name`. With the copy the
-call is the same call as any other — `tool_call` and `tool_result` fire, the
-approval gate applies. *contract: `a tool call can be settled from a plain
-function on another thread…`* omp's own `read()` blocks the loop the same way
-when it goes to the read tool (`prelude.py`, `_read_tool_text` →
-`_bridge_call`), so a helper that holds the main thread for a tool call is
-within what the kernel already does. This is how `recipes.py` keeps to "Python
-helpers: sync".
+persistent event loop, on the main thread. A plain function that blocks —
+on a socket, say — holds that loop for as long as it waits. omp's own helpers
+do exactly that: `read()` is synchronous and answers a value, not a coroutine,
+going to the read tool over omp's bridge while the loop waits (`prelude.py`,
+`_read_tool_text` → `_bridge_call`). *contract: `a cell runs inside a running
+event loop, and a plain blocking call there is how omp's own helpers work…`*
+So a library whose functions are plain calls that block on a request is
+within what the kernel already does, and is what "Python helpers: sync"
+promises a model. This is how `recipes.py` is written.
 
 ### What a Python cell answers
 
@@ -605,20 +604,13 @@ the `read` tool and raises `RuntimeError: No session - artifacts unavailable`.
 Not the JavaScript kernel's. A Python cell past its deadline is *interrupted*
 (SIGINT) and the kernel is meant to live: the output begins `[eval cell timed
 out after Ns; kernel interrupted but remains running. Reset the kernel via {
-reset: true } if state appears corrupted.]`. Tool time counts toward the
-deadline as it does in JavaScript, and the signal of a tool call in flight is
-aborted with a `TimeoutError`. When the interrupt lands in a plain function
-waiting on a thread — a recipe — it surfaces as `KeyboardInterrupt`, the cell
-ends, and the namespace is intact: `omp_re` survives a timed-out recipe.
-*contract: `a Python cell past its deadline is interrupted, not killed…`*
-
-When it lands in a cell that is itself `await`ing a tool call, what was seen is
-worse than the message says: the cell reports the timeout as above, and the
-*next* cell answers `[Kernel died during execution; completion is uncertain…]`
-`Python kernel exited with code 130`, after which a fresh kernel is started
-with nothing in it. *seen once, in a scratch run; not pinned, and not examined
-in the source.* So for Python too, give a slow tool call a `timeout` and a cell
-of its own.
+reset: true } if state appears corrupted.]`. The interrupt surfaces as
+`KeyboardInterrupt` in whatever the cell was doing; when that is a plain
+function blocked on a request — any call of `omp_re` — the call ends, the
+cell ends, and the namespace is intact: `omp_re` survives a timed-out call,
+where `re` in the JavaScript kernel does not. An interrupt by the user does
+the same. *contract: `a Python cell past its deadline is interrupted, not
+killed…`, `aborting a Python cell interrupts it the same way…`*
 
 ## Eval preludes
 
@@ -658,60 +650,61 @@ idle kernel. `timeout: 0` was read, not run.
 ## What omp-re relies on
 
 Each row is a host behaviour this plugin would break without. "contract" is
-`test/omp-eval-contract.test.ts`; the other two files show the same behaviour
-through the real RE tools (`test/extension-sdk.test.ts`) and the real recipes
-(`test/recipes-eval.test.ts`).
+`test/omp-eval-contract.test.ts`; the other files show the same behaviour
+through the plugin itself: `test/bridge.test.ts` (the way from a cell to the
+engine), `test/extension-sdk.test.ts` (the verbs in both kernels) and
+`test/recipes-eval.test.ts` (the recipes).
 
 | Behaviour | Depends on it | Pinned by |
 | --- | --- | --- |
-| `tool.<name>()` reaches tools mounted as `xd://` devices | every RE tool (`render.ts`, `RE_LOAD_MODE`); `recipes.js` and `recipes.py` (`observe`); SKILL.md | contract: `reaches a discoverable tool…`; extension-sdk: `omp's eval reaches an RE tool as tool.<name>()…` |
-| A tool with details returns `{ text, details }`, details intact | `recipes.js` (`observe` reads `details.truncated`, `details.artifactId`); SKILL.md ("read `.text`") | contract: `a result with details comes back as { text, details }…` |
-| A result of one text block with details reaches the cell with that text unchanged, last line included | the engine's `[evidence …]` tag, the last line of a read's text; `recipes.js` (`EVIDENCE_TAG`) | contract: same test; extension-sdk: `open, annotate, and resume through eval…` |
-| A tool that throws rejects with its own message | `recipes.js`; SKILL.md ("A failing tool throws"); every `omp-re: …` refusal | contract: `a tool that throws rejects in the cell…`; extension-sdk: `…its error is catchable in the cell` |
-| A result marked as an error comes back with `hasError` instead | `recipes.js` (`observe` throws on it) | contract: `a result the tool marked isError does not throw…`, `a thrown tool whose result a tool_result handler replaced…` |
-| A call from a cell runs the tool's own `execute`, under an id of omp's | `index.ts` (`execute` forwards the call and its id to the engine, which refuses while `/re off`, writes the audit line and records the evidence). omp-re registers no `tool_call` or `tool_result` handler. | extension-sdk: `/re off refuses RE tool calls from eval…`; shim: `every call that ran is in the audit log under omp's own tool-call id…` |
-| Each call is approved on its own tier and `tools.approval.<name>`, and `tool_approval_resolved` says what was decided | every tool's `approval`; `index.ts` (forwards the decision to the engine's audit log) | contract: `each tool.<name>() call is approved on its own tier and policy…`; shim: same test as above |
-| `%load skill://re-triage/recipes.js` runs the script beside SKILL.md | SKILL.md; README; `recipes.js` | contract: `skill://<name>/<path> loads the file…`; recipes-eval: `%load by the skill's own URL defines re…` |
-| `%load` does not echo the source and shows the script's last expression | `recipes.js` (its last expression is the call that defines `re`, whose value is the "recipes loaded" message) | contract: `runs the file in the kernel without echoing its source…` |
+| An extension can register no prelude, and `tool.<name>()` reaches only registered tools | the whole design: a library the model loads, asking a listener | contract: `are built in — browser, computer, ratchet, archive…`, `reaches a tool an extension registered, and nothing else…` |
+| A kernel is a child process of omp's | the library finds the listener by a file named for its parent's process id (`recipes.js`, `recipes.py`: `connect`) | contract: `the JavaScript kernel is a child process of omp…`, `is a child process of omp too…`; bridge: `its file is the owner's alone…` |
+| The kernel's temporary directory, user id and `XDG_RUNTIME_DIR` are omp's | where that file is looked for (`bridgeDirectories` on both sides) | contract: `the kernel's temporary directory and user are omp's own…`, `its temporary directory, user and runtime directory are omp's own…` |
+| The Python kernel's environment is filtered | the listener is not named in a variable | contract: `its environment is filtered…` |
+| A cell can reach a loopback listener in omp's process | every verb | contract: `a JavaScript cell can ask a loopback listener…`, `a Python cell can ask a loopback listener…`; extension-sdk: `omp's eval reaches the engine through the library…` |
+| `__omp_session__.sessionId` is `js:session:<file>:cwd:<cwd>` or `js:cwd:<cwd>` | `recipes.js` (`kernel`): which session a request is for | contract: `a JavaScript cell is told its session as __omp_session__…`; bridge: `two sessions in one omp process, each with its file…` |
+| `PI_SESSION_FILE` is the session's file during a Python cell, and the kernel's directory is the session's | `recipes.py` (`kernel`) | contract: `is a child process of omp too, started in the session's directory…`; extension-sdk: `the same analysis from Python cells, in the same session…` |
+| A kernel is keyed by the session's file, or by its directory when it has none | `host.ts` (`sessionOfKernel`): two sessions that share a kernel are refused | contract: `is keyed by the session's file and working directory…`; bridge: `sessions omp keeps no file for are told apart by their directory…` |
+| A stopped cell's open request is hung up, in both kernels | the engine's work on a call is cancelled when nobody waits for it (`host.ts`, `answerKernel`) | contract: `time a cell spends waiting on a socket counts toward its deadline…`, `aborting a cell kills the kernel too…`, the two Python tests of the same; bridge: `a JavaScript cell that is interrupted, or runs past its timeout, cancels the engine's call…`, `a Python cell that is interrupted…` |
+| `tool_call` for `eval` carries the call's id and a context that names the session | the audit log names a call `<eval call id>#<n>` (`host.ts`, `cellStarted`) | contract: `tool_call and tool_result fire for a cell…`; shim: `every call that ran is in the audit log, named by the eval call it came from…` |
+| `tool_result` for `eval` fires for a failed cell too, and what a handler adds to the content reaches the result | the line that says how to load the library (`index.ts`) | contract: same test; extension-sdk: `a cell that uses the library in a kernel that has not loaded it is told the line that loads it…` |
+| An undefined name is said as `<name> is not defined` / `NameError: name '<name>' is not defined` | what that handler looks for | contract: same test, `a name that is not defined is NameError in these words…` |
+| `%load skill://re-triage/recipes.js` runs the script beside SKILL.md | SKILL.md; README; the library | contract: `skill://<name>/<path> loads the file…`; recipes-eval: `%load by the skill's own URL defines re…` |
+| `%load` does not echo the source and shows the script's last expression | `recipes.js` (its last expression is the call that defines `re`, whose value is the "loaded" message) | contract: `runs the file in the kernel without echoing its source…` |
 | What a script puts on `globalThis` persists across cells | `recipes.js` (`globalThis.re`) | contract: `top-level const, let, var…`, `what the script defines at top level persists…` |
 | The name `re` is free in the realm | `recipes.js` | contract: `the name re is not taken by the host…`; recipes-eval: same test as above |
-| `ctx.sessionManager.saveArtifact(content, tool)` returns an id; `getArtifactPath(id)` finds the file | `host.ts` (`saveArtifact`, `readArtifact`: where the engine keeps a cut result whole, and how `/re report` reads it back) | contract: `read("artifact://<id>") returns, raw and whole…` |
-| `read("artifact://<id>")` in a cell returns that text raw and whole | `recipes.js` (`wholeOutput`) | contract: same test; recipes-eval: `a read cut at the size cap is read back whole…` |
-| Without a session on disk the read fails, with an error rather than other text | `recipes.js` (`lost`: it stops instead of parsing cut JSON) | contract: `a session that is not on disk still hands out artifact ids…`; recipes-eval: `when the whole of a cut read cannot be had…` |
-| A tool result of at most 50 KB reaches the cell uncut | the engine's cap on a result's body, 48 KiB (`engine/util.lisp`, `+max-octets+`), which is meant to be the only cut | contract: `a result whose text is at most tools.artifactSpillThreshold…`, `one byte more…` |
-| `read xd://<name>` documents a mounted tool; `tools.xdev` off changes nothing for cells | SKILL.md; README | contract: `read("xd://") lists the mounted devices…`, `off, the same tools are listed top-level…` |
+| `eval` is one `exec`-tier call to the approval gate, and nothing inside a cell is put to it | what SECURITY.md says omp approves | contract: `eval itself is an exec-tier tool…`, `that is the one gate…` |
+| `ctx.sessionManager.saveArtifact(content, tool)` returns an id; `getArtifactPath(id)` finds the file | `host.ts` (`saveArtifact`, `readArtifact`: where the engine keeps a text the size cap cut, and how the line `report` reads it back) | contract: `read("artifact://<id>") returns, raw and whole…` |
+| What a cell prints is cut at 50 KB | the engine's cap on a result's body, 48 KiB (`engine/util.lisp`, `+max-octets+`), which is meant to be the only cut of a printed read | contract: `past 50 KB the middle of the output is left out…`; recipes-eval: `the engine's own cut stays under omp's limit…` |
 
-The Python script, `skills/re-triage/recipes.py`, stands on the same bridge
-and on these besides, all from [The Python kernel](#the-python-kernel):
+The Python library, `skills/re-triage/recipes.py`, stands on these besides,
+all from [The Python kernel](#the-python-kernel):
 
 | Behaviour | Depends on it | Pinned by |
 | --- | --- | --- |
 | `re` is already the regex module in a Python cell | `recipes.py` (the global is `omp_re`); SKILL.md | contract: `the name re is taken in a Python cell…`; recipes-eval: `%load by the skill's own URL defines omp_re…` |
-| `tool.<name>()` answers a coroutine that gives a `str` or a `dict` of `text` and `details` | `recipes.py` (`observe`) | contract: `tool.<name>(args) answers a coroutine; awaited…` |
-| A tool that throws raises `RuntimeError` with its message; an `isError` result comes back with `hasError` | `recipes.py` (`observe` raises on it); every `omp-re: …` refusal reaching a Python cell | contract: `a tool that throws raises RuntimeError…`; recipes-eval: `with no binary open every recipe fails…` (Python) |
-| A coroutine can be run to its end on another thread under a copy of the cell's context, and only under one | `recipes.py` (`settled`: what lets a recipe be a plain function) | contract: `a tool call can be settled from a plain function on another thread…` |
-| `%load skill://re-triage/recipes.py` runs the file in the cell namespace; the output is what it printed | `recipes.py` (it prints the "recipes loaded" message as it finishes loading); SKILL.md | contract: `%load skill://<name>/<path> runs a Python file…`; recipes-eval: same test as the first row |
-| `read("artifact://<id>")` is synchronous and returns the text whole; without a session on disk it raises | `recipes.py` (`whole_output`, `lost`) | contract: `read("artifact://<id>") is synchronous in Python…`, `in a session that is not on disk…`; recipes-eval: `a read cut at the size cap is read back whole … by Python's read()`, `when the whole of a cut read cannot be had, the Python recipe stops…` |
-| A value is shown by its `__repr__` | `recipes.py` (`Report`: a report left as a cell's value reads as its text) | contract: `a string left as a cell's last expression is shown as its repr…`; recipes-eval: `a report is text…` |
+| A plain function may block the cell's event loop, as omp's own `read()` does | every function of `omp_re` is a plain call | contract: `a cell runs inside a running event loop, and a plain blocking call there…` |
+| `%load skill://re-triage/recipes.py` runs the file in the cell namespace; the output is what it printed | `recipes.py` (it prints the "loaded" message as it finishes loading); SKILL.md | contract: `%load skill://<name>/<path> runs a Python file…`; recipes-eval: same test as the first row |
+| A value is shown by its `__repr__` | `recipes.py` (`Report`: a text left as a cell's value reads as written) | contract: `a string left as a cell's last expression is shown as its repr…`; recipes-eval: `what the library answers is text…` |
 | A line beginning with `%` is a magic even inside brackets | `recipes.py` (no line starts with a format's `%`) | contract: `a line that begins with % is rewritten as a magic…` |
-| A timed-out Python cell is interrupted and the namespace kept | nothing depends on it; it is why `omp_re` outlives a recipe that ran out of time | contract: `a Python cell past its deadline is interrupted, not killed…` |
+| A stopped Python cell is interrupted and the namespace kept | `omp_re` need not be loaded again after a timeout; SKILL.md says so | contract: `a Python cell past its deadline is interrupted, not killed…`; bridge: `a Python cell that is interrupted, or runs past its timeout, cancels the engine's call and keeps its kernel…` |
 
-Two host behaviours the plugin is exposed to and does nothing about, and one it
-keeps clear of. They are pinned so that they stay known:
+Two host behaviours the plugin is exposed to and can only tell the model
+about, and one it keeps clear of. They are pinned so that they stay known:
 
-- **A JavaScript cell that outlives its deadline takes `re` with it.** (A
-  Python one is interrupted instead; see [The deadline in
-  Python](#the-deadline-in-python).) The default is 30 s and tool time counts; `open_binary` budgets 300 s for analysis and
-  `rizin_command` 120 s a command. contract: `a cell past its deadline is
-  killed…`, `time spent inside tool.<name>() counts toward the deadline…`
+- **A JavaScript cell that outlives its deadline takes `re` with it.** The
+  default is 30 s and time in the engine counts; opening a binary budgets
+  300 s for analysis and a rizin command 120 s. The skill says to give such a
+  cell a `timeout`, and the line under the next cell's error says how to load
+  the library again. contract: `a cell past its deadline is killed…`
 - **An interrupted cell does too.** contract: `aborting a cell kills the kernel
   too…`
-- **A result within 50 KB of text is the plugin's to keep under.** The engine
+- **A printed read within 50 KB is the plugin's to keep under.** The engine
   caps a result's *body* at 48 KiB, so that the header line, the truncation
-  note and the evidence tag it adds stay under omp's threshold. (With the cap
-  at 50 KiB a cut result went just over, and omp cut its middle out a second
-  time and named a second artifact.) Held by the group "a long read through
-  omp's eval is cut once" in `test/recipes-eval.test.ts`.
+  note and the evidence tag it adds stay under omp's limit on what a cell
+  shows. (With the cap at 50 KiB a cut result went just over, and omp cut its
+  middle out a second time and named a second artifact.) Held by the group
+  "a long read through omp's eval is cut once" in `test/recipes-eval.test.ts`.
 
 ## Open questions
 
@@ -730,16 +723,17 @@ keeps clear of. They are pinned so that they stay known:
 - **Python's kernel.** The setting's label says "IPython kernel"; the tool
   description says "plain Python subprocess, not IPython". The description
   matches the code.
-- **`tool.<name>(args)` in Python: awaited or not.** The tool description's
-  helper list puts `await` before `tool.<name>(args)` for JavaScript only
-  (`prompts/tools/eval.md`: `{{#if js}}await {{/if}}tool.<name>(args)`), under
-  the heading "Python helpers: sync, kwargs" — which reads as "no await in
-  Python". The code is `async def __call__`, and an un-awaited call does
-  nothing (*contract*). `omp://tools/eval.md` was not checked on this point.
-  SKILL.md tells the model to await it.
-- **A Python cell that times out while awaiting a tool call.** The message
-  says the kernel "remains running"; the next cell found it dead (exit 130).
-  Seen once; whether it is the rule was not established.
+- **The JavaScript kernel as a thread.** When the kernel's process cannot be
+  started omp runs it as a Bun Worker in its own process. The library looks
+  for the listener's file under its own process id as well as its parent's
+  for that case, and `__omp_session__` is set the same way; neither was run.
+- **A subagent's kernel.** A task subagent is a session with a file of its
+  own, so it has kernels of its own and its requests name its own session.
+  That an extension's `tool_call` handler fires for a subagent's `eval` was
+  read, not run: no suite starts a subagent.
+- **A model's turn.** Everything here was shown by executing the `eval` tool
+  directly. `tool_execution_end`, and what the agent loop does with content a
+  `tool_result` handler added, were not seen.
 - **An older Python.** The runner allows for Python before 3.12 and nothing
   states a floor. `recipes.py` uses nothing newer than 3.9, but was run on
   3.13 only.
@@ -755,8 +749,8 @@ keeps clear of. They are pinned so that they stay known:
   forked or its tree navigated was not examined.
 - **A handler that revises the arguments.** The wrapper lets a `tool_call`
   handler return a replacement `input`, re-checked by the approval gate
-  (`ExtensionToolWrapper.execute`). Read, not run; omp-re's handlers return
-  nothing.
+  (`ExtensionToolWrapper.execute`). Read, not run here; omp-re's `tool_call`
+  handler returns nothing.
 - **`timeout: 0`**, images in a tool result, and the ACP permission gate
   `getToolForEvalBridge` applies (`#wrapToolForAcpPermission`) were read, not
   run.
@@ -771,8 +765,8 @@ URL sources that bear on this page, from a diff of `src/eval`,
 - **In-memory artifacts become readable.** `artifact-protocol.ts` gains
   `callerInMemoryArtifact`: a session with no artifacts directory reads its
   own in-memory spill. `No session - artifacts unavailable` stops being the
-  answer for an id the session issued, so the contract test of that name, and
-  `when the whole of a cut read cannot be had…` in recipes-eval, will change.
+  answer for an id the session issued, so the contract test of that name will
+  change. Nothing of omp-re's depends on it any more.
 - **`read("artifact://<id>")` for another session's artifact** locates the
   file with a bounded `read` and then reads it directly (`prelude.txt`).
 - **A tool that is registered but not enabled** throws `Tool is registered but
@@ -782,6 +776,13 @@ URL sources that bear on this page, from a diff of `src/eval`,
   bridge (`DELEGATED_WORK_TOOLS`). Other tools still count.
 - **A new global, `sh`** — `` await sh`cmd ${arg}` `` — and a reply scheme,
   `out://`, that a bridged `write` cannot reach.
+- **`__omp_session__`, the kernel's process model and the Python
+  environment filter are unchanged** (`eval/js/shared/runtime.ts`,
+  `eval/js/context-manager.ts`, `eval/py/runtime.ts`): what the way to the
+  engine stands on is the same there.
+- **A `tool_call` handler's revised `input`** "becomes what the loop
+  schedules, displays, persists" (`extensibility/shared-events.ts`), which is
+  one more reason omp-re does not rewrite a cell.
 - **The tool description names the session's tools** and states the deadline's
   clamp; a prelude may inline its documentation there.
 - **Skills** can be re-discovered mid-session (`rediscoverSkills`,

@@ -2,34 +2,32 @@
  * The part of omp's `eval` this plugin stands on, pinned claim by claim.
  *
  * docs/omp-eval.md describes what omp's eval does — cells and what persists,
- * `tool.<name>()`, `%load`, the `skill://`, `artifact://` and `xd://` URLs —
- * from omp's source, because omp.sh does not. This file holds that description
- * to the installed omp: each test is named for one claim of the doc, so an omp
- * release that changes one fails here in the claim's own words.
+ * what a kernel is and what it knows of its session, `%load`, the `skill://`,
+ * `artifact://` and `xd://` URLs — from omp's source, because omp.sh does
+ * not. This file holds that description to the installed omp: each test is
+ * named for one claim of the doc, so an omp release that changes one fails
+ * here in the claim's own words.
  *
  * Everything goes through omp's real SDK and real `eval` tool, as
  * test/extension-sdk.test.ts and test/recipes-eval.test.ts do. No model is
  * called and no rizin is needed: the host's behaviour is shown with a probe
- * extension registered inline (a handful of tools that answer, throw, sleep or
- * overflow on demand, and two event handlers that write down what they see),
- * not with the RE tools. What those tools and the recipes do on top of this is
- * the other two files' business.
+ * extension registered inline — two tools, a loopback listener of its own,
+ * and event handlers that write down what they see — not with the plugin's
+ * extension. What the plugin does on top of this is the other files'
+ * business.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession, ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { boot as bootSession, type Cell, caught, pythonKernel, rmDirSafe, ROOT, runCell, scratchAgentDir, SKILLS } from "./helpers.ts";
+import { boot as bootSession, type Cell, caught, pythonKernel, rmDirSafe, ROOT, runCell, scratchAgentDir, SKILLS, until } from "./helpers.ts";
 
 const RECIPES = join(SKILLS, "re-triage", "recipes.js");
 const RECIPES_PY = join(SKILLS, "re-triage", "recipes.py");
 
 const python = await pythonKernel();
 if (!python.ok) console.log(`omp-re: SKIPPING the Python-kernel contract tests — omp reports its Python backend unavailable here: ${python.reason ?? "no reason given"}`);
-
-/** omp's own bound on a tool result's text: `tools.artifactSpillThreshold`, 50 KB by default. */
-const SPILL_THRESHOLD_BYTES = 50 * 1024;
 
 // --- the probe extension -------------------------------------------------------------------
 
@@ -38,15 +36,58 @@ interface SeenEvent {
 	tool: string;
 	id: string;
 	input: unknown;
+	/** The file of the session the handler's context is for. */
+	sessionFile?: string;
 	isError?: boolean;
 	text?: string;
 }
 /** Every tool_call and tool_result the probe's handlers were handed, in order. */
 const seen: SeenEvent[] = [];
-/** How each c_sleep call ended: "finished", or the name of the reason its signal was aborted with. */
-const sleeps: string[] = [];
 /** Names on the ExtensionAPI object an extension is handed, own and inherited. */
 const apiNames = new Set<string>();
+
+/**
+ * A loopback listener in omp's process, as the plugin's is (extensions/re/bridge.ts): it wants a token, answers
+ * `/quick` at once and `/slow` never, and writes down every request it took and every one whose asker hung up.
+ */
+const listener = { url: "", token: `probe-${crypto.randomUUID()}`, took: [] as string[], hungUp: [] as string[], stop: () => {} };
+function listen(): void {
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		idleTimeout: 0,
+		async fetch(request) {
+			if (request.headers.get("authorization") !== `Bearer ${listener.token}`) return new Response("no token", { status: 401 });
+			const { pathname, searchParams } = new URL(request.url);
+			const who = searchParams.get("who") ?? "?";
+			listener.took.push(`${request.method} ${pathname} ${who} ${await request.text()}`);
+			if (pathname === "/slow") {
+				request.signal.addEventListener("abort", () => listener.hungUp.push(who));
+				await new Promise(() => {});
+			}
+			return Response.json({ ok: true });
+		},
+	});
+	listener.url = `http://127.0.0.1:${server.port}`;
+	listener.stop = () => void server.stop(true);
+}
+/** A JavaScript expression that asks the listener with node:http, as the plugin's library does, and answers the reply's text. */
+const jsAsk = (path: string) =>
+	`await new Promise((done, failed) => { const request = require("node:http").request(${JSON.stringify("URL")} + ${JSON.stringify(path)}, { method: "POST", agent: false, headers: { authorization: ${JSON.stringify("TOKEN")} } }, (response) => { let text = ""; response.on("data", (chunk) => (text += chunk)); response.on("end", () => done(text)); }); request.on("error", failed); request.end("{}"); })`
+		.replace('"URL"', JSON.stringify(listener.url))
+		.replace('"TOKEN"', JSON.stringify(`Bearer ${listener.token}`));
+/** Python statements that ask the listener with http.client, as the plugin's library does, leaving the reply's text in `reply`. */
+const pyAsk = (path: string) =>
+	[
+		"import http.client, urllib.parse",
+		`address = urllib.parse.urlsplit(${JSON.stringify(listener.url)})`,
+		"connection = http.client.HTTPConnection(address.hostname, address.port)",
+		"try:",
+		`    connection.request("POST", ${JSON.stringify(path)}, body=b"{}", headers={"Authorization": ${JSON.stringify(`Bearer ${listener.token}`)}})`,
+		"    reply = connection.getresponse().read().decode()",
+		"finally:",
+		"    connection.close()",
+	].join("\n");
 
 const row = (i: number) => `row ${String(i).padStart(6, "0")} ${"x".repeat(40)}`;
 /** `count` lines of 51 bytes each, newline included. */
@@ -61,36 +102,6 @@ function probe(pi: ExtensionAPI): void {
 		pi.registerTool({ name, label: name, description: `contract probe: ${name}`, approval: "read", parameters: none, ...extra, execute: ((id: string, params: never, signal: AbortSignal | undefined, _update: unknown, ctx: never) => execute(id, params, signal, ctx)) as never });
 
 	tool("c_plain", { parameters: z.object({ say: z.string().optional() }) }, async (_id, params: { say?: string }) => ({ content: [text(`plain:${params.say ?? ""}`)], details: undefined }));
-	tool("c_details", {}, async () => ({ content: [text("one"), text("two")], details: { k: 1 } }));
-	tool("c_required", { parameters: z.object({ must: z.string() }) }, async () => ({ content: [text("ran")], details: {} }));
-	tool("c_throw", {}, async () => {
-		throw new Error("c_throw: refused in the tool's own words");
-	});
-	tool("c_throw_rewritten", {}, async () => {
-		throw new Error("the tool's message");
-	});
-	tool("c_iserror", {}, async () => ({ content: [text("soft failure")], details: { why: "marked" }, isError: true }));
-	tool("c_blocked", {}, async () => ({ content: [text("must never run")], details: {} }));
-	tool("c_inactive", { defaultInactive: true }, async () => ({ content: [text("must never run")], details: {} }));
-	tool("c_essential", { loadMode: "essential" }, async () => ({ content: [text("essential ran")], details: {} }));
-	tool("c_write", { approval: "write" }, async () => ({ content: [text("wrote")], details: {} }));
-	tool("c_exec", { approval: undefined }, async () => ({ content: [text("ran")], details: {} }));
-	tool("c_sleep", { parameters: z.object({ ms: z.number() }) }, async (_id, params: { ms: number }, signal) => {
-		await new Promise<void>((done) => {
-			const timer = setTimeout(() => {
-				sleeps.push("finished");
-				done();
-			}, params.ms);
-			signal?.addEventListener("abort", () => {
-				clearTimeout(timer);
-				sleeps.push(`aborted:${(signal.reason as Error | undefined)?.name}`);
-				done();
-			});
-		});
-		return { content: [text("slept")], details: {} };
-	});
-	// A result of exactly `bytes` bytes of text, with details of its own.
-	tool("c_bytes", { parameters: z.object({ bytes: z.number() }) }, async (_id, params: { bytes: number }) => ({ content: [text(rows(Math.ceil(params.bytes / 51)).slice(0, params.bytes))], details: { mine: true } }));
 	// What the engine does past its own cap, through the extension: keep the whole output as a session artifact, answer the cut text and the id.
 	tool("c_spill", { parameters: z.object({ lines: z.number() }) }, async (_id, params: { lines: number }, _signal, ctx: { sessionManager: { saveArtifact(content: string, toolType: string): Promise<string | undefined> } }) => {
 		const full = `header\n${rows(params.lines)}`;
@@ -98,16 +109,18 @@ function probe(pi: ExtensionAPI): void {
 		return { content: [text(`header\n\n[Output truncated. Full output: artifact://${artifactId}]`)], details: { truncated: true, artifactId } };
 	});
 
-	pi.on("tool_call", async (event) => {
-		seen.push({ kind: "call", tool: event.toolName, id: event.toolCallId, input: event.input });
-		return event.toolName === "c_blocked" ? { block: true, reason: "blocked by the probe's tool_call handler" } : undefined;
+	// An environment variable set while the extension loads, under each kind of name: the plugin's own prefix, and omp's.
+	process.env.OMPRE_CONTRACT_PROBE = "set by the probe";
+	process.env.PI_CONTRACT_PROBE = "set by the probe";
+
+	pi.on("tool_call", async (event, ctx) => {
+		seen.push({ kind: "call", tool: event.toolName, id: event.toolCallId, input: event.input, sessionFile: ctx.sessionManager.getSessionFile() });
 	});
-	pi.on("tool_result", async (event) => {
+	pi.on("tool_result", async (event, ctx) => {
 		const body = event.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-		seen.push({ kind: "result", tool: event.toolName, id: event.toolCallId, input: event.input, isError: event.isError, text: body });
-		// A handler adding one more text block after the tool's own.
-		if (event.toolName === "c_throw_rewritten") return { content: [{ type: "text" as const, text: "the handler's replacement" }] };
-		return event.toolName === "c_details" ? { content: [...event.content, { type: "text" as const, text: "\n[tagged by tool_result]" }] } : undefined;
+		seen.push({ kind: "result", tool: event.toolName, id: event.toolCallId, input: event.input, sessionFile: ctx.sessionManager.getSessionFile(), isError: event.isError, text: body });
+		// A handler adding one more text block after the cell's own output.
+		return event.toolName === "eval" && body.includes("TAG ME") ? { content: [...event.content, { type: "text" as const, text: "[tagged by tool_result]" }] } : undefined;
 	});
 }
 
@@ -133,12 +146,12 @@ async function value<T>(session: AgentSession, expression: string): Promise<T> {
 	expect(await out(session, `await Bun.write(${JSON.stringify(file)}, JSON.stringify(await (async () => (${expression}))())); "written"`)).toBe("written");
 	return JSON.parse(await readFile(file, "utf8")) as T;
 }
-const eventsOf = (name: string): SeenEvent[] => seen.filter((event) => event.tool === name);
 
 /** The session most claims are shown on: on disk, so it has an artifact store; with the probe and this plugin's skills. */
 let h: AgentSession;
 
 beforeAll(async () => {
+	listen();
 	work = await mkdtemp(join(tmpdir(), "omp-re-contract-cwd-"));
 	const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 	h = await boot(SessionManager.create(work, join(agentDir(), "sessions")));
@@ -147,6 +160,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await h.dispose();
+	listener.stop();
 	rmDirSafe(work);
 });
 
@@ -216,114 +230,14 @@ describe("a cell", () => {
 // --- tool.<name>() --------------------------------------------------------------------------
 
 describe("tool.<name>(args)", () => {
-	test("reaches a discoverable tool that is mounted as an xd:// device and absent from the top-level list", async () => {
-		expect(h.getMountedXdevToolNames()).toContain("c_plain");
-		expect(h.getActiveToolNames()).not.toContain("c_plain");
+	test("reaches a tool an extension registered, and nothing else: a name that is no registered tool throws Unknown tool from js runtime — so a plugin that registers none has no way in through it", async () => {
 		expect(await out(h, 'await tool.c_plain({ say: "hi" })')).toBe("plain:hi");
-		// An essential tool stays top-level and is reached the same way.
-		expect(h.getActiveToolNames()).toContain("c_essential");
-		expect(await out(h, "(await tool.c_essential({})).text")).toBe("essential ran");
-	});
-
-	test("a result with no details comes back as a bare string", async () => {
-		expect(await value<unknown>(h, 'tool.c_plain({ say: "hi" })')).toBe("plain:hi");
-	});
-
-	test("a result with details comes back as { text, details }: the text blocks joined with nothing between, the details as the tool gave them", async () => {
-		expect(await value<unknown>(h, "tool.c_bytes({ bytes: 5 })")).toEqual({ text: "row 0", details: { mine: true } });
-		// Two blocks from the tool, and a third appended by a tool_result handler.
-		expect(await value<unknown>(h, "tool.c_details({})")).toEqual({ text: "onetwo\n[tagged by tool_result]", details: { k: 1 } });
-	});
-
-	test("a tool that throws rejects in the cell as a plain Error carrying the tool's own message", async () => {
-		expect(await out(h, caught("await tool.c_throw({})"))).toBe("c_throw: refused in the tool's own words");
-		expect(await out(h, 'let k; try { await tool.c_throw({}) } catch (e) { k = [e instanceof Error, e.name].join(" ") }; k')).toBe("true Error");
-	});
-
-	test("a result the tool marked isError does not throw: it comes back as { text, details, hasError: true }", async () => {
-		expect(await value<unknown>(h, "tool.c_iserror({})")).toEqual({ text: "soft failure", details: { why: "marked" }, hasError: true });
-	});
-
-	test("a thrown tool whose result a tool_result handler replaced does not throw either: the replacement comes back with hasError: true", async () => {
-		expect(await value<unknown>(h, "tool.c_throw_rewritten({})")).toEqual({ text: "the handler's replacement", hasError: true });
-	});
-
-	test("tool_call and tool_result fire for a call made from a cell, under the id js-<name>-<uuid>, with the arguments the tool ran with", async () => {
-		seen.length = 0;
-		await out(h, 'await tool.c_plain({ say: "audited" })');
-		const [call, result] = eventsOf("c_plain");
-		expect(eventsOf("c_plain").map((event) => event.kind)).toEqual(["call", "result"]);
-		expect(call!.id).toMatch(/^js-c_plain-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-		expect(result!.id).toBe(call!.id);
-		expect(call!.input).toEqual({ say: "audited" });
-		expect(result).toMatchObject({ isError: false, text: "plain:audited" });
-		// The cell itself is a tool call too, around the one it made.
-		expect(seen.map((event) => `${event.kind} ${event.tool}`)).toEqual(["call eval", "call c_plain", "result c_plain", "result eval"]);
-	});
-
-	test("a thrown tool reaches tool_result handlers as isError with the message as its content", async () => {
-		seen.length = 0;
-		await out(h, caught("await tool.c_throw({})"));
-		expect(eventsOf("c_throw").at(-1)).toMatchObject({ kind: "result", isError: true, text: "c_throw: refused in the tool's own words" });
-	});
-
-	test("a tool_call handler that blocks makes the call throw its reason in the cell, and the tool does not run", async () => {
-		seen.length = 0;
-		expect(await out(h, caught("await tool.c_blocked({})"))).toBe("blocked by the probe's tool_call handler");
-		expect(eventsOf("c_blocked").map((event) => event.kind)).toEqual(["call"]);
-	});
-
-	test("a name that is not a tool, and a registered tool that is not enabled, both throw Unknown tool from js runtime", async () => {
-		expect(await out(h, caught("await tool.no_such_tool({})"))).toBe("Unknown tool from js runtime: no_such_tool");
-		expect(h.getToolByName("c_inactive")).toBeDefined();
-		expect(await out(h, caught("await tool.c_inactive({})"))).toBe("Unknown tool from js runtime: c_inactive");
-	});
-
-	test("arguments are checked against the tool's schema before it runs; omitted arguments are {}", async () => {
-		seen.length = 0;
-		expect(await out(h, caught("await tool.c_required({})"))).toStartWith('Validation failed for tool "c_required":');
-		expect(eventsOf("c_required")).toEqual([]); // refused before tool_call
-		expect(await out(h, "await tool.c_plain()")).toBe("plain:");
-	});
-
-	test("checkpoint and rewind are refused through the bridge", async () => {
-		expect(await out(h, caught("await tool.checkpoint({})"))).toBe("`checkpoint` cannot run through the eval bridge; call the direct `checkpoint` tool.");
-	});
-
-	test("calls started together run concurrently, and a call that was not awaited is still finished before the cell returns", async () => {
-		const elapsed = await value<number>(h, "(async () => { const t = Date.now(); await Promise.all([tool.c_sleep({ ms: 300 }), tool.c_sleep({ ms: 300 }), tool.c_sleep({ ms: 300 })]); return Date.now() - t })()");
-		expect(elapsed).toBeLessThan(800);
-		sleeps.length = 0;
-		expect(await out(h, 'tool.c_sleep({ ms: 200 }); "returned without awaiting"')).toBe("returned without awaiting");
-		expect(sleeps).toEqual(["finished"]);
-	});
-
-	test("a result whose text is at most tools.artifactSpillThreshold (50 KB) is passed through whole", async () => {
-		const result = await value<{ text: string; details: Record<string, unknown> }>(h, `tool.c_bytes({ bytes: ${SPILL_THRESHOLD_BYTES} })`);
-		expect(Buffer.byteLength(result.text)).toBe(SPILL_THRESHOLD_BYTES);
-		expect(result.details).toEqual({ mine: true });
-	});
-
-	test("one byte more and omp cuts the middle out, says so on a last line naming an artifact, and adds details.meta.truncation beside the tool's own details", async () => {
-		seen.length = 0;
-		const result = await value<{ text: string; details: { mine?: boolean; meta?: { truncation?: { direction: string; totalBytes: number; artifactId: string } } } }>(h, `tool.c_bytes({ bytes: ${SPILL_THRESHOLD_BYTES + 1} })`);
-		const truncation = result.details.meta?.truncation;
-		expect(result.details.mine).toBe(true);
-		expect(truncation).toMatchObject({ direction: "middle", totalBytes: SPILL_THRESHOLD_BYTES + 1 });
-		expect(truncation!.artifactId).toMatch(/^\d+$/);
-		expect(Buffer.byteLength(result.text)).toBeLessThan(SPILL_THRESHOLD_BYTES);
-		expect(result.text.split("\n").at(-1)).toMatch(new RegExp(`^\\[Showing lines 1-\\d+ and \\d+-\\d+ of \\d+; [\\d,]+ middle lines \\(.+\\) elided\\. Read artifact://${truncation!.artifactId} for full output\\]$`));
-		// It is done before tool_result fires: a handler is handed the cut text, note and all.
-		expect(eventsOf("c_bytes").at(-1)!.text).toBe(result.text);
-		// The artifact is the whole text, and eval's read() returns it raw.
-		const whole = await value<string>(h, `read("artifact://${truncation!.artifactId}")`);
-		expect(Buffer.byteLength(whole)).toBe(SPILL_THRESHOLD_BYTES + 1);
+		expect(await out(h, caught("await tool.re_open({})"))).toBe("Unknown tool from js runtime: re_open");
+		expect(await out(h, caught('await tool.rizin_command({ command: "aflj" })'))).toBe("Unknown tool from js runtime: rizin_command");
 	});
 });
 
-// --- approval -------------------------------------------------------------------------------
-
-describe("approval of a call made from a cell", () => {
+describe("approval of a cell", () => {
 	test("eval itself is an exec-tier tool: under tools.approvalMode always-ask with no UI it is refused, naming tools.approval.eval", async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 		const session = await boot(SessionManager.inMemory(join(work, "ask-1")), { "tools.approvalMode": "always-ask" });
@@ -337,24 +251,15 @@ describe("approval of a call made from a cell", () => {
 		}
 	});
 
-	test("each tool.<name>() call is approved on its own tier and policy: read runs, write is refused, and tools.approval.<name>: deny blocks before tool_call fires", async () => {
+	test("that is the one gate: once a cell is allowed, what it does over a socket is asked of nobody; and under the default mode (yolo) a cell runs unprompted", async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		const session = await boot(SessionManager.inMemory(join(work, "ask-2")), { "tools.approvalMode": "always-ask", "tools.approval": { eval: "allow", c_exec: "deny" } });
+		const session = await boot(SessionManager.inMemory(join(work, "ask-2")), { "tools.approvalMode": "always-ask", "tools.approval": { eval: "allow" } });
 		try {
-			seen.length = 0;
-			expect(await out(session, "await tool.c_plain({})")).toBe("plain:");
-			expect(await out(session, caught("await tool.c_write({})"))).toStartWith('Tool "c_write" requires approval but no interactive UI available.');
-			expect(await out(session, caught("await tool.c_exec({})"))).toBe('Tool "c_exec" is blocked by user policy.\nTo allow: remove "tools.approval.c_exec: deny" from config.');
-			// A call awaiting approval has already been announced to tool_call handlers; a denied one never is. Neither ran.
-			expect(eventsOf("c_write").map((event) => event.kind)).toEqual(["call"]);
-			expect(eventsOf("c_exec")).toEqual([]);
+			expect(await out(session, jsAsk("/quick?who=allowed"))).toBe('{"ok":true}');
 		} finally {
 			await session.dispose();
 		}
-	});
-
-	test("under the default mode (yolo) every tier runs unprompted", async () => {
-		expect(await out(h, "(await tool.c_write({})).text + (await tool.c_exec({})).text")).toBe("wroteran");
+		expect(await out(h, "1 + 1")).toBe("2");
 	});
 });
 
@@ -412,10 +317,10 @@ describe("%load <path>", () => {
 		expect((await cell(h, "%load https://example.com/x.js")).text).toBe("Eval scripts must be local. Download and inspect remote scripts before executing them.");
 	});
 
-	test("skill://<name>/<path> loads the file beside that skill's SKILL.md — how this plugin's recipes are loaded", async () => {
+	test("skill://<name>/<path> loads the file beside that skill's SKILL.md — how this plugin's library is loaded", async () => {
 		const loaded = await cell(h, "%load skill://re-triage/recipes.js");
 		expect(loaded.isError).toBe(false);
-		expect(loaded.text).toStartWith("omp-re recipes loaded: ");
+		expect(loaded.text).toStartWith("omp-re loaded: ");
 		expect(await out(h, "typeof re.triage")).toBe("function");
 	});
 
@@ -510,6 +415,7 @@ describe("internal URLs, read from a cell", () => {
 	test('read("xd://") lists the mounted devices, read("xd://<tool>") is one tool\'s documentation, and xd://eval/helpers is where omp documents %load', async () => {
 		const listing = await value<string>(h, 'read("xd://")');
 		expect(listing.split("\n")[0]).toMatch(/^xd:\/\/ \d+ mounted tool devices\.$/);
+		// A device is a registered tool: there is no entry an extension can add without registering one.
 		expect(listing).toMatch(/^xd:\/\/c_plain +contract probe: c_plain$/m);
 		expect(await value<string>(h, 'read("xd://c_plain")')).toStartWith("# c_plain");
 		const helpers = await value<string>(h, 'read("xd://eval/helpers")');
@@ -520,23 +426,6 @@ describe("internal URLs, read from a cell", () => {
 		const reference = await value<string>(h, 'read("omp://tools/eval.md")');
 		expect(reference).toStartWith("# eval\n");
 		expect(reference).toContain("`tool.<name>(args)` for a normal session tool call");
-	});
-});
-
-// --- tools.xdev -----------------------------------------------------------------------------
-
-describe("tools.xdev", () => {
-	test("off, the same tools are listed top-level, tool.<name>() is unchanged, and xd:// is not mounted", async () => {
-		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		const session = await boot(SessionManager.inMemory(join(work, "flat")), { "tools.xdev": false });
-		try {
-			expect(session.getMountedXdevToolNames()).toEqual([]);
-			expect(session.getActiveToolNames()).toContain("c_plain");
-			expect(await out(session, 'await tool.c_plain({ say: "flat" })')).toBe("plain:flat");
-			expect(await out(session, caught('await read("xd://")'))).toBe("xd:// is not mounted in this session.");
-		} finally {
-			await session.dispose();
-		}
 	});
 });
 
@@ -591,27 +480,6 @@ describe.skipIf(!python.ok)("the Python kernel", () => {
 	};
 	/** A cell that prints the kind and message of whatever `statement` raises, or "ok". */
 	const caughtPy = (statement: string) => `try:\n    ${statement}\n    print("ok")\nexcept Exception as error:\n    print(type(error).__name__ + ": " + str(error))`;
-	/** What recipes.py does to wait for a tool call from a plain function, with and without the cell's context. */
-	const SETTLE = [
-		"def settle(awaitable, keep_context=True):",
-		"    import threading",
-		"    context = contextvars.copy_context()",
-		"    outcome = {}",
-		"    async def wait():",
-		"        return await awaitable",
-		"    def work():",
-		"        try:",
-		'            outcome["value"] = context.run(asyncio.run, wait()) if keep_context else asyncio.run(wait())',
-		"        except BaseException as error:",
-		'            outcome["error"] = error',
-		"    worker = threading.Thread(target=work)",
-		"    worker.start()",
-		"    worker.join()",
-		'    if "error" in outcome:',
-		'        raise outcome["error"]',
-		'    return outcome["value"]',
-	].join("\n");
-
 	test("the name re is taken in a Python cell: omp's prelude runs in the cell namespace and leaves the standard library's regex module, json, os, math and Path there", async () => {
 		expect(await pyOut(h, 'print(" ".join(name + ":" + type(globals().get(name)).__name__ for name in ["re", "json", "os", "math", "asyncio", "inspect", "contextvars", "Path"]))')).toBe(
 			"re:module json:module os:module math:module asyncio:module inspect:module contextvars:module Path:type",
@@ -621,56 +489,17 @@ describe.skipIf(!python.ok)("the Python kernel", () => {
 		expect(await pyOut(h, 'print(" ".join(str(callable(globals().get(name))) for name in ["read", "write", "display", "env", "output", "log", "phase", "wait", "tool"]))')).toBe(Array(9).fill("True").join(" "));
 	});
 
-	test("tool.<name>(args) answers a coroutine; awaited, it gives what a JavaScript cell gets — a bare string, or a dict of text and details — for arguments passed as a dict, as keywords, or not at all", async () => {
-		expect(await pyOut(h, 'call = tool.c_plain({"say": "hi"})\nprint(type(call).__name__, inspect.isawaitable(call))\nprint(repr(await call))')).toBe("coroutine True\n'plain:hi'");
-		expect(await pyOut(h, 'print(await tool.c_plain(say="hi"), await tool.c_plain({"say": "no"}, say="yes"), repr(await tool.c_plain()))')).toBe("plain:hi plain:yes 'plain:'");
-		expect(await pyOut(h, "print(json.dumps(await tool.c_details(), sort_keys=True))")).toBe('{"details": {"k": 1}, "text": "onetwo\\n[tagged by tool_result]"}');
-		expect(await pyOut(h, caughtPy('await tool.c_plain("hi")'))).toBe("TypeError: tool.c_plain(...) expects a dict of arguments (got str)");
-	});
-
-	test("a tool that throws raises RuntimeError with the tool's own message; a result marked isError comes back as a dict with hasError True; a name that is no tool raises too", async () => {
-		expect(await pyOut(h, caughtPy("await tool.c_throw()"))).toBe("RuntimeError: c_throw: refused in the tool's own words");
-		expect(await pyOut(h, "print(json.dumps(await tool.c_iserror(), sort_keys=True))")).toBe('{"details": {"why": "marked"}, "hasError": true, "text": "soft failure"}');
-		expect(await pyOut(h, caughtPy("await tool.no_such_tool()"))).toBe("RuntimeError: Unknown tool from js runtime: no_such_tool");
-		expect(await pyOut(h, caughtPy("await tool.c_required()"))).toStartWith('RuntimeError: Validation failed for tool "c_required"');
-	});
-
-	test("a cell runs inside a running event loop: top-level await works and asyncio.run() is refused, so a plain function cannot wait for a tool call there", async () => {
+	test("a cell runs inside a running event loop, and a plain blocking call there is how omp's own helpers work: read() answers a value, not a coroutine", async () => {
 		expect(await pyOut(h, "print(asyncio.get_running_loop().is_running())")).toBe("True");
-		expect(await pyOut(h, "pending = asyncio.sleep(0)\ntry:\n    asyncio.run(pending)\nexcept RuntimeError as error:\n    print(error)\nawait pending")).toBe("asyncio.run() cannot be called from a running event loop");
+		expect(await pyOut(h, 'print(type(read("skill://re-triage/recipes.py")).__name__, inspect.iscoroutinefunction(read))')).toBe("str False");
 	});
-
-	test("a tool call can be settled from a plain function on another thread under a copy of the cell's context; without the copy the bridge refuses it: Missing session/run/name", async () => {
-		const before = eventsOf("c_plain").length;
-		expect(await pyOut(h, `${SETTLE}\nprint(settle(tool.c_plain(say="from a thread")))`)).toBe("plain:from a thread");
-		// It is the same call as any other: announced to tool_call handlers, with the arguments given.
-		expect(eventsOf("c_plain").slice(before).map((event) => [event.kind, event.input])).toEqual([
-			["call", { say: "from a thread" }],
-			["result", { say: "from a thread" }],
-		]);
-		expect(await pyOut(h, caughtPy('settle(tool.c_plain(say="no context"), keep_context=False)'))).toBe("RuntimeError: Missing session/run/name");
-		expect(await pyOut(h, caughtPy("settle(tool.c_throw())"))).toBe("RuntimeError: c_throw: refused in the tool's own words");
-	});
-
-	test("a Python cell past its deadline is interrupted, not killed: a plain function waiting on a tool call is stopped, the call's signal is aborted, and the namespace is still there", async () => {
-		expect(await pyOut(h, 'marker = "before"\nprint(marker)')).toBe("before");
-		sleeps.length = 0;
-		const started = Date.now();
-		const late = await py(h, 'settle(tool.c_sleep({"ms": 10000}))\nprint("finished")', { timeout: 1 });
-		expect(late.isError).toBe(true);
-		expect(late.text).toStartWith("[eval cell timed out after 1s; kernel interrupted but remains running.");
-		expect(late.text).not.toContain("finished");
-		expect(Date.now() - started).toBeLessThan(8000);
-		expect(sleeps).toEqual(["aborted:TimeoutError"]);
-		expect(await pyOut(h, "print(marker, callable(settle))")).toBe("before True");
-	}, 20_000);
 
 	test("%load skill://<name>/<path> runs a Python file in the cell namespace: the output is what it printed, and omp sets __file__ and puts the script's directory on sys.path", async () => {
 		expect(await pyOut(h, 'print("__file__" in globals(), "omp_re" in globals())')).toBe("False False");
 		const loaded = await py(h, "%load skill://re-triage/recipes.py");
 		expect(loaded.isError).toBe(false);
 		// The source is not echoed; a script says what it did by printing.
-		expect(loaded.text).toStartWith("omp-re recipes loaded: omp_re.triage, ");
+		expect(loaded.text).toStartWith("omp-re loaded: omp_re.open, ");
 		expect(loaded.text.split("\n").length).toBe(1);
 		expect((loaded.details as { cells: { code: string }[] }).cells[0]!.code).toBe("%load skill://re-triage/recipes.py");
 		expect(await pyOut(h, `import sys\nprint(__file__, ${JSON.stringify(join(SKILLS, "re-triage"))} in sys.path, "omp_re" in globals())`)).toBe(`${RECIPES_PY} True True`);
@@ -751,23 +580,151 @@ describe("the kernel", () => {
 		expect(await out(h, '[typeof marker, typeof re].join(" ")')).toBe("undefined undefined");
 	}, 15_000);
 
-	test("time spent inside tool.<name>() counts toward the deadline, and the tool's signal is aborted with a TimeoutError when it passes", async () => {
-		sleeps.length = 0;
+	test("time a cell spends waiting on a socket counts toward its deadline; when the kernel is killed its open request is hung up, which the listener sees", async () => {
+		listener.hungUp.length = 0;
 		const started = Date.now();
-		const late = await cell(h, 'await tool.c_sleep({ ms: 10_000 }); "finished"', { timeout: 1 });
+		const late = await cell(h, `${jsAsk("/slow?who=js-timeout")}; "finished"`, { timeout: 1 });
 		expect(late.text).toStartWith("Command timed out after 1 seconds.");
 		expect(Date.now() - started).toBeLessThan(5000);
-		expect(sleeps).toEqual(["aborted:TimeoutError"]);
+		expect(await until(() => listener.hungUp.includes("js-timeout"), 3000)).toBe(true);
 	}, 15_000);
 
-	test("aborting a cell kills the kernel too, and aborts the tool call it was waiting on", async () => {
+	test("aborting a cell kills the kernel too, and hangs up the request it was waiting on", async () => {
 		expect(await out(h, 'globalThis.marker = "before"; marker')).toBe("before");
-		sleeps.length = 0;
+		listener.hungUp.length = 0;
 		const stop = new AbortController();
 		setTimeout(() => stop.abort(), 300);
-		const stopped = await cell(h, 'await tool.c_sleep({ ms: 10_000 }); "finished"', {}, stop.signal);
+		const stopped = await cell(h, `${jsAsk("/slow?who=js-abort")}; "finished"`, {}, stop.signal);
 		expect(stopped).toMatchObject({ thrown: false, isError: true, text: "Command aborted" });
-		expect(sleeps).toEqual(["aborted:AbortError"]);
+		expect(await until(() => listener.hungUp.includes("js-abort"), 3000)).toBe(true);
 		expect(await out(h, "typeof marker")).toBe("undefined");
 	}, 15_000);
+});
+
+// --- what the plugin's way to the engine stands on -------------------------------------------
+
+describe("a kernel is a process of its own, a child of omp's, and may open a socket", () => {
+	test("the JavaScript kernel is a child process of omp: its parent's id is omp's, and nothing of omp's realm is in it", async () => {
+		(globalThis as Record<symbol, unknown>)[Symbol.for("omp-re.contract")] = "omp's realm";
+		const kernel = await value<{ pid: number; ppid: number; shared: string }>(h, '({ pid: process.pid, ppid: process.ppid, shared: typeof globalThis[Symbol.for("omp-re.contract")] })');
+		expect(kernel.ppid).toBe(process.pid);
+		expect(kernel.pid).not.toBe(process.pid);
+		expect(kernel.shared).toBe("undefined");
+	});
+
+	test("a JavaScript cell is told its session as __omp_session__: { cwd, sessionId }, the id being js:session:<session file>:cwd:<cwd>, or js:cwd:<cwd> for a session with no file", async () => {
+		expect(await value<unknown>(h, "globalThis.__omp_session__")).toEqual({ cwd: work, sessionId: `js:session:${h.sessionManager.getSessionFile()}:cwd:${work}` });
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		const fileless = join(work, "fileless-js");
+		const session = await boot(SessionManager.inMemory(fileless));
+		try {
+			expect(await value<unknown>(session, "globalThis.__omp_session__")).toMatchObject({ sessionId: `js:cwd:${fileless}` });
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	test("a JavaScript cell can ask a loopback listener in omp's process with node:http, token and all, and is refused without the token", async () => {
+		expect(await out(h, jsAsk("/quick?who=js"))).toBe('{"ok":true}');
+		expect(listener.took.at(-1)).toBe("POST /quick js {}");
+		expect(await out(h, `await new Promise((done) => require("node:http").get(${JSON.stringify(`${listener.url}/quick`)}, (response) => done(response.statusCode)))`)).toBe("401");
+	});
+
+	test("the kernel's temporary directory and user are omp's own: where a file left for it is looked for", async () => {
+		const { tmpdir: ompTmp } = await import("node:os");
+		expect(await value<unknown>(h, '({ tmp: require("node:os").tmpdir(), uid: process.getuid?.() ?? null, runtime: process.env.XDG_RUNTIME_DIR ?? null })')).toEqual({
+			tmp: ompTmp(),
+			uid: process.getuid?.() ?? null,
+			runtime: process.env.XDG_RUNTIME_DIR ?? null,
+		});
+	});
+
+	test("tool_call and tool_result fire for a cell, with its code and language and a context that names the session's file; what tool_result adds to the content reaches the cell's result, an error's too", async () => {
+		seen.length = 0;
+		const id = `contract-${crypto.randomUUID()}`;
+		const tagged = await runCell(h, "js", '"TAG ME"', {}, undefined, id);
+		expect(tagged.text).toBe("TAG ME\n[tagged by tool_result]");
+		expect(seen.map((event) => [event.kind, event.tool, event.id, event.sessionFile])).toEqual([
+			["call", "eval", id, h.sessionManager.getSessionFile()],
+			["result", "eval", id, h.sessionManager.getSessionFile()],
+		]);
+		expect(seen[0]!.input).toMatchObject({ language: "js", code: '"TAG ME"' });
+		expect(seen[1]).toMatchObject({ isError: false, input: { language: "js", code: '"TAG ME"' } });
+		// A cell that threw is a result too, marked as an error, and what a handler adds is shown under it.
+		const failed = await cell(h, 'throw new Error("TAG ME")');
+		expect(failed.isError).toBe(true);
+		expect(failed.text).toEndWith("[tagged by tool_result]");
+		expect(seen.at(-1)).toMatchObject({ kind: "result", isError: true });
+		// A name that is not defined is said in these words: what the plugin's reload hint looks for.
+		expect((await cell(h, "notDefinedAnywhere.status()")).text).toContain("notDefinedAnywhere is not defined");
+	});
+
+	describe.skipIf(!python.ok)("the Python kernel", () => {
+		const py = (session: AgentSession, code: string, more: Record<string, unknown> = {}, signal?: AbortSignal) => cell(session, code, { language: "py", ...more }, signal);
+		const pyOut = async (session: AgentSession, code: string): Promise<string> => {
+			const result = await py(session, code);
+			expect({ code, isError: result.isError, text: result.isError ? result.text : "" }).toEqual({ code, isError: false, text: "" });
+			return result.text;
+		};
+
+		test("is a child process of omp too, started in the session's directory, and told the session's file as PI_SESSION_FILE — which a session with no file does not have", async () => {
+			const kernel = JSON.parse(await pyOut(h, 'print(json.dumps({"ppid": os.getppid(), "cwd": os.getcwd(), "file": os.environ.get("PI_SESSION_FILE")}))')) as { ppid: number; cwd: string; file: string };
+			expect(kernel).toEqual({ ppid: process.pid, cwd: work, file: h.sessionManager.getSessionFile()! });
+			const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+			const fileless = join(work, "fileless-py");
+			await mkdir(fileless, { recursive: true });
+			const session = await boot(SessionManager.inMemory(fileless));
+			try {
+				expect(await pyOut(session, 'print(os.getcwd(), os.environ.get("PI_SESSION_FILE"))')).toBe(`${fileless} None`);
+			} finally {
+				await session.dispose();
+			}
+		});
+
+		test("its environment is filtered: a variable under the plugin's own prefix does not reach it, one under PI_ does — so the listener cannot be named to it by a variable of the plugin's", async () => {
+			expect(await pyOut(h, 'print(os.environ.get("OMPRE_CONTRACT_PROBE"), os.environ.get("PI_CONTRACT_PROBE"))')).toBe("None set by the probe");
+			// The JavaScript kernel is handed omp's environment as it is.
+			expect(await out(h, "process.env.OMPRE_CONTRACT_PROBE")).toBe("set by the probe");
+		});
+
+		test("its temporary directory, user and runtime directory are omp's own: where a file left for it is looked for", async () => {
+			const { tmpdir: ompTmp } = await import("node:os");
+			const kernel = JSON.parse(await pyOut(h, 'import tempfile\nprint(json.dumps({"tmp": tempfile.gettempdir(), "uid": os.getuid() if hasattr(os, "getuid") else None, "runtime": os.environ.get("XDG_RUNTIME_DIR")}))'));
+			expect(kernel).toEqual({ tmp: ompTmp(), uid: process.getuid?.() ?? null, runtime: process.env.XDG_RUNTIME_DIR ?? null });
+		});
+
+		test("a Python cell can ask a loopback listener in omp's process with http.client, token and all", async () => {
+			expect(await pyOut(h, `${pyAsk("/quick?who=py")}\nprint(reply)`)).toBe('{"ok":true}');
+			expect(listener.took.at(-1)).toBe("POST /quick py {}");
+		});
+
+		test("a Python cell past its deadline is interrupted, not killed: the call it was blocked in is stopped by KeyboardInterrupt, its request is hung up, and the namespace is still there", async () => {
+			expect(await pyOut(h, 'marker = "before"\nprint(marker)')).toBe("before");
+			listener.hungUp.length = 0;
+			const started = Date.now();
+			const late = await py(h, `${pyAsk("/slow?who=py-timeout")}\nprint("finished")`, { timeout: 1 });
+			expect(late.isError).toBe(true);
+			expect(late.text).toStartWith("[eval cell timed out after 1s; kernel interrupted but remains running.");
+			expect(late.text).not.toContain("finished");
+			expect(Date.now() - started).toBeLessThan(8000);
+			expect(await until(() => listener.hungUp.includes("py-timeout"), 3000)).toBe(true);
+			expect(await pyOut(h, "print(marker, os.getpid() > 0)")).toBe("before True");
+		}, 20_000);
+
+		test("aborting a Python cell interrupts it the same way: KeyboardInterrupt in the cell, the request hung up, the kernel and its names kept", async () => {
+			const pid = await pyOut(h, 'kept = "kept"\nprint(os.getpid())');
+			listener.hungUp.length = 0;
+			const stop = new AbortController();
+			setTimeout(() => stop.abort(), 300);
+			const stopped = await py(h, `${pyAsk("/slow?who=py-abort")}\nprint("finished")`, {}, stop.signal);
+			expect(stopped.isError).toBe(true);
+			expect(stopped.text).toContain("KeyboardInterrupt");
+			expect(await until(() => listener.hungUp.includes("py-abort"), 3000)).toBe(true);
+			expect(await pyOut(h, "print(kept, os.getpid())")).toBe(`kept ${pid}`);
+		}, 20_000);
+
+		test("a name that is not defined is NameError in these words: what the plugin's reload hint looks for", async () => {
+			expect((await py(h, "not_defined_anywhere.status()")).text).toContain("NameError: name 'not_defined_anywhere' is not defined");
+		});
+	});
 });

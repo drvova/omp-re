@@ -1,19 +1,24 @@
 # omp-re playbooks
 
-Task-shaped recipes that compose the one observational tool (`rizin_command`),
-the stateful tools, and `rizin_emulate` into the analyses other suites ship as
-single buttons — deep-function review, vulnerability hunting, crackme solving,
-IOC extraction, exploit-dev recon, shellcode and file-format triage, diffing.
+Task-shaped recipes that compose reads of the binary (`re.cmd`, `re.json`), the
+stateful tools (`re.call`), and `rizin_emulate` into the analyses other suites
+ship as single buttons — deep-function review, vulnerability hunting, crackme
+solving, IOC extraction, exploit-dev recon, shellcode and file-format triage,
+diffing.
 
 Each is a **starting line, not a script**: adapt from what the binary shows.
-Every `rizin_command` read returns an `[evidence xxxxxxxx]` tag — cite those ids
-in `record_finding` so the conclusion reaches the report. Look up a command's
-exact arguments for the installed rizin with `rizin_help`; the grounding rules
-in `SKILL.md` still hold (only addresses from tool output, hedge hypotheses,
-disassembly is not decompiled C).
+Every read leaves an evidence record — `re.cmd`'s text ends with its
+`[evidence xxxxxxxx]` tag, `re.json` answers the id beside the data — and those
+ids are what `record_finding` cites, so the conclusion reaches the report. Look
+up a command's exact arguments for the installed rizin with `rizin_help`; the
+grounding rules in `SKILL.md` still hold (only addresses from the engine's
+output, hedge hypotheses, disassembly is not decompiled C).
 
-The parse helper from `SKILL.md` (`const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));`)
-is assumed below.
+The examples are JavaScript cells, with the library loaded as `SKILL.md` says
+(`%load skill://re-triage/recipes.js`) and one helper for a `*j` read's data:
+`const rows = async (command, addr) => (await re.json(command, addr)).data;`.
+In a Python cell the same calls are `omp_re.json(command, addr).data` and
+`omp_re.cmd(command, addr)`, with no `await`.
 
 ## Deep function analysis
 
@@ -21,11 +26,11 @@ Everything known about one function, grounded:
 
 ```js
 const at = "sym.target";                                        // an address/name from aflj
-const info = rows(await tool.rizin_command({ command: "afij", addr: at }))[0]; // sig, nargs, callers
-const cc   = rows(await tool.rizin_command({ command: "afcrj", addr: at }));   // ret reg + arg regs
-const vars = rows(await tool.rizin_command({ command: "afvlj", addr: at }));   // locals/args (afvlj, not afvj)
-const to   = rows(await tool.rizin_command({ command: "axtj", addr: at }));    // who calls it
-print((await tool.rizin_command({ command: "pdg", addr: at }).catch(() => tool.rizin_command({ command: "pdf", addr: at }))).text);
+const info = (await rows("afij", at))[0]; // sig, nargs, callers
+const cc   = await rows("afcrj", at);     // ret reg + arg regs
+const vars = await rows("afvlj", at);     // locals/args (afvlj, not afvj)
+const to   = await rows("axtj", at);      // who calls it
+print(await re.cmd("pdg", at).catch(() => re.cmd("pdf", at)));
 ```
 
 If argument recovery looks wrong, `set_calling_convention` then re-read. Name
@@ -37,10 +42,10 @@ Dangerous call sites and the binary's own hardening — the two halves of a
 "find-vulnerabilities" pass:
 
 ```js
-const imp = rows(await tool.rizin_command({ command: "iij" }));
+const imp = await rows("iij");
 const risky = /^(gets|strcpy|strcat|sprintf|scanf|system|exec|popen|memcpy|alloca|vsprintf)/i;
 for (const i of imp.filter((x) => risky.test(x.name ?? "")))
-  print(i.name + " -> " + rows(await tool.rizin_command({ command: "axtj", addr: i.plt ?? i.vaddr })).length + " call sites");
+  print(i.name + " -> " + (await rows("axtj", "0x" + (i.plt ?? i.vaddr).toString(16))).length + " call sites");
 ```
 
 Mitigations (checksec) come from `ij` — the `bin` object carries `nx`, `pie`,
@@ -73,7 +78,7 @@ decompile evidence.
 Strings plus the imports that use them:
 
 ```js
-const s = rows(await tool.rizin_command({ command: "izzj" }));   // izzj = whole file; izj = data only
+const s = await rows("izzj");   // izzj = whole file; izj = data only
 const pat = {
   url:    /\bhttps?:\/\/[^\s"']+/i,
   ip:     /\b\d{1,3}(?:\.\d{1,3}){3}\b/,
@@ -127,7 +132,7 @@ For a blob with no container (shellcode, a carved region):
 omp-re already bridges rizin's differ — no second session needed:
 
 ```js
-await tool.rizin_cli({ tool: "rz-diff", args: ["-t", "functions", "-A", "old.bin", "new.bin"] });
+print(await re.call("rizin_cli", { tool: "rz-diff", args: ["-t", "functions", "-A", "old.bin", "new.bin"] }));
 ```
 
 `-t` picks the dimension (`functions`, `imports`, `symbols`, `strings`,
@@ -144,8 +149,8 @@ The RzIL VM and ESIL calculator, both reachable today:
   `step_until` an address, `vars` for the full state. No OS process runs — safe
   for decryptor loops and argument computation. (ESIL *stepping*, `aes`, is
   unreliable through rizin's pipe in 0.9.1; RzIL is the live replacement.)
-- **`ae <rpn>`** through `rizin_command` is a stateless ESIL calculator for
+- **`ae <rpn>`** through `re.cmd` is a stateless ESIL calculator for
   one-off math: `ae 0xdead,0xbeef,^`, `ae 1,20,<<`. No VM, no target code.
-- **`aoj` / `ao`** through `rizin_command` lifts an instruction and shows both
+- **`aoj` / `ao`** through `re.cmd` lifts an instruction and shows both
   its `esil` and `rzil` forms (`ao` is the IL AST view) — use it to understand
   one opcode's semantics without stepping.

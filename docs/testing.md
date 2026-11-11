@@ -5,17 +5,17 @@ Two suites run without a terminal or a model, and CI runs both:
 | Suite | Command | Tests |
 | --- | --- | --- |
 | The Lisp suite | `bun run test:engine` (`sbcl --non-interactive --load test/nodecode/run.lisp`) | the engine, and both hosts' Lisp |
-| The bun suites | `bun test test/` | the omp extension, loaded through omp's real SDK, with the engine behind it |
+| The bun suites | `bun test test/` | the omp extension, loaded through omp's real SDK, with the engine behind it, driven from cells of omp's real `eval` in both of its kernels |
 
 Two checks stand beside them, and CI runs both: `bun run check:warnings`
 (the three Lisp systems compile from scratch with no warning) and
 `bun run cover:engine` (the Lisp suite again, under sb-cover). They are
 below.
 
-Four more tiers drive a real omp terminal under tmux or a real model. They are
-manual: no workflow runs them, and each exits 0 with a printed `SKIP` when a
-program it needs to start at all is missing. `bash test/tui.sh`,
-`bash test/tui-carry.sh`, `bash test/tui-qa.sh`, `bash test/live-model.sh`.
+One more tier drives a real `omp` with a real model, `bash test/live-model.sh`.
+It is manual: no workflow runs it, and it exits 0 with a printed `SKIP` when a
+program it needs to start at all is missing. Nothing drives a real omp
+terminal: the tmux tiers that did typed `/re` lines, which no longer exist.
 
 Run everything from the repository root after `bun install --ignore-scripts`.
 
@@ -47,7 +47,7 @@ subset.
 
 This is where the engine's behaviour is held: the primitives against published
 vectors (SHA-256, HMAC), the read-only command policy and every refusal's
-words, every tool and `/re` line, the evidence store and the audit log, the
+words, every tool and line, the evidence store and the audit log, the
 record on a branch, a rizin killed and replaced, a session forgotten and
 restored from its record, an interrupted command, a timeout, the debugger's
 command lines and gates, findings, verify, report, carry, the views and the
@@ -67,9 +67,8 @@ Two of the suites are about a host:
 
 One group of the carry suite compiles `test/fixtures/sample.c` twice, the
 second time with a function renamed and a constant changed, writes a report
-on the first build and carries it onto the second: the engine's half of what
-`test/tui-carry.sh` drives through omp. It needs a C compiler (`cc`, `gcc` or
-`clang`) and says `SKIPPED` without one.
+on the first build and carries it onto the second. It needs a C compiler
+(`cc`, `gcc` or `clang`) and says `SKIPPED` without one.
 
 The debugger checks run rizin's command lines against a stand-in program. One
 group launches a real process under `rizin -d`, and only when the test binary
@@ -139,7 +138,11 @@ covers 56 %.
 ## The bun suites — `bun test test/`
 
 The dev dependencies pin omp **18.11.1**, so the host APIs under test are the
-ones `bun install` gives you. No model is called, on any machine: the one
+ones `bun install` gives you. Everything the model would do is done the way
+the model does it: a cell run through omp's own `eval` tool, with the library
+loaded by the skill's load line (`bootLoaded` in `test/helpers.ts`), in the
+JavaScript kernel and, where omp can start one, the Python kernel. No model is
+called, on any machine: the one
 harness every suite boots a session through (`boot` in `test/helpers.ts`)
 gives the session no model and a side turn of its own, so the claim audit
 finds nobody to ask even where omp has provider credentials. The one test of
@@ -147,12 +150,13 @@ the audit's wiring hands `boot` a stand-in to reply in the model's place.
 
 | File | What it holds |
 | --- | --- |
-| `test/extension-sdk.test.ts` | The extension loaded by omp's real SDK and extension runner, driven the way a session drives it: `/re` lines, the tools through omp's own `eval` (`tool.<name>()`), `--binary`, resume with replay, the debugger's opt-in. It is the suite that catches omp API drift. |
-| `test/shim.test.ts` | omp's end of the pipe. Against `test/stand-in-engine.ts`, a bun script that speaks `stdio/protocol.json` and holds everything omp's side sends to it: no SBCL, an engine that cannot load, dies, speaks another protocol version or never becomes ready; message framing; every method, session event and member of the wire sent once; the status band, the list and code overlays and their keys; a headless run's output; an engine that goes silent, loses a request, dies mid-request or will not leave. The side turn the audit asks for, on its own. Against the real engine: two sessions on one engine process, an engine killed and replaced with `/re off` kept, the audit log under omp's own call ids, abort, `/re undo`, the claim audit put to a stand-in side model, a session branched, compacted and switched, every approval sentence. |
+| `test/extension-sdk.test.ts` | The extension loaded by omp's real SDK and extension runner: that it registers no tool, command or flag; the verbs in both kernels, their refusals in the same words, the reload note under a cell that had not loaded the library; with rizin, a whole analysis from JavaScript cells and from Python cells of one session, a resumed session's replay, the debugger behind its switch, a session with no file. |
+| `test/bridge.test.ts` | The way from a cell to the engine. The listener's file (the owner's alone, gone at shutdown, a stale one swept), a request without the token or with another, `OMPRE_DISABLED=1` starting nothing; two sessions in one process each reaching the engine as itself, two that share a kernel refused, a kernel behind a launcher found by its session file; a cell that is interrupted or times out cancelling the engine's call, in both kernels, and, with rizin, an interrupted analysis. Mostly against the stand-in engine, which writes down what omp's side said to it. |
+| `test/shim.test.ts` | omp's end of the pipe. Against `test/stand-in-engine.ts`, a bun script that speaks `stdio/protocol.json` and holds everything omp's side sends to it: no SBCL, an engine that cannot load, one that dies, one of another version, one that never starts; every method and event of the protocol sent once and checked against the protocol's own description; the status band and the panels drawn and driven by key; what a headless run prints; how long omp waits and how an engine is ended. Against the real engine: one engine for the process, the audit log's call ids, and with rizin an annotation and its undo, the claim audit through a stand-in side model, a session whose binary is gone. |
 | `test/image.test.ts` | How the engine process is started ([`install.md`](install.md#the-engine-image)), with real images and a real SBCL, each test in a cache directory of its own: a first start builds an image and is that image, and the next runs the same file; an image shipped in `dist/` is run while it is this source's, and a changed source passes it over and builds once; a cached image that will not run is built again; `OMPRE_ENGINE_IMAGE` is run as it is, with no SBCL, and one that is no image is the start's error; where no image can be built the engine loads from source and the log says why; two builds at once leave one whole image. What was started is read from the engine's own `hello` and, on Linux, from `/proc/<pid>/exe`. |
 | `test/versions.test.ts` | One version in `package.json`, the marketplace entry and the three `.asd` files; `extensions/re/protocol.ts` and the tables of `engine-protocol.md` current with `stdio/protocol.json`. |
-| `test/recipes-eval.test.ts` | The recipes in omp's `eval`, both kernels. With rizin, the same recipes are run by the JavaScript script, the Python script and the Lisp verbs on the same binary and their reports compared whole — every line, evidence ids aside. It also runs `scripts/gen-recipes.ts --check`. |
-| `test/omp-eval-contract.test.ts` | omp itself: one test for each behaviour of omp's `eval` that [`omp-eval.md`](omp-eval.md) describes and omp does not document. It uses a probe extension, not the RE tools. Its first test fails until the page names the installed omp version. |
+| `test/recipes-eval.test.ts` | The library's recipes in omp's `eval`, both kernels: what loading leaves in a kernel, refusals. With rizin, the same recipes are run by the JavaScript script, the Python script and the Lisp verbs on the same binary and their reports compared whole. `gen-recipes.ts --check` and `gen-api.ts --check` run here too. |
+| `test/omp-eval-contract.test.ts` | omp itself: one test for each behaviour of omp's `eval` that [`omp-eval.md`](omp-eval.md) describes and omp does not document — among them everything the way to the engine stands on: a kernel is a child process of omp's, what it is told of its session, that it can reach a loopback listener, that a cell's timeout or interrupt hangs up. It uses a probe extension, not the plugin's. |
 
 Every suite that boots a session starts the engine the way omp does, so it
 runs the image. `test/setup.ts`, which `bunfig.toml` has `bun test` load
@@ -160,56 +164,23 @@ before any suite, builds that image when the cache has none for this source,
 so that the first compile and save are not inside some test's own time
 limit. Only the tests of `image.test.ts` that are about building build more.
 
-## Fast smoke tier — `bash test/tui.sh`
-
-A short tmux-driven smoke test against the real TUI: seven assertions, no model
-round-trip. It needs tmux, `omp`, SBCL, rizin and a test binary (`/bin/ls`, or
-`OMPRE_TEST_BINARY`). It exits 0 with a printed `SKIP` when a prerequisite is
-missing.
-
-## Carry / findings end to end — `bash test/tui-carry.sh`
-
-Drives `/re carry --inherit` in a real omp TUI. It is self-contained: it
-compiles two builds of `test/fixtures/sample.c`, records three findings on the
-first with `test/e2e/make-carry-manifest.lisp` (real rizin evidence and the
-real `record_finding`, with a stand-in auditor so no model is needed), then
-starts `omp -e extensions/re --binary v2` and types the slash commands. It
-checks the carry statuses, the agenda placed in the editor, the status band
-and `/re status` counting the inherited findings, and the second build's
-report. It needs tmux, `omp`, SBCL, rizin and a C compiler, and skips (exit 0)
-without them.
-
 ## Live-model tier — `bash test/live-model.sh`
 
 The model-facing half of findings, which no deterministic test can reach. A
-real model drives omp in print mode on two builds of the fixture: it records
-findings on the first and attempts an overreaching claim the support auditor
-should refuse; `/re carry … --resolve` on the second prints the agenda for the
-drifted finding; the script passes that agenda back as the next prompt and
-writes the report.
+real model drives omp in print mode on two builds of the fixture, doing
+everything in `eval` through the library: on the first it records findings,
+attempts an overreaching claim the support auditor should refuse, and writes
+the report; on the second, in a fresh session, it carries the first report's
+manifest with `--inherit`, works through the agenda the line hands it, and
+writes the second report.
 
 `OMPRE_LIVE_MODEL=<provider>/<model>` names the model, in the form omp's
 `--model` takes, with that provider's key in the environment. The script has
 no default: without the variable it says so and exits 2. Assertions are on
 recorded state only (session entries and report files), never on model prose.
 It costs real tokens. It skips without `omp`, SBCL, rizin or a C compiler.
-
-## Full QA tier — `bash test/tui-qa.sh`
-
-A long tmux-driven pass against the live TUI: every `/re` subcommand, the
-shortcuts, the evidence panel, undo and the audit log. It needs tmux, `omp`,
-SBCL, rizin, two test binaries (`/bin/ls` and `/bin/cat`, or
-`OMPRE_TEST_BINARY` and `OMPRE_TEST_BINARY_ALT`) and a working model. Three of
-its phases rest on a model turn: one that does not finish fails its step and
-the steps after it, it does not skip them. A step skips only where the fixture
-has nothing to show it on. It drives an interactive terminal on wall-clock
-assumptions, so a heavily loaded host can produce failures that have nothing
-to do with the plugin; re-run on an idle host before treating one as real.
-
-The script pins its own assertion count as a drift guard (a literal `-eq 100`
-near its end): if you add or remove an assertion, update that literal in the
-same commit, and give any conditional assertion an explicit `fail` or `skip`
-mirror on every other branch it could take.
+It was rewritten when the `/re` command went and **had not been run** when
+this was written: no `omp` binary and no model were at hand.
 
 ## What CI runs
 
@@ -221,8 +192,10 @@ portable static release build — it cannot load a decompiler plugin), builds
 1. `bun run check` — the type check;
 2. `node scripts/release.mjs --check-versions` — `package.json`, the
    marketplace entry and the three `.asd` files carry one version;
-3. `bun scripts/gen-recipes.ts --check` — the recipes' generated blocks are
-   current with `recipes/tables.json`;
+3. `bun scripts/gen-recipes.ts --check` and `bun scripts/gen-api.ts --check` —
+   the generated blocks of the two eval libraries, and nodecode's
+   `recipe-data.lisp` and `verb-forms.lisp`, are current with
+   `recipes/tables.json` and `recipes/api.json`;
 4. `bun scripts/gen-protocol.ts --check` — `extensions/re/protocol.ts` and the
    tables of `engine-protocol.md` are current with `stdio/protocol.json`;
 5. `scripts/check-warnings.lisp` — the three Lisp systems compile from
@@ -247,8 +220,8 @@ dispatch: one Windows job that installs SBCL (Chocolatey), cl-ppcre (cloned to
 `~/common-lisp/`) and rizin (the release zip), builds the fixture as a PE, and
 runs steps 1, 6 and 8. It cannot run the Lisp suite.
 
-Neither workflow runs a tmux tier or calls a model: those tiers exit 0 when a
-prerequisite is missing, which would make them theatre on a hosted runner.
+No workflow calls a model: the live tier exits 0 when a prerequisite is
+missing, which would make it theatre on a hosted runner.
 Never add a malware sample to CI — the fixture is built on the runner.
 
 ## What is not proven
@@ -284,10 +257,21 @@ Stated plainly, so a green badge is not read as more than it is.
   `extension-sdk.test.ts`.
 - **Decompiler output in CI.** CI's rizin has no decompiler plugin, so CI sees
   only the labeled-disassembly fallback.
-- **What the terminal shows.** `shim.test.ts` draws the status band, the
-  overlays and a tool card without colours on a screen of its own and drives
-  them by key. How omp's real terminal lays them out is seen only by the tmux
-  tiers, and those are run by hand.
+- **A real omp.** Every suite loads the extension through omp's SDK and runs
+  cells through omp's real `eval` tool, but none starts the `omp` program or
+  a model's turn. Unseen, therefore: that omp finds the skill beside the
+  extension as installed; that a model, given the skill, loads the library
+  and uses it; what omp's agent loop does with the note added under a cell's
+  error; a subagent (`re-analyst`) loading the library in its own kernel.
+- **The listener off Linux.** `bridge.test.ts` ran on Linux. On Windows the
+  file's mode bits mean nothing and a virtual environment's `python.exe` is a
+  launcher, so the kernel's parent is not omp: the library then finds the
+  listener by the session's file, which is tested here by renaming the file,
+  not on Windows. On macOS the temporary directory is per user and the
+  kernels' view of it was not seen.
+- **What the terminal shows.** `shim.test.ts` draws the status band and the
+  overlays without colours on a screen of its own and drives them by key.
+  How omp's real terminal lays them out is seen by nothing now.
 - **nodecode itself.** The cell is tested over a stand-in for nodecode's
   kernel.
 - **A newer omp.** The suites run against the pinned 18.11.1.
@@ -297,8 +281,9 @@ Stated plainly, so a green badge is not read as more than it is.
 `test/helpers.ts` (`boot`) shows the pattern: `createAgentSession({
 additionalExtensionPaths: ["extensions/re"], disableExtensionDiscovery: true,
 sessionManager })`, then `initializeExtensions(...)` from
-`@oh-my-pi/pi-coding-agent/modes/runtime-init`. Slash commands passed to
-`session.prompt("/re …")` run locally with no model call. For a full install
+`@oh-my-pi/pi-coding-agent/modes/runtime-init`. A cell is run with
+`session.getToolByName("eval").execute(…)` (`runCell`), which is the call the
+agent loop makes for a model. For a full install
 check, `omp plugin marketplace add /path/to/checkout` then `omp plugin install
 omp-re@drvova` installs from a local checkout.
 

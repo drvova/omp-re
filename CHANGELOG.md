@@ -6,7 +6,103 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### BREAKING
+
+- **Under omp, omp-re registers no tool, no slash command and no flag.** The
+  model does everything inside omp's own `eval`, through a library the
+  `re-triage` skill loads into the kernel: `re.open`, `re.cmd`, `re.json`,
+  `re.call`, `re.tools`, `re.doc`, `re.slash`, `re.status`, `re.help` and the
+  recipes in JavaScript (every call awaited), the same as `omp_re.*` in Python
+  (plain calls). What is gone with the tools:
+  - `await tool.rizin_command({ … })`, `tool.open_binary`, and every other
+    `tool.<name>` of omp-re's: a cell that calls one gets omp's `Unknown tool`.
+    `re.cmd(command, addr)` and `re.call(name, { … })` are the calls now.
+  - the `xd://` devices (`read xd://rizin_command`, `write xd://…`): omp
+    lists only registered tools there. `re.help()`, `re.tools()` and
+    `re.doc(name)` answer what they did, from the running engine.
+  - the tool cards in the transcript. A cell's card shows its code and what
+    it printed.
+- **Per-call approval is gone under omp.** Each tool call used to pass omp's
+  approval gate on its own tier — `read`, `write` or `exec` — with a sentence
+  saying what it would do, and `tools.approval.<tool>` could allow or deny one
+  tool. Now omp sees one call, the `eval` cell, which is `exec`-tier: omp's
+  approval mode and `tools.approval.eval` decide whether a cell runs, and
+  nothing asks about what the cell then does. You can no longer let reads
+  through and be asked about annotations. The engine's own policy is what it
+  was — read-only rizin commands only, `OMPRE_ALLOWED_DIRS`, the confined
+  output directory, the debugger off unless `OMPRE_ENABLE_DEBUGGER` — and is
+  now the only control inside a cell. The audit log no longer has
+  `approved`/`reason` lines, since no gate decides anything per call; a
+  call's line is named `<eval call id>#<n>`. See `SECURITY.md`, "What omp
+  approves".
+- **A loopback listener.** A kernel of omp's `eval` is a separate process, so
+  the extension listens on `127.0.0.1` (a port the system picks) for the
+  kernels of its omp process. Requests need a 32-byte token that is kept in a
+  file only you can read (`$XDG_RUNTIME_DIR/omp-re/<pid>.json`, or under your
+  temporary directory). Any process running as you can read that file and
+  drive the engine; nobody else can. See `SECURITY.md`, "The listener".
+- **The `/re` command is gone, on both hosts.** No `/re open`, `/re report`,
+  `/re verify`, `/re carry`, `/re status`, no `/re` dialog under nodecode, no
+  argument completion. The same lines are the engine's still, and the model
+  runs them: `re.slash("report out.md")`, `(re:slash "report out.md")`. Ask
+  for what you want in words. What has no replacement:
+  - `omp -p "/re report out.md"` and other headless pipelines that ran a line
+    with no model turn;
+  - `/re cite <id>` putting a citation in your input box, and Enter on a row
+    of the evidence or findings panel doing so (those two panels have no key;
+    the functions, strings and imports panels keep `alt+g`, `alt+s`, `alt+i`);
+  - `/re carry --resolve`, which sent the agenda to the model as your next
+    message. `carry --inherit` now answers the agenda to the model that ran
+    it, which is the same thing done in one step; `--resolve` is no longer a
+    flag.
+- **`/re off` and `/re on` are gone**, and with them the per-session switch.
+  To switch the plugin off under omp, set `OMPRE_DISABLED=1` in omp's
+  environment (it then starts nothing) or disable the plugin in omp. Under
+  nodecode the cell's `"enabled": false` is the switch, as before.
+- **`omp --binary <path>` is gone.** Ask the model to open the binary.
+- **The library must be loaded by the model**, once per kernel:
+  `%load skill://re-triage/recipes.js` or `…/recipes.py`, in a cell of its
+  own. omp has no way for a plugin to do this for it. The skill says so, and a
+  cell that fails because `re` (or `omp_re`) is not defined gets the load line
+  added to its error. A JavaScript kernel loses the library at every timeout
+  and interrupt; a Python kernel keeps it.
+- **`re.help()` is the engine's manual**, where it was the list of recipes;
+  that list is `re.recipes()` (`omp_re.recipes()`).
+- **The recipes' refusal about a cut read is gone**, because the case is: a
+  recipe gets the whole of what rizin printed beside the text, and no longer
+  reads it back from a session artifact. A session omp keeps no file for can
+  run the recipes on a large binary now.
+- **A session omp keeps no file for must have its directory to itself.** Such
+  sessions share one `eval` kernel per directory, and a request from that
+  kernel cannot say which of two it is for: it is refused.
+- **Protocol 4** (`stdio/protocol.json`). Removed: `describe`, `approval`,
+  `keepSession`; `session.hasUI` and `session.memory`; `state.evidence` and
+  `state.memory`; `event.binary`; a line's `level`, `draft` and `userMessage`;
+  the tool descriptor types. Added: `call`'s result carries `raw` (all rizin
+  printed) and `evidence` (the record's id as it is cited), and `callId` is
+  optional. The two halves ship together.
+- **For a host of the engine** (`engine/package.lisp`): `engine-commands`,
+  `engine-evidence`, `engine-memory`, `engine-remember` and `engine-approval`
+  are gone; `engine-command` takes no `:by-model` and answers `{text,
+  failed}`; `engine-restore` takes no `:open`; `engine-tools` answers `{name,
+  description, parameters, evidence}`; the host services `:has-ui` and
+  `:keep-session` are no longer asked.
+
 ### Added
+
+- **`recipes/api.json` and `scripts/gen-api.ts`**: the verbs the model calls
+  from eval, described once and written into the JavaScript library, the
+  Python library and nodecode's `verb-forms.lisp`, so the three hosts' verbs
+  take the same arguments, do the same thing and refuse in the same words.
+  `bun run check:api` fails when a generated file is stale; CI runs it.
+- **`re.json` / `omp_re.json`** answer a `*j` command's data decoded, whole
+  even past the size cap, with the id of the evidence record — what
+  `(re:json …)` has always answered under nodecode.
+- **The lines `tools` and `doc <tool>`**, on both hosts: the engine's own
+  account of its tools, in the host's way of calling one. They are what
+  `re.tools()`/`re.doc()` and `(re:tools)`/`(re:doc)` answer.
+- A cell that times out or is interrupted cancels the engine's work on the
+  call it was waiting for, in both kernels.
 
 - **The engine starts from a saved image under omp.** SBCL can save a loaded
   engine as one executable, and omp's side now runs one when it can: the
@@ -52,9 +148,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   type error inside the engine's sentence, and `engine-command` with a line
   that was not a string signalled instead of answering. Under nodecode,
   `(re:slash 42)` is now a refusal the model reads like any other.
-- **Protocol 3.** `hello`'s answer has a new member, `started`: `"source"`
-  or `"image"`. The two halves of omp-re ship together, so this is seen only
-  as the number in `{"ready": 3}`.
+- **`hello`'s answer has a new member, `started`**: `"source"` or `"image"`
+  (part of protocol 4, above).
+- **With SBCL missing, omp-re's extension loads and says so**, where it used
+  to fail to load: the session is told what to install when it starts, and
+  every call from a cell is refused with the same words.
+- **Under nodecode `(re:doc "nope")` is refused as a call to that tool is**:
+  `omp-re: no tool named "nope" — (re:tools) lists them`.
+- The engine's text no longer tells anyone to type `/re open`: with no binary
+  open it says how the model opens one on that host.
+
+### Removed
+
+- The three manual tmux tiers under `test/` (the smoke script, the QA pass
+  and the carry script, with the Lisp script that made its fixture), and the
+  README's two screenshots of `/re cite` and `/re report`: each drove omp by
+  typing `/re` lines. The bun suites drive the same engine through real
+  `eval` cells; nothing drives a real omp terminal now. `test/live-model.sh`
+  and `tools/shotgen/capture.sh` are rewritten to ask a model for what they
+  typed, and neither has been run since.
 
 ## [0.11.0] - 2026-11-11
 

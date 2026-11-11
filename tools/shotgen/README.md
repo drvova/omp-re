@@ -26,9 +26,13 @@ viewport/scale (1040px viewport / `scale: 2` requested, 1024px delivered) —
 target roughly that width for a visual match with any headless-Chrome
 equivalent. Save the result to `../../docs/img/<scene>.png`.
 
-`capture.sh` requires tmux, `omp`, a real rizin (`OMPRE_RIZIN_PATH` if it
-isn't on PATH), and a fixture binary (`FIXTURE`, default `/bin/ls`). Set
-`DECOMPILE_FN` and `REPORT_ADDR` together when using a different fixture.
+`capture.sh` requires tmux, `omp` with the plugin installed and a model (the
+binary is opened by asking the model: there is no command for it), a real
+rizin (`OMPRE_RIZIN_PATH` if it isn't on PATH), and a fixture binary
+(`FIXTURE`, default `/bin/ls`). Set `DECOMPILE_FN` when using a different
+fixture. It captures four scenes: `hero`, `functions`, `decompile`, `xrefs`.
+It was ported when the `/re` command was removed — two scenes that typed
+`/re cite` and `/re report` went with it — and has not been run since.
 With rz-ghidra installed the decompile scene shows typed C; without it, the
 labeled disassembly fallback — both are truthful captures.
 

@@ -1,19 +1,28 @@
 # Architecture
 
-omp-re is one engine and two hosts.
+omp-re is one engine and two hosts. On both, the model has one way in — the
+host's own `eval` — and the same verbs there.
 
 ```
                        engine/            ASDF system omp-re
                  rizin, the read-only policy, the session record,
                  evidence, annotations, findings, verify, report,
-                 carry, the debugger, /re, the views
+                 carry, the debugger, the lines, the views
                     |  the surface: engine/engine.lisp
                     |  the port:    engine/host.lisp
         +-----------+-----------+
         |                       |
-   nodecode/                 stdio/  +  extensions/re/
-   system nodecode-re        system omp-re-stdio, and a TypeScript shim
-   in the nodecode image     a child SBCL process beside omp
+   nodecode/                 stdio/  +  extensions/re/  +  skills/re-triage/
+   system nodecode-re        system omp-re-stdio, a TypeScript shim, and
+   in the nodecode image     the library omp's eval loads
+                             a child SBCL process beside omp
+        |                       |
+   (re:cmd "aflj")           await re.cmd("aflj")   omp_re.cmd("aflj")
+   verbs in eval             the same verbs in eval's two kernels
+        +-----------+-----------+
+                    |
+              recipes/api.json     one description of the verbs
+              recipes/tables.json  one description of the recipes
 ```
 
 The engine is Common Lisp and runs on SBCL. It knows nothing of either host.
@@ -41,22 +50,35 @@ call starts another.
 
 Every tool call, whoever makes it, goes through one function (`call-tool` in
 `engine/call.lisp`): the arguments are checked against the tool's declared
-parameters, `/re off` refuses, the audit line is written, the body runs, and
-for `rizin_command` the result is recorded as evidence. Code that composes
-reads (a recipe, `/re carry`, `adopt_finding`) makes each read a call in its
-own right or goes through the same gate; there is no second way to reach
-rizin.
+parameters, the audit line is written, the body runs, and for `rizin_command`
+the result is recorded as evidence. Code that composes reads (a recipe, the
+line `carry`, `adopt_finding`) makes each read a call in its own right or goes
+through the same gate; there is no second way to reach rizin.
 
-What a host builds on is `engine/engine.lisp`: what tools and `/re`
-subcommands there are, calling one, running one `/re` line, and — for a host
-with a screen and sessions it starts and ends — views, the status band's
-facts, the lines to keep through a compaction, the approval gate's decision,
-restore, rekey and close. Each answers plain JSON data and none signals: a
-failure is an answer with `failed` true and the reason as its text.
+Beside its tools the engine has **lines** (`define-slash` in `engine/slash.lisp`):
+`report out.md`, `verify --strict`, `evidence`, `tools`, `doc <tool>`. A line
+is a command the model runs. The code and the engine's text call them `/re`
+lines, from when an operator typed them after `/re` on both hosts; no host has
+that command now, and the name was left, since the model's verb for running
+one is `slash` on every host and renaming half of that would help nobody. A
+host's voice says how its model runs one.
 
-A tool is declared once (`define-tool`): its name, parameters, approval tier,
-the sentence an approval prompt shows, and how a transcript should draw its
-result. Both hosts read that declaration. Neither holds a list of tools.
+What a host builds on is `engine/engine.lisp`: what tools there are, calling
+one, running one line, and — for a host with a screen and sessions it starts
+and ends — views, the status band's facts, the lines to keep through a
+compaction, restore, rekey and close. Each answers plain JSON data and none
+signals: a failure is an answer with `failed` true and the reason as its text.
+
+A tool is declared once (`define-tool`): its name, parameters, what it does,
+whether a result is evidence. Neither host holds a list of tools: the lines
+`tools` and `doc` answer from the declarations.
+
+Nothing in the engine tells an operator from a model, and nothing gates a
+call but the engine's own policy. There used to be both: an operator typed
+`/re` lines and could switch the tools off for a session, and omp asked about
+each tool call on a tier the tool declared. With one way in on each host —
+`eval`, which the host approves as a whole — none of that had a caller, and
+it is gone.
 
 What a host may name is what `engine/package.lisp` exports, and two things
 hold a host to it.
@@ -116,12 +138,14 @@ and the last:
 - `nodecode-host.lisp` makes the host's package and answers the record services: entries are stamped with
   the turn they were written in, and a call reads those on the session's
   branch.
-- `verbs.lisp` is the model's surface: functions in the `RE` package called
-  from `eval`, over the engine's surface. `RE` (`nodecode-re`) is this host's
-  own package: it uses what the engine's package exports
-  (`engine/package.lisp`) and nothing else of it.
-- `cell.lisp` declares the cell: the config section, the manual, `/re` and its
-  dialog, the side question a support audit asks, start and stop.
+- `verbs.lisp` is what a verb is written in: a keyword list onto the engine's
+  JSON, one call, one line. The verbs themselves — functions in the `RE`
+  package called from `eval` — are `verb-forms.lisp`, generated from
+  `recipes/api.json`, the same description omp's two libraries are generated
+  from. `RE` (`nodecode-re`) is this host's own package: it uses what the
+  engine's package exports (`engine/package.lisp`) and nothing else of it.
+- `cell.lisp` declares the cell: the config section, the manual, the side
+  question a support audit asks, start and stop. It contributes no command.
 
 The recipes (`recipes.lisp`, with `recipe-data.lisp` generated from
 `recipes/tables.json`) live here because they are verbs. See
@@ -169,47 +193,102 @@ method's handler from it and refuses what it does not have, in and out.
 - `host.ts` keeps the one engine of the process (on `globalThis`, because omp
   imports an extension afresh for each session) and answers the engine's
   requests: the session's record is omp's own session file, artifacts are
-  omp's, the side question is omp's `runEphemeralTurn`. It also carries each
-  session's `memory` — what the engine holds in no record, such as `/re off` —
-  back to an engine started after the first ended.
-- `index.ts` asks the engine what tools and subcommands exist and registers
-  exactly those with omp, forwards calls and the session's life, and fills an
-  approval sentence from the data the engine sent.
-- `ui.ts` and `render.ts` draw what the engine sends: the status band's
-  lines, the panels, the code view, a tool's transcript card. Neither knows a
-  record's shape.
+  omp's, the side question is omp's `runEphemeralTurn`. It is also where a
+  request from a cell of `eval` is answered: for which session it is, and the
+  `call` or `command` it becomes.
+- `bridge.ts` is the listener a cell reaches: the socket, the token, the
+  file a kernel finds it by. It knows nothing of sessions or the engine.
+- `index.ts` registers nothing a model or an operator calls. It forwards the
+  session's life to the engine, hands omp the lines to keep through a
+  compaction, binds the keys of the panels, and watches the one tool the
+  model's calls arrive in: `eval`.
+- `ui.ts` draws what the engine sends: the status band's lines, the panels,
+  the code view. It does not know a record's shape.
 
-The engine is started while the extension's factory runs, not later: omp
-accepts tool registrations only then, and the tool list comes from the engine.
-That start is a few milliseconds from an image, or a few seconds the first
-time after an install or upgrade, when the engine is compiled and its image
-saved. If the child dies, the next call starts another and each session comes
-back from its record and the memory omp kept of it.
+The engine is started when a session starts, to bring back the binary the
+session had open; a model's first call would start it as well. That start is
+a few milliseconds from an image, or a few seconds the first time after an
+install or upgrade, when the engine is compiled and its image saved. If the
+child dies, the next call starts another and each session comes back from its
+record.
 
-Every RE tool is registered `discoverable`, so omp mounts it as an
-`xd://<name>` device and the model reaches it from omp's `eval` as
-`tool.<name>()`. Whichever way a call arrives, omp's tool wrapper applies the
-tool's approval tier and then runs the one `execute` that forwards to the
-engine. [`omp-eval.md`](omp-eval.md) is what the plugin relies on there.
+### omp: the way in from `eval`
+
+omp's model has one code tool, `eval`, with a JavaScript and a Python kernel,
+and that is where it calls the engine from. The plugin registers no tool, so
+`tool.<name>()` reaches nothing of it and `xd://` lists nothing of it. omp
+also gives an extension nothing to put into a kernel — no global, no prelude,
+no module — and a kernel is a separate process, a child of omp's.
+[`omp-eval.md`](omp-eval.md) has each of those facts from omp's source, pinned
+by a test.
+
+So the way in is the one an unsandboxed child process has: a socket.
+
+```
+ eval cell (a kernel process)                 omp's process                    the engine
+ re.cmd("aflj")
+   skills/re-triage/recipes.js   --HTTP-->  extensions/re/bridge.ts
+   (or recipes.py: omp_re.cmd)   loopback,   the token, the path
+                                 a token       |
+                                             host.ts: which session?  --pipe-->  call / command
+                                               the kernel's session file,          (stdio/protocol.json)
+                                               or its directory
+```
+
+- **The library** is what the `re-triage` skill ships and the model loads with
+  `%load skill://re-triage/recipes.js` (or `.py`): the verbs, and the recipes
+  composed over them. Its verbs are generated from `recipes/api.json` by
+  `scripts/gen-api.ts`, which writes nodecode's verbs from the same file; its
+  recipes' data from `recipes/tables.json` by `scripts/gen-recipes.ts`. What
+  is written by hand in each language is the client of the listener and the
+  loop that renders a recipe.
+- **The listener** is one per omp process, on `127.0.0.1`, a port the system
+  picks, alive while a session with the plugin is. A request carries a
+  32-byte token. The token and the port are in a file only the user can read,
+  named for omp's process id; a kernel finds its parent's.
+  [`engine-protocol.md`](engine-protocol.md#the-other-wire-a-kernel-of-omps-eval-to-the-extension)
+  has the wire, and [`SECURITY.md`](../SECURITY.md#the-listener-omps-eval-reaches-the-engine-through)
+  what it protects.
+- **The session** a request is for is the one omp gave that kernel: omp keys
+  a kernel by the session's file and directory. Two sessions with no file in
+  one directory share a kernel and cannot be told apart, which is refused.
+- **Giving up** needs no hook: a cell that times out or is interrupted closes
+  its connection, and the shim tells the engine `cancel`.
+- **The audit log** names a call by the `eval` call it came from and its place
+  in that cell, which the shim knows from omp's `tool_call` event.
+
+Why not the alternatives: the engine cannot listen itself or be started by a
+kernel, because its record is omp's session file, which only the shim can
+read and append to; a kernel cannot be handed the listener's address in the
+environment, because omp filters the Python kernel's environment; a Unix
+socket would need a second design for Windows, whose Python has none; and
+rewriting the model's cell to load the library for it would change what the
+transcript says the model wrote.
+
+What omp gates is the cell: `eval` is one `exec`-tier tool. Inside a cell the
+engine's policy is the control ([`SECURITY.md`](../SECURITY.md#what-omp-approves)).
 
 ## Where a change lands
 
 | To change | Edit | Held by |
 | --- | --- | --- |
-| a tool, its parameters, its approval sentence, a refusal's words | the tool's `define-tool` in `engine/` | `test/nodecode/suite-*.lisp`; approval sentences also `test/shim.test.ts` |
+| a tool, its parameters, a refusal's words | the tool's `define-tool` in `engine/` | `test/nodecode/suite-*.lisp` |
 | what `rizin_command` may run | `engine/policy-data.lisp`, `engine/policy.lisp` | `suite-core`, `suite-debug` (the on-hit policy) |
-| a `/re` subcommand | its `define-slash` in `engine/` | the suites; `test/extension-sdk.test.ts` for omp's help and errors |
+| a line | its `define-slash` in `engine/` | the suites; `test/extension-sdk.test.ts` for a line run from a cell |
+| a verb the model calls: its arguments, what it does, how it refuses | `recipes/api.json`, then `bun run gen:api`; what a verb is written in is `nodecode/verbs.lisp` and the client in `skills/re-triage/recipes.js` and `recipes.py` | `bun run check:api`; `suite-core` (nodecode's verbs); `test/extension-sdk.test.ts` (both kernels) |
+| how a cell reaches the engine: the listener, its file, which session | `extensions/re/bridge.ts`, `host.ts`; the client in the two libraries; the prose of [`engine-protocol.md`](engine-protocol.md) | `test/bridge.test.ts`; what it stands on in omp, `test/omp-eval-contract.test.ts` |
 | a setting | `+settings+` in `engine/host.lisp` | `suite-core` (the example file equals the declaration) |
 | what a host may call, and with what | the export in `engine/package.lisp`, the `declaim ftype` beside the function, a new kind of value in `engine/types.lisp` | `scripts/check-warnings.lisp` (both hosts compile against it with no warning); `suite-core` (a wrong type is refused in words; the package is locked) |
 | how the engine process is started | `extensions/re/image.ts`; `main` and `image-main` in `stdio/server.lisp`; `scripts/build-image.lisp` | `test/image.test.ts`, with real images; `suite-stdio` for the start from source |
 | what a panel or the code view shows | `engine/views.lisp` | `suite-views` |
-| how omp draws it | `extensions/re/ui.ts`, `render.ts` | `test/shim.test.ts` (the band, the overlays and a result card, drawn without colours); the tmux tiers by hand |
+| how omp draws it | `extensions/re/ui.ts` | `test/shim.test.ts` (the band and the overlays, drawn without colours) |
 | a key binding | `keys` in `stdio/protocol.json`, then `bun run gen:protocol` | `test/shim.test.ts`; `suite-stdio` (each names a view the engine has) |
 | a message between omp and the engine | `stdio/protocol.json`, then `bun run gen:protocol`; its handler in `stdio/server.lisp` or `extensions/re/host.ts`, its sender, and the prose of [`engine-protocol.md`](engine-protocol.md) | the type check (omp's side) and the server's load (a method with no handler); `suite-stdio` and `test/shim.test.ts`, whose stand-ins check every message against the same file |
-| a verb, the nodecode dialog, the primer | `nodecode/verbs.lisp`, `nodecode/cell.lisp` | `suite-core`, over a stand-in for nodecode's kernel |
+| nodecode's primer, its settings, its side question | `nodecode/cell.lisp` | `suite-core`, `suite-audit`, over a stand-in for nodecode's kernel |
 | a recipe's reads, wording or tables | `recipes/tables.json`, then `bun run gen:recipes` | `test/recipes-eval.test.ts` (three hosts, whole reports); `suite-recipes` |
 
-A new tool needs no TypeScript: the shim registers whatever `describe` lists.
+A new tool needs no TypeScript and no change to a library: `re.call` reaches
+whatever the engine offers, and `re.tools()` lists it.
 
 ## Data that outlives a process
 

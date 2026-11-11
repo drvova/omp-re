@@ -10,8 +10,8 @@ findings, and the report writer that refuses a claim with no evidence.
 
 There is one engine (`engine/`, ASDF system `omp-re`), and it is the one the
 omp plugin runs too. The cell (`nodecode/`, system `nodecode-re`) is the
-nodecode host over it: the verbs, the `/re` command, the manual and the config
-section. Here the engine is loaded into the organism's own Lisp image — no
+nodecode host over it: the verbs, the manual and the config section. It
+contributes no command: the model is the one who calls it. Here the engine is loaded into the organism's own Lisp image — no
 bun, no node, no second process.
 
 ## Install
@@ -57,7 +57,7 @@ verb answers a string, except `re:json`, which answers data.
 | `(re:call "tool" :key value ...)` | Any other engine tool: the annotate tools, `record_finding`, `retract_finding`, `rizin_help`, `rizin_cli`, `rizin_emulate`, `analyze`, `apply_signatures`, `map_file`, `export_project`, … |
 | `(re:tools)` | The engine's tools, one line each. |
 | `(re:doc "tool")` | One tool's description and its keyword arguments. |
-| `(re:slash "line")` | A `/re` line: `functions`, `strings`, `imports`, `evidence [id]`, `cite <id>`, `findings [id]`, `undo`, `verify [--strict]`, `report [path]`, `carry <manifest>`. |
+| `(re:slash "line")` | One of the engine's lines, which its text calls `/re` lines: `functions`, `strings`, `imports`, `evidence [id]`, `cite <id>`, `findings [id]`, `undo`, `verify [--strict]`, `report [path]`, `carry <manifest>`, `tools`, `doc <tool>`, `help`. |
 | `(re:status)` | rizin, the open binary, evidence and findings on this session. |
 
 Arguments map mechanically onto the engine's JSON: `:expect-sha256` is
@@ -109,7 +109,7 @@ and a plain reading of them — ordinary functions over `(re:cmd …)`, not tool
 Each read a recipe makes is a `rizin_command` call in its own right — gated,
 audited, recorded as evidence — and every section of what it answers names
 the evidence id it rests on, so its lines can be cited in `record_finding`
-and re-run by `/re verify`. A recipe says what was observed and what is worth
+and re-run by the line `verify`. A recipe says what was observed and what is worth
 a look; it never states a conclusion.
 
 What each recipe reads, its options, sections, wording and tables are data in
@@ -120,19 +120,17 @@ marked blocks of the omp plugin's twins of these functions —
 `skills/re-triage/recipes.py` for its Python kernel. A test runs all three on
 the same binary and compares their reports whole.
 
-## `/re`
+## No command
 
-The operator's command, in every shell nodecode has. Typed alone it answers
-a dialog, as nodecode's commands do: a row for each thing it does — status,
-functions, strings, imports, evidence, findings, verify, undo, tools on and
-off — and rows that ask for a word first (open a binary, cite evidence,
-write the report). The same lines work typed or from eval
-(`/re status`, `(re:slash "status")`); a line from eval is the model's, so
-`/re off` refuses it as it refuses a tool call, while the operator's typed
-lines are never gated. `help`, `status`, `on` and `off` answer at once even
-while another call holds the session. `/re cite <id>` puts the citation in
-the input box where the shell has one, and answers it as text elsewhere. The
-lists are text: the overlay panels are omp's.
+Until 0.11 the cell contributed a `/re` command: a dialog of what it offered,
+and the engine's lines typed after it. It is gone, as omp's is: the operator
+asks, and the model runs the line with `(re:slash "…")`. The cell's switch is
+its section's `"enabled": false`; there is no per-session one. Neither host
+has per-call approval — nodecode's model already runs arbitrary code through
+`eval`, and omp approves an `eval` cell as a whole — so the one dangerous
+capability, executing the sample under a debugger, is off unless the operator
+sets `debugger`. Run untrusted samples in a sandbox either way
+([SECURITY.md](../SECURITY.md)).
 
 Something that lasts — annotations that could not be replayed, an audit log
 that could not be written — stands as the cell's notice in `/cells` and at
@@ -179,9 +177,9 @@ The same, because it is the same engine:
   is set;
 - every observing call is recorded in the content-addressed evidence store and
   tagged `[evidence xxxxxxxx]`;
-- `record_finding` is gated on evidence that exists, and `/re report` refuses
-  ungrounded claims; `/re verify` re-runs the evidence against the binary's
-  hash;
+- `record_finding` is gated on evidence that exists, and the line `report`
+  refuses ungrounded claims; `verify` re-runs the evidence against the
+  binary's hash;
 - **the record follows the session's branch.** nodecode's session is a tree
   of turns, as omp's is. Each entry is stamped with the turn it was written
   in, and a call reads only the entries on the current branch: after a `/tree`
@@ -199,14 +197,8 @@ The same, because it is the same engine:
 
 Different, because the host is:
 
-- **No approval tiers.** Under omp each tool call passes omp's approval mode.
-  nodecode has no per-tool approval — its model already runs arbitrary code
-  through `eval` — so the cell adds none. The one dangerous capability,
-  executing the sample under a debugger, is off unless the operator sets
-  `debugger`. Run untrusted samples in a sandbox either way
-  ([SECURITY.md](../SECURITY.md)).
-- **No panels, renderers or status band** — those are omp's terminal UI. The
-  `/re` lists are text.
+- **No panels and no status band** — those are omp's terminal UI. A list is
+  text.
 - **The claim-support audit is a side question to a session of its own.**
   `record_finding`, `adopt_finding` and `(re:slash "report …")` put the claim
   and its quoted evidence to the model with `nle:submit … :tools '()`, in a
@@ -218,9 +210,7 @@ Different, because the host is:
   by source. `unaudited` means nobody judged the claim, never that it failed:
   `audit` is off, there is no store, the turn failed, was cancelled, ran past
   `audit_seconds` or answered nothing readable — the reason is recorded, and
-  `--audit=strict` withholds on a verdict only. `/re report` typed as a
-  command does not wait on a model turn, so its report is `unaudited` and
-  says so; ask for it from eval to have it audited.
+  `--audit=strict` withholds on a verdict only.
 - **A cut result names a file**, not `artifact://N`: the whole output is kept
   beside the session's record and `(re:json …)` reads it for you.
 - **The `re-analyst` subagent and the `re-triage` skill** are omp assets; the
@@ -243,10 +233,12 @@ The cell is three files of host and the recipes:
   the engine's words when the engine answers a failure. The file also answers
   where a session's record is kept: each entry is stamped with the turn it was
   written in, and a call reads the entries on the session's branch.
-- `verbs.lisp` is the verbs and the argument mapping, over the engine's
-  surface (`engine/engine.lisp`).
-- `cell.lisp` is the primer, the manual, `/re` and its dialog, the side
-  question a support audit asks, and the `nle:define-cell` declaration.
+- `verbs.lisp` is the argument mapping and what a verb answers, over the
+  engine's surface (`engine/engine.lisp`); `verb-forms.lisp` is the verbs,
+  generated from `recipes/api.json` (`bun run gen:api`), the description omp's
+  two eval libraries are generated from too.
+- `cell.lisp` is the primer, the manual, the side question a support audit
+  asks, and the `nle:define-cell` declaration.
 - `recipes.lisp` and the generated `recipe-data.lisp` are the recipes, which
   are verbs.
 

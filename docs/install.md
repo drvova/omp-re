@@ -157,8 +157,8 @@ omp's side looks for an engine in this order, and takes the first that starts
 
 1. **`OMPRE_ENGINE_IMAGE`**, when set: the image at that path, run as it is.
    Nothing checks what it was built from; that is yours to know. If it does
-   not start, the extension fails to load and the error names the variable:
-   nothing else is tried.
+   not start, the engine does not, and the error a session is told names the
+   variable: nothing else is tried.
 2. **An image shipped with the plugin**:
    `<plugin>/dist/omp-re-engine-<platform>-<arch>`, with `.exe` on Windows.
    `<platform>` and `<arch>` are what Node calls them: `linux`, `darwin` or
@@ -317,7 +317,7 @@ for, in order:
 Set `OMPRE_DECOMPILER` to a comma-separated list of decompiler commands to
 change the order or add another plugin's command (`OMPRE_DECOMPILER=pdd` to
 prefer jsdec; `OMPRE_DECOMPILER=mydec` for a plugin omp-re doesn't know).
-`pdg` and `pdd` stay as a fallback, and `/re status` reports what it found.
+`pdg` and `pdd` stay as a fallback, and the engine's status (`re.status()`) reports what it found.
 
 Build rz-ghidra against the rizin you installed (its tag tracks rizin's minor
 version; v0.9.0 builds against rizin 0.9.1). It needs a shared rizin — a
@@ -346,14 +346,14 @@ rizin -qc 'aaa; pdg @ main' /bin/ls
 
 Expected shape: a typed C function such as `int main(int argc, char **argv)
 { ... }`. An error like `Error while executing command: pdg` means the
-plugin isn't loaded. Inside omp, `/re status` reports the decompiler omp-re
-found.
+plugin isn't loaded. Inside omp, the engine's status — ask the model for it;
+it runs `re.status()` — reports the decompiler omp-re found.
 
 ## Dynamic analysis (the debugger, opt-in)
 
 `rizin_debug` runs the sample under rizin's debugger. Because that executes
 the binary, it is **off by default**: set `OMPRE_ENABLE_DEBUGGER=1` before
-starting omp to register it. rizin's debugger uses `ptrace`, so it needs a
+starting omp to have the engine offer it. rizin's debugger uses `ptrace`, so it needs a
 host that permits it (most Linux; a container must be started with it
 allowed). Only ever enable this inside a disposable VM or container — see
 [`SECURITY.md`](../SECURITY.md#rizin_debug). `OMPRE_DEBUG_TIMEOUT_MS` (default
@@ -361,9 +361,8 @@ allowed). Only ever enable this inside a disposable VM or container — see
 
 ## Optional triage binaries
 
-Each is independently probed on PATH when a session starts, and its tool is
-simply not registered if the binary is absent — no configuration needed
-either way.
+Each is looked for on PATH, and its tool is simply not offered while the
+binary is absent — no configuration needed either way.
 
 | Binary | Tool | Install |
 | --- | --- | --- |
@@ -410,7 +409,8 @@ rizin -qc 'aaa; pdg @ main' /bin/ls     # rz-ghidra producing typed C
 omp plugin list                         # omp-re installed
 ```
 
-Then inside omp: `/re status` (it answers only if the engine started, and says
-which rizin and decompiler it found), `/re open /bin/ls`, `alt+g`, open `main`,
-press `d`. If the decompiled view's title reads `decompile` (not
+Then inside omp, ask: "open /bin/ls with omp-re and show me its status". The
+model loads the library, opens the binary and prints the status, which says
+which rizin and decompiler the engine found; a session whose engine did not
+start is told why when it starts. Then `alt+g`, open `main`, press `d`. If the decompiled view's title reads `decompile` (not
 `decompile (disassembly only)`), the full stack is working.

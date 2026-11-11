@@ -18,9 +18,10 @@ rizin 0.9.1 and rz-ghidra. See [`docs/install.md`](docs/install.md).
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) has the shape and a table of
 where a typical change lands. In short: behaviour lives in `engine/` (Common
-Lisp), and is tested by the Lisp suite. `extensions/re/` is a shim that
-registers what the engine describes and draws what it sends; a new tool or
-`/re` subcommand needs no TypeScript.
+Lisp), and is tested by the Lisp suite. `extensions/re/` is a shim: it
+registers nothing a model calls, passes on what a cell of omp's `eval` asks,
+and draws what the engine sends. A new tool or line needs no TypeScript and
+no change to the libraries in `skills/re-triage/`.
 
 ## Before opening a PR
 
@@ -31,23 +32,26 @@ bun run check:warnings # the three Lisp systems compile from scratch with no war
 bun run test:engine    # the Lisp suite: the engine and both hosts' Lisp
 bun test test/         # the extension through omp's SDK, the engine behind it
 bun run check:recipes  # the recipes' generated blocks are current
+bun run check:api      # the verbs' generated blocks and nodecode's verb-forms.lisp are current
 bun run check:protocol # the shim's types and the protocol page's tables are current
 bun run cover:engine   # the Lisp suite again under sb-cover: what it does not run
-bash test/tui.sh       # fast tmux smoke test
-bun run qa:tui         # full tmux QA pass
 ```
 
-CI runs the first seven on Linux with rizin installed. The last two are manual
-tiers: they need tmux, `omp`, a test binary (`/bin/ls` unless
-`OMPRE_TEST_BINARY` names another), and for `qa:tui` a working model; no
-workflow runs them, so run them yourself when you change what the terminal
-shows. See [`docs/testing.md`](docs/testing.md) for what each tier needs and
-what none of them proves.
+CI runs all of these on Linux with rizin installed. One tier is manual:
+`bash test/live-model.sh` drives a real `omp` with a real model. Nothing
+drives a real omp terminal; see [`docs/testing.md`](docs/testing.md) for what
+each tier needs and what none of them proves.
 
-A tool is declared once, with `define-tool` in `engine/`: its parameters, its
-approval tier, the sentence its approval prompt shows (`:reason`) and how a
-transcript draws its result (`:render`). Give a new tool all four; the omp
-shim and the nodecode verbs read the declaration and need no change.
+A tool is declared once, with `define-tool` in `engine/`: its parameters,
+what it does, whether a result is evidence. Both hosts reach it through the
+`call` verb and list it from the declaration; nothing else changes.
+
+The verbs the model calls from eval — `open`, `cmd`, `json`, `call`, `tools`,
+`doc`, `slash`, `status` — are described once, in `recipes/api.json`. To
+change one, change it there and run `bun run gen:api`, which rewrites the
+marked blocks of `skills/re-triage/recipes.js` and `recipes.py` and the whole
+of `nodecode/verb-forms.lisp`. Never edit those by hand, and never give one
+host a verb the others lack without saying so in the description (`hosts`).
 
 A function a host may call is exported from `engine/package.lisp` and
 declared, beside its definition, in the types of `engine/types.lisp`
@@ -64,8 +68,8 @@ which the suite ran. A new one on that list wants a check, or a reason.
 Every rizin command a tool sends is built from values that went through
 `validate-addr`, `validate-ident` or `rz-quote` (`engine/util.lisp`);
 annotation commands are built only by `annotation-commands`
-(`engine/annotate.lisp`), which the forward tools, `/re undo` and replay all
-share. Keep it that way.
+(`engine/annotate.lisp`), which the forward tools, the line `undo` and replay
+all share. Keep it that way.
 
 The messages between omp and the engine are described once, in
 `stdio/protocol.json`. To change one, change it there and run
@@ -76,22 +80,12 @@ method it has no handler for. Update the page's prose in the same commit. When
 you change `recipes/tables.json`, run `bun run gen:recipes` and commit what it
 writes.
 
-## Two hard rules `test/tui-qa.sh` depends on
-
-1. **The assertion-count drift guard.** `test/tui-qa.sh` pins its own total
-   assertion count in a literal near the end of the script (currently `-eq
-   100`). Any PR that adds or removes an assertion **must** update that
-   literal in the same commit — the guard exists to catch a branch that
-   forgot to report an assertion and would otherwise still exit 0.
-2. **Every conditional assertion needs a mirror on every other branch it
-   could take.** If an assertion only runs inside an `if [ -n "$SOME_ID" ]`
-   block, the corresponding `else` branch (and any outer failure branch)
-   must report the same assertion: `fail '<same assertion name> (<why>)'`
-   when the thing it tests should have been there — a model turn that did
-   not finish is a failure, not a skip — and `skip '<same assertion name>'
-   '<reason>'` only when the fixture has nothing to show it on. Otherwise
-   the total differs between branches and the drift guard fails a healthy
-   run.
+What the plugin stands on in omp's `eval` — that a kernel is a child process
+of omp's, what it is told of its session, that a cell's timeout hangs up its
+connection — is in no documentation of omp's. [`docs/omp-eval.md`](docs/omp-eval.md)
+writes it down from omp's source and `test/omp-eval-contract.test.ts` pins
+each claim against the installed omp. When you come to rely on one more such
+fact, add it to both.
 
 ## Versioning and releases
 
@@ -129,6 +123,6 @@ node scripts/release.mjs <baseRef> <headRef> --dry-run
 - Match the file's existing patterns before introducing a new one; this
   project has a strict "one canonical way to do X" convention throughout
   (see e.g. the single `find-by-id` lookup in `engine/evidence.lisp` that
-  `/re evidence`, `/re cite` and the findings tools share).
+  the lines `evidence` and `cite` and the findings tools share).
 - Comments and docs say why, or how to operate; they do not restate the code.
   A list that mirrors `ls` rots.

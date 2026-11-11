@@ -1,14 +1,16 @@
 /**
- * skills/re-triage/recipes.js and recipes.py — the five recipes for omp's
- * eval, one script for each of its kernels — driven through omp's REAL eval
- * tool, loaded the way a session loads them (`%load skill://re-triage/recipes.js`
- * in a JavaScript cell, `…/recipes.py` in a Python one), with the extension
- * booted by the suites' one harness (helpers.ts). Nothing here calls a model.
+ * skills/re-triage/recipes.js and recipes.py — omp-re's library for omp's
+ * eval, one script for each of its kernels, and above all the five recipes
+ * in it — driven through omp's REAL eval tool, loaded the way a session
+ * loads them (`%load skill://re-triage/recipes.js` in a JavaScript cell,
+ * `…/recipes.py` in a Python one), with the extension booted by the suites'
+ * one harness (helpers.ts). Nothing here calls a model. (The verbs the
+ * recipes are composed over are extension-sdk.test.ts's and bridge.test.ts's.)
  *
  * Three groups for the JavaScript script:
  *  1. no rizin: the script loads, defines `re` and nothing else, registers no
  *     tool, and a recipe with no binary open fails with the engine's words;
- *     what the generator wrote is current.
+ *     what the generators wrote is current.
  *  2. rizin: what the code does on the test binary — that every id a recipe
  *     cites is a real `re.evidence` record, that a finding citing one passes
  *     record_finding, a read past the size cap, bounds, refusals.
@@ -34,7 +36,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
-import { boot as bootSession, canRunRizin, caught, evalJs, evalPy, logSkip, pythonKernel, rmDirSafe, ROOT, scratchAgentDir, type SdkHarness as Harness, SKILLS, TEST_BINARY } from "./helpers.ts";
+import { boot as bootSession, canRunRizin, caught, evalJs, evalPy, logSkip, ownSession, pythonKernel, rmDirSafe, ROOT, scratchAgentDir, type SdkHarness as Harness, SKILLS, TEST_BINARY } from "./helpers.ts";
 
 logSkip("recipes-eval rizin tests");
 
@@ -58,6 +60,14 @@ if (canRunRizin && !canRunLisp) console.log("omp-re: SKIPPING the recipes parity
 
 /** Boot a session with the extension and the plugin's skills loaded, headless, as `omp -p` runs. */
 const boot = (sessionManager: unknown) => bootSession(sessionManager, { headless: true, skills: true });
+/** The same, for a session with a file and a directory of its own. */
+const bootOwn = async () => boot(await ownSession(agentDir()));
+/** The same, for a session omp keeps no file for, in a directory of its own. */
+const bootFileless = async () => {
+	const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+	const cwd = await mkdtemp(join(tmpdir(), "omp-re-recipes-fileless-"));
+	return bootSession(SessionManager.inMemory(cwd), { headless: true, skills: true, cwd });
+};
 
 type Answers = Record<string, string | { error: string }>;
 
@@ -163,21 +173,20 @@ describe("recipes.js in omp's eval (no rizin needed)", () => {
 	let h: Harness;
 
 	beforeAll(async () => {
-		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		h = await boot(SessionManager.inMemory());
+		h = await bootOwn();
 	});
 
 	afterAll(async () => {
 		await h.shutdown();
 	});
 
-	test("what scripts/gen-recipes.ts writes into the three hosts is current with recipes/tables.json", () => {
-		const check = Bun.spawnSync(["bun", join(ROOT, "scripts", "gen-recipes.ts"), "--check"], { stdout: "pipe", stderr: "pipe" });
+	test.each(["gen-recipes.ts", "gen-api.ts"])("what scripts/%s writes into the three hosts is current with its description", (script) => {
+		const check = Bun.spawnSync(["bun", join(ROOT, "scripts", script), "--check"], { stdout: "pipe", stderr: "pipe" });
 		expect(check.stderr.toString()).toBe("");
 		expect(check.exitCode).toBe(0);
 	});
 
-	test("%load by the skill's own URL defines `re` with the five recipes, and nothing else", async () => {
+	test("%load by the skill's own URL defines `re` with the verbs and the five recipes, and nothing else", async () => {
 		// What a cell returns is cut for a model's eyes, so the realm's names are written out to be compared whole.
 		const names = async (file: string) => {
 			expect((await evalJs(h.session, `await Bun.write(${JSON.stringify(join(scratch, file))}, JSON.stringify(Object.getOwnPropertyNames(globalThis))); "written"`)).text).toBe("written");
@@ -189,14 +198,15 @@ describe("recipes.js in omp's eval (no rizin needed)", () => {
 
 		const loaded = await evalJs(h.session, LOAD);
 		expect(loaded.isError).toBe(false);
-		expect(loaded.text).toContain("omp-re recipes loaded: re.triage, re.scanImports, re.inspectFunction, re.findComparisons, re.findCrypto");
+		expect(loaded.text).toBe(
+			"omp-re loaded: re.open, re.cmd, re.json, re.call, re.tools, re.doc, re.slash, re.status, re.help, and the recipes re.triage, re.scanImports, re.inspectFunction, re.findComparisons, re.findCrypto. Every one is async: await it. print(await re.help()) is the manual; print(re.recipes()) says what each recipe answers.",
+		);
 
 		const after = await names("globals-after.json");
 		expect(after.filter((name) => !before.includes(name))).toEqual(["re"]);
-		expect((await evalJs(h.session, "Object.keys(re).sort().join(' ')")).text).toBe("findComparisons findCrypto help inspectFunction scanImports triage");
-		expect((await evalJs(h.session, "['triage','scanImports','inspectFunction','findComparisons','findCrypto'].map((n) => re[n].constructor.name).join(' ')")).text).toBe(
-			Array(5).fill("AsyncFunction").join(" "),
-		);
+		expect((await evalJs(h.session, "Object.keys(re).sort().join(' ')")).text).toBe("call cmd doc findComparisons findCrypto help inspectFunction json open recipes scanImports slash status tools triage");
+		// Everything that asks the engine is async; recipes() is the library's own text.
+		expect((await evalJs(h.session, "Object.keys(re).filter((name) => re[name].constructor.name !== 'AsyncFunction').join(' ')")).text).toBe("recipes");
 		// Recipes are code in eval, not tools: the session's tool set is what it was.
 		expect(h.session.getAllToolNames().sort()).toEqual(tools);
 		for (const name of ["triage", "scan_imports", "inspect_function", "find_comparisons", "find_crypto"]) {
@@ -213,22 +223,16 @@ describe("recipes.js in omp's eval (no rizin needed)", () => {
 		expect((await evalJs(h.session, "typeof re.triage")).text).toBe("function");
 	});
 
-	test("help() shows how each recipe is called", async () => {
-		const help = (await evalJs(h.session, "re.help()")).text;
+	test("recipes() shows how each recipe is called", async () => {
+		const help = (await evalJs(h.session, "re.recipes()")).text;
 		for (const name of ["re.triage(", "re.scanImports(", "re.inspectFunction(", "re.findComparisons(", "re.findCrypto("]) expect(help).toContain(name);
 	});
 
 	test("with no binary open every recipe fails with the engine's own message", async () => {
-		const message = "omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first";
+		const message = 'omp-re: no binary open — open one first: await re.open("/path/to/binary") — in Python, omp_re.open("/path/to/binary")';
 		for (const call of ["re.triage()", "re.scanImports()", 're.inspectFunction("main")', 're.findComparisons("main")', "re.findCrypto()"]) {
 			expect((await evalJs(h.session, caught(`await ${call}`))).text).toBe(message);
 		}
-	});
-
-	test("a recipe is stopped by /re off at its first read, like any call", async () => {
-		await h.session.prompt("/re off");
-		expect((await evalJs(h.session, caught("await re.triage()"))).text).toBe("omp-re: RE tools are off for this session — the user can re-enable them with /re on");
-		await h.session.prompt("/re on");
 	});
 
 	test("arguments of the wrong shape are refused in words before any read", async () => {
@@ -242,8 +246,7 @@ describe.skipIf(!canRunPython)("recipes.py in omp's Python kernel (no rizin need
 	let h: Harness;
 
 	beforeAll(async () => {
-		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		h = await boot(SessionManager.inMemory());
+		h = await bootOwn();
 	});
 
 	afterAll(async () => {
@@ -252,7 +255,7 @@ describe.skipIf(!canRunPython)("recipes.py in omp's Python kernel (no rizin need
 
 	const RECIPE_NAMES = ["triage", "scan_imports", "inspect_function", "find_comparisons", "find_crypto"];
 
-	test("%load by the skill's own URL defines `omp_re` with the five recipes and nothing else, and leaves the standard library's `re` where omp put it", async () => {
+	test("%load by the skill's own URL defines `omp_re` with the verbs and the five recipes and nothing else, and leaves the standard library's `re` where omp put it", async () => {
 		const names = async (file: string) => {
 			expect((await evalPy(h.session, `Path(${JSON.stringify(join(scratch, file))}).write_text(json.dumps(sorted(globals())), encoding="utf-8")\nprint("written")`)).text).toBe("written");
 			return JSON.parse(await readFile(join(scratch, file), "utf8")) as string[];
@@ -267,7 +270,7 @@ describe.skipIf(!canRunPython)("recipes.py in omp's Python kernel (no rizin need
 		const loaded = await evalPy(h.session, LOAD_PY);
 		expect(loaded).toMatchObject({
 			isError: false,
-			text: "omp-re recipes loaded: omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto — print(omp_re.help()) says what each answers.",
+			text: "omp-re loaded: omp_re.open, omp_re.cmd, omp_re.json, omp_re.call, omp_re.tools, omp_re.doc, omp_re.slash, omp_re.status, omp_re.help, and the recipes omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto. Every one is a plain call: nothing is awaited. print(omp_re.help()) is the manual; print(omp_re.recipes()) says what each recipe answers.",
 		});
 
 		const after = await names("py-globals-after.json");
@@ -275,47 +278,43 @@ describe.skipIf(!canRunPython)("recipes.py in omp's Python kernel (no rizin need
 		expect(after.filter((name) => !before.includes(name))).toEqual(["__file__", "omp_re"]);
 		expect((await evalPy(h.session, "print(__file__)")).text).toBe(RECIPES_PY);
 		expect((await evalPy(h.session, 'print(type(re).__name__, re.__name__, re.sub("a", "b", "aaa"))')).text).toBe("module re bbb");
-		expect((await evalPy(h.session, 'print(" ".join(sorted(name for name in dir(omp_re) if not name.startswith("_"))))')).text).toBe("find_comparisons find_crypto help inspect_function scan_imports triage");
+		expect((await evalPy(h.session, 'print(" ".join(sorted(name for name in dir(omp_re) if not name.startswith("_"))))')).text).toBe("call cmd doc find_comparisons find_crypto help inspect_function json open recipes scan_imports slash status tools triage");
 		// Python helpers in omp's eval are synchronous, and so are these: plain functions, not coroutine functions.
-		expect((await evalPy(h.session, `print(" ".join(str(callable(getattr(omp_re, name)) and not inspect.iscoroutinefunction(getattr(omp_re, name))) for name in ${JSON.stringify(RECIPE_NAMES)}))`)).text).toBe(
-			Array(5).fill("True").join(" "),
-		);
+		expect((await evalPy(h.session, 'print(all(callable(getattr(omp_re, name)) and not inspect.iscoroutinefunction(getattr(omp_re, name)) for name in dir(omp_re) if not name.startswith("_")))')).text).toBe("True");
+		expect((await evalPy(h.session, "omp_re")).text).toBe("<omp-re: open, cmd, json, call, tools, doc, slash, status, help; recipes triage, scan_imports, inspect_function, find_comparisons, find_crypto — print(omp_re.help()) is the manual>");
 		// Recipes are code in eval, not tools: the session's tool set is what it was.
 		expect(h.session.getAllToolNames().sort()).toEqual(tools);
 		for (const name of RECIPE_NAMES) expect(h.session.getToolByName(name)).toBeUndefined();
 	});
 
 	test("the skill's URL resolves to the file in this repository, and its plain path loads too", async () => {
-		expect((await evalPy(h.session, 'print("\\n".join(read("skill://re-triage/recipes.py").split("\\n")[:2]))')).text).toBe(`[Skill file: ${RECIPES_PY}]\n# recipes.py — wide reads composed over the one read tool, for omp's eval:`);
+		expect((await evalPy(h.session, 'print("\\n".join(read("skill://re-triage/recipes.py").split("\\n")[:2]))')).text).toBe(`[Skill file: ${RECIPES_PY}]\n# recipes.py — omp-re in omp's eval, for the Python kernel: the verbs that reach`);
 		const again = await evalPy(h.session, `%load ${JSON.stringify(RECIPES_PY)}`);
 		expect(again.isError).toBe(false); // loading it again replaces `omp_re` without complaint
 		expect((await evalPy(h.session, "print(callable(omp_re.triage))")).text).toBe("True");
 	});
 
-	test("help() shows how each recipe is called, in this kernel's call forms", async () => {
-		const help = (await evalPy(h.session, "print(omp_re.help())")).text;
+	test("recipes() shows how each recipe is called, in this kernel's call forms", async () => {
+		const help = (await evalPy(h.session, "print(omp_re.recipes())")).text;
 		for (const name of RECIPE_NAMES) expect(help).toContain(`omp_re.${name}(`);
 	});
 
-	test("a report is text: shown as written when it is the cell's value, and a cell that awaits it gets the same string", async () => {
-		const printed = (await evalPy(h.session, "print(omp_re.help())")).text;
-		// A plain str left as a cell's last expression is shown as its repr, on one quoted line; a report is shown as its text.
+	test("what the library answers is text: shown as written when it is the cell's value, and a cell that awaits it gets the same string", async () => {
+		const printed = (await evalPy(h.session, "print(omp_re.recipes())")).text;
+		// A plain str left as a cell's last expression is shown as its repr, on one quoted line; a text of the library's is shown as written.
 		expect((await evalPy(h.session, '"two\\nlines"')).text).toBe("'two\\nlines'");
-		expect((await evalPy(h.session, "omp_re.help()")).text).toBe(printed);
-		expect((await evalPy(h.session, "print(isinstance(omp_re.help(), str), type(await omp_re.help()).__name__, (await omp_re.help()) == omp_re.help())")).text).toBe("True str True");
+		expect((await evalPy(h.session, "omp_re.recipes()")).text).toBe(printed);
+		expect((await evalPy(h.session, "print(isinstance(omp_re.recipes(), str), type(await omp_re.recipes()).__name__, (await omp_re.recipes()) == omp_re.recipes())")).text).toBe("True str True");
+		// The engine's own text is one too: a line's answer is read as it stands.
+		expect((await evalPy(h.session, 'omp_re.slash("help")')).text).toStartWith("/re open <path>");
+		expect((await evalPy(h.session, 'print((await omp_re.status()) == omp_re.status())')).text).toBe("True");
 	});
 
 	test("with no binary open every recipe fails with the engine's own message", async () => {
-		const message = "RuntimeError: omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first";
+		const message = 'RuntimeError: omp-re: no binary open — open one first: await re.open("/path/to/binary") — in Python, omp_re.open("/path/to/binary")';
 		for (const call of ["omp_re.triage()", "omp_re.scan_imports()", 'omp_re.inspect_function("main")', 'omp_re.find_comparisons("main")', "omp_re.find_crypto()"]) {
 			expect((await evalPy(h.session, caughtPy(call))).text).toBe(message);
 		}
-	});
-
-	test("a recipe is stopped by /re off at its first read, like any call", async () => {
-		await h.session.prompt("/re off");
-		expect((await evalPy(h.session, caughtPy("omp_re.triage()"))).text).toBe("RuntimeError: omp-re: RE tools are off for this session — the user can re-enable them with /re on");
-		await h.session.prompt("/re on");
 	});
 
 	test("arguments of the wrong shape are refused before any read: an address in recipes.js's words, an option in Python's own", async () => {
@@ -353,15 +352,13 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 	let binaryEvidence: EvidenceEntry[];
 
 	beforeAll(async () => {
-		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		// On disk, so a read past the size cap has a session artifact store to spill its whole output to.
-		h = await boot(SessionManager.create(tmpdir(), join(agentDir(), "sessions")));
+		h = await bootOwn();
 		await h.session.sessionManager.ensureOnDisk();
 		blob = join(scratch, "tables.bin");
 		await writeFile(blob, constantsBlob());
 
 		expect((await evalJs(h.session, LOAD)).isError).toBe(false);
-		expect((await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`)).isError).toBe(false);
+		expect((await evalJs(h.session, `await re.open(${JSON.stringify(TEST_BINARY)})`)).isError).toBe(false);
 		omp = await answers(h.session, scratch, {
 			triage: "re.triage()",
 			triageShort: "re.triage({ maxStrings: 1, maxFunctions: 2 })",
@@ -401,7 +398,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 		}
 		binaryEvidence = recordedEvidence(h.session);
 
-		expect((await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(blob)}, arch: "x86", bits: 64, format: "any" })`)).isError).toBe(false);
+		expect((await evalJs(h.session, `await re.open(${JSON.stringify(blob)}, { arch: "x86", bits: 64, format: "any" })`)).isError).toBe(false);
 		Object.assign(
 			omp,
 			await answers(h.session, scratch, {
@@ -429,8 +426,8 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 	});
 
 
-	test("a read cut at the size cap is read back whole from its artifact, not parsed cut", () => {
-		// The premise: this binary's function list is past the cap, so the text the call returned held none of its JSON.
+	test("a read cut at the size cap is read whole, not parsed cut", () => {
+		// The premise: this binary's function list is past the cap, so the text of the call held none of its JSON.
 		const record = binaryEvidence.find((entry) => entry.args.command === "aflj") as (EvidenceEntry & { artifactId?: string; summary?: string }) | undefined;
 		expect(record?.artifactId).toEqual(expect.any(String));
 		expect(record?.summary).toContain("[Output truncated: 0 of 1 lines");
@@ -439,16 +436,14 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 		expect(text(omp.triage)).toMatch(/^ {2}… \d+ more functions not shown$/m);
 	});
 
-	test("when the whole of a cut read cannot be had, the recipe stops and says so instead of reporting from cut JSON", async () => {
-		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		// A session that is not on disk has no artifact store to read back from.
-		const memory = await boot(SessionManager.inMemory());
+	test("a session with no artifact store reads the whole of a cut read all the same: the data comes beside the text, not through an artifact", async () => {
+		// A session that is not on disk has nowhere to keep what the size cap cut from a text.
+		const memory = await bootFileless();
 		try {
 			expect((await evalJs(memory.session, LOAD)).isError).toBe(false);
-			expect((await evalJs(memory.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`)).isError).toBe(false);
-			const message = (await evalJs(memory.session, caught("await re.triage()"))).text;
-			expect(message).toMatch(/^omp-re: triage: the output of rizin_command "(?:izj|aflj)" was cut at the size cap and the whole of it could not be read back \(/);
-			expect(message).toContain("will not report from cut JSON");
+			expect((await evalJs(memory.session, `await re.open(${JSON.stringify(TEST_BINARY)})`)).isError).toBe(false);
+			const report = text((await answers(memory.session, scratch, { triage: "re.triage()" })).triage);
+			expect(withoutIds(report)).toBe(withoutIds(text(omp.triage)));
 		} finally {
 			await memory.shutdown();
 		}
@@ -479,7 +474,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 	test("a finding citing what triage read passes record_finding", async () => {
 		// The blob is open now; cite its triage, since a finding is bound to the open binary.
 		const id = evidenceTaken(text(omp.blobTriage)).find((entry) => entry.label === "iIj")!.id;
-		const recorded = await evalJs(h.session, `const r = await tool.record_finding({ claim: "The file has no stack canary and its data pages are executable.", evidence: [${JSON.stringify(id)}], confidence: "likely" }); typeof r === "string" ? r : r.text`);
+		const recorded = await evalJs(h.session, `await re.call("record_finding", { claim: "The file has no stack canary and its data pages are executable.", evidence: [${JSON.stringify(id)}], confidence: "likely" })`);
 		expect(recorded.isError).toBe(false);
 		expect(recorded.text).toMatch(/^record_finding: recorded [0-9a-f]{8}\n/);
 	});
@@ -509,7 +504,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 	});
 
 	test("an address that is no function, or that could open another command, is refused in words", () => {
-		expect(refusal(omp.inspectFunctionNone)).toBe('omp-re: inspect_function: no function at 0x1 — list them with await tool.rizin_command({ command: "aflj" }), or define one with define_function');
+		expect(refusal(omp.inspectFunctionNone)).toBe('omp-re: inspect_function: no function at 0x1 — list them with await re.json("aflj"), or define one with define_function');
 		// The engine's own gate on what may follow `@`: nothing of this reached rizin.
 		expect(refusal(omp.inspectFunctionInvalid)).toBe('omp-re: invalid address or expression: "main;!id"');
 		// rizin's own words for a read that failed, passed on as the recipe's refusal.
@@ -549,11 +544,11 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 		test("the refusals are the same words, raised as RuntimeError, each kernel naming its own call", () => {
 			for (const name of ["inspectFunctionNone", "inspectFunctionInvalid", "findComparisonsNone"]) expect((py[name] as { kind?: string }).kind).toBe("RuntimeError");
 			for (const name of ["inspectFunctionInvalid", "findComparisonsNone", "inspectFunctionNotAString", "findComparisonsNotAString"]) expect(refusal(py[name])).toBe(refusal(omp[name]));
-			expect(refusal(py.inspectFunctionNone)).toBe('omp-re: inspect_function: no function at 0x1 — list them with await tool.rizin_command({"command": "aflj"}), or define one with define_function');
-			expect(refusal(py.inspectFunctionNone).replace('await tool.rizin_command({"command": "aflj"})', 'await tool.rizin_command({ command: "aflj" })')).toBe(refusal(omp.inspectFunctionNone));
+			expect(refusal(py.inspectFunctionNone)).toBe('omp-re: inspect_function: no function at 0x1 — list them with omp_re.json("aflj"), or define one with define_function');
+			expect(refusal(py.inspectFunctionNone).replace('omp_re.json("aflj")', 'await re.json("aflj")')).toBe(refusal(omp.inspectFunctionNone));
 		});
 
-		test("a read cut at the size cap is read back whole from its artifact by Python's read(), not parsed cut", () => {
+		test("a read cut at the size cap is read whole by the Python kernel too, not parsed cut", () => {
 			// The same premise as the JavaScript test above (this binary's `aflj` is past the cap), and the same count as JavaScript read.
 			const functions = Number(/^Functions: (\d+);/m.exec(text(py.triage))![1]);
 			expect(functions).toBeGreaterThan(20);
@@ -561,15 +556,13 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 			expect(text(py.triage)).toMatch(/^ {2}… \d+ more functions not shown$/m);
 		});
 
-		test("when the whole of a cut read cannot be had, the Python recipe stops and says so in the same words", async () => {
-			const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-			const memory = await boot(SessionManager.inMemory());
+		test("in a session with no artifact store the Python recipe reads the whole of a cut read as well", async () => {
+			const memory = await bootFileless();
 			try {
 				expect((await evalPy(memory.session, LOAD_PY)).isError).toBe(false);
-				expect((await evalPy(memory.session, `await tool.open_binary({"path": ${JSON.stringify(TEST_BINARY)}})\nprint("opened")`)).text).toBe("opened");
-				const message = (await evalPy(memory.session, caughtPy("omp_re.triage()"))).text;
-				expect(message).toMatch(/^RuntimeError: omp-re: triage: the output of rizin_command "(?:izj|aflj)" was cut at the size cap and the whole of it could not be read back \(artifact:\/\/\d+: /);
-				expect(message).toContain("will not report from cut JSON");
+				expect((await evalPy(memory.session, `omp_re.open(${JSON.stringify(TEST_BINARY)})\nprint("opened")`)).text).toBe("opened");
+				const report = text((await answersPy(memory.session, scratch, { triage: "omp_re.triage()" })).triage);
+				expect(withoutIds(report)).toBe(withoutIds(text(omp.triage)));
 			} finally {
 				await memory.shutdown();
 			}
@@ -598,7 +591,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 			const id = evidenceTaken(text(py.blobTriage)).find((entry) => entry.label === "iIj")!.id;
 			const recorded = await evalPy(
 				h.session,
-				`r = await tool.record_finding({"claim": "The file is not position-independent: it loads at a fixed address.", "evidence": [${JSON.stringify(id)}], "confidence": "likely"})\nprint(r if isinstance(r, str) else r["text"])`,
+				`print(omp_re.call("record_finding", claim="The file is not position-independent: it loads at a fixed address.", evidence=[${JSON.stringify(id)}], confidence="likely"))`,
 			);
 			expect(recorded.isError).toBe(false);
 			expect(recorded.text).toMatch(/^record_finding: recorded [0-9a-f]{8}\n/);
@@ -607,7 +600,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 		test("an address past 2^53 is the one rizin printed, in both kernels: the blob mapped where a kernel image lies", async () => {
 			// Last in this group: it opens the blob again, mapped high, and what is open afterwards is that.
 			// rizin prints an address as a decimal integer; 0xffffffff80000040 is not a value a double holds, so a parse through one prints …000 instead.
-			expect((await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(blob)}, arch: "x86", bits: 64, format: "any", map: "0xffffffff80000000" })`)).isError).toBe(false);
+			expect((await evalJs(h.session, `await re.open(${JSON.stringify(blob)}, { arch: "x86", bits: 64, format: "any", map: "0xffffffff80000000" })`)).isError).toBe(false);
 			const js = text((await answers(h.session, scratch, { high: "re.findCrypto({ references: false })" })).high);
 			const python = text((await answersPy(h.session, scratch, { high: "omp_re.find_crypto(references=False)" })).high);
 			expect(python).toMatch(/^ {2}0xffffffff80000040 {2}AES — S-box \[evidence [0-9a-f]{8}\]$/m);
@@ -635,7 +628,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 		test("the refusals are the same words, each host naming its own call", () => {
 			// The engine's own refusal of what may follow `@`, rizin's own words for a read that failed, and the recipes' refusal of a name that is no string.
 			for (const name of ["inspectFunctionInvalid", "findComparisonsNone", "inspectFunctionNotAString", "findComparisonsNotAString"]) expect(refusal(lisp[name])).toBe(refusal(omp[name]));
-			expect(refusal(omp.inspectFunctionNone).replace('await tool.rizin_command({ command: "aflj" })', '(re:json "aflj")')).toBe(refusal(lisp.inspectFunctionNone));
+			expect(refusal(omp.inspectFunctionNone).replace('await re.json("aflj")', '(re:json "aflj")')).toBe(refusal(lisp.inspectFunctionNone));
 		});
 	});
 });
@@ -644,27 +637,30 @@ describe.skipIf(!canRunRizin)("a long read through omp's eval is cut once", () =
 	let h: Harness;
 
 	beforeAll(async () => {
-		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		h = await boot(SessionManager.create(tmpdir(), join(agentDir(), "sessions-long-read")));
+		h = await bootOwn();
 		await h.session.sessionManager.ensureOnDisk();
-		expect((await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`)).isError).toBe(false);
+		expect((await evalJs(h.session, LOAD)).isError).toBe(false);
+		expect((await evalJs(h.session, `await re.open(${JSON.stringify(TEST_BINARY)})`)).isError).toBe(false);
 	}, 120_000);
 
 	afterAll(async () => {
 		await h.shutdown();
 	});
 
-	test("the engine's own cut stays under omp's limit, so omp cuts no second hole in it", async () => {
-		// Regression: a body cut to exactly omp's 50 KB tool-result limit, plus the header line, the truncation note and the
-		// evidence tag, landed just over it. omp then elided the middle of what the engine had kept and named a second
-		// artifact holding the already-cut text. The engine now leaves headroom (engine/util.lisp, +MAX-OCTETS+); docs/omp-eval.md has the mechanism.
+	test("the engine's own cut stays under omp's limit, so a cell that prints a long read has no second hole cut in it", async () => {
+		// Regression: a body cut to exactly omp's 50 KB limit on what a cell shows, plus the header line, the truncation note
+		// and the evidence tag, landed just over it. omp then elided the middle of what the engine had kept and named a second
+		// artifact holding the already-cut text. The engine leaves headroom (engine/util.lisp, +MAX-OCTETS+); docs/omp-eval.md has the mechanism.
 		const out = await evalJs(
 			h.session,
-			'const r = await tool.rizin_command({ command: "pd 3000", addr: "entry0" }); print("NOTES=" + (r.text.match(/\\[Output truncated/g) || []).length + " HOLE=" + /elided|\\[Showing lines/.test(r.text) + " BYTES=" + new TextEncoder().encode(r.text).length + " TAG=" + /\\[evidence [0-9a-f]{8}/.test(r.text.split("\\n").at(-1)));',
+			'const text = await re.cmd("pd 3000", "entry0"); print(text); print("NOTES=" + (text.match(/\\[Output truncated/g) || []).length + " BYTES=" + new TextEncoder().encode(text).length + " TAG=" + /\\[evidence [0-9a-f]{8}/.test(text.split("\\n").at(-1)));',
 		);
 		expect(out.isError).toBe(false);
-		expect(out.text).toContain("NOTES=1 HOLE=false");
+		expect(out.text).toContain("NOTES=1 ");
 		expect(out.text).toContain("TAG=true");
+		expect(out.text).toStartWith("rizin> pd 3000 @ entry0\n");
+		expect(out.text).not.toMatch(/elided|\[Showing lines/);
+		expect(out.text.match(/\[Output truncated/g)).toHaveLength(1);
 		expect(Number(/BYTES=(\d+)/.exec(out.text)![1])).toBeLessThanOrEqual(50 * 1024);
 	});
 });

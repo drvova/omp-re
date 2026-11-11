@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Live-model test of the findings loop: the half no deterministic test reaches.
 #
-# A real model, driving real omp (print mode) with the extension loaded, on two
-# builds of the sample fixture (v2 renames `fib`, changes `checksum`'s multiplier):
+# A real model, driving real omp (print mode) with the plugin loaded, on two
+# builds of the sample fixture (v2 renames `fib`, changes `checksum`'s multiplier).
+# The plugin registers no tool and no command, so everything the model does it
+# does in omp's eval, through the library of the re-triage skill:
 #
-#   A. on v1: the model reads sym.checksum and sym.fib with rizin_command, records
-#      a finding for each citing the `[evidence xxxxxxxx]` tags, then attempts an
-#      overreaching claim — the support auditor should refuse it. /re report.
-#   B. on v2, fresh session: /re carry <v1 manifest> --resolve — the holding
-#      finding is re-proven and recorded. Headless, a command cannot start a
-#      model turn, so --resolve prints the agenda (the drifted checksum finding
-#      with its diff) instead of sending it.
-#   C. same session continued: the agenda goes to the model as a prompt, and
-#      the model should revise the drifted finding; then /re report on v2.
+#   A. on v1: the model loads the library, opens the binary, reads sym.checksum
+#      and sym.fib, records a finding for each citing the evidence ids, then
+#      attempts an overreaching claim — the support auditor should refuse it —
+#      and writes the report (the line `report <path>`).
+#   B. on v2, fresh session: the model opens the new build, carries v1's
+#      manifest onto it with --inherit — the holding finding is re-proven and
+#      recorded, and the agenda of what drifted comes back to it under the
+#      summary — revises the drifted finding, and writes the v2 report.
 #
 # Asserts only on recorded state (session entries, report files), never on model
 # prose. The model is the caller's to name: OMPRE_LIVE_MODEL, in the form omp's
@@ -50,7 +51,7 @@ CC="$(command -v cc || command -v gcc || command -v clang || true)"
 
 WORK="${OMPRE_LIVE_WORKDIR:-$(mktemp -d)}"
 mkdir -p "$WORK"
-log "workdir: $WORK (logs: a.log b.log c.log)"
+log "workdir: $WORK (logs: a.log b.log)"
 cp "$REPO_DIR/test/fixtures/sample.c" "$WORK/v1.c"
 sed -e 's/h \* 33u/h * 31u/' -e 's/\bfib\b/fibonacci/g' "$REPO_DIR/test/fixtures/sample.c" >"$WORK/v2.c"
 "$CC" -O0 -o "$WORK/v1" "$WORK/v1.c" && "$CC" -O0 -o "$WORK/v2" "$WORK/v2.c" || {
@@ -59,16 +60,21 @@ sed -e 's/h \* 33u/h * 31u/' -e 's/\bfib\b/fibonacci/g' "$REPO_DIR/test/fixtures
 }
 
 # stdin from /dev/null on every call: with a non-terminal stdin, omp -p waits to read a piped prompt.
-OMP=(omp -e "$REPO_DIR/extensions/re" --model "$MODEL" --approval-mode yolo)
+# The plugin is loaded from its root, as README.md says a checkout is, so omp finds the skill beside the extension.
+OMP=(omp -e "$REPO_DIR" --model "$MODEL" --approval-mode yolo)
+LIBRARY="$REPO_DIR/skills/re-triage/recipes.js"
 
 # --- A: analyse v1, record findings, try an overreach, write the report -------
-PROMPT_A="You are reverse engineering the open binary with the omp-re tools. Work only with tools; keep prose short.
-1. Call rizin_command with command \"pdf\" and addr \"sym.checksum\". Work out exactly what the function computes.
-2. Call record_finding with that conclusion (addr sym.checksum, confidence confirmed), citing the 8-character id from the [evidence ...] tag at the end of that tool result.
-3. Do the same for sym.fib: rizin_command pdf @ sym.fib, then record_finding.
-4. Then call record_finding once more with exactly this claim, citing the checksum evidence: \"checksum authenticates the program's network traffic to a C2 server.\" Do not override the auditor if it refuses. Report what the tool answered."
+PROMPT_A="You are reverse engineering one binary with omp-re. Everything goes through the eval tool, in JavaScript cells; keep prose short.
+0. Run a cell that holds only this line: %load $LIBRARY
+   Then, in a cell with timeout 300: await re.open(\"$WORK/v1\")
+1. print(await re.cmd(\"pdf\", \"sym.checksum\")). Work out exactly what the function computes.
+2. Record that conclusion: await re.call(\"record_finding\", { claim, evidence: [id], addr: \"sym.checksum\", confidence: \"confirmed\" }), id being the 8 characters of the [evidence ...] tag that ended the read.
+3. Do the same for sym.fib: re.cmd pdf at sym.fib, then record_finding.
+4. Then call record_finding once more with exactly this claim, citing the checksum evidence: \"checksum authenticates the program's network traffic to a C2 server.\" Do not override the auditor if it refuses. Say what the call answered.
+5. Last: print(await re.slash(\"report $WORK/v1.md\"))"
 rm -rf "$WORK/s1" "$WORK/s2" "$WORK"/v1.md* "$WORK"/v2.md*
-timeout 900 "${OMP[@]}" --binary "$WORK/v1" --session-dir "$WORK/s1" -p "$PROMPT_A" "/re report $WORK/v1.md" </dev/null >"$WORK/a.log" 2>&1
+timeout 900 "${OMP[@]}" --session-dir "$WORK/s1" -p "$PROMPT_A" </dev/null >"$WORK/a.log" 2>&1
 log "phase A exit: $?"
 
 S1="$(ls -t "$WORK"/s1/*.jsonl 2>/dev/null | head -1)"
@@ -95,22 +101,18 @@ fi
 grep -q "NOT recorded — the support auditor" "$S1" 2>/dev/null && pass "the auditor refused something with a reason" || log "NOTE: no auditor refusal in the transcript (auditor unavailable, or the model skipped step 4)"
 grep -q "## Findings" "$WORK/v1.md" 2>/dev/null && pass "v1 report has a Findings section" || fail "v1 report Findings section"
 
-# --- B: carry onto v2 with --resolve -----------------------------------------
-timeout 900 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -p "/re carry $WORK/v1.md.manifest.json --resolve" </dev/null >"$WORK/b.log" 2>&1
+# --- B: carry onto v2, resolve the agenda, write the v2 report ---------------
+PROMPT_B="You are carrying an earlier report onto a new build of the same program with omp-re. Everything goes through the eval tool, in JavaScript cells; keep prose short.
+0. Run a cell that holds only this line: %load $LIBRARY
+   Then, in a cell with timeout 300: await re.open(\"$WORK/v2\")
+1. print(await re.slash(\"carry $WORK/v1.md.manifest.json --inherit\")). It answers what holds here, and under that an agenda of findings that no longer hold as written.
+2. Work through the agenda: read what it names on this build, and for each finding record the revised claim with record_finding (supersedes, where it says so) or leave it out if it is no longer true.
+3. Last: print(await re.slash(\"report $WORK/v2.md\"))"
+timeout 900 "${OMP[@]}" --session-dir "$WORK/s2" -p "$PROMPT_B" </dev/null >"$WORK/b.log" 2>&1
 log "phase B exit: $?"
-grep -q "inherit: [1-9][0-9]* finding(s) re-proven" "$WORK/b.log" && pass "carry --resolve re-proved finding(s) on v2" || fail "no inherit summary (see b.log)"
-# The agenda is everything from its opening line to the end of b.log.
-AGENDA="$(sed -n '/^These findings from the earlier report do not carry over unchanged/,$p' "$WORK/b.log")"
-[ -n "$AGENDA" ] && pass "carry --resolve printed the agenda for the next prompt" || log "NOTE: no agenda printed (no finding drifted?)"
-
-# --- C: resolve the agenda, then write the v2 report, in the same session ------
-if [ -n "$AGENDA" ]; then
-	timeout 900 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -c -p "$AGENDA" "/re report $WORK/v2.md" </dev/null >"$WORK/c.log" 2>&1
-else
-	timeout 600 "${OMP[@]}" --binary "$WORK/v2" --session-dir "$WORK/s2" -c -p "/re report $WORK/v2.md" </dev/null >"$WORK/c.log" 2>&1
-fi
-log "phase C exit: $?"
 S2="$(ls -t "$WORK"/s2/*.jsonl 2>/dev/null | head -1)"
+grep -q "inherit: [1-9][0-9]* finding(s) re-proven" "$S2" 2>/dev/null && pass "carry --inherit re-proved finding(s) on v2" || fail "no inherit summary in the session (see b.log)"
+grep -q "These findings from the earlier report do not carry over unchanged" "$S2" 2>/dev/null && pass "the carry handed the model the agenda" || log "NOTE: no agenda in the session (no finding drifted?)"
 grep -q "re-verified on this build" "$WORK/v2.md" 2>/dev/null && pass "v2 report carries inherited finding(s)" || fail "v2 report has no inherited finding"
 FINDINGS_B="$(count '"customType":"re.finding"' "$S2")"
 INHERITED_B="$(count '"customType":"re.finding".*"inherited"' "$S2")"

@@ -1,53 +1,55 @@
 # Tool reference
 
-`omp-re`'s model-facing surface is deliberately small: **one tool to read the
-binary — `rizin_command` — plus a few stateful tools** (open, annotate, findings,
-the rz-* CLI, triage, debugger). You observe the binary by running rizin's own
-read-only commands through `rizin_command` and composing them in omp's `eval`;
-there is no typed tool per read.
+These are the engine's tools. Neither host registers them with anything: the
+model reaches them from the host's `eval`, and they are the same under both.
 
-The tools are the engine's, and the same under nodecode, where they are
-reached as `(re:cmd …)` and `(re:call "tool" …)` ([`nodecode.md`](nodecode.md)).
-This page describes them as omp presents them. The authoritative description
-of each is the engine's own: `read xd://<name>` under omp, `(re:doc "name")`
-under nodecode.
+| | omp, JavaScript | omp, Python | nodecode |
+| --- | --- | --- | --- |
+| read the binary | `await re.cmd("pdg", "main")` | `omp_re.cmd("pdg", "main")` | `(re:cmd "pdg" "main")` |
+| the same, as data | `await re.json("aflj")` | `omp_re.json("aflj")` | `(re:json "aflj")` |
+| open | `await re.open(path, { arch })` | `omp_re.open(path, arch=…)` | `(re:open path :arch …)` |
+| any tool below | `await re.call("set_comment", { addr, text })` | `omp_re.call("set_comment", addr=…, text=…)` | `(re:call "set_comment" :addr … :text …)` |
+| list them, describe one | `await re.tools()`, `await re.doc(name)` | `omp_re.tools()`, `omp_re.doc(name)` | `(re:tools)`, `(re:doc name)` |
 
-Every tool is registered `discoverable`, so omp presents it as an `xd://<name>`
-device rather than a top-level tool: `read xd://<name>` shows its documentation,
-`write xd://<name>` calls it, and omp's `eval` calls it as
-`await tool.<name>({ ...params })`, which returns `{ text, details }` and throws
-on failure. Call `rizin_command` with an empty command for the manual.
+The surface is deliberately small: **one tool to read the binary —
+`rizin_command`, which is what `cmd` and `json` call — plus a few stateful
+tools** (open, annotate, findings, the rz-* CLI, triage, debugger). You observe
+the binary by running rizin's own read-only commands and composing them in
+code; there is no typed tool per read. The authoritative description of each
+tool is the engine's own: `doc`, above. `cmd` with an empty command (`re.help()`
+under omp) answers the manual.
 
-Every tool is registered with omp in its standard shape: `approval` gates
-whether omp prompts before running it (`tools.approvalMode` /
-`tools.approval.<name>` in your omp config), every tool has its own transcript
-renderer, and every `rizin_command` read becomes a `re.evidence` entry — see
+Nothing asks the operator about one call. Under omp the `eval` cell is what
+omp approves ([`SECURITY.md`](../SECURITY.md#what-omp-approves)); under
+nodecode nothing is. Every call is written to the audit log, and every
+`rizin_command` read becomes a `re.evidence` entry — see
 [`workflow.md`](workflow.md). Parameters are checked by the engine against the
 tool's declaration, and a call that does not fit is refused in the engine's
-words. A cancelled call leaves at its next wait on rizin, and rizin keeps its
-analysis; an external program a tool started (`rz-*`, a triage scanner) is
-left to finish or reach its time limit.
+words. A call whose cell stopped waiting leaves at its next wait on rizin, and
+rizin keeps its analysis; an external program a tool started (`rz-*`, a triage
+scanner) is left to finish or reach its time limit.
 
-Output larger than the cap (2000 lines or 48 KiB of body) is truncated for the
-model and saved in full to the session's artifact store; the result ends with
+A text larger than the cap (2000 lines or 48 KiB of body) is cut for the
+model and saved in full to the session's artifact store; it ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
-that artifact.
+that artifact. `json`, and the recipes, get what rizin printed whole, beside
+the text.
 
 ## Session (3 tools)
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `open_binary` | `read` | `path`, `arch?`, `bits?`, `base?`, `map?`, `format?` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
-| `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
-| `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable: the map stays with this binary for the session, reopening included; only a branch from before the call is without it. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `open_binary` | `path`, `arch?`, `bits?`, `base?`, `map?`, `format?` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
+| `export_project` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
+| `map_file` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable: the map stays with this binary for the session, reopening included; only a branch from before the call is without it. |
 
 ## Reading the binary — `rizin_command` (one tool)
 
 There is no typed tool per read. You read the binary by running rizin's own
 read-only commands through **one** tool, `rizin_command`, and composing them in
-omp's `eval`. Prefer the JSON (`*j`) forms — they canonicalize for `/re verify`
-and parse cleanly (the body is JSON between the `rizin> <cmd>` header line and the
-trailing `[evidence …]` tag). Every successful read is recorded as a
+`eval`. Prefer the JSON (`*j`) forms — they canonicalize for the line `verify`
+and `json` answers them decoded (in the text, the body is JSON between the
+`rizin> <cmd>` header line and the trailing `[evidence …]` tag). Every successful read is recorded as a
 `re.evidence` entry. Call `rizin_command` with an empty command for the manual,
 and `rizin_help` for any command's exact arguments.
 
@@ -83,45 +85,43 @@ writes, pipes, redirects, and `@` inside the command (put the address in `addr`)
 Every mutate tool follows resolve → read-old → write → read-back → verify: it
 throws with what rizin actually stored rather than reporting success when the
 requested mutation did not land. Annotations are keyed on the function's
-start address (or the exact address, for comments). `/re undo` reverses the
-most recently applied annotation, and the session replays annotations into a
-fresh rizin process on resume or respawn. Each approval prompt states the
-exact change (e.g. `Rename function "main" to "parse_args". Reversible with
-/re undo.`).
+start address (or the exact address, for comments). The line `undo` reverses
+the most recently applied annotation, and the session replays annotations into
+a fresh rizin process on resume or respawn.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `rename_function` | `write` | `addr, new` | Rename a function. |
-| `rename_variable` | `write` | `addr, old, new` | Rename a local variable or argument; an unknown `old` lists the variables that exist. |
-| `set_comment` | `write` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
-| `set_prototype` | `write` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
-| `set_variable_type` | `write` | `addr, var, type` | Set a local variable's C type. |
-| `define_variable` | `write` | `addr, storage, location, name, type?` | Define a local variable analysis missed — a stack slot (`storage: stack`, `location` a frame delta, `afvs`) or a register variable (`storage: reg`, `location` a register, `afvr`) — so the decompiler names it. Refuses a name that already exists; `/re undo` runs `afv-`. |
-| `define_function` | `write` | `addr` | Define a function where auto-analysis missed one (`af`); refuses when a function already begins there, verifies one now does. `/re undo` runs `af-`. |
-| `define_global` | `write` | `addr, name, type` | Define a global variable at a data address (`avga`), naming and typing it so disassembly, xrefs, and the decompiler show the name and typed accesses. Refuses a name that already exists; `/re undo` runs `avgm`. |
-| `set_calling_convention` | `write` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
-| `set_flag` | `write` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; `/re undo` restores the previous flag (or removes it). |
-| `set_arch_hint` | `write` | `addr, arch?, bits?` | Hint the architecture and/or word size to disassemble from an address (`aha`/`ahb`) — e.g. `bits: 16` for an ARM Thumb region, or `arch` for mixed-arch firmware. `/re undo` deletes the hint. |
-| `set_hint` | `write` | `addr, hint, value` | Set an analysis hint that corrects how rizin reads one instruction: `immediate_base` (how an operand is shown — hex/decimal/char/string/syscall/IP-relative, `ahi`), `opcode_type` (reclassify, `aho`), `opcode_size` (force byte-length to realign disassembly, `ahs`), `jump_target` (the real target of an indirect jump/call, `ahc`), or `return_value` (`ahr`). Records what rizin stored; `/re undo` deletes it or restores the prior hint. |
-| `set_data` | `write` | `addr, size, count?` | Mark bytes as a data element/array (`Cd`) so they stop rendering as code. `/re undo` removes the mark. |
-| `set_string` | `write` | `addr, size?` | Mark bytes as a string (`Cs`); omit `size` to autodetect. Correctly no-ops on non-string bytes. `/re undo` removes it. |
-| `set_format` | `write` | `addr, size, format` | Overlay a pf struct format (with field names) on a region (`Cf`) so disassembly shows named fields. Display-only. `/re undo` removes it. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `rename_function` | `addr, new` | Rename a function. |
+| `rename_variable` | `addr, old, new` | Rename a local variable or argument; an unknown `old` lists the variables that exist. |
+| `set_comment` | `addr, text` (empty clears) | Set or clear the comment at an address, replacing any existing one. Text is stored literally. |
+| `set_prototype` | `addr, sig` | Set a function's C prototype; the name in it becomes the function's name. If rizin's C parser normalizes it differently, the error shows what it stored. |
+| `set_variable_type` | `addr, var, type` | Set a local variable's C type. |
+| `define_variable` | `addr, storage, location, name, type?` | Define a local variable analysis missed — a stack slot (`storage: stack`, `location` a frame delta, `afvs`) or a register variable (`storage: reg`, `location` a register, `afvr`) — so the decompiler names it. Refuses a name that already exists; the line `undo` runs `afv-`. |
+| `define_function` | `addr` | Define a function where auto-analysis missed one (`af`); refuses when a function already begins there, verifies one now does. the line `undo` runs `af-`. |
+| `define_global` | `addr, name, type` | Define a global variable at a data address (`avga`), naming and typing it so disassembly, xrefs, and the decompiler show the name and typed accesses. Refuses a name that already exists; the line `undo` runs `avgm`. |
+| `set_calling_convention` | `addr, cc` | Set a function's calling convention (`afc`); an unknown convention is rejected with rizin's own error (list with `rizin_command afcl`). |
+| `set_flag` | `addr, name` | Name an address with a flag (`f`), replacing any flag already there; the line `undo` restores the previous flag (or removes it). |
+| `set_arch_hint` | `addr, arch?, bits?` | Hint the architecture and/or word size to disassemble from an address (`aha`/`ahb`) — e.g. `bits: 16` for an ARM Thumb region, or `arch` for mixed-arch firmware. the line `undo` deletes the hint. |
+| `set_hint` | `addr, hint, value` | Set an analysis hint that corrects how rizin reads one instruction: `immediate_base` (how an operand is shown — hex/decimal/char/string/syscall/IP-relative, `ahi`), `opcode_type` (reclassify, `aho`), `opcode_size` (force byte-length to realign disassembly, `ahs`), `jump_target` (the real target of an indirect jump/call, `ahc`), or `return_value` (`ahr`). Records what rizin stored; the line `undo` deletes it or restores the prior hint. |
+| `set_data` | `addr, size, count?` | Mark bytes as a data element/array (`Cd`) so they stop rendering as code. the line `undo` removes the mark. |
+| `set_string` | `addr, size?` | Mark bytes as a string (`Cs`); omit `size` to autodetect. Correctly no-ops on non-string bytes. the line `undo` removes it. |
+| `set_format` | `addr, size, format` | Overlay a pf struct format (with field names) on a region (`Cf`) so disassembly shows named fields. Display-only. the line `undo` removes it. |
 
 ## Findings (3 tools)
 
 The model's own conclusions, recorded as report claims (`re.finding` entries).
 A finding is gated when it is recorded, while the model can still act on the
-result, and again at `/re report`. It lands in the report's **Findings**
-section and in the verification manifest, and `/re carry --inherit` re-proves
+result, and again at the line `report`. It lands in the report's **Findings**
+section and in the verification manifest, and the line `carry --inherit` re-proves
 it on the next build. `record_finding` and `retract_finding` read nothing of
 the binary and record no evidence; `adopt_finding` re-runs the commands it is
 given, and those reads are evidence like any other.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `record_finding` | `read` | `claim, evidence[], addr?, confidence?, supersedes?, override_audit?` | Records a conclusion backed by evidence ids (exact or a ≥6-character prefix). It is refused when an id doesn't resolve on this branch or was taken against a different binary than the one open. The claim then goes to the same side-turn support audit `/re report` uses. An `unsupported` or `overreach` verdict refuses the finding with the auditor's reason, unless `override_audit` gives a justification, which is kept and shown beside the finding. With no model available the finding is recorded as `unaudited` (fails open). The result says how much of its evidence is machine-reproducible: only `rizin_command` evidence carries to the next build. `supersedes` revises an earlier finding. `confidence` is `confirmed`, `likely` (the default) or `speculative`. |
-| `adopt_finding` | `read` | `claim, commands[{command, addr?}], addr?, confidence?, source?, expect_sha256?, override_audit?` | Adopts a finding made somewhere else, typically by the `re-analyst` subagent, whose evidence lives in its own session. Each command is re-run read-only on the open binary through `rizin_command`'s own gate and recorded as evidence in this session, then the claim goes through the same checks as `record_finding`. It is refused if `expect_sha256` (the subagent's `sha256`) doesn't match the open binary, or if a command fails here. If the auditor refuses the claim, the re-run evidence stays recorded so a narrower claim can cite it. The finding is marked "adopted from <source>, re-proven in this session". |
-| `retract_finding` | `read` | `id, reason` | Withdraws a finding, which then leaves the report. The reason is kept in the session log. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `record_finding` | `claim, evidence[], addr?, confidence?, supersedes?, override_audit?` | Records a conclusion backed by evidence ids (exact or a ≥6-character prefix). It is refused when an id doesn't resolve on this branch or was taken against a different binary than the one open. The claim then goes to the same side-turn support audit the line `report` uses. An `unsupported` or `overreach` verdict refuses the finding with the auditor's reason, unless `override_audit` gives a justification, which is kept and shown beside the finding. With no model available the finding is recorded as `unaudited` (fails open). The result says how much of its evidence is machine-reproducible: only `rizin_command` evidence carries to the next build. `supersedes` revises an earlier finding. `confidence` is `confirmed`, `likely` (the default) or `speculative`. |
+| `adopt_finding` | `claim, commands[{command, addr?}], addr?, confidence?, source?, expect_sha256?, override_audit?` | Adopts a finding made somewhere else, typically by the `re-analyst` subagent, whose evidence lives in its own session. Each command is re-run read-only on the open binary through `rizin_command`'s own gate and recorded as evidence in this session, then the claim goes through the same checks as `record_finding`. It is refused if `expect_sha256` (the subagent's `sha256`) doesn't match the open binary, or if a command fails here. If the auditor refuses the claim, the re-run evidence stays recorded so a narrower claim can cite it. The finding is marked "adopted from <source>, re-proven in this session". |
+| `retract_finding` | `id, reason` | Withdraws a finding, which then leaves the report. The reason is kept in the session log. |
 
 ## rizin REPL (2 tools)
 
@@ -130,10 +130,10 @@ and command discovery. Both read the catalog the installed rizin publishes about
 itself (`rizin -qc '?*j'`, read once per process with no binary open), so they
 match the user's rizin version and plugins exactly.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `rizin_help` | `read` | `query: string` | A command or prefix (`ph`, `afv`, `/R`) lists that family; an exact match adds its typed arguments (required/optional, defaults, choices) and description. Anything else is a keyword search over summaries and descriptions (`entropy`, `rop gadgets`). Entries `rizin_command` would refuse are marked `[not runnable via rizin_command]`. |
-| `rizin_command` | `exec` (reason names the command) | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. An **empty command returns the omp-re manual** (no binary needed). When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `rizin_help` | `query: string` | A command or prefix (`ph`, `afv`, `/R`) lists that family; an exact match adds its typed arguments (required/optional, defaults, choices) and description. Anything else is a keyword search over summaries and descriptions (`entropy`, `rop gadgets`). Entries `rizin_command` would refuse are marked `[not runnable via rizin_command]`. |
+| `rizin_command` | `command: string`, `addr?: string` | Runs one read-only command and returns its output, or `(no output)`. An **empty command returns the omp-re manual** (no binary needed). When rizin rejects the arguments, its own error and usage text come back as an error result. `addr` is validated like every other address and sent as `@ <addr>`. Times out after 120 s. |
 
 `rizin_command` accepts a command only if all of these hold, checked before
 anything reaches rizin:
@@ -157,14 +157,14 @@ anything reaches rizin:
 ## rizin CLI suite (1 tool)
 
 `rizin_cli` fronts the standalone `rz-*` executables that ship beside rizin,
-for analysis the in-core commands don't cover. It registers only when those
+for analysis the in-core commands don't cover. It is offered only when those
 binaries are found next to the configured rizin (or on PATH). The engine
 starts them by argv — no shell — so there is no `;`/`|`/`$()` surface; the
 gating is on the flags. A run is ended after 180 s.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `rizin_cli` | `exec` (reason is the full command line) | `tool: enum`, `args: string[]` | Runs one of `rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` with the given arguments. `@binary` in `args` is the open binary's path (auto-appended for `rz-bin`). `args: ["-h"]` returns that tool's own help. Output, or `(no output)`; the tool's stderr comes back as an error result. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `rizin_cli` | `tool: enum`, `args: string[]` | Runs one of `rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax` with the given arguments. `@binary` in `args` is the open binary's path (auto-appended for `rz-bin`). `args: ["-h"]` returns that tool's own help. Output, or `(no output)`; the tool's stderr comes back as an error result. |
 
 | Tool | Covers | For example |
 | --- | --- | --- |
@@ -198,10 +198,10 @@ applying a *custom* `.sig`/`.pat` file — which `rizin_command` can't, because
 it refuses file arguments — and creating a new signature from the analyzed
 functions. List the built-in database with `rizin_command Flt`.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `apply_signatures` | `exec` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions, so it is exec-tier. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
-| `create_signature` | `exec` | `file?` | Builds a FLIRT signature (`Fc`) from the current binary's analyzed functions — to recognize them in other samples (tracking a routine across a malware family) — written to omp-re's output directory as `.pat` (text patterns, default) or `.sig` (compiled). Reads the analysis, modifies nothing. Apply it elsewhere with `apply_signatures` (`source: file`). |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `apply_signatures` | `source` (`sigdb`/`file`), `path?` | `sigdb` re-applies rizin's built-in database (`Fa`); `file` applies the FLIRT file at `path` (`Fs`). Both rename matched functions. A custom file is recorded and re-applied automatically on resume/respawn (like annotations), so the names it produced survive; it is not an undoable annotation. |
+| `create_signature` | `file?` | Builds a FLIRT signature (`Fc`) from the current binary's analyzed functions — to recognize them in other samples (tracking a routine across a malware family) — written to omp-re's output directory as `.pat` (text patterns, default) or `.sig` (compiled). Reads the analysis, modifies nothing. Apply it elsewhere with `apply_signatures` (`source: file`). |
 
 ## Analysis passes — `analyze` (1 tool)
 
@@ -213,9 +213,9 @@ so each layer sees the one before it), not as an undoable annotation. A pass
 stays with the binary for the session, reopening included; only a branch from
 before the call is without it.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `all_functions` (`aaf`), `data_refs` (`aad`), `autoname` (`aan`), `types` (`aaft`), `struct_offsets` (`aat`), `golang` (`aalg`), `objc` (`aalor`), `rtti_classes` (`avrr` — C++ classes from RTTI), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `analyze` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `all_functions` (`aaf`), `data_refs` (`aad`), `autoname` (`aan`), `types` (`aaft`), `struct_offsets` (`aat`), `golang` (`aalg`), `objc` (`aalor`), `rtti_classes` (`avrr` — C++ classes from RTTI), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
 
 ## Emulation — `rizin_emulate` (1 tool)
 
@@ -224,21 +224,21 @@ file is never written; the VM's state lives in the analysis session. External
 calls and syscalls are not emulated, so keep runs small — a decryptor loop, an
 argument computation.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `rizin_emulate` | `exec` | `action` (enum), `addr?`, `count?`, `name?`, `value?`, `bytes?` | `init` starts the VM at `addr`; `step` runs `count` instructions and returns the register, flag and PC writes; `step_until` runs until the PC equals `addr`; `vars` is the whole VM state as JSON; `set_var` sets VM variable `name` to `value`; `set_mem` writes hex `bytes` into the VM's memory at `addr` (an in-memory overlay). |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `rizin_emulate` | `action` (enum), `addr?`, `count?`, `name?`, `value?`, `bytes?` | `init` starts the VM at `addr`; `step` runs `count` instructions and returns the register, flag and PC writes; `step_until` runs until the PC equals `addr`; `vars` is the whole VM state as JSON; `set_var` sets VM variable `name` to `value`; `set_mem` writes hex `bytes` into the VM's memory at `addr` (an in-memory overlay). |
 
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 
 `rizin_debug` launches the open binary under rizin's debugger and drives it.
-It **executes the sample**, so it registers only when `OMPRE_ENABLE_DEBUGGER`
+It **executes the sample**, so it is offered only when `OMPRE_ENABLE_DEBUGGER`
 is set, runs in a debug session separate from the static one (which never
 executes the file), and is killed with its debuggee on `stop` or session
 shutdown. Run untrusted samples only in an isolated, disposable environment.
 
-| Tool | Approval | Parameters | What it does |
-| --- | --- | --- | --- |
-| `rizin_debug` | `exec` (the reason says plainly when an action executes, modifies, or inspects) | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?`, `file?` | Drives one debug action (below). `addr` is validated like every other address. |
+| Tool | Parameters | What it does |
+| --- | --- | --- |
+| `rizin_debug` | `action: enum`, `addr?`, `count?`, `size?`, `reg?`, `value?`, `bytes?`, `perm?`, `run?`, `attach?`, `condition?`, `command?`, `lib?`, `name?`, `file?` | Drives one debug action (below). `addr` is validated like every other address. |
 
 Actions:
 
@@ -288,7 +288,7 @@ Actions:
 
 Every action needs a session started first except `start`; nothing is ever
 launched implicitly. The `write_*` and `watch_add` actions change the live
-process and are called out as such in the approval reason. A
+process. A
 `continue`/`step` that never returns (a debuggee blocked on input) is killed
 at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
 no facilities for evading detection or hiding the debuggee; see
@@ -308,12 +308,12 @@ and is ended at its time limit (capa 300 s, floss 600 s). Their results are
 not recorded as evidence: follow a lead with `rizin_command` before a finding
 cites it.
 
-| Tool | Approval | Requires on PATH | Parameters | What it does |
-| --- | --- | --- | --- | --- |
-| `triage_capa` | `exec` | `capa` | (none) | Run capa rules to detect capabilities and ATT&CK techniques. |
-| `triage_floss` | `exec` | `floss` | (none) | Extract obfuscated strings (stack, decoded, static) via FLOSS. |
-| `triage_die` | `exec` | `diec` | (none) | Detect packers, compilers, and file types via Detect It Easy. |
-| `triage_yara` | `exec` | `yara` | `rules_path` (required — no default ruleset ships) | Scan the binary with user-supplied YARA rules. |
+| Tool | Requires on PATH | Parameters | What it does |
+| --- | --- | --- | --- |
+| `triage_capa` | `capa` | (none) | Run capa rules to detect capabilities and ATT&CK techniques. |
+| `triage_floss` | `floss` | (none) | Extract obfuscated strings (stack, decoded, static) via FLOSS. |
+| `triage_die` | `diec` | (none) | Detect packers, compilers, and file types via Detect It Easy. |
+| `triage_yara` | `yara` | `rules_path` (required — no default ruleset ships) | Scan the binary with user-supplied YARA rules. |
 
 For `triage_capa`/`triage_floss`/`triage_die`, a non-zero exit code with
 non-empty stdout is treated as "the tool ran and reported zero findings",

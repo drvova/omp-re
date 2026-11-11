@@ -4,20 +4,22 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![omp ≥ 18.11.1](https://img.shields.io/badge/omp-%E2%89%A5%2018.11.1-informational)
 ![rizin 0.9+](https://img.shields.io/badge/rizin-0.9%2B-informational)
-![one code tool](https://img.shields.io/badge/surface-one%20code%20tool-informational)
+![surface: omp's own eval](https://img.shields.io/badge/surface-omp's%20own%20eval-informational)
 
 ![omp-re triaging a small demo binary: hash, imports, and a plain-English verdict](docs/img/hero.png)
 
-`omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi):
-it drives [rizin](https://rizin.re) through **one tool to read the binary**
-(`rizin_command`, run from omp's own `eval`) plus a few stateful tools for
-opening, annotating, and recording findings — all presented the omp-native way,
-as `xd://` devices the model calls from `eval` — a
-`/re` slash command, five overlay panels, a packaged `re-analyst` subagent, a
-content-addressed evidence store, an HMAC-signable audit log, and a report
-writer that refuses to write a claim with no supporting evidence. The agent
-gathers facts through the tools; the evidence store remembers exactly what it
-observed; the report writer will not let it claim more than that.
+`omp-re` is a reverse-engineering plugin for [omp](https://omp.sh) (oh-my-pi).
+It registers **no tool, no slash command and no flag** with omp: the model
+drives [rizin](https://rizin.re) from the one code tool omp already has, its
+own `eval`, through a small library the plugin's skill loads there —
+`re.open`, `re.cmd`, `re.json`, `re.call` and a handful more in JavaScript, the
+same as `omp_re.*` in Python. Behind it are a content-addressed evidence
+store, an HMAC-signable audit log, findings that are checked against their
+evidence when they are recorded, and a report writer that refuses to write a
+claim with no supporting evidence. Beside it: a status band, three overlay
+panels on keys, and a packaged `re-analyst` subagent. The agent gathers facts
+through the engine; the evidence store remembers exactly what it observed; the
+report writer will not let it claim more than that.
 
 The work is done by one engine, written in Common Lisp (`engine/`), which also
 runs as a [nodecode](#also-a-nodecode-cell) cell. Under omp it runs as an SBCL
@@ -53,12 +55,15 @@ version you already have (and looks like it did nothing). Omit the name from
 up your checkout.)
 
 To develop against a local checkout instead of installing as a plugin, point
-omp at the extension directory directly:
+omp at the checkout's root — the directory with `package.json`, not
+`extensions/re` inside it. omp loads the extension the package names and, with
+it, the `skills/` and `agents/` beside it; without the skill the model has
+neither the manual nor the library to load:
 
 ```yaml
 # ~/.omp/agent/config.yml
 extensions:
-  - /path/to/omp-re/extensions/re
+  - /path/to/omp-re
 ```
 
 There is no build step of yours. The TypeScript in `extensions/re` loads
@@ -69,8 +74,8 @@ directory in this config (`/path/to/omp-re`, not a machine-specific path).
 
 **SBCL and cl-ppcre are required.** The extension starts the engine with the
 `sbcl` on your `PATH` (or the one `OMPRE_SBCL_PATH` names). Without SBCL, or
-without cl-ppcre where SBCL's ASDF can find it, the extension does not load
-and the error says what to install. The first omp start after an install or an
+without cl-ppcre where SBCL's ASDF can find it, a session is told what to
+install when it starts, and so is every call the model makes. The first omp start after an install or an
 upgrade compiles the engine and saves an image of it, which takes a few
 seconds; later starts run the image and take a few milliseconds. A release's
 prebuilt image runs without SBCL at all.
@@ -85,95 +90,102 @@ desktop launch of omp didn't inherit your shell `PATH` (so `rizin` works in
 your terminal but omp-re can't see it), omp-re also looks in the common
 install locations — Homebrew, `/usr/local/bin`, `/usr/bin`, `/opt/rizin/bin`,
 snap, `~/.local/bin`; set `OMPRE_RIZIN_PATH` to its full path for anywhere
-else (the output of `which rizin`). When it truly can't be found, `/re open`
-says so and points you at `OMPRE_RIZIN_PATH`. See
+else (the output of `which rizin`). When it truly can't be found, opening a
+binary says so and points at `OMPRE_RIZIN_PATH`. See
 [Prerequisites](#prerequisites) and [`docs/install.md`](docs/install.md).
 
 ## Quickstart
 
-A copy-pasteable first run against `/bin/ls` — no sample binary, no setup
-beyond rizin, SBCL and cl-ppcre:
+There is nothing to type but what you want. With rizin, SBCL and cl-ppcre
+installed, ask omp in plain words:
 
 ```
-/re open /bin/ls
+analyse /bin/ls: what is it, what does it link against, and what does main do?
+```
+
+The model reads the `re-triage` skill, loads the library into `eval`, opens the
+binary and works from there; the status band under the transcript shows the
+open binary and the counts as they grow. While it works, or after:
+
+```
 alt+g            # function navigator; type to filter (fuzzy)
 Enter            # open a function in the code view
 d                # toggle decompiled C
 x                # follow the selected xref
 a                # hand the function off to the model with a grounding prompt
-/re report       # write a Markdown report from what was gathered
-/re verify       # re-run the cited commands and prove the report reproducible
-/re carry report.md.manifest.json --against ./v2 --inherit   # re-prove what survives on the next build
 ```
 
-Or delegate a whole analysis: ask omp to run the `re-analyst` agent on a
-binary path. It opens the binary in its own rizin process, follows the triage
-order, and returns structured findings that each cite the tool output and
-address behind them.
+Then ask for what you want kept — "record what you found and write the report
+to ls.md", "verify the report", "carry ls.md.manifest.json onto ./ls-v2" — and
+the model runs the engine's lines for it. Or delegate a whole analysis: ask omp
+to run the `re-analyst` agent on a binary path. It opens the binary in its own
+rizin process, follows the triage order, and returns structured findings that
+each cite the output and address behind them.
 
-## Host-native: `xd://` devices and omp's `eval`
+## Host-native: everything inside omp's `eval`
 
-omp-re adds no tool menu of its own, and no second code tool: omp's `eval` is the
-code host. Its capabilities register as ordinary omp tools with
-`loadMode: "discoverable"`, so omp mounts each as an `xd://<name>` device instead
-of putting a schema in the model's top-level tool list. You **read the binary
-through one tool, `rizin_command`**, and compose rizin's own commands in `eval`:
+omp-re adds no tool menu of its own, and no second code tool: omp's `eval` is
+the code host, and it is the only way in. The plugin's skill, `re-triage`,
+ships one library for each of `eval`'s kernels, and the model loads the one for
+the language it is writing:
 
-- **Discover:** `await tool.rizin_command({ command: "" })` returns the manual —
-  the command families and the other tools — and `rizin_help` looks up any
-  command's exact arguments. omp's system prompt also lists the mounted devices,
-  and `read xd://rizin_command` shows a device's own docs.
-- **Call one:** `write xd://rizin_command` with `{ "command": "aflj" }`.
-- **Compose:** in omp's `eval` tool, every tool is `await tool.<name>({ ... })` —
-  loop over functions, filter strings, chain xrefs, and define helpers that
-  persist for the session (`eval` state survives compaction). A read's result
-  comes back as `{ text, details }`: `.text` is the `rizin> <cmd>` header line,
-  the body (JSON for a `*j` command), and the `[evidence xxxxxxxx …]` tag on the
-  last line. A refusal throws, so the code can `try`/`catch`. To keep helpers
-  across sessions, write them to a script and `%load` it — omp's own mechanism.
-- **Mind the cell deadline.** An `eval` cell is killed after 30 seconds unless
-  it sets a `timeout`, and time spent inside a tool counts. Analysis on open
-  can take minutes: give that cell `timeout: 600`. A killed cell loses what
-  eval had defined (load helpers again); rizin and its analysis are untouched.
-  [`docs/omp-eval.md`](docs/omp-eval.md) has the details.
+| Kernel | Load line (a cell of its own) | Global | Calls |
+| --- | --- | --- | --- |
+| JavaScript | `%load skill://re-triage/recipes.js` | `re` | async — `await re.cmd("aflj")` |
+| Python | `%load skill://re-triage/recipes.py` | `omp_re` | plain — `omp_re.cmd("aflj")` (`re` is Python's regex module there) |
 
 ```js
-// eval — read with rizin_command; a call returns { text, details } to your code.
-// display(value) renders a highlighted block, print(x) shows monospace text.
-await tool.open_binary({ path: "/bin/ls" });
-// A *j read is JSON between the header line and the trailing [evidence] tag:
-const rows = (r) => JSON.parse(r.text.split("\n").slice(1, -1).join("\n"));
-display(rows(await tool.rizin_command({ command: "afij", addr: "main" })));  // one function, highlighted JSON
-print((await tool.rizin_command({ command: "pdg", addr: "main" })).text);    // decompiled C as text
-// A big list (aflj on a large binary) can exceed the size cap and spill to an artifact — read it or narrow.
+await re.open("/bin/ls");                                  // spawn rizin + full analysis
+print(await re.cmd("pdg", "main"));                        // one read-only rizin command, its text
+const { data, evidence } = await re.json("aflj");          // a *j command as data, whole, with its evidence id
+await re.call("set_comment", { addr: "main", text: "entry" });   // any other tool of the engine
+print(await re.triage());                                  // a recipe: the first dozen reads, each line citing its evidence
+print(await re.slash("report ls.md"));                     // a line: evidence, findings, verify, report, carry, undo
 ```
 
-**Recipes.** The reads every analysis opens with are written once, as code
-for `eval` rather than as more tools: `%load skill://re-triage/recipes.js`
-defines `re.triage()`, `re.scanImports()`, `re.inspectFunction(addr)`,
-`re.findComparisons(addr)` and `re.findCrypto()`. `eval`'s other kernel has
-the same five: in a Python cell, `%load skill://re-triage/recipes.py` defines
-`omp_re.triage()`, `omp_re.scan_imports()` and the rest (`omp_re`, because
-`re` is Python's regex module there), answering the same text. Each composes
-`tool.rizin_command` — so every read is approved, audited and recorded as
-evidence like any other — and returns a report whose every line names the
-evidence id it rests on, ready to cite in `record_finding`. What the recipes
-and the tools take from `eval` — `tool.<name>()`, `%load`, `skill://`,
-`artifact://` — omp's site does not document;
-[`docs/omp-eval.md`](docs/omp-eval.md) does, from omp's source.
+- **Discover:** `re.help()` is the manual — the command families and the tools;
+  `re.tools()` lists the tools and `re.doc(name)` one tool's arguments;
+  `rizin_help` (through `re.call`) looks up any rizin command's exact
+  arguments. The skill's `SKILL.md` is where the model starts.
+- **Compose:** loop over functions, filter strings, chain xrefs, and define
+  helpers that persist for the session (`eval` state survives compaction). A
+  read's text is the `rizin> <cmd>` header line, the output, and the
+  `[evidence xxxxxxxx …]` tag on the last line; `re.json` hands over the decoded
+  data and the id. A refusal throws, so the code can `try`/`catch`.
+- **Recipes:** `re.triage()`, `re.scanImports()`, `re.inspectFunction(addr)`,
+  `re.findComparisons(addr)` and `re.findCrypto()` (snake_case in Python) are
+  the reads every analysis opens with, written once. Each read a recipe makes
+  is audited and recorded as evidence like any other, and every line of its
+  report names the evidence id it rests on, ready to cite in `record_finding`.
+- **Mind the cell deadline.** An `eval` cell is stopped after 30 seconds unless
+  it sets a `timeout`, and time spent in the engine counts. Analysis on open
+  can take minutes: give that cell `timeout: 600`. A stopped cell cancels the
+  engine's work on its call. A stopped JavaScript cell also loses its kernel —
+  load the library again, as omp-re's note under the error says; a Python
+  kernel survives. rizin and its analysis are untouched either way.
+  [`docs/omp-eval.md`](docs/omp-eval.md) has the details.
 
-A tool call made from `eval` returns its `{ text, details }` to your code; omp
-renders the eval cell (your `print`/`display` output), not a per-tool card — the
-card renderers apply to top-level and `write xd://<name>` calls. So `display(...)`
-structured reads for a highlighted block instead of a wall of `print` text.
+**How a cell reaches the engine.** omp gives a plugin no way to put anything
+into an `eval` kernel, and a kernel is a separate process. So the extension
+listens on the loopback interface — a port the system picks, a 32-byte token —
+and leaves a file readable only by you, named for omp's process id, that a
+kernel finds its parent's listener by. Each request names the session the
+kernel serves; the extension passes it to the engine for that session, and a
+cell that times out or is interrupted hangs up, which cancels the engine's
+work. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#omp-the-way-in-from-eval)
+has the design and [`SECURITY.md`](SECURITY.md#the-listener-omps-eval-reaches-the-engine-through)
+what it does and does not protect.
 
-Because these are real omp tools on every path, each call — top-level,
-`write xd://…`, or `tool.<name>()` from `eval` — goes through omp's tool
-wrapper, so it gets its own approval tier and reason, and then reaches the
-engine, which writes the audit line, refuses while `/re off`, and for a
-`rizin_command` read records the evidence and tags the result with its
-`[evidence xxxxxxxx …]` id for `record_finding`. (With omp's `tools.xdev`
-setting off, omp lists the same tools top-level instead; nothing else changes.)
+**What omp approves is the cell.** `eval` is one `exec`-tier tool to omp, so
+omp's approval mode and `tools.approval.eval` decide whether a cell runs; what
+a cell then asks of the engine is not asked of you again. The engine's own
+rules are unchanged and are the control inside a cell: only read-only rizin
+commands, files only from allowed directories, the debugger only when you
+switched it on. Every call is a line in the audit log.
+
+**Switching it off.** `OMPRE_DISABLED=1` in omp's environment: the extension
+then starts nothing — no engine, no listener, no band, no keys. omp's own
+plugin enable/disable does the same for good.
 
 ## Also a nodecode cell
 
@@ -190,9 +202,10 @@ git clone https://github.com/drvova/omp-re ~/.nodecode/cells/nodecode-re
 
 The cell (`nodecode-re.asd`, `nodecode/*.lisp`) is the engine (`omp-re.asd`,
 `engine/*.lisp`) presented the nodecode way — verbs in the `RE` package, a
-`/re` command, a `(help :re)` manual, a config section. It registers no tools:
-nodecode's model has one, `eval`, and everything here is a function inside it —
-the counterpart of the one-tool surface above:
+`(help :re)` manual, a config section. It registers no tool and no command:
+nodecode's model has one tool, `eval`, and everything here is a function
+inside it — the same verbs as above, written from the same description
+(`recipes/api.json`):
 
 ```lisp
 (re:open "/bin/ls")                  ; open and analyze
@@ -200,15 +213,15 @@ the counterpart of the one-tool surface above:
 (re:json "aflj")                     ; a *j command, as data to loop over
 (re:triage)                          ; the first dozen reads, composed, each line citing its evidence
 (re:call "record_finding" :claim "…" :evidence '("1a2b3c4d"))
-(re:slash "report analysis.md")      ; a /re line
+(re:slash "report analysis.md")      ; a line: report, verify, carry, evidence, findings, undo
 ```
 
-Evidence, the audit log, findings, annotations with replay, `/re verify`, the
+Evidence, the audit log, findings, annotations with replay, verification, the
 report gate and the read-only command policy are the same code under both
 hosts. The record follows nodecode's session tree as it follows omp's: after a
 rewind, an abandoned branch's annotations are rolled back and its evidence
 grounds nothing. See [`docs/nodecode.md`](docs/nodecode.md) for the verbs,
-configuration, and what differs from omp (no approval tiers, no panels).
+configuration, and what differs from omp (no panels, no status band).
 
 ## What's omp-native
 
@@ -216,20 +229,18 @@ configuration, and what differs from omp (no approval tiers, no panels).
 
 | omp feature | What omp-re does with it |
 | --- | --- |
-| Tool renderers (`renderCall`/`renderResult`) | Every RE tool renders a compact call line and a collapsible result; decompiled code is syntax-highlighted as C with omp's highlighter. |
-| Native tool views (`describeCall`/`describeResult`) | In Tern and other TSP terminals, each RE tool is a native tool card — title, target, and facts in the head; C, JSON, or disassembly as a `code` node the terminal highlights and clamps — instead of a generic text card. |
-| Streaming updates + `AbortSignal` | `open_binary` streams analysis progress; cancelling a tool call stops waiting without killing rizin (and its annotations); cancelling analysis kills the half-analyzed process. |
-| Session artifacts (`artifact://`) | Output past the context cap is saved in full to the session's artifact store and linked from the result, never discarded. |
+| The `eval` tool, both kernels | The whole model surface. Nothing is registered: `re.*` in JavaScript and `omp_re.*` in Python are a library loaded with `%load skill://re-triage/…`, asking a loopback listener the extension owns. See [Host-native](#host-native-everything-inside-omps-eval). |
+| Skills (`skill://`) | The plugin's skill carries the manual the model starts from, the playbooks, and the library itself; `%load skill://re-triage/recipes.js` resolves wherever the plugin is installed. |
+| `tool_call` / `tool_result` on `eval` | Each request a cell makes is written to the audit log under that `eval` call's id and its place in the cell (`<toolCallId>#2`). A cell that fails because the library is not loaded in its kernel gets one line added naming the load line; the model's code is never rewritten. |
+| A cell's timeout and interrupt | The kernel hangs up, and the engine's work on that call is cancelled: waiting stops without killing rizin (and its annotations); an analysis that was cut short has its half-analyzed process ended. |
+| Session artifacts (`artifact://`) | A text past the context cap is saved in full to the session's artifact store and linked from the result, never discarded. (`re.json` and the recipes get the data whole without it.) |
 | Session branches (`getBranch`) | Evidence, annotations, and the open binary follow the active branch: after `/tree` navigation or a branch, an abandoned branch's renames are rolled back and its evidence no longer grounds claims. |
 | Session lifecycle events | `--continue`/`/resume` reopen the branch's binary in the background and **replay its annotations** into the fresh rizin process; a crashed or timed-out rizin respawns the same way. |
-| Compaction preservation (`session.compacting`) | When omp compacts the conversation, omp-re folds a snapshot of the RE session — open binary, evidence and annotation counts, the most recent evidence ids — into the summary, so the post-compaction model stays grounded and knows it can recall detail with `/re evidence` / `/re cite`. |
+| Compaction preservation (`session.compacting`) | When omp compacts the conversation, omp-re folds a snapshot of the RE session — open binary, evidence and annotation counts, the most recent evidence ids, the findings — into the summary, so the post-compaction model stays grounded. |
 | One engine process | The engine is one SBCL child for the whole omp process; the main session and every task subagent are sessions on its pipe. It ends with the last session, inside omp's shutdown budget, and takes each session's rizin and debugger with it. If it dies, the next call starts another and the sessions come back from their records. What it writes to its standard error goes to omp's log. The extension has no third-party npm dependencies — it resolves only the host's own packages. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). |
-| Approval tiers with reasons | `rizin_help` is `read`; `rizin_command` is `exec` with the exact command in its reason; mutate tools are `write` with a per-call reason (e.g. `Rename function "main" to "parse_args"`); triage tools are `exec`. omp's `tools.approvalMode` decides. |
-| `xd://` devices (`loadMode: "discoverable"`) and the `eval` tool bridge | Every omp-re tool is mounted as a device, not a top-level tool; the model reads `xd://<name>` for a tool's docs and drives them from omp's `eval` as `tool.<name>()`. The read surface is one tool — `rizin_command` — with an empty command returning the manual. See [Host-native](#host-native-xd-devices-and-omps-eval). |
-| `/re off` | The engine refuses every RE tool call on every path (top-level, `xd://`, `eval`) until `/re on`, without unmounting the devices. The switch is in no record; omp carries it for the engine, so an engine started after the first one died still has the tools off. A session resumed later starts with them on. |
-| Task subagents | omp forwards extension tools to `task` subagents, so the plugin ships `agents/re-analyst.md`, marked `structured: true` so its output schema is enforced even when `task.structured` is off. |
-| Slash-command completion | `/re` completes its subcommands and, for `cite`/`evidence`, the newest 200 evidence ids on this branch. |
-| Footer status, widgets, logger | Analysis progress shows in the footer; the binary-facts band is a widget; headless warnings go to omp's log. |
+| Task subagents | The plugin ships `agents/re-analyst.md`, which lists `eval` among its tools and autoloads the skill; it is marked `structured: true` so its output schema is enforced even when `task.structured` is off. A subagent is a session of its own: its own kernel, its own load line, its own rizin. |
+| Shortcuts, overlays | `alt+g`, `alt+s` and `alt+i` open the functions, strings and imports of the open binary as panels; a row opens the code view. They show what the engine sends and record no evidence. |
+| Footer status, widgets, message renderer, logger | Analysis progress shows in the footer; the binary-facts band is a widget; the line that says a binary was opened is drawn in the transcript; headless warnings go to omp's log. |
 
 ## Using all of rizin
 
@@ -255,7 +266,7 @@ included, with typed arguments and a summary) and uses it three ways:
   [`SECURITY.md`](SECURITY.md#rizin_command).
 - **A compatibility check**: when a binary opens, every command omp-re's own
   tools send is looked up in the catalog, and any your rizin lacks is named in
-  a warning instead of failing later as an empty result. `/re status` shows
+  a warning instead of failing later as an empty result. `re.status()` shows
   the result and which decompiler the catalog lists.
 
 Beyond the in-core commands, rizin's **standalone CLI tools** are one tool
@@ -286,9 +297,8 @@ single-step, read and write registers and memory, disassemble **live**
 memory (so self-modified or unpacked code is visible where the static view
 can't reach), walk the backtrace, and inspect maps, modules, threads, and
 Windows or glibc heaps. This **executes the sample**, so it is off until you
-set `OMPRE_ENABLE_DEBUGGER`, runs in a session separate from the static one
-that only ever reads the file, and every resume or modification is an
-`exec`-tier approval that says which it is. Run untrusted samples only in an
+set `OMPRE_ENABLE_DEBUGGER`, and runs in a session separate from the static
+one that only ever reads the file. Run untrusted samples only in an
 isolated, disposable VM or container — see
 [`SECURITY.md`](SECURITY.md#rizin_debug).
 
@@ -326,10 +336,8 @@ session resumes or rizin respawns.
 ## What it looks like
 
 The screenshots below are real, unmodified captures of an `omp-re` session
-triaging a small demo binary (`fixture.exe`, built from the C source in
-[`tools/shotgen/fixture`](tools/shotgen/fixture)) on Windows — not mockups. The
-text-UI layout is current; [`tools/shotgen`](tools/shotgen) regenerates them
-against your own rizin install.
+triaging a small demo binary on Windows — not mockups. They were taken with an
+earlier release; the status band and the panels they show are unchanged.
 
 ### Function navigator
 
@@ -349,44 +357,34 @@ pretending to have a real decompile — see [Prerequisites](#prerequisites).
 
 ![Cross-references to main()](docs/img/xrefs.png)
 
-### Evidence, cited
+### The report gate
 
-`/re evidence` lists every fact gathered on this branch by an 8-character id;
-Enter on a row (or `/re cite <id>`) pulls it straight into the editor as a
-prefilled message — here, the exact digests a hash command (`rizin_cli` rz-hash,
-or `rizin_command ph sha256`) actually returned, not a retyped guess:
-
-![/re cite prefilling the editor with a hash evidence entry](docs/img/evidence-cite.png)
-
-### The report gate, proven
-
-`/re report` refuses to write a report containing any claim with zero
-backing evidence. Here the model is instructed to record an unverified
-IOC-shaped claim directly (bypassing the RE tools on purpose) — the write is
-blocked, and the IOC is defanged even in the error message:
-
-![/re report withholding the whole report over one ungrounded IOC claim](docs/img/report-gate.png)
+The line `report` refuses to write a report containing any claim with zero
+backing evidence: the whole report is withheld, the claim is named, and an
+IOC in it is defanged even in the refusal. What the model learned some other
+way — a shell command, a pasted dump, what it remembers — has no evidence id
+behind it and cannot be reported as observed.
 
 ### Verified, reproducible
 
-Grounding proves a claim was *cited*; `/re verify` proves its evidence is
+Grounding proves a claim was *cited*; the line `verify` proves its evidence is
 *reproducible*. Every `rizin_command` evidence record stores the exact command,
 the SHA-256 of its canonicalized output, and the open binary's SHA-256 (stamped
-at open time). `/re verify [--strict]` re-runs each cited command read-only
-against the same binary and confirms the hash still matches — a mismatch is a
-hard failure with a non-zero headless exit, the same loud signal the report gate
-uses. `/re report` ships this as a **Verification Manifest** (claim → command →
+at open time). `verify [--strict]` re-runs each cited command read-only
+against the same binary and confirms the hash still matches — a mismatch
+fails the line, the same loud signal the report gate uses. `report` ships
+this as a **Verification Manifest** (claim → command →
 output hash → binary hash) plus a machine-readable `<report>.manifest.json`
 sidecar, so anyone with the binary can re-derive the report rather than trust it.
 
 ### Supported, not just cited
 
 Two gates prove a claim is *cited* and *reproducible*; a third proves its evidence
-actually *supports* it. Before `/re report` emits, each grounded claim and its
+actually *supports* it. Before `report` emits, each grounded claim and its
 cited evidence are put to a self-audit through omp's `ctx.runEphemeralTurn` side
 turn (no tools, no history writes), judged **supported / overreach / unsupported**.
 It is **advisory** by default — unsupported claims are flagged inline and the
-report is still written — while `/re report --audit=strict` withholds the report
+report is still written — while `report --audit=strict` withholds the report
 on any unsupported/overreach (and `--no-audit` skips it). It fails open: with no
 model or side-turn host it degrades to an "unaudited" note and never blocks, so
 the two deterministic gates stay authoritative.
@@ -398,7 +396,7 @@ conclusions, such as "checksum is a djb2 hash" or "the config is RC4-decrypted
 with a key from the volume serial", get in through `record_finding`. Each
 finding cites evidence ids and is checked when it is recorded. Every id must
 resolve on this branch and must have been taken against the open binary, and
-the claim goes to the same support audit `/re report` uses. An overreaching
+the claim goes to the same support audit `report` uses. An overreaching
 claim is refused with the auditor's reason, so the model narrows it while it is
 still analysing. Overriding the auditor takes a written justification, which is
 kept and shown. Findings appear in the report's **Findings** section with their
@@ -412,7 +410,7 @@ re-proven where the report is written.
 
 ### Carried to the next build
 
-A report's manifest is also a regression test. `/re carry <manifest.json>
+A report's manifest is also a regression test. The line `carry <manifest.json>
 [--against <binary>] [--strict] [--out <path>]` replays every cited command
 against a *different* binary (the next sample of a family, a firmware update,
 a patched build) and gives each claim a status. **holds** means the output is
@@ -424,8 +422,8 @@ the same thing there. **drifted** means the command still runs but its output
 changed; the claim arrives with a diff limited to what really changed, not every
 shifted address. **broken** means the anchor is gone and nothing matches its
 fingerprint, or the command now produces nothing. **unchecked** means the
-evidence was provenance-only. Headless, a broken claim exits non-zero, and
-`--strict` also fails on relocation or drift.
+evidence was provenance-only. A broken claim fails the line, and `--strict`
+also fails on relocation or drift.
 
 `--inherit` turns the carry into the new build's starting point. Every finding
 that holds or relocated is re-proven: its commands are re-run through
@@ -433,14 +431,13 @@ that holds or relocated is re-proven: its commands are re-run through
 to the new binary (never copied from the manifest), and the finding is
 re-recorded with its provenance, e.g. "inherited from `646243…`, re-verified on
 this build (relocated: sym.fib → sym.fibonacci)". Findings that drifted or broke
-become an agenda that is placed in the editor, each with a compact diff of
-exactly what changed, ready to hand to the model: "this no longer holds as
-written; here is the change; revise or retract". `--resolve` goes further: it
-sends that agenda to the model as a turn, so a single command takes v1's report
-to a v2 analysis that is already re-proven, plus the model working through
-exactly what changed. (Headless, `omp -p` starts no turn after a command, so the
-agenda is printed for you to pass as the next prompt: `omp -c -p "<agenda>"`.)
-`/re findings` lists the findings on the branch, and they
+come back under the summary as an agenda for the model, each with a compact
+diff of exactly what changed: "this no longer holds as written; here is the
+change; revise or retract". Since it is the model that ran the line, one
+request — "carry the v1 report onto this build" — takes v1's report to a v2
+analysis that is already re-proven, with the model working through exactly
+what changed.
+The line `findings` lists the findings on the branch, and they
 are restated in the context summary when the conversation is compacted, so the
 model doesn't re-derive or contradict what it already recorded. Every command still goes through the read-only
 `rizin_command` gate, because a manifest is untrusted input, and carrying
@@ -450,13 +447,13 @@ records no evidence.
 
 | Requirement | Notes |
 | --- | --- |
-| `omp` ≥ 18.11.1 | Developed and tested against 18.11.1 (its `getAllTools()` returns tool objects, and Tern renders tools natively). The dev dependencies pin it, so `bun install` tests against the same host. |
+| `omp` ≥ 18.11.1 | Developed and tested against 18.11.1. What the plugin stands on in omp's `eval` is pinned by a test against that version ([`docs/omp-eval.md`](docs/omp-eval.md)). The dev dependencies pin it, so `bun install` tests against the same host. |
 | `bun` | The runtime `omp` invokes plugin code with; omp ships it as a dependency, but you need it to run this repo's own `bun install`/`bun test` for local development. |
 | **SBCL — required under omp, not bundled** | The engine runs on it. Found on `PATH` or via `OMPRE_SBCL_PATH`. Developed against SBCL 2.2.9 (Debian's package). Other Common Lisp implementations will not do: the engine uses SBCL's threads, process interface, package locks and saved images. The one way to do without it is a prebuilt [engine image](docs/install.md#the-engine-image). |
 | **cl-ppcre — required, not bundled** | The one Lisp library the engine needs (the read-only command policy is regular expressions). It must be where SBCL's ASDF finds it: the distribution's package, Quicklisp in `~/quicklisp/`, or a copy under `~/common-lisp/`. |
-| **rizin — required, not bundled** | Your own install, found on `PATH` or via `OMPRE_RIZIN_PATH`. Tested with rizin 0.9.1. `/re status` shows which rizin and decompiler omp-re found. |
-| **rz-ghidra — optional, strongly recommended** | Provides `pdg`, a real Ghidra decompile. jsdec (`pdd`) is used when rz-ghidra is absent. With neither, `pdg`/`pdd` error and the code viewer's `d` key falls back to annotated disassembly (`pdf`). `/re status` shows which decompiler is active. |
-| Optional triage binaries | Each is independently probed on PATH at load time and simply not registered when absent: `capa` → `triage_capa`, `floss` → `triage_floss`, `diec` → `triage_die`, `yara` → `triage_yara`. |
+| **rizin — required, not bundled** | Your own install, found on `PATH` or via `OMPRE_RIZIN_PATH`. Tested with rizin 0.9.1. `re.status()` shows which rizin and decompiler omp-re found. |
+| **rz-ghidra — optional, strongly recommended** | Provides `pdg`, a real Ghidra decompile. jsdec (`pdd`) is used when rz-ghidra is absent. With neither, `pdg`/`pdd` error and the code viewer's `d` key falls back to annotated disassembly (`pdf`). `re.status()` shows which decompiler is active. |
+| Optional triage binaries | Each is looked for on PATH and simply not offered when absent: `capa` → `triage_capa`, `floss` → `triage_floss`, `diec` → `triage_die`, `yara` → `triage_yara`. |
 
 **Platforms.** Linux is where omp-re is developed and where CI runs all of its
 tests. Windows and macOS are written for — the engine has Windows branches for
@@ -466,9 +463,12 @@ either when this was written. CI has a Windows leg that had not yet been seen
 to pass, and no macOS leg. [`docs/testing.md`](docs/testing.md#what-is-not-proven)
 lists what is unproven.
 
-## Command reference
+## Line reference
 
-`/re help`, or `/re` alone, prints the list from the engine:
+Beside its tools the engine has lines: commands with a word or two after them.
+The model runs one with `re.slash("<line>")`. The engine's own text still
+calls them `/re` lines, from when an operator typed them; `re.slash("help")`
+prints the list:
 
 ```
 /re open <path>            open a binary and analyze it with rizin
@@ -476,41 +476,38 @@ lists what is unproven.
 /re strings                the strings rizin found, with address
 /re imports                the imports, with address
 /re evidence [id]          evidence recorded on this branch
-/re cite <id>              cite an evidence entry in your next message
+/re cite <id>              an evidence record as the opening of a message about it
 /re findings [id]          findings the model recorded on this branch
 /re undo                   revert the last annotation
 /re report [path] [--audit=strict] write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)
 /re verify [--strict]      re-run cited rizin commands and check recorded output hashes
-/re carry <manifest>       replay a report on another build (--against, --inherit, --resolve, --strict, --out)
+/re carry <manifest>       replay a report on another build (--against, --inherit, --strict, --out)
 /re status                 rizin, decompiler, binary, and evidence status
-/re on                     enable the RE tools for this session
-/re off                    disable the RE tools for this session
 /re help                   show this list
-keys: alt+g functions · alt+s strings · alt+i imports; in a code view: d toggle decompile · x follow xrefs · a ask the model
+/re tools                  the tools, one line each
+/re doc <tool>             what one tool does and the arguments it takes
 ```
 
-In the terminal UI, `functions`, `strings`, `imports`, `evidence` and
-`findings` typed alone open a panel; under `omp -p` they print the same list
-as text, cut at 4000 characters. An evidence or finding id typed by hand must
-be the whole id or a unique prefix of at least 6 characters. `omp --binary
-<path>` opens a binary at startup.
+A list is cut at 4000 characters. An evidence or finding id must be the whole
+id or a unique prefix of at least 6 characters. There is no `/re` command to
+type and no `--binary` flag: the operator asks, and the model runs the line.
 
 ## Tool reference
 
-You read the binary through **one tool, `rizin_command`**, and compose rizin's
-commands in `eval`; the rest are stateful tools (open, annotate, findings, the
-rz-* CLI, triage, debugger). See [`docs/tools.md`](docs/tools.md) for the full
-command map and parameter tables. Each tool is an `xd://<name>` device (see
-[Host-native](#host-native-xd-devices-and-omps-eval)): `read` it for its docs,
-`write` it to call it, or call it from `eval` as `tool.<name>()`. Triage tools
-appear only when their backing binary is on PATH, and `rizin_debug` only when
-`OMPRE_ENABLE_DEBUGGER` is set.
+These are the engine's tools, not omp's: none is registered with omp. The
+binary is read through **one of them, `rizin_command`** — what `re.cmd` and
+`re.json` call — and the rest are stateful (open, annotate, findings, the rz-*
+CLI, triage, debugger), reached as `re.call("<name>", { … })`. See
+[`docs/tools.md`](docs/tools.md) for the full command map and parameter
+tables; `re.tools()` and `re.doc("<name>")` answer the same from the running
+engine. Triage tools are offered only while their backing binary is on PATH,
+and `rizin_debug` only when `OMPRE_ENABLE_DEBUGGER` is set.
 
-| Tool | Tier | What it does |
+| Tool | Kind | What it does |
 | --- | --- | --- |
-| `open_binary` | session | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. |
-| `export_project` | session (exec) | Save the analysis as a rizin project (`.rzdb`, `Ps`) to open in rizin or Cutter. |
-| `map_file` | session (exec) | Open an additional file into the session at a virtual address (`o`), re-mapped on respawn. |
+| `open_binary` | session | Spawns rizin on a binary and runs full analysis (`aaa`); `re.open` calls it. |
+| `export_project` | session | Save the analysis as a rizin project (`.rzdb`, `Ps`) to open in rizin or Cutter. |
+| `map_file` | session | Open an additional file into the session at a virtual address (`o`), re-mapped on respawn. |
 | **read the binary** | read | One tool — `rizin_command` — runs any read-only rizin command (`aflj`, `pdg @ <fn>`, `izj`, `iij`, `iEj`, `axtj`, `tsj`, `/xj`, `ph entropy`, …); see [Reading the binary](docs/tools.md#reading-the-binary--rizin_command-one-tool) for the full command map. `rizin_help` finds a command's arguments. |
 | `rename_function` | mutate | Rename a function, with read-back verification. |
 | `rename_variable` | mutate | Rename a local variable or argument, with read-back verification. |
@@ -527,14 +524,14 @@ appear only when their backing binary is on PATH, and `rizin_debug` only when
 | `set_data` | mutate | Mark bytes as a data element/array (`Cd`). |
 | `set_string` | mutate | Mark bytes as a string (`Cs`). |
 | `set_format` | mutate | Overlay a pf struct format on a region (`Cf`). |
-| `analyze` | analyze (exec) | Re-run a rizin analysis pass beyond the baseline `aaa` (preludes, Go/ObjC recovery, pointers, types, emulation, …). |
-| `apply_signatures` | signatures (exec) | Name library functions from FLIRT signatures — the built-in sigdb or a custom `.sig`/`.pat`. |
-| `create_signature` | signatures (exec) | Build a FLIRT signature (`Fc`) from the analyzed functions, to recognize them in other samples. |
-| `rizin_emulate` | emulate (exec) | Emulate code in rizin's RzIL VM — init, step, read/set VM state (no OS process runs). |
-| `rizin_help` | rizin REPL (read) | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
-| `rizin_command` | rizin REPL (exec) | **The read surface.** Run any read-only rizin command against the open binary (`aflj`, `pdg`, `izj`, `iij`, `axtj`, `tsj`, `px`, `/xj`, …); an empty command returns the manual. |
-| `rizin_cli` | rizin CLI (exec) | Run a standalone rizin CLI tool (`rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax`) with its own arguments. |
-| `rizin_debug` | debugger (exec) | Dynamic analysis: launch the binary under rizin's debugger and drive it (breakpoints, continue, step, registers, memory, backtrace). Opt-in via `OMPRE_ENABLE_DEBUGGER`. |
+| `analyze` | analyze | Re-run a rizin analysis pass beyond the baseline `aaa` (preludes, Go/ObjC recovery, pointers, types, emulation, …). |
+| `apply_signatures` | signatures | Name library functions from FLIRT signatures — the built-in sigdb or a custom `.sig`/`.pat`. |
+| `create_signature` | signatures | Build a FLIRT signature (`Fc`) from the analyzed functions, to recognize them in other samples. |
+| `rizin_emulate` | emulate | Emulate code in rizin's RzIL VM — init, step, read/set VM state (no OS process runs). |
+| `rizin_help` | rizin REPL | Look up commands in the installed rizin's own help: usage, typed arguments, keyword search. |
+| `rizin_command` | rizin REPL | **The read surface.** Run any read-only rizin command against the open binary (`aflj`, `pdg`, `izj`, `iij`, `axtj`, `tsj`, `px`, `/xj`, …); an empty command returns the manual. |
+| `rizin_cli` | rizin CLI | Run a standalone rizin CLI tool (`rz-bin`, `rz-diff`, `rz-hash`, `rz-find`, `rz-asm`, `rz-ax`) with its own arguments. |
+| `rizin_debug` | debugger | Dynamic analysis: launch the binary under rizin's debugger and drive it (breakpoints, continue, step, registers, memory, backtrace). Opt-in via `OMPRE_ENABLE_DEBUGGER`. |
 | `triage_capa` | triage | Run capa rules (capabilities, ATT&CK techniques). |
 | `triage_floss` | triage | Extract obfuscated strings (FLOSS). |
 | `triage_die` | triage | Detect packers/compilers/file types (Detect It Easy). |
@@ -542,8 +539,8 @@ appear only when their backing binary is on PATH, and `rizin_debug` only when
 
 Every mutate tool follows resolve → read-old → write → read-back → verify,
 and throws with what rizin actually stored rather than reporting success when
-the mutation did not land as requested. `/re undo` reverses the most recently
-applied annotation. Every free-text and type argument reaches rizin as a
+the mutation did not land as requested. The line `undo` reverses the most
+recently applied annotation. Every free-text and type argument reaches rizin as a
 single-quoted literal, so a comment like `x; !id` is stored as text, never
 run.
 
@@ -557,7 +554,8 @@ closed, and its next call restores it from the record.
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `OMPRE_SBCL_PATH` | `sbcl` | The SBCL that builds the engine's image under omp, and loads the engine where there is no image. Read by the extension, not the engine; nodecode does not use it. |
-| `OMPRE_ENGINE_IMAGE` | unset | An engine image to run as it is, in place of the one omp-re builds: a release's, or your own (`bun run build:image`). With it omp-re needs no SBCL. If it does not start, the extension does not load. Read by the extension. |
+| `OMPRE_DISABLED` | unset | Set to `1` and the extension starts nothing under omp: no engine, no listener for `eval`, no status band, no keys. Read once, when omp loads the extension. |
+| `OMPRE_ENGINE_IMAGE` | unset | An engine image to run as it is, in place of the one omp-re builds: a release's, or your own (`bun run build:image`). With it omp-re needs no SBCL. If it does not start, the engine does not, and the session is told why. Read by the extension. |
 | `OMPRE_CACHE_DIR` | the user's cache directory, `omp-re` in it | Where the image omp-re builds is kept (`~/.cache/omp-re` on Linux, `~/Library/Caches/omp-re` on macOS, `%LOCALAPPDATA%\omp-re\cache` on Windows). Deleting it is safe: the next start builds the image again. Read by the extension. |
 | `OMPRE_RIZIN_PATH` | `rizin` | Path to the rizin executable; its sibling `rz-*` tools are taken from the same directory. |
 | `OMPRE_RIZIN_PATH_64`, `OMPRE_RIZIN_PATH_32` | unset | A rizin to use instead for a 64-bit or a 32-bit target. |
@@ -566,7 +564,7 @@ closed, and its next call restores it from the record.
 | `OMPRE_RIZIN_LOAD_USER_CONFIG` | unset | By default omp-re spawns rizin with `-N` so your `rizinrc` can't change the output it parses. Set (`1`/`true`) to load your rizinrc (e.g. for a custom `dir.plugins`). |
 | `OMPRE_ANALYSIS_TIMEOUT_MS` | `300000` | Budget for the one-time `aaa` analysis run on open. |
 | `OMPRE_DECOMPILER` | `pdg,pdd` | Comma-separated decompiler command priority; names a plugin's command. Built-ins stay as a fallback. |
-| `OMPRE_ENABLE_DEBUGGER` | unset | Set (`1`/`true`) to register `rizin_debug`, which **executes** the sample under rizin's debugger. Off by default. |
+| `OMPRE_ENABLE_DEBUGGER` | unset | Set (`1`/`true`) to offer `rizin_debug`, which **executes** the sample under rizin's debugger. Off by default. |
 | `OMPRE_DEBUG_TIMEOUT_MS` | `60000` | Budget for one debugger continue/step before the stuck debuggee is killed. |
 | `OMPRE_AUDIT_HMAC_KEY` | unset | HMAC-SHA256 key for signing audit log lines. Unset → lines are written unsigned, and a notice says so once a session. |
 
@@ -578,21 +576,27 @@ closed, and its next call restores it from the record.
 - [`docs/engine-protocol.md`](docs/engine-protocol.md) — what omp and the engine say to each other over the pipe.
 - [`docs/nodecode.md`](docs/nodecode.md) — running omp-re as a nodecode cell: verbs, configuration, what differs from omp.
 - [`docs/tools.md`](docs/tools.md) — the `rizin_command` read map and parameter tables for the stateful tools.
-- [`docs/omp-eval.md`](docs/omp-eval.md) — omp's `eval` as this plugin uses it: cells, `tool.<name>()`, `%load`, `skill://` and `artifact://`, read from omp's source and pinned by a test.
+- [`docs/omp-eval.md`](docs/omp-eval.md) — omp's `eval` as this plugin uses it: cells, what a kernel is and knows of its session, `%load`, `skill://` and `artifact://`, read from omp's source and pinned by a test.
 - [`docs/testing.md`](docs/testing.md) — the test tiers, what each needs, what CI runs and what is not proven.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and the QA harness's two hard rules.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, style, and where a change lands.
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, analysis hygiene.
 
 ## Known limitations
 
 - **A notify raised while the code view is open can render underneath it.**
-  Panels now close before reporting "nothing to open", and Enter on an
-  evidence row cites it into the editor, so this only affects the code view's
-  own `d` notice when a function has no decompiler output.
+  Panels close before reporting "nothing to open", so this only affects the
+  code view's own `d` notice when a function has no decompiler output.
+- **The library has to be loaded, by the model, once per kernel.** omp has no
+  way for a plugin to load a script into `eval` for it. The skill teaches the
+  line and omp-re repeats it under the error when it was forgotten; a
+  JavaScript kernel loses it at every timeout.
+- **Sessions omp keeps no file for share one `eval` kernel per directory**
+  (`omp --no-session`). Two of them in one directory cannot be told apart by a
+  request from that kernel, and such a request is refused rather than guessed.
 - **Annotations made by a `re-analyst` subagent stay in that subagent's
   rizin process.** They are not merged back into the parent session; the
   agent is instructed not to annotate unless asked.
-- **`/re report` withholds the entire report, not just the ungrounded part,**
+- **The line `report` withholds the entire report, not just the ungrounded part,**
   when any claim has zero backing evidence ids — see
   [`docs/workflow.md`](docs/workflow.md) for why that's the point, not a bug.
 - **Renaming a function can change rizin's idea of its prototype.** rizin

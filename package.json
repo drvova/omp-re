@@ -36,10 +36,7 @@
     "gen:protocol": "bun scripts/gen-protocol.ts",
     "check:protocol": "bun scripts/gen-protocol.ts --check",
     "check:versions": "node scripts/release.mjs --check-versions",
-    "test:tui": "bash test/tui.sh",
-    "test:tui:carry": "bash test/tui-carry.sh",
-    "test:live": "bash test/live-model.sh",
-    "qa:tui": "bash test/tui-qa.sh"
+    "test:live": "bash test/live-model.sh"
   },
   "devDependencies": {
     "@oh-my-pi/pi-coding-agent": "^18.11.1",

@@ -10,7 +10,7 @@
 ;;;; and test/recipes-eval.test.ts holds the whole of every report to what
 ;;;; omp's two eval kernels answer. Here is what only this engine can show:
 ;;;; that each read is a real, audited, re-runnable record, that a finding
-;;;; can cite it, that `/re off' stops a recipe, the bounds and the refusals.
+;;;; can cite it, the bounds and the refusals.
 
 (in-package #:omp-re-test)
 

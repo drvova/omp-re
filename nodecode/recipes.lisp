@@ -21,7 +21,7 @@
 ;;;; worded as "worth a look", never as a verdict.
 ;;;;
 ;;;; skills/re-triage/recipes.js and recipes.py are the same five for the two
-;;;; kernels of omp's eval, over tool.rizin_command. All three answer the same
+;;;; kernels of omp's eval, over the same rizin_command. All three answer the same
 ;;;; text for the same binary, reads and all, and test/recipes-eval.test.ts
 ;;;; holds them to it. What a recipe reads, in which order, how each section
 ;;;; is worded, its options and their bounds, the tables and every sentence

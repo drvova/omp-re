@@ -3,45 +3,50 @@
 ## Triage walkthrough, end to end
 
 Use a binary you're allowed to run commands against without a sandbox — a
-system binary like `/bin/ls` is enough to learn the flow.
+system binary like `/bin/ls` is enough to learn the flow. There is no command
+to type: you ask, and the model does the work in `eval`. What it runs there is
+given beside each step, as the JavaScript kernel spells it
+(`omp_re.…` in Python, `(re:…)` under nodecode).
 
-1. `/re open /bin/ls` — spawns rizin, runs full analysis (`aaa`, progress in
-   the footer), and populates the status band.
-2. `alt+g` (function navigator) or `/re functions` — browse everything
-   rizin's analysis found. Type to filter (fuzzy, best match first).
+1. "Open /bin/ls and triage it." — `await re.open("/bin/ls")` spawns rizin,
+   runs full analysis (`aaa`, progress in the footer), and populates the
+   status band; `await re.triage()` takes the first dozen reads.
+2. `alt+g` (function navigator) — browse everything rizin's analysis found,
+   yourself, while the model works or after. Type to filter (fuzzy, best
+   match first).
 3. Select a function to open the code view. `d` toggles decompiled pseudo-C;
    `x` follows the selected cross-reference one hop; `a` hands the function
    off to the model with a grounding prompt ("use the RE tools to gather
    evidence first; report only what the evidence supports").
-4. `alt+s` / `/re strings` — the string list; Enter lists the code that
-   references a string, then opens it.
-5. `alt+i` / `/re imports` — imported symbols; Enter lists the callers of an
-   import. Useful for a quick capability guess before diving into
-   decompilation.
+4. `alt+s` — the string list; Enter lists the code that references a string,
+   then opens it.
+5. `alt+i` — imported symbols; Enter lists the callers of an import. Useful
+   for a quick capability guess before diving into decompilation.
 6. If `capa`/`floss`/`diec`/`yara` are on PATH, ask the model to run the
    matching `triage_*` tool for a fast capability/packer read before manual
    analysis. What they print is a lead, not evidence.
-7. `/re evidence` lists everything gathered so far on this branch; Enter on
-   a row (or `/re cite <id>`, which completes ids) pulls that entry's
-   tool/address/summary into your next chat message so you can ask a
-   follow-up about it without retyping context.
-8. `/re report [path]` writes a Markdown report. With no path, it prints the
-   report directly instead of writing a file.
-9. `/re verify [--strict]` re-runs each cited `rizin_command` read-only against
-   the open binary and checks its recorded output hash — proving the report's
-   evidence is not just cited but reproducible.
-10. Conclusions go in with `record_finding` (claim + the evidence ids behind
-    it). A finding is refused if its evidence doesn't resolve, belongs to
-    another binary, or doesn't support the claim in the auditor's judgement,
-    and it becomes a report claim like any other.
-11. `/re carry <report>.manifest.json --against <next-build>` replays that
-    report on a different binary and labels each claim holds, relocated
-    (found again by fingerprint after a rename or move), drifted (with a line
-    diff of what changed), broken (its anchor is gone), or unchecked.
-    It works as a regression test for the next build: a broken claim exits
-    non-zero headless, and `--strict` also fails on drift. Add `--inherit` to
-    re-prove the surviving findings on the new build, with fresh evidence, and
-    get the drifted ones back as a to-do list with their diffs.
+7. "What have you observed so far?" — `await re.slash("evidence")` lists
+   everything gathered on this branch, by id; `re.slash("evidence <id>")` is
+   one record.
+8. Conclusions go in with `record_finding` (claim + the evidence ids behind
+   it). A finding is refused if its evidence doesn't resolve, belongs to
+   another binary, or doesn't support the claim in the auditor's judgement,
+   and it becomes a report claim like any other.
+9. "Write the report to ls.md." — `await re.slash("report ls.md")`. With no
+   path the line answers the report instead of writing a file.
+10. "Verify it." — `await re.slash("verify --strict")` re-runs each cited
+    `rizin_command` read-only against the open binary and checks its recorded
+    output hash — proving the report's evidence is not just cited but
+    reproducible.
+11. "Carry ls.md.manifest.json onto ./ls-next." —
+    `await re.slash("carry ls.md.manifest.json --against ./ls-next --inherit")`
+    replays that report on a different binary and labels each claim holds,
+    relocated (found again by fingerprint after a rename or move), drifted
+    (with a line diff of what changed), broken (its anchor is gone), or
+    unchecked. It works as a regression test for the next build: a broken
+    claim fails the line, and `--strict` also fails on drift. `--inherit`
+    re-proves the surviving findings on the new build, with fresh evidence,
+    and hands the model the drifted ones as a to-do list with their diffs.
 
 ## How the evidence chain actually works
 
@@ -57,41 +62,39 @@ something a finding can cite.
 outside these tools produces no evidence.** If the model reads a file with
 `bash`/`cat`, greps a disassembly dump you pasted in, or reasons from
 something it already knew, none of that is backed by an evidence id — and
-`/re report`'s write gate is hard: if *any* claim in the built report has
-zero evidence ids, the **entire report is withheld**, not just the
-ungrounded parts. Headless failure is loud (`console.error` plus a non-zero
-exit code), never a silently dropped report. The gate exists so an
+the write gate of the line `report` is hard: if *any* claim in the built
+report has zero evidence ids, the **entire report is withheld**, not just the
+ungrounded parts. The line fails, loudly, naming the claim; a report is never
+silently dropped. The gate exists so an
 ungrounded report never reaches a ticket — a partial, quietly-trimmed report
 would be worse than an obvious failure, because it would look complete.
 
-In practice: if you want something in the final report, get it through a
-tool call, not a shell command or a paraphrase. A call the model makes from
-omp's `eval` (`await tool.rizin_command({ command: "pdg", addr: "main" })`) is a
-tool call too, and is recorded and tagged the same way. `/re evidence` and `/re cite
-<id>` exist specifically so the model (and you) can look back at exactly
-what was actually observed, in its own words, before writing a claim that
-depends on it.
+In practice: if you want something in the final report, get it through the
+engine (`await re.cmd("pdg", "main")`), not a shell command or a paraphrase.
+The lines `evidence` and `evidence <id>` exist specifically so the model can
+look back at exactly what was actually observed, in its own words, before
+writing a claim that depends on it.
 
 Grounding is the first gate; reproducibility is the second. Alongside the
 model-facing `outputHash` (which bakes in the header and any truncation footer,
 so it is not reproducible), every `rizin_command` evidence record now stores a
 `reproHash` — the SHA-256 of its *canonicalized* raw output (ANSI, line endings,
 and trailing whitespace normalized; the binary's path redacted) — plus the open
-binary's SHA-256. `/re verify [--strict]` re-runs each cited command read-only
-and compares, and `/re report` ships the same data as a Verification Manifest
+binary's SHA-256. The line `verify [--strict]` re-runs each cited command read-only
+and compares, and `report` ships the same data as a Verification Manifest
 and a `<report>.manifest.json` sidecar, so a report is re-derivable from the
 binary, not merely trusted.
 
-The third gate is relevance. Before `/re report` emits, each grounded claim and
+The third gate is relevance. Before `report` emits, each grounded claim and
 its cited evidence go to an LLM self-audit through omp's `ctx.runEphemeralTurn`
 side turn (no tools, no history writes) that judges whether the evidence actually
 supports the claim — supported, overreach, or unsupported. It is advisory by
-default (flags claims inline, still writes the report); `/re report --audit=strict`
+default (flags claims inline, still writes the report); `report --audit=strict`
 withholds the report on an unsupported/overreach verdict, and it fails open to an
 "unaudited" note when no model or side turn is available, so the two deterministic
 gates stay authoritative.
 
-All three gates stop at the binary that was analysed. `/re carry` takes a report
+All three gates stop at the binary that was analysed. The line `carry` takes a report
 to other binaries: the manifest's entries are `claim → exact read-only command →
 canonical output hash`, so re-running them on another build and comparing hashes
 tells you which findings carry over (`holds`), which still run but now say
@@ -108,7 +111,7 @@ branch and call targets, RIP-relative displacements, and auto-names such as
 `fcn.000011fd`. Immediates in other operands are kept, so a changed constant
 still drifts. Output that matches only after masking counts as **holds**, and
 drift diffs are matched on the masked lines, so they show only real changes.
-Second, when `/re report` writes the manifest with the report's own binary still
+Second, when `report` writes the manifest with the report's own binary still
 open, every address-pinned entry gets an **anchor fingerprint**: the containing
 function's name, offset, size, block count, the anchor's offset inside it, and
 its mnemonic sequence. When the anchor no longer resolves, or a numeric anchor
@@ -124,10 +127,10 @@ Evidence and annotation entries persist in the session JSONL and survive a
 `--continue`/reload, but they are **not** injected into LLM context and are
 **not** rendered inline in the transcript — omp's `pi.appendEntry()`
 explicitly does not forward custom entries to the model. The status band's
-evidence counter and the `/re evidence`/`/re cite` panel and command are the
-visible surfaces. When a tool's output was too large for the context and was
-spilled to a session artifact, its evidence entry records the
-`artifact://<id>` too, and `/re report` reads the untruncated artifact.
+evidence counter and the line `evidence` are the visible surfaces. When a
+tool's output was too large for the context and was spilled to a session
+artifact, its evidence entry records the `artifact://<id>` too, and `report`
+reads the untruncated artifact.
 
 ## Branches, resume, and annotation replay
 
@@ -140,7 +143,7 @@ not the whole session file:
   memory. Whenever a fresh process is needed — `--continue`/`/resume`, a
   respawn after a crash or timeout, or a branch whose annotations differ from
   what the process holds — omp-re re-analyzes the binary the branch last
-  opened and **replays that branch's annotations** (minus any `/re undo`
+  opened and **replays that branch's annotations** (minus any the line `undo`
   reversed) in order. Each annotation is attributed to the binary that was
   open when it was made, so opening a second binary never receives the
   first one's renames.
@@ -175,13 +178,11 @@ Two constraints:
 - **The advisor's model must differ from the RE session's model.** omp has
   no self-review guard — setting both to the same model is silently allowed
   and defeats the point of a second reviewer.
-- **The `tools:` grant is restricted to omp's built-in tool names.** This
-  suite's own tools (`rizin_command`, `rename_function`, etc.) are
-  extension-registered, not built-in, so listing them here does nothing —
-  the advisor gets `read`/`grep`/`glob` regardless, which is enough to read
-  evidence blobs and session entries directly. Never grant a mutating tool
-  to an advisor even experimentally: advisor tool grants bypass the primary
-  agent's approval wrapper, so a granted mutating tool would run unprompted.
+- **Give the advisor `read`/`grep`/`glob` and nothing else.** That is enough
+  to read evidence blobs and session entries directly. omp-re has no tools of
+  omp's to grant — its engine is reached from `eval` — and an advisor given
+  `eval` could annotate and record findings itself: advisor tool grants bypass
+  the primary agent's approval wrapper, so it would run unprompted.
 
 `WATCHDOG.md` (this repo's root file, if you're dev-loading from a checkout)
 carries RE-specific review priorities, but omp only discovers `WATCHDOG.md`
@@ -191,17 +192,17 @@ installing as a plugin, copy `WATCHDOG.md` into the project you're actually
 reverse-engineering in, or into `<agentDir>/WATCHDOG.md` for a user-wide
 default.
 
-**Delegating to the `re-analyst` agent.** omp forwards extension-registered
-tools to `task` subagents, so the plugin ships `agents/re-analyst.md`. Ask
-for it by name with a binary path and a question; it opens the binary in its
-own rizin process (its first call is always `open_binary`), follows the
-`re-triage` skill's order of work, and returns structured findings — a
-summary plus a list of `{claim, ea, evidence, confidence}` — where every
-`ea` is copied from tool output. Two properties to keep in mind: its
-evidence entries live in the subagent's session, not yours, so cite the
-findings it returns rather than expecting them in your `/re evidence`; and
-annotations it makes stay in its own rizin process, which is why it is told
-not to annotate unless asked.
+**Delegating to the `re-analyst` agent.** The plugin ships
+`agents/re-analyst.md`, a subagent that has `eval` among its tools and the
+`re-triage` skill loaded. Ask for it by name with a binary path and a
+question; it loads the library into its own kernel, opens the binary in its
+own rizin process, follows the skill's order of work, and returns structured
+findings — a summary plus a list of `{claim, ea, evidence, confidence}` —
+where every `ea` is copied from the engine's output. Two properties to keep
+in mind: its evidence entries live in the subagent's session, not yours, so
+adopt the findings it returns rather than expecting them in your evidence;
+and annotations it makes stay in its own rizin process, which is why it is
+told not to annotate unless asked.
 
 ## Findings, and inheriting them
 
@@ -214,7 +215,7 @@ address and a confidence. It is gated when it is recorded:
    prefix of at least 6 characters).
 2. **Binding.** The evidence must have been taken against the open binary.
 3. **Support.** The claim and its evidence go to the same `ctx.runEphemeralTurn`
-   auditor `/re report` uses. An `unsupported` or `overreach` verdict refuses
+   auditor `report` uses. An `unsupported` or `overreach` verdict refuses
    the finding and returns the reason, so the model narrows the claim or cites
    better evidence while it is still working. `override_audit` records it
    anyway, with the justification kept beside it in the report. A missing
@@ -236,7 +237,7 @@ section. There they go through the report's own gates again, and they are listed
 in the manifest's `findings` block next to the evidence entries and anchor
 fingerprints.
 
-`/re carry --inherit` uses that block. For each finding whose claim **holds** or
+The line `carry --inherit` uses that block. For each finding whose claim **holds** or
 **relocated** on the new build, each reproduced evidence row is re-run through
 the same function `rizin_command` executes and recorded through the same
 evidence path as a live tool call, bound to the new binary's SHA-256. The
@@ -245,22 +246,15 @@ relocation (old name to new name, old start to new start), and its provenance
 records the source binary, the source finding and the carry status. Findings
 that **drifted**, **broke**, or couldn't be re-checked form the agenda: a prompt
 listing each claim with its evidence status and a compact diff (changed lines
-plus two lines of context, matched with addresses masked). Interactively it goes
-into the editor, like `/re cite`; headless it is printed. With `--resolve` it is
-instead sent to the model as a user turn (`pi.sendUserMessage`). That works
-because the model is in the session where the fresh evidence was just recorded,
-so it can re-examine each item and `record_finding` a revision citing evidence
-on this build. Headless, `--resolve` prints the agenda instead: print mode
-starts no model turn after its scripted prompts, so a turn requested from a
-command would never run; pass the printed agenda as the next prompt
-(`omp -c -p "<agenda>"`). A headless inherit also writes the session to disk at
-once (omp otherwise writes a session on its first model turn) and names it if it
-has no name, because `omp -c` skips a session with no turn and no title.
+plus two lines of context, matched with addresses masked). It follows the
+line's summary in its answer. Since it is the model that ran the line, and the
+model is in the session where the fresh evidence was just recorded, it can
+re-examine each item and `record_finding` a revision citing evidence on this
+build without anything more being asked.
 Inheriting is idempotent: a claim already live on the branch is skipped.
 
 Findings also survive compaction. On omp's `session.compacting` event the
 engine restates the most recent live findings (id, confidence, inherited or not, claim, address)
 in the summary, telling the model they are already recorded. They are revised
-with `supersedes`, not re-recorded. `/re findings` lists them, and Enter pulls
-one into the editor to discuss.
+with `supersedes`, not re-recorded. The line `findings` lists them.
 

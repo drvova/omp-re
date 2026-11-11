@@ -31,15 +31,16 @@ provides any isolation:
 - Triage tools (`triage_capa`, `triage_yara`, etc.) shell out to real
   external binaries you installed yourself. Their own security posture is
   out of scope for this document — keep them updated.
-- omp-re adds no code-execution tool. When the model composes RE tools in
-  omp's `eval`, the code runs in omp's own eval kernel under omp's approval of
-  `eval`; each RE tool it calls is still a separate tool call with its own
-  approval tier, audit line, and (for `/re off`) block.
+- omp-re adds no tool at all, and no code-execution tool. The model reaches
+  the engine from omp's own `eval`, whose code runs in omp's eval kernel under
+  omp's approval of `eval` — see `## What omp approves` and `## The listener`
+  below for what that does and does not gate.
 - Under omp the engine is a child process: the extension starts the `sbcl` on
   your `PATH` (or `OMPRE_SBCL_PATH`) by argv, with no shell, with
   `--no-sysinit --no-userinit` so no init file runs in it. It talks to omp on
-  its standard input and output only; it opens no socket. It runs with your
-  privileges, as omp does. ASDF keeps the engine's compiled files in its cache
+  its standard input and output only; the engine opens no socket (the
+  extension does, on the loopback interface: `## The listener`). It runs with
+  your privileges, as omp does. ASDF keeps the engine's compiled files in its cache
   in your home directory and loads them at the next start, so that cache is as
   trusted as the plugin's own files.
 - What the extension runs as the engine is, in order, the executable
@@ -62,8 +63,83 @@ provides any isolation:
   - `rizin_debug`'s `run.stdin`, `run.stdout`, `run.stderr` and `run.cwd`,
     which rz-run opens for the debuggee. The debugger is off unless you
     switch it on, and it runs the target's code in any case;
-  - the manifest `/re carry` reads, which is a line the operator types. The
-    binary given with `--against` is held to the list.
+  - the manifest the line `carry` reads. The binary given with `--against`
+    is held to the list.
+
+## What omp approves
+
+Up to 0.11 every tool of omp-re was a tool registered with omp, and omp asked
+about each call on that tool's own tier: `read` for a lookup, `write` for an
+annotation, `exec` for a rizin command, with a sentence saying what the call
+would do. **That per-call approval is gone.** omp-re registers no tool; the
+model calls the engine from inside a cell of omp's `eval`, and to omp a cell is
+one call of one `exec`-tier tool:
+
+- omp's approval mode and `tools.approval.eval` decide whether a cell runs.
+  Under omp's default mode nothing is asked. Under `always-ask` you are shown
+  the cell's code, once, and what it asks of the engine while it runs is not
+  shown to you again.
+- A policy cannot tell one cell from another: `tools.approval.eval: allow`
+  allows renaming a function and reading one alike. There is no setting that
+  lets reads through and asks about writes.
+- nodecode never had per-call approval; the two hosts are now alike in this.
+
+What stands between a cell and your machine is therefore the engine's own
+policy, which is unchanged and does not depend on omp:
+
+- only read-only rizin commands run through `rizin_command` (`## rizin_command`);
+- files are opened only from `OMPRE_ALLOWED_DIRS` when you set it;
+- the tools write only into `OMPRE_OUTPUT_DIR`, the report where its line says;
+- the debugger does not exist unless you set `OMPRE_ENABLE_DEBUGGER`;
+- every call is a line in the audit log, signed when `OMPRE_AUDIT_HMAC_KEY` is
+  set, named by the `eval` call it came from and its place in that cell.
+
+Note what `eval` is: omp runs a cell's code unsandboxed, as a process of
+yours. A cell that is allowed to run can already read files, spawn programs
+and open sockets without omp-re. omp-re's policy governs what is asked of
+*its engine*; it is not a sandbox for the model.
+
+`OMPRE_DISABLED=1` in omp's environment keeps the extension from starting
+anything: no engine, no listener. There is no longer a per-session switch
+(`/re off`).
+
+## The listener omp's eval reaches the engine through
+
+An `eval` kernel is a separate process, and omp gives a plugin no channel into
+it. So, under omp, the extension listens for the kernels of its own omp
+process (`extensions/re/bridge.ts`):
+
+- It binds `127.0.0.1` only, on a port the system picks, for as long as a
+  session with the plugin is alive in that omp process. It is not reachable
+  from another machine.
+- Every request must carry a bearer token: 32 random bytes made when the
+  listener starts, compared in constant time. A request without it is refused
+  (401) before its body is read. A web page in your browser can send a request
+  to a loopback port, and cannot know the token.
+- The token and the port are written to one file, `<pid of omp>.json`, mode
+  `0600`, in `$XDG_RUNTIME_DIR/omp-re` or else `<tmpdir>/omp-re-<your uid>`,
+  a directory made `0700`. The extension refuses a directory that is not a
+  directory of yours, since someone else's directory under a shared `/tmp` is
+  one they could swap files in; the library in the kernel refuses a file that
+  is not yours. The file is removed when the listener stops; one left by a
+  killed omp is removed by the next.
+- **Whoever can read that file can drive the engine**: open binaries, run
+  read-only rizin commands, annotate, record findings, write a report where a
+  line says. That is every process running as you — your shell, your editor,
+  anything you run — and nobody else, short of root. It is the trust boundary
+  of your own account, the same one that already lets those processes run
+  `rizin`, read omp's session files, or attach to omp. It is not a boundary
+  against other software you run as yourself.
+- A request says which session it is for by the session file (or, for a
+  session omp keeps no file for, the directory) its kernel was given by omp.
+  The token authorizes the whole listener, not one session: a process that
+  has the token can name any session of that omp process. Two sessions that a
+  request cannot tell apart are refused, never guessed.
+- On Windows the file's mode bits do not restrict anything; the file is
+  protected by where it is, your own temporary directory. This is as written
+  and has not been run there.
+- A kernel that stops waiting — a cell's timeout, an interrupt — closes its
+  connection, and the engine's work on that request is cancelled.
 
 ## Mutations never touch the file on disk
 
@@ -94,9 +170,9 @@ separators, no `..`, not absolute), never a path, so none of them can
 traverse out of that directory or overwrite an arbitrary file. A memory dump's
 bytes are read by the engine through the debugger and written by the engine;
 for the other three rizin is handed the confined path, single-quoted.
-`/re report <path>` and `/re carry --out <path>` write where the `/re` line
-says. Under omp only the operator types `/re` lines. Under nodecode the model
-can send one from `eval` (`(re:slash …)`), where it can already write files.
+The lines `report <path>` and `carry --out <path>` write where the line says.
+On both hosts it is the model that runs a line, from `eval`, where it can
+already write files.
 
 `-N` additionally skips the user's `rizinrc` and startup scripts, so a global
 eval var or alias in the operator's config can't silently change the command
@@ -130,7 +206,7 @@ none of them can start a second command:
 **0.1.x is affected by a command-injection bug fixed in 0.2.0.** It
 interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and the
 command backend splits on `;`, so a comment such as `a; !id` ran an
-additional command — including `!`, a shell escape. `set_comment` is a
+additional command — including `!`, a shell escape. `set_comment` was then a
 `write`-tier tool, so this let a model (for example one steered by text
 inside the sample it was analyzing) reach shell execution without passing an
 `exec`-tier approval. `/re undo` replayed stored comments the same way.
@@ -139,8 +215,7 @@ Upgrade if you run 0.1.x; 0.2.0 onward (rizin) is not affected.
 ## rizin_command
 
 `rizin_command` is the one tool that sends a model-written rizin command
-line, so it is `exec`-tier (the approval prompt quotes the exact command)
-and it refuses before anything reaches rizin unless the command:
+line, and it refuses before anything reaches rizin unless the command:
 
 - belongs to a read-only family — print, info, search, graph, op/ESIL
   analysis, xref and function queries, comment and flag lookups — and is
@@ -238,14 +313,15 @@ of the suite holds:
 - It runs in a **separate rizin session** (`-d`) from the static one, which
   continues to only read the file. The debug process is killed with its
   debuggee on `stop` and on session shutdown.
-- Every action is `exec`-tier, and the approval reason says plainly whether
-  it resumes execution (`start`, `continue`, `continue_to_syscall`, `step`),
-  modifies the live process (`write_register`, `write_memory`, `watch_add`,
-  `break_add_hw`), reads live memory out to a file (`dump_memory` — see the
-  confined output directory above), or only inspects (`registers`,
+- Nothing asks you about one action: once the debugger is switched on, a
+  cell may resume execution (`start`, `continue`, `continue_to_syscall`,
+  `step`), modify the live process (`write_register`, `write_memory`,
+  `watch_add`, `break_add_hw`), read live memory out to a file (`dump_memory`
+  — see the confined output directory above), or inspect (`registers`,
   `read_memory`, `disassemble`, `backtrace`, the heap and process-state
-  actions). Addresses, register names, register values, and hex byte strings
-  are all validated before anything reaches the process.
+  actions). The switch is the gate. Addresses, register names, register
+  values, and hex byte strings are all validated before anything reaches the
+  process.
 - `break_command` stores a rizin command that reruns on **every** breakpoint
   hit (`dbc`), so its command string is gated the way `rizin_command` is —
   but, running inside the live debugger, it additionally allows a vetted set
@@ -284,7 +360,8 @@ by `test/nodecode/suite-debug.lisp`.
 ## Scope
 
 In scope: the engine (`engine/`), its two hosts (`stdio/` with
-`extensions/re/`, and `nodecode/`), the `/re` command surface, and the tool
-implementations. Out of scope: rizin itself, rz-ghidra, jsdec, capa/floss/
+`extensions/re/`, and `nodecode/`), the listener and the library that asks it
+(`extensions/re/bridge.ts`, `skills/re-triage/recipes.js` and `recipes.py`),
+the engine's lines, and the tool implementations. Out of scope: rizin itself, rz-ghidra, jsdec, capa/floss/
 diec/yara, SBCL, cl-ppcre, omp and nodecode — report vulnerabilities in those
 projects upstream.

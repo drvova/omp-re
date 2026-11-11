@@ -57,6 +57,8 @@ jobs:
         run: node scripts/release.mjs --check-versions
       - name: The recipes' generated blocks are current with recipes/tables.json
         run: bun scripts/gen-recipes.ts --check
+      - name: The verbs of both eval libraries and of nodecode are current with recipes/api.json
+        run: bun scripts/gen-api.ts --check
       - name: The shim's types and the protocol document's tables are current with stdio/protocol.json
         run: bun scripts/gen-protocol.ts --check
       # The engine's exported functions are declared in types, and a call that
