@@ -11,7 +11,7 @@
   :description "omp-re for omp: the engine served over standard input and output"
   :author "drvova"
   :license "MIT"
-  :version "0.10.0"
+  :version "0.11.0"
   :depends-on ("omp-re")
   :pathname "stdio/"
   :serial t

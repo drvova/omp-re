@@ -1,6 +1,6 @@
 {
   "name": "omp-re",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Reverse engineering with rizin for omp and nodecode: one Common Lisp engine (needs SBCL and cl-ppcre), evidence store, signed audit log, gated findings, and a report writer that refuses ungrounded claims.",
   "license": "MIT",
   "author": "drvova <drvova.ai@gmail.com>",

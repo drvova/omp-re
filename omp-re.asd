@@ -21,7 +21,7 @@
   :description "Reverse engineering with rizin: evidence-backed findings, annotations and reports"
   :author "drvova"
   :license "MIT"
-  :version "0.10.0"
+  :version "0.11.0"
   :depends-on ("cl-ppcre" (:feature (:not :win32) "sb-posix"))
   :pathname "engine/"
   :serial t
