@@ -222,8 +222,9 @@ into the cell's value:
 
 `text` is every text block of the result joined with nothing between them. A
 block appended by a `tool_result` handler is therefore the end of `text` — the
-handler supplies its own newline. That is how omp-re's `[evidence …]` tag comes
-to be the last line.
+handler supplies its own newline. omp-re does not use that: an RE tool's
+result is one text block, written by the engine, and the `[evidence …]` tag is
+its last line.
 
 One case moves a throw into the fourth row: when a `tool_result` handler
 replaces the content of a call that threw, the wrapper returns the replacement
@@ -272,8 +273,9 @@ then approved again on its own terms, so approving a cell does not approve what
 it does. *contract: `eval itself is an exec-tier tool…`* And nothing is written
 to the transcript per call: the cell's card shows a status line for each
 (`summarizeToolResult`), but the session record has one tool call, the cell.
-Anything that must outlive the cell has to be recorded by a handler, as
-`evidence.ts` and `audit.ts` do.
+Anything that must outlive the cell has to be recorded by the tool or by a
+handler. omp-re's engine does it while the tool's `execute` runs: the audit
+line and the evidence record are written there, whichever way the call came.
 
 ### Deadline and abort
 
@@ -406,7 +408,8 @@ a file `<id>.<tool>.log` in it, `id` a counter starting at 0
   consecutive per tool);
 - an extension, with `await ctx.sessionManager.saveArtifact(content, toolType)`,
   which returns the id (`session/session-manager.ts`). This is what
-  `extensions/re/format.ts` does past its own cap.
+  `extensions/re/host.ts` does (`saveArtifact`) when the engine asks omp to
+  keep a result that is past the engine's own cap.
 
 Reading one back from a cell: `await read("artifact://<id>")` returns the file
 raw and whole — no header, no line numbers, no size bound — and `{ offset,
@@ -663,19 +666,19 @@ through the real RE tools (`test/extension-sdk.test.ts`) and the real recipes
 | --- | --- | --- |
 | `tool.<name>()` reaches tools mounted as `xd://` devices | every RE tool (`render.ts`, `RE_LOAD_MODE`); `recipes.js` and `recipes.py` (`observe`); SKILL.md | contract: `reaches a discoverable tool…`; extension-sdk: `omp's eval reaches an RE tool as tool.<name>()…` |
 | A tool with details returns `{ text, details }`, details intact | `recipes.js` (`observe` reads `details.truncated`, `details.artifactId`); SKILL.md ("read `.text`") | contract: `a result with details comes back as { text, details }…` |
-| `text` is the blocks joined, so a `tool_result` handler's block is its last line | `evidence.ts` (the `[evidence …]` tag); `recipes.js` (`EVIDENCE_TAG`) | contract: same test; extension-sdk: `open, annotate, and resume through eval…` |
+| A result of one text block with details reaches the cell with that text unchanged, last line included | the engine's `[evidence …]` tag, the last line of a read's text; `recipes.js` (`EVIDENCE_TAG`) | contract: same test; extension-sdk: `open, annotate, and resume through eval…` |
 | A tool that throws rejects with its own message | `recipes.js`; SKILL.md ("A failing tool throws"); every `omp-re: …` refusal | contract: `a tool that throws rejects in the cell…`; extension-sdk: `…its error is catchable in the cell` |
 | A result marked as an error comes back with `hasError` instead | `recipes.js` (`observe` throws on it) | contract: `a result the tool marked isError does not throw…`, `a thrown tool whose result a tool_result handler replaced…` |
-| `tool_call` and `tool_result` fire for calls from a cell | `audit.ts` (the audit log); `evidence.ts` (the evidence record); `index.ts` (`/re off` blocks in `tool_call`) | contract: `tool_call and tool_result fire…`, `a tool_call handler that blocks…`; extension-sdk: `/re off refuses RE tool calls from eval…` |
-| Each call is approved on its own tier and `tools.approval.<name>` | every tool's `approval`; `audit.ts` (`tool_approval_resolved`) | contract: `each tool.<name>() call is approved on its own tier and policy…` |
+| A call from a cell runs the tool's own `execute`, under an id of omp's | `index.ts` (`execute` forwards the call and its id to the engine, which refuses while `/re off`, writes the audit line and records the evidence). omp-re registers no `tool_call` or `tool_result` handler. | extension-sdk: `/re off refuses RE tool calls from eval…`; shim: `every call that ran is in the audit log under omp's own tool-call id…` |
+| Each call is approved on its own tier and `tools.approval.<name>`, and `tool_approval_resolved` says what was decided | every tool's `approval`; `index.ts` (forwards the decision to the engine's audit log) | contract: `each tool.<name>() call is approved on its own tier and policy…`; shim: same test as above |
 | `%load skill://re-triage/recipes.js` runs the script beside SKILL.md | SKILL.md; README; `recipes.js` | contract: `skill://<name>/<path> loads the file…`; recipes-eval: `%load by the skill's own URL defines re…` |
-| `%load` does not echo the source and shows the script's last expression | `recipes.js` (its last line is the "recipes loaded" message) | contract: `runs the file in the kernel without echoing its source…` |
+| `%load` does not echo the source and shows the script's last expression | `recipes.js` (its last expression is the call that defines `re`, whose value is the "recipes loaded" message) | contract: `runs the file in the kernel without echoing its source…` |
 | What a script puts on `globalThis` persists across cells | `recipes.js` (`globalThis.re`) | contract: `top-level const, let, var…`, `what the script defines at top level persists…` |
 | The name `re` is free in the realm | `recipes.js` | contract: `the name re is not taken by the host…`; recipes-eval: same test as above |
-| `ctx.sessionManager.saveArtifact(content, tool)` returns an id; `getArtifactPath(id)` finds the file | `format.ts` (`spill`); `report.ts` | contract: `read("artifact://<id>") returns, raw and whole…` |
+| `ctx.sessionManager.saveArtifact(content, tool)` returns an id; `getArtifactPath(id)` finds the file | `host.ts` (`saveArtifact`, `readArtifact`: where the engine keeps a cut result whole, and how `/re report` reads it back) | contract: `read("artifact://<id>") returns, raw and whole…` |
 | `read("artifact://<id>")` in a cell returns that text raw and whole | `recipes.js` (`wholeOutput`) | contract: same test; recipes-eval: `a read cut at the size cap is read back whole…` |
 | Without a session on disk the read fails, with an error rather than other text | `recipes.js` (`lost`: it stops instead of parsing cut JSON) | contract: `a session that is not on disk still hands out artifact ids…`; recipes-eval: `when the whole of a cut read cannot be had…` |
-| A tool result of at most 50 KB reaches the cell uncut | `format.ts` (its cap is meant to be the only one) | contract: `a result whose text is at most tools.artifactSpillThreshold…`, `one byte more…` |
+| A tool result of at most 50 KB reaches the cell uncut | the engine's cap on a result's body, 48 KiB (`engine/util.lisp`, `+max-octets+`), which is meant to be the only cut | contract: `a result whose text is at most tools.artifactSpillThreshold…`, `one byte more…` |
 | `read xd://<name>` documents a mounted tool; `tools.xdev` off changes nothing for cells | SKILL.md; README | contract: `read("xd://") lists the mounted devices…`, `off, the same tools are listed top-level…` |
 
 The Python script, `skills/re-triage/recipes.py`, stands on the same bridge
@@ -687,14 +690,14 @@ and on these besides, all from [The Python kernel](#the-python-kernel):
 | `tool.<name>()` answers a coroutine that gives a `str` or a `dict` of `text` and `details` | `recipes.py` (`observe`) | contract: `tool.<name>(args) answers a coroutine; awaited…` |
 | A tool that throws raises `RuntimeError` with its message; an `isError` result comes back with `hasError` | `recipes.py` (`observe` raises on it); every `omp-re: …` refusal reaching a Python cell | contract: `a tool that throws raises RuntimeError…`; recipes-eval: `with no binary open every recipe fails…` (Python) |
 | A coroutine can be run to its end on another thread under a copy of the cell's context, and only under one | `recipes.py` (`settled`: what lets a recipe be a plain function) | contract: `a tool call can be settled from a plain function on another thread…` |
-| `%load skill://re-triage/recipes.py` runs the file in the cell namespace; the output is what it printed | `recipes.py` (its last line prints the "recipes loaded" message); SKILL.md | contract: `%load skill://<name>/<path> runs a Python file…`; recipes-eval: same test as the first row |
+| `%load skill://re-triage/recipes.py` runs the file in the cell namespace; the output is what it printed | `recipes.py` (it prints the "recipes loaded" message as it finishes loading); SKILL.md | contract: `%load skill://<name>/<path> runs a Python file…`; recipes-eval: same test as the first row |
 | `read("artifact://<id>")` is synchronous and returns the text whole; without a session on disk it raises | `recipes.py` (`whole_output`, `lost`) | contract: `read("artifact://<id>") is synchronous in Python…`, `in a session that is not on disk…`; recipes-eval: `a read cut at the size cap is read back whole … by Python's read()`, `when the whole of a cut read cannot be had, the Python recipe stops…` |
 | A value is shown by its `__repr__` | `recipes.py` (`Report`: a report left as a cell's value reads as its text) | contract: `a string left as a cell's last expression is shown as its repr…`; recipes-eval: `a report is text…` |
 | A line beginning with `%` is a magic even inside brackets | `recipes.py` (no line starts with a format's `%`) | contract: `a line that begins with % is rewritten as a magic…` |
 | A timed-out Python cell is interrupted and the namespace kept | nothing depends on it; it is why `omp_re` outlives a recipe that ran out of time | contract: `a Python cell past its deadline is interrupted, not killed…` |
 
-Three host behaviours the plugin is exposed to and does nothing about. They are
-pinned so that they stay known:
+Two host behaviours the plugin is exposed to and does nothing about, and one it
+keeps clear of. They are pinned so that they stay known:
 
 - **A JavaScript cell that outlives its deadline takes `re` with it.** (A
   Python one is interrupted instead; see [The deadline in
@@ -703,12 +706,12 @@ pinned so that they stay known:
   killed…`, `time spent inside tool.<name>() counts toward the deadline…`
 - **An interrupted cell does too.** contract: `aborting a cell kills the kernel
   too…`
-- **A result within 50 KB of text is the plugin's to keep under.**
-  `format.ts` caps the *body* at 50 KiB and then adds a header line and a
-  truncation note, which puts a capped multi-line result just over omp's
-  threshold; omp then cuts 10 KB from its middle and appends a second note
-  naming a second artifact. Seen with `pd 3000 @ main` on `/bin/ls`; not pinned
-  here, since it is this plugin's arithmetic and not the host's.
+- **A result within 50 KB of text is the plugin's to keep under.** The engine
+  caps a result's *body* at 48 KiB, so that the header line, the truncation
+  note and the evidence tag it adds stay under omp's threshold. (With the cap
+  at 50 KiB a cut result went just over, and omp cut its middle out a second
+  time and named a second artifact.) Held by the group "a long read through
+  omp's eval is cut once" in `test/recipes-eval.test.ts`.
 
 ## Open questions
 

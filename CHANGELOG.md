@@ -6,6 +6,146 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: one engine, and under omp it needs SBCL.** omp-re had two
+  engines: TypeScript for omp, Common Lisp for nodecode. The TypeScript one is
+  gone. The Lisp engine (`engine/`, ASDF system `omp-re`) now serves both
+  hosts: inside the organism under nodecode, and under omp as one SBCL child
+  process for the whole omp process, spoken to over its standard input and
+  output (`docs/engine-protocol.md`). **Under omp you must now install SBCL
+  and the cl-ppcre library** (`apt install sbcl cl-ppcre` on Debian and
+  Ubuntu; `docs/install.md` for macOS and Windows). Without them the
+  extension does not load, and the error says what to install.
+  `OMPRE_SBCL_PATH` names an SBCL that is not on `PATH`. The first omp start
+  after an install or upgrade compiles the engine (a few seconds); later
+  starts take a fraction of a second. Linux is what was run; Windows and
+  macOS are written for and were not run.
+- **`/re help` and bare `/re`** print the engine's list, one line per
+  subcommand with its description, then one line of keys, in place of the
+  fixed two-column text.
+- **`/re functions`, `strings`, `imports`, `evidence` and `findings` under
+  `omp -p`** print the engine's lists (`name  addr · size`, and so on), ending
+  `… cut at 4000 characters; read the rest with rizin_command` when cut. They
+  were labels only, silently sliced.
+- **`/re open` always answers** `Binary opened: <path>`, with what was
+  re-applied and what could not be under it. It was silent unless annotations
+  were replayed.
+- **`/re cite <id>` in the terminal UI** says `Evidence <id> is in your
+  draft.` as it fills the editor.
+- **An id typed by hand** (`/re evidence`, `/re cite`, `/re findings`) must be
+  the whole id or a unique prefix of at least 6 characters, under both hosts.
+  The first match of any prefix was taken before. A short or ambiguous one is
+  refused in words (`… is too short (use at least 6 characters of the id)`,
+  `… is ambiguous (N matches)`).
+- **`/re status` under omp** follows the engine's order (rizin, binary,
+  debugger, evidence, annotations, findings, audit log) and gains the lines
+  nodecode already had: `CHANGED ON DISK since it was opened` and `the file is
+  no longer readable there`.
+- **With no binary open under omp**, a panel and a tool say the same thing:
+  `omp-re: no binary open — use /re open <path>, open_binary, or --binary
+  <path> first`.
+- **Progress** reads `rizin: analyzing <name>… Ns`, the same text in the
+  footer and in the tool's partial result.
+- **Aborting a call** is answered by the engine at its next wait: `omp-re:
+  rizin command "<line>" aborted`, or `omp-re: the call aborted` for one still
+  queued. The session goes on, and rizin keeps its analysis.
+- **The audit log under omp** gets a call's line when the call runs, not
+  before approval. A call the approval gate denied has only the gate's
+  decision; a call refused by `/re off` or by its schema has no line.
+- **Tool schemas under omp** are the engine's JSON Schema. Length bounds
+  (claim, reason, the number of evidence ids or commands) are no longer in
+  the schema: the engine refuses in its own words. An unknown member of
+  `rizin_debug`'s `run` is refused (`… is not a supported rz-run setting`)
+  where it was dropped silently.
+- **A tool result's `details`** no longer has `summary`, `header` or
+  `decompiler`, and gains `evidenceId` and `artifactPath`. The `[evidence …]`
+  tag is the last line of the result's one text block; the text `eval` sees
+  is unchanged.
+- **A transcript card** takes its header from the first line of the result
+  text.
+- **Completion after `/re cite` and `/re evidence`** offers up to 200 evidence
+  ids, not all of them.
+- **The debugger's launch warning** is in the result text only, no longer
+  also a notification.
+- **A support audit whose side turn failed** records why (`the audit side
+  turn failed: …`) where it said only `unaudited`.
+- **The `/re` command's description** in omp lists the subcommand names.
+- **nodecode: object arguments are written as lists, not text.**
+  `rizin_debug`'s `run` and `attach` and `adopt_finding`'s `commands` were JSON
+  text or `"pdf @ x"` strings; they are now `:attach '(:pid 1234)` and
+  `:commands '((:command "pdf" :addr "main"))`, and the string forms are
+  refused. `(re:doc …)` shows them that way.
+- **nodecode: `(re:status)` signals `RE-ERROR`** when it fails, where it
+  returned the failure as text.
+- **nodecode: `/re help`, `status`, `on` and `off`** answer at once while
+  another call holds the session.
+- **nodecode: `(re:slash …)` is refused while `/re off`,** as a tool call is:
+  a line from `eval` is the model's. The operator's typed lines are not gated.
+- **A setting has one precedence rule**: the `re` section's value when it says
+  something other than the default, else the environment variable, else the
+  default. `state_dir` now shows its real default, `omp-re/`.
+- **Tool and subcommand names are normalised**, so `Open-Binary` is
+  `open_binary`.
+- `test:nodecode` is now `test:engine` (it runs the whole engine's suite) and
+  `gen:nodecode` is `gen:recipes`; `check:recipes` and `check:versions` are
+  new. CI is one Linux job that installs SBCL, cl-ppcre and rizin and runs
+  the type check, both generator checks, the engine loaded alone, the Lisp
+  suite and the bun suites; the cross-OS workflow is a Windows job that runs
+  what can run there (not the Lisp suite).
+- `scripts/release.mjs` writes the version to all three `.asd` files, and
+  `--check-versions` fails when the five files that carry it disagree.
+
+### Added
+
+- **`OMPRE_ALLOWED_DIRS` under omp.** The directory allow-list the nodecode
+  cell had now applies to omp as well: `open_binary`, `/re open`, `map_file`,
+  YARA rules and `/re carry --against` open only files under the listed
+  directories, links resolved first. (A FLIRT file given to
+  `apply_signatures` is not checked against it: rizin opens that path
+  itself.)
+- **Relative paths and `~/` wherever the engine opens a file.** `open_binary`,
+  `map_file`, YARA rules, a carry manifest, `--against`, and the paths
+  `/re report` and `/re carry --out` write are read against the session's
+  directory, where only `/re open` was. A path with spaces in `/re open` is no
+  longer collapsed.
+- **An engine that dies is replaced.** Under omp the next call starts another
+  engine process and each session comes back from its record. `/re off` is
+  held in memory, so a replaced engine starts with the tools on.
+- **Fail-closed record lookups.** When the host cannot say which branch a
+  session is on, the call is refused; when it cannot say which turn an entry
+  belongs to, the entry is not written.
+- `docs/engine-protocol.md`: the messages between omp and the engine.
+  `docs/ARCHITECTURE.md` is rewritten around the engine, the port a host
+  answers and the two hosts.
+
+### Removed
+
+- The TypeScript engine (33 modules under `extensions/re`) and its 22 unit
+  test files; what they held is held by the Lisp suite, and `extensions/re`
+  is five files that register what the engine describes and draw what it
+  sends.
+- `scripts/gen-nodecode-policy.ts` and `test/nodecode-parity.test.ts`. There
+  is one copy of the read-only command policy now
+  (`engine/policy-data.lisp`), so nothing is generated from another and
+  there are no two engines to compare.
+
+### Fixed
+
+- **`/re status` called a signed audit log unsigned** when
+  `OMPRE_AUDIT_HMAC_KEY` was only whitespace: the lines were signed with it.
+  The status now says HMAC-SHA256.
+- **`Re-applied N of M annotation(s)` on open** subtracted other layers'
+  failures from N. It counts annotations only, and a mapped file, analysis
+  pass or signature file that could not be put back is listed under its own
+  name; the notice after a respawn names each layer too, where it called all
+  of them annotations.
+- **Evidence rows with no tool or summary** are left out of `/re evidence`,
+  the status count and the address index.
+- A cut result whose whole text could not be saved ends `Full output was
+  larger.` in place of advice to narrow with paging parameters that no longer
+  exist.
+
 ## [0.10.0] - 2026-11-10
 
 ### Added

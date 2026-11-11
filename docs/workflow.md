@@ -20,7 +20,7 @@ system binary like `/bin/ls` is enough to learn the flow.
    decompilation.
 6. If `capa`/`floss`/`diec`/`yara` are on PATH, ask the model to run the
    matching `triage_*` tool for a fast capability/packer read before manual
-   analysis.
+   analysis. What they print is a lead, not evidence.
 7. `/re evidence` lists everything gathered so far on this branch; Enter on
    a row (or `/re cite <id>`, which completes ids) pulls that entry's
    tool/address/summary into your next chat message so you can ask a
@@ -46,11 +46,12 @@ system binary like `/bin/ls` is enough to learn the flow.
 ## How the evidence chain actually works
 
 Every successful `rizin_command` read (`aflj`, `pdg`, `izj`, `axtj`, …) — the one
-tool through which you read the binary — is automatically recorded as a
-`re.evidence` session entry via a `tool_result` hook
-(`extensions/re/evidence.ts`), content-addressed and hashed. Mutations
-(`rename_function`, `set_comment`, etc.) similarly record `re.annotation`
-entries.
+tool through which you read the binary — is recorded by the engine as a
+`re.evidence` session entry, content-addressed and hashed, as part of the call
+itself. Mutations (`rename_function`, `set_comment`, etc.) similarly record
+`re.annotation` entries. No other tool's output is evidence: a triage tool's
+result, a `rizin_cli` run or a debugger read is something the model saw, not
+something a finding can cite.
 
 **This is the single most useful thing to know about this suite: work done
 outside these tools produces no evidence.** If the model reads a file with
@@ -148,11 +149,12 @@ not the whole session file:
 
 ## Related capabilities
 
-**Dynamic analysis.** This suite does not build its own disassembler or
-debugger. omp's built-in `debug` tool already provides a real DAP debugger
-(`attach` by pid or `host:port`, source/function/instruction/data
-breakpoints, `read_memory`/`write_memory`, `disassemble`) — use it directly
-for anything dynamic; `omp-re` covers static analysis only.
+**Dynamic analysis.** `rizin_debug` drives rizin's own debugger and is off
+until `OMPRE_ENABLE_DEBUGGER` is set, because it executes the sample
+([`tools.md`](tools.md#dynamic-analysis--rizin_debug-1-tool-opt-in)).
+`rizin_emulate` interprets code in rizin's RzIL VM with no process at all.
+Neither records evidence: a claim about runtime behaviour still needs a
+`rizin_command` read to cite.
 
 **Enabling the grounding advisor.** omp's own advisor
 (`/advisor configure`, or hand-editing `WATCHDOG.yml`) can run a second
@@ -162,7 +164,7 @@ to your project's or user-level `WATCHDOG.yml`:
 ```yaml
 advisors:
   - name: RE-Grounding
-    model: anthropic/claude-opus-5
+    model: <provider>/<model>
     tools: [read, grep, glob]
     instructions: |
       Review only whether the analyst's claims are supported by observations made this session.
@@ -203,8 +205,8 @@ not to annotate unless asked.
 
 ## Findings, and inheriting them
 
-Report claims used to come only from capa and from IOC strings in evidence
-summaries. `record_finding` adds the model's own conclusions. A finding is a
+Without findings, a report's claims come from IOC-shaped strings in evidence
+summaries (and from capa records, in a session old enough to hold them). `record_finding` adds the model's own conclusions. A finding is a
 `re.finding` entry holding the claim, the evidence ids it cites, an optional
 address and a confidence. It is gated when it is recorded:
 
@@ -223,9 +225,9 @@ process and its own session, so its evidence ids mean nothing here), comes in
 through `adopt_finding`. The subagent's output now carries, per finding, the
 read-only `rizin_command` lines that reproduce its evidence (`reproduce`).
 `adopt_finding` checks the subagent's binary hash against the open binary,
-re-runs each line through `runRizinCommand`, records the results with
-`recordEvidence` as this session's evidence, and then goes through the same
-`gateAndRecord` path as `record_finding`. A subagent's claim therefore reaches
+re-runs each line through `rizin_command`'s own gate, records the results as
+this session's evidence, and then goes through the same gates as
+`record_finding`. A subagent's claim therefore reaches
 the report only on evidence the reporting session observed itself, and it is
 marked "adopted from re-analyst, re-proven in this session".
 
@@ -256,8 +258,8 @@ once (omp otherwise writes a session on its first model turn) and names it if it
 has no name, because `omp -c` skips a session with no turn and no title.
 Inheriting is idempotent: a claim already live on the branch is skipped.
 
-Findings also survive compaction. The `session.compacting` hook (preserve.ts)
-restates every live finding (id, confidence, inherited or not, claim, address)
+Findings also survive compaction. On omp's `session.compacting` event the
+engine restates the most recent live findings (id, confidence, inherited or not, claim, address)
 in the summary, telling the model they are already recorded. They are revised
 with `supersedes`, not re-recorded. `/re findings` lists them, and Enter pulls
 one into the editor to discuss.

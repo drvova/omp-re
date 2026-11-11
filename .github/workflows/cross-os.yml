@@ -1,31 +1,39 @@
 name: Cross-OS
 
-# Runs the suites with SBCL and rizin installed on Linux and Windows, so the
-# OS-specific paths — starting and ending the engine process, rizin's pipe,
-# the debugger, PE format handling — are exercised on the real OS. Both legs
-# run the bun suites, which drive the engine through the extension. The Lisp
-# suite runs on Linux only: its harness sets up processes with POSIX calls.
+# The Windows leg. ci.yml is the Linux one and runs everything; this runs what
+# can run on Windows today, on a hosted Windows runner:
 #
-# macOS was dropped from the matrix. Its one unique value — the debugger —
-# can't run on a hosted macOS runner (rizin's Darwin backend needs
-# task_for_pid, refused to a non-root, un-codesigned rizin). With the debugger
-# gated off the leg still wedged `bun test` for ~20 min for a reason that
-# could not be diagnosed from CI — a timed-out job is *cancelled*, and GitHub
-# archives no downloadable log for a cancelled job, so the hang point was
-# never visible. The remaining macOS coverage (Mach-O static analysis)
-# overlaps Linux's ELF coverage.
+#   - the type check;
+#   - system omp-re loaded in a plain SBCL;
+#   - the bun suites, which load the extension through omp's SDK and so start
+#     the engine process, drive rizin over its pipe, and open a PE.
 #
-# Install notes: rizin on Linux is the portable static release tarball (no
-# .deb exists), on Windows the rizin-windows-shared64 release zip; both pinned
-# to v0.9.1. SBCL is the distribution's package on Linux and Chocolatey's on
-# Windows. cl-ppcre is the distribution's package on Linux; on Windows its
-# source is cloned to ~/common-lisp/, where ASDF looks. clang builds the
-# fixture PE on Windows.
+# It does not run the Lisp suite (test/nodecode/run.lisp): the suite's harness
+# and its stand-in programs are POSIX (sb-posix, /bin/sh scripts). Three tests
+# of test/shim.test.ts that use a shell-script stand-in for the engine skip
+# themselves on Windows too.
+#
+# This leg was written with the engine's move to Common Lisp and had not been
+# seen to pass when it was written. A red run here is information about
+# Windows, not a flake to retry: docs/testing.md lists what is unproven.
+#
+# There is no macOS leg. An earlier one wedged `bun test` for ~20 minutes for a
+# reason that could not be read from CI (a timed-out job is cancelled, and
+# GitHub keeps no log for a cancelled job), and rizin's debugger cannot run on
+# a hosted macOS runner (its Darwin backend needs task_for_pid, refused to an
+# unsigned rizin that is not root). Nothing in CI runs omp-re on macOS.
+#
+# Install notes: rizin is the rizin-windows-shared64 release zip, pinned.
+# SBCL is Chocolatey's package; a later step does not see what an installer
+# added to the machine's PATH, so the step that installs it also puts its
+# folder on GITHUB_PATH and sets SBCL_HOME. cl-ppcre is cloned to
+# ~/common-lisp/cl-ppcre, one of the places ASDF looks by default. clang
+# builds the fixture PE.
 #
 # Never add a malware sample here — the fixture is a trivial program built from
 # test/fixtures/sample.c on the runner.
 #
-# Runs on every push to main (alongside the fast ci.yml) and on manual dispatch.
+# Runs on every push to main (alongside ci.yml) and on manual dispatch.
 
 on:
   workflow_dispatch:
@@ -36,16 +44,10 @@ env:
   RIZIN_VERSION: "0.9.1"
 
 jobs:
-  suite:
-    name: suite (${{ matrix.os }})
-    strategy:
-      fail-fast: false # one OS failing must not cancel the other — we want both results
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    # A healthy leg finishes in a couple of minutes; cap it so a wedged run
-    # fails fast and frees the borrowed runner instead of holding it for the
-    # 6-hour default.
+  windows:
+    runs-on: windows-latest
+    # A healthy run takes a few minutes; cap it so a wedged one fails fast
+    # instead of holding the runner for the 6-hour default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -53,34 +55,17 @@ jobs:
         with:
           bun-version: "1.3.14"
 
-      # --- install SBCL and cl-ppcre: the engine ---
-      - name: Install SBCL and cl-ppcre (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
-
-      - name: Install SBCL and cl-ppcre (Windows)
-        if: runner.os == 'Windows'
+      - name: Install SBCL and cl-ppcre
         shell: pwsh
         run: |
           choco install sbcl -y --no-progress
+          $exe = Get-ChildItem -Path $env:ProgramFiles -Filter sbcl.exe -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "sbcl.exe was not found under $env:ProgramFiles after the install" }
+          $exe.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "SBCL_HOME=$($exe.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           git clone --depth 1 --branch v2.1.1 https://github.com/edicl/cl-ppcre "$HOME\common-lisp\cl-ppcre"
 
-      - name: The engine loads alone
-        # No string in the forms: the two legs' shells quote differently.
-        run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames (string-downcase :omp-re.asd) (uiop:getcwd)))' --eval '(asdf:load-system :omp-re)'
-
-      # --- install rizin v0.9.1 (there is no .deb in the release) ---
-      - name: Install rizin (Linux, portable static build)
-        if: runner.os == 'Linux'
-        run: |
-          set -eux
-          curl -fsSL "https://github.com/rizinorg/rizin/releases/download/v${RIZIN_VERSION}/rizin-v${RIZIN_VERSION}-static-x86_64.tar.xz" -o /tmp/rizin.tar.xz
-          mkdir -p "$HOME/rizin" && tar -xJf /tmp/rizin.tar.xz -C "$HOME/rizin"
-          # Add whatever directory holds the rizin binary (layout-agnostic).
-          dirname "$(find "$HOME/rizin" -type f -name rizin | head -1)" >> "$GITHUB_PATH"
-
-      - name: Install rizin (Windows, release zip)
-        if: runner.os == 'Windows'
+      - name: Install rizin (release zip)
         shell: pwsh
         run: |
           $url = "https://github.com/rizinorg/rizin/releases/download/v$env:RIZIN_VERSION/rizin-windows-shared64-v$env:RIZIN_VERSION.zip"
@@ -90,41 +75,33 @@ jobs:
           $exe = Get-ChildItem -Path "$HOME\rizin" -Filter rizin.exe -Recurse | Select-Object -First 1
           $exe.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Show rizin version
-        run: rizin -v
-
-      # --- build the test fixture (a binary with main, locals, calls, a string) ---
-      # The default /bin/ls fixture is absent on Windows, so each OS compiles
-      # test/fixtures/sample.c and points OMPRE_TEST_BINARY at it. Ground truth
-      # is still read from rizin at runtime.
-      - name: Build fixture (Linux)
-        if: runner.os == 'Linux'
+      - name: Show tool versions
+        shell: pwsh
         run: |
-          cc -o fixture test/fixtures/sample.c
-          echo "OMPRE_TEST_BINARY=$PWD/fixture" >> "$GITHUB_ENV"
+          bun --version
+          sbcl --version
+          rizin -v
 
-      - name: Build fixture (Windows)
-        if: runner.os == 'Windows'
+      # /bin/ls, the suites' default fixture, does not exist here. Ground truth
+      # is still read from rizin at run time.
+      - name: Build fixture
         shell: pwsh
         run: |
           clang test/fixtures/sample.c -o fixture.exe
           "OMPRE_TEST_BINARY=$PWD\fixture.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - run: bun install --ignore-scripts
-      - run: bun run check
 
-      # The debugger's attach-by-pid check attaches to a process that is not a
-      # child of rizin; hosted Linux runners default to
-      # kernel.yama.ptrace_scope=1, which forbids attaching to a non-descendant.
-      - name: Allow ptrace attach by PID (Linux)
-        if: runner.os == 'Linux'
-        run: sudo sysctl -w kernel.yama.ptrace_scope=0
+      - name: Type check
+        run: bun run check
 
-      - name: The Lisp suite (Linux)
-        if: runner.os == 'Linux'
-        run: sbcl --non-interactive --load test/nodecode/run.lisp
+      - name: The engine loads alone
+        shell: pwsh
+        # No string in the forms, so no quote has to survive the shell.
+        run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames (string-downcase :omp-re.asd) (uiop:getcwd)))' --eval '(asdf:load-system :omp-re)'
 
       # No OMPRE_ENABLE_DEBUGGER here: extension-sdk.test.ts asserts the
-      # default-off behavior and switches it on itself where it tests the
+      # default-off behaviour and switches it on itself where it tests the
       # debugger.
-      - run: bun test
+      - name: The bun suites
+        run: bun test test/

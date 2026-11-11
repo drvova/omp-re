@@ -45,7 +45,8 @@ families and the other tools), and `rizin_help` to look up a command's arguments
   its own so a loss costs one call. rizin and its analysis survive a killed
   cell; only what eval held is gone.
 - `eval`, `xd://`, and top-level calls are the same tool calls: each is
-  recorded as evidence, audited, and approved the same way.
+  approved and audited the same way, and a `rizin_command` read is recorded as
+  evidence whichever way it was made.
 
 ## Recipes
 
@@ -95,8 +96,9 @@ evidence id behind it, and `/re report` withholds the **entire** report if any
 claim in it is unbacked. Get findings through the tools.
 
 When you reach a conclusion, record it with `record_finding`: the claim, stated
-as narrowly as the evidence supports, plus the evidence ids behind it (every RE
-tool result ends with an `[evidence xxxxxxxx]` tag; cite those 8 characters). That is how a conclusion
+as narrowly as the evidence supports, plus the evidence ids behind it (every
+`rizin_command` result ends with an `[evidence xxxxxxxx …]` tag; cite those 8
+characters — no other tool's result is evidence). That is how a conclusion
 gets into the report. A finding is refused if an id doesn't resolve or the
 support auditor judges the claim more than the evidence shows. Read the reason,
 then narrow the claim or gather better evidence. Prefer `rizin_command` evidence
@@ -146,8 +148,9 @@ installed rizin.
    or `pdd @ <fn>` (jsdec). If neither plugin is installed those error — fall
    back to `pdf @ <fn>` (annotated disassembly) and say it is disassembly, not
    decompiled C, before drawing behavioural conclusions.
-6. `triage_capa` when it is registered — the only source that grounds ATT&CK and
-   verdict claims.
+6. `triage_capa` when it is registered, for a fast read of capabilities and
+   ATT&CK techniques. Its result is a lead, not evidence: confirm what it
+   points at with `rizin_command` before a finding cites it.
 
 A triage tool exists only when its binary was on PATH at load: `triage_capa`
 needs `capa`, `triage_floss` needs `floss`, `triage_die` needs `diec`,
