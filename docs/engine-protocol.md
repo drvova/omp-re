@@ -214,4 +214,4 @@ Anything else is answered with a status and `{"error": "<why>"}`: 401 without th
 
 **Which session.** omp keys a kernel by the session's file and directory, or by the directory alone for a session with no file, and that is all a kernel knows. So a request is for the session of this omp process that has that file — or, with no file, the one session without a file that works in that directory. None is a refusal; so are two, which share the kernel: nothing in a request says which of them a cell belongs to.
 
-**Giving up.** A kernel that stops waiting closes its connection: a JavaScript kernel is killed when its cell times out or is interrupted, a Python cell is interrupted inside the call. omp's side then sends the engine `cancel` for that request. It does the same for a request still open when omp says the `eval` call that made it is over.
+**Giving up.** A kernel that stops waiting closes its connection: a JavaScript kernel is killed when its cell times out or is interrupted, a Python cell is interrupted inside the call. omp's side then sends the engine `cancel` for that request. A cell that merely ended, or that omp moved to the background, cancels nothing.

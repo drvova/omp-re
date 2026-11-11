@@ -323,7 +323,9 @@ wrote. *read; the experiment that showed it works is not in the suite*
 
 `tool_execution_start` and `tool_execution_end` are the agent loop's events
 and do not fire when the tool is executed directly, as the suites do. omp-re
-listens for the second as well as `tool_result`, to know a cell is over.
+listens for the second as well as `tool_result`, to stop counting requests
+under an `eval` call that is over; it cancels nothing then, since with
+`eval.autoBackground` on a cell answers its call and runs on.
 *read; not seen in a model's turn*
 
 ### How a cell is approved

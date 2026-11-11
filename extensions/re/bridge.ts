@@ -141,9 +141,8 @@ export function startBridge(answer: Answer): Bridge {
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
-		// An analysis can be silent for minutes, and the body of a decompile is not small.
+		// An analysis can be silent for minutes: a request is never ended for being quiet.
 		idleTimeout: 0,
-		maxRequestBodySize: 64 * 1024 * 1024,
 		async fetch(request) {
 			if (!authorized(request)) return said(401, { error: "omp-re: this request does not carry the token of omp's listener" });
 			const { pathname } = new URL(request.url);

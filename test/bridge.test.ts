@@ -354,15 +354,16 @@ describe("a cell that stops waiting", () => {
 		});
 	}, 60_000);
 
-	test("a cell that ends without waiting for what it asked leaves nothing running in the engine", async () => {
+	test("a cell that ended without waiting for what it asked cancels nothing: omp may have moved it to the background, where it runs on", async () => {
 		await withStandIn(async () => {
 			const h = await bootLoaded(agentDir());
 			try {
-				// The agent loop says a tool call is over (tool_execution_end); the suites run the tool itself, so it is said here.
-				const cell = runCell(h.session, "js", 'void re.call("stand_in_tool", { addr: "wait" }).catch(() => {}); await new Promise((done) => setTimeout(done, 300)); "left it"', {}, undefined, "cell-left");
+				const cell = runCell(h.session, "js", 'globalThis.pending = re.call("stand_in_tool", { addr: "wait" }).catch((error) => error.message); await new Promise((done) => setTimeout(done, 300)); "left it"', {}, undefined, "cell-left");
 				expect((await cell).text).toBe("left it");
+				// The agent loop says a tool call is over (tool_execution_end); the suites run the tool itself, so it is said here.
 				await h.session.extensionRunner!.emit({ type: "tool_execution_end", toolName: "eval", toolCallId: "cell-left", sessionId: h.session.sessionManager.getSessionId() } as never);
-				expect(await comesTo(h, { asked: 1, cancels: 1 })).toEqual({ asked: 1, cancels: 1 });
+				await Bun.sleep(300);
+				expect(await cancelled(h)).toEqual({ asked: 1, cancels: 0 });
 			} finally {
 				await h.shutdown();
 			}

@@ -25,8 +25,6 @@ interface Session {
 	onState?: (ctx: ExtensionContext, state: State) => void;
 	/** The `eval` call omp is running for the session, and how many requests its cell has made: what the audit log names each by. */
 	cell?: { toolCallId: string; requests: number };
-	/** What hangs up on the requests of the session's kernels that are still open. */
-	open: Set<AbortController>;
 }
 
 /**
@@ -96,7 +94,7 @@ export function sessionOf(pi: ExtensionAPI, ctx: ExtensionContext, onState?: Ses
 		known.pi = pi;
 		if (onState) known.onState = onState;
 	} else {
-		known = { pi, ctx, state: { band: null }, onState, open: new Set() };
+		known = { pi, ctx, state: { band: null }, onState };
 		sessions.set(id, known);
 	}
 	return { id, cwd: ctx.cwd };
@@ -247,7 +245,12 @@ export function engine(): Engine {
 /** omp loaded the extension into a session: the engine and the listener are kept until `leaveSession` has ended every one of them. */
 export function enter(pi: ExtensionAPI): void {
 	instances.add(pi);
-	shared.listening ??= outside.listen(answerKernel);
+	try {
+		shared.listening ??= outside.listen(answerKernel);
+	} catch (error) {
+		// Without a listener no cell reaches the engine, and each that tries is told it found none. The session itself goes on.
+		outside.log(error instanceof Error ? error.message : String(error));
+	}
 }
 
 // --- what a cell of omp's eval asks ----------------------------------------------------------------
@@ -293,27 +296,20 @@ function sessionOfKernel(kernel: Kernel): Session {
 	return served[0]!;
 }
 
-/** Answer one request a kernel made through the listener. Hanging up cancels the engine's work on it. */
+/** Answer one request a kernel made through the listener. `hungUp` aborts when the kernel stops waiting — its cell timed out or was interrupted — and that cancels the engine's work on it. */
 async function answerKernel(method: BridgeMethod, kernel: Kernel, body: JsonObject, hungUp: AbortSignal): Promise<Json> {
 	const session = sessionOfKernel(kernel);
 	if (method === "whoami") return { bridge: CONSTANTS.bridgeVersion };
-	const over = new AbortController();
-	const signal = AbortSignal.any([hungUp, over.signal]);
-	session.open.add(over);
-	try {
-		if (method === "command") {
-			if (typeof body.line !== "string") throw new Refusal(400, "omp-re: a line is a string");
-			const { text, failed } = await ask(session.pi, session.ctx, "command", { line: body.line }, signal);
-			return { text, failed };
-		}
-		const args = body.arguments ?? {};
-		if (typeof body.name !== "string" || args === null || typeof args !== "object" || Array.isArray(args)) throw new Refusal(400, "omp-re: a call names a tool with a string and gives its arguments as one object");
-		const callId = session.cell && `${session.cell.toolCallId}#${++session.cell.requests}`;
-		const { text, failed, refused, raw, evidence } = await ask(session.pi, session.ctx, "call", { name: body.name, arguments: args, ...(callId ? { callId } : {}) }, signal);
-		return { text, failed, ...(refused ? { refused } : {}), ...(raw === undefined ? {} : { raw }), ...(evidence === undefined ? {} : { evidence }) };
-	} finally {
-		session.open.delete(over);
+	if (method === "command") {
+		if (typeof body.line !== "string") throw new Refusal(400, "omp-re: a line is a string");
+		const { text, failed } = await ask(session.pi, session.ctx, "command", { line: body.line }, hungUp);
+		return { text, failed };
 	}
+	const args = body.arguments ?? {};
+	if (typeof body.name !== "string" || args === null || typeof args !== "object" || Array.isArray(args)) throw new Refusal(400, "omp-re: a call names a tool with a string and gives its arguments as one object");
+	const callId = session.cell && `${session.cell.toolCallId}#${++session.cell.requests}`;
+	const { text, failed, refused, raw, evidence } = await ask(session.pi, session.ctx, "call", { name: body.name, arguments: args, ...(callId ? { callId } : {}) }, hungUp);
+	return { text, failed, ...(refused ? { refused } : {}), ...(raw === undefined ? {} : { raw }), ...(evidence === undefined ? {} : { evidence }) };
 }
 
 /** omp started running an `eval` call for `ctx`'s session: the requests its cell makes are counted under it. */
@@ -323,14 +319,13 @@ export function cellStarted(pi: ExtensionAPI, ctx: ExtensionContext, toolCallId:
 }
 
 /**
- * The `eval` call is over. A request its cell left open has nobody to answer: the kernel's hanging up says so for a
- * cell that timed out or was interrupted, and this says it for one that ended without waiting for what it asked.
+ * The `eval` call is over: a request that still arrives is not counted under it. Nothing is cancelled here. A cell
+ * omp moved to the background (`eval.autoBackground`) has answered its tool call and is still running, and the
+ * engine's work for it goes on; a cell that was stopped has hung up, which is what cancels.
  */
 export function cellEnded(ctx: ExtensionContext, toolCallId: string): void {
 	const session = sessions.get(ctx.sessionManager.getSessionId());
-	if (session?.cell?.toolCallId !== toolCallId) return;
-	session.cell = undefined;
-	for (const request of session.open) request.abort();
+	if (session?.cell?.toolCallId === toolCallId) session.cell = undefined;
 }
 
 /** The engine's methods that are about a session. */
@@ -358,7 +353,6 @@ export async function leaveSession(pi: ExtensionAPI, ctx: ExtensionContext, over
 	const id = ctx.sessionManager.getSessionId();
 	const live = shared.running;
 	if (live) await ask(pi, ctx, "event", { kind: over ? "shutdown" : "before-switch" }).catch((error) => outside.log(`leaving session ${id}: ${error instanceof Error ? error.message : String(error)}`));
-	for (const request of sessions.get(id)?.open ?? []) request.abort();
 	sessions.delete(id);
 	if (!over) return;
 	instances.delete(pi);
