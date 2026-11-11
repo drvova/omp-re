@@ -114,7 +114,7 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 		} finally {
 			error.mockRestore();
 			log.mockRestore();
-			process.exitCode = exitCode; // this test's deliberate failure must not fail the test run
+			process.exitCode = exitCode ?? 0; // this test's deliberate failure must not fail the test run
 			await headless.shutdown();
 		}
 	});

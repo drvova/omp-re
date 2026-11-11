@@ -2,11 +2,13 @@ name: Release
 
 # Auto-bump the version on every merge to main, driven by Conventional Commits.
 #
-# scripts/release.mjs inspects the commits that just landed and, if any warrant
-# a release (feat / fix / perf / a breaking change), bumps package.json and
-# .omp-plugin/marketplace.json in lock-step and stamps a dated section in
-# CHANGELOG.md. This job then commits that as `chore(release): vX.Y.Z`, tags it,
-# and pushes both back to main. See CONTRIBUTING.md -> Versioning.
+# scripts/release.mjs inspects the commits that just landed and picks the bump
+# (a breaking change or a feat is a minor bump while the version is 0.x; any
+# other commit is a patch), writes the one version to package.json,
+# .omp-plugin/marketplace.json and the three .asd files, and stamps a dated
+# section in CHANGELOG.md. This job then commits that as
+# `chore(release): vX.Y.Z`, tags it, and pushes both back to main. See
+# CONTRIBUTING.md -> Versioning.
 #
 # No recursion: a push authenticated with the default GITHUB_TOKEN does not
 # trigger further workflow runs, so the release commit/tag this job pushes does
