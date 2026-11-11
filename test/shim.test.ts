@@ -148,7 +148,7 @@ describe("starting the engine", () => {
 describe("the wire, method by method, against a stand-in that holds both sides to stdio/protocol.json", () => {
 	test("everything the engine asks of omp is answered as the protocol says, and done", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const h = await boot(await onDisk());
+			const h = await boot(await onDisk(), { sideModel: (prompt) => `the side model read: ${prompt}` });
 			try {
 				const id = h.session.sessionManager.getSessionId();
 				const wire = await standInSays<Record<string, unknown> & { appended: { id: string } }>(h, "wire");
@@ -163,6 +163,7 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 				expect(wire.readBack).toBe(true);
 				expect(wire.readMissing).toEqual({});
 				expect(wire.kept).toEqual({});
+				expect(wire.judged).toEqual({ text: "the side model read: CLAIM 0: the stand-in asks" });
 				expect(wire.unknownSession).toEqual({ error: 'omp-re: omp has no session "no-such-session"' });
 				expect(wire.unknownMethod).toEqual({ error: 'omp-re: omp has no method "noSuchMethod"' });
 
@@ -593,6 +594,34 @@ describe.skipIf(!canRunRizin)("against rizin", () => {
 			await h.shutdown();
 		}
 	}, 60_000);
+
+	test("the claim audit reaches omp's side model through the real pair: the verdict it gives decides whether a finding is recorded, and a session with no model records it unaudited", async () => {
+		const asked: string[] = [];
+		const audited = await boot(await inMemory(), {
+			sideModel: (prompt) => {
+				asked.push(prompt);
+				return '[{"index": 0, "verdict": "overreach", "reason": "the stand-in says the read shows less"}]';
+			},
+		});
+		const unaudited = await boot(await inMemory());
+		try {
+			const record = (h: SdkHarness) =>
+				evalJs(
+					h.session,
+					`await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })\nconst read = await tool.rizin_command({ command: "ij" })\n${caught('m = (await tool.record_finding({ claim: "The file is a program.", evidence: [read.details.evidenceId] })).text')}`,
+				);
+			const refused = await record(audited);
+			expect(refused.text).toStartWith("record_finding: NOT recorded — the support auditor judged this claim overreach: the stand-in says the read shows less\n");
+			expect(asked).toHaveLength(1);
+			expect(asked[0]).toContain("CLAIM 0: The file is a program.");
+			const recorded = await record(unaudited);
+			expect(recorded.text).toMatch(/^record_finding: recorded [0-9a-f]{8}\n/);
+			expect(recorded.text).toContain("support audit: unaudited — no model / side turns unavailable");
+		} finally {
+			await audited.shutdown();
+			await unaudited.shutdown();
+		}
+	}, 90_000);
 
 	test("a real session through the real pair: the band the engine sends is drawn, a list opens as a panel of the binary's own functions, a compaction keeps the binary, and a branch and a tree leave it open", async () => {
 		const h = await boot(await inMemory());

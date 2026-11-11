@@ -71,12 +71,16 @@ run on Windows.
 ## The bun suites — `bun test test/`
 
 The dev dependencies pin omp **18.11.1**, so the host APIs under test are the
-ones `bun install` gives you. No model is called.
+ones `bun install` gives you. No model is called, on any machine: the one
+harness every suite boots a session through (`boot` in `test/helpers.ts`)
+gives the session no model and a side turn of its own, so the claim audit
+finds nobody to ask even where omp has provider credentials. The one test of
+the audit's wiring hands `boot` a stand-in to reply in the model's place.
 
 | File | What it holds |
 | --- | --- |
 | `test/extension-sdk.test.ts` | The extension loaded by omp's real SDK and extension runner, driven the way a session drives it: `/re` lines, the tools through omp's own `eval` (`tool.<name>()`), `--binary`, resume with replay, the debugger's opt-in. It is the suite that catches omp API drift. |
-| `test/shim.test.ts` | omp's end of the pipe. Against `test/stand-in-engine.ts`, a bun script that speaks `stdio/protocol.json` and holds everything omp's side sends to it: no SBCL, an engine that cannot load, dies, speaks another protocol version or never becomes ready; message framing; every method, session event and member of the wire sent once; the status band, the list and code overlays and their keys; a headless run's output; an engine that goes silent, loses a request, dies mid-request or will not leave. Against the real engine: the side model, two sessions on one engine process, an engine killed and replaced with `/re off` kept, the audit log under omp's own call ids, abort, `/re undo`, a session branched, compacted and switched, every approval sentence. |
+| `test/shim.test.ts` | omp's end of the pipe. Against `test/stand-in-engine.ts`, a bun script that speaks `stdio/protocol.json` and holds everything omp's side sends to it: no SBCL, an engine that cannot load, dies, speaks another protocol version or never becomes ready; message framing; every method, session event and member of the wire sent once; the status band, the list and code overlays and their keys; a headless run's output; an engine that goes silent, loses a request, dies mid-request or will not leave. The side turn the audit asks for, on its own. Against the real engine: two sessions on one engine process, an engine killed and replaced with `/re off` kept, the audit log under omp's own call ids, abort, `/re undo`, the claim audit put to a stand-in side model, a session branched, compacted and switched, every approval sentence. |
 | `test/versions.test.ts` | One version in `package.json`, the marketplace entry and the three `.asd` files; `extensions/re/protocol.ts` and the tables of `engine-protocol.md` current with `stdio/protocol.json`. |
 | `test/recipes-eval.test.ts` | The recipes in omp's `eval`, both kernels. With rizin, the same recipes are run by the JavaScript script, the Python script and the Lisp verbs on the same binary and their reports compared whole — every line, evidence ids aside. It also runs `scripts/gen-recipes.ts --check`. |
 | `test/omp-eval-contract.test.ts` | omp itself: one test for each behaviour of omp's `eval` that [`omp-eval.md`](omp-eval.md) describes and omp does not document. It uses a probe extension, not the RE tools. Its first test fails until the page names the installed omp version. |

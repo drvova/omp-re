@@ -15,8 +15,8 @@
  * the result. The model still receives the full text.
  */
 import { highlightCode, type Theme, type ToolRenderResultOptions } from "@oh-my-pi/pi-coding-agent";
-import { Text, type Component } from "@oh-my-pi/pi-tui";
-import { code, span, text } from "@oh-my-pi/pi-tui/native/describe";
+import { code, span, Text, text, type Component } from "@oh-my-pi/pi-tui";
+// The native tool view's types are not in pi-tui's root module; `./tools` is the entry its package.json exports for them.
 import type { NativeToolHead, NativeToolView } from "@oh-my-pi/pi-tui/tools";
 import type { Details, Render } from "./protocol.ts";
 
@@ -34,18 +34,16 @@ import type { Details, Render } from "./protocol.ts";
 export const RE_LOAD_MODE = "discoverable" as const;
 
 /**
- * How the engine says one tool is shown (the protocol's `render`): its title, the argument that names the call's
- * subject (address, query, path), shown after the title, and its body — "json" highlights JSON and stays collapsed,
- * "text" shows plain lines, "none" shows only the header.
+ * `Render` is how the engine says one tool is shown (the protocol's `render`): its title, the argument that names the
+ * call's subject (address, query, path), shown after the title, and its body — "json" highlights JSON and stays
+ * collapsed, "text" shows plain lines, "none" shows only the header.
  */
-type RenderSpec = Render;
 type BodyStyle = Render["body"];
 
 const COLLAPSED_LINES = 6;
 const EXPANDED_LINES = 400;
 /** Error gist length in a native head; the full message goes in the body. */
 const ERROR_GIST_CHARS = 120;
-
 
 interface RenderableResult {
 	content: { type: string; text?: string }[];
@@ -58,12 +56,12 @@ function firstText(result: RenderableResult): string {
 	return block?.text ?? "";
 }
 
-function subjectOf(spec: RenderSpec, args: unknown): string | undefined {
+function subjectOf(spec: Render, args: unknown): string | undefined {
 	const subject = spec.subject && args !== null && typeof args === "object" ? (args as Record<string, unknown>)[spec.subject] : undefined;
 	return typeof subject === "string" && subject.length > 0 ? subject : undefined;
 }
 
-function callLine(spec: RenderSpec, args: unknown, theme: Theme): string {
+function callLine(spec: Render, args: unknown, theme: Theme): string {
 	const parts = [theme.fg("toolTitle", theme.bold(spec.title))];
 	const subject = subjectOf(spec, args);
 	if (subject) parts.push(theme.fg("accent", subject));
@@ -98,7 +96,7 @@ function bodyLines(style: BodyStyle, body: string, theme: Theme): string[] {
 	return body.split("\n").map((line) => theme.fg("toolOutput", line));
 }
 
-function nativeHead(spec: RenderSpec, args: unknown, meta: NativeToolHead["meta"] = []): NativeToolHead {
+function nativeHead(spec: Render, args: unknown, meta: NativeToolHead["meta"] = []): NativeToolHead {
 	const subject = subjectOf(spec, args);
 	return { title: spec.title, ...(subject ? { target: subject } : {}), meta };
 }
@@ -110,7 +108,7 @@ function nativeBody(style: BodyStyle, body: string) {
 }
 
 /** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */
-export function reRenderers(spec: RenderSpec) {
+export function reRenderers(spec: Render) {
 	return {
 		renderCall(args: unknown, _options: ToolRenderResultOptions, theme: Theme): Component {
 			return new Text(callLine(spec, args, theme), 0, 0);

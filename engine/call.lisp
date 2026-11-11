@@ -419,7 +419,8 @@ the call can be paired with it."
   "Run the tool NAME with the JSON object ARGUMENTS in SESSION — a session
 or the id of one => (values TEXT FAILED RAW EVIDENCE-ID ARTIFACT-PATH
 DETAILS). TEXT is what the model reads: for a failure, what went wrong in
-words it can act on. RAW is the tool's second value when it has one — the
+words it can act on. FAILED is T for a result that says it failed and
+:REFUSED for a call that never came to a result (IN-SESSION). RAW is the tool's second value when it has one — the
 whole of what rizin printed, where TEXT may be cut. EVIDENCE-ID is the
 record this call left, whose tag TEXT ends with; ARTIFACT-PATH where all of
 a TEXT that was cut is kept; DETAILS the result's own details object."

@@ -479,15 +479,16 @@ not waited for: THUNK runs beside that call, on what the session holds now."
 (defun act-in-session (session what thunk &key (wait t))
   (handler-case (hold-session (if (stringp session) (find-session session) session) thunk :wait wait)
     (re-error (condition)
-      (values (princ-to-string condition) t))
+      (values (princ-to-string condition) :refused))
     (error (condition)
-      (values (format nil "omp-re: ~a failed: ~a" what condition) t))))
+      (values (format nil "omp-re: ~a failed: ~a" what condition) :refused))))
 
 (defmacro in-session ((session what &key (wait t)) &body body)
   "BODY acting in SESSION — a session or the id of one — with *SESSION*
 bound to it => BODY's values, the first of them the text of an answer. This
 is the one place a refusal becomes text: an RE-ERROR in BODY answers
-(values ITS-WORDS T), and anything else that goes wrong answers the same way
-as `omp-re: WHAT failed: ...'. A failure is an answer, never a signal. WAIT
-as HOLD-SESSION takes it."
+(values ITS-WORDS :REFUSED), and anything else that goes wrong answers the
+same way as `omp-re: WHAT failed: ...'. A failure is an answer, never a
+signal; :REFUSED as its second value is how an answer BODY never came to is
+told from one BODY gave. WAIT as HOLD-SESSION takes it."
   `(act-in-session ,session ,what (lambda () ,@body) :wait ,wait))

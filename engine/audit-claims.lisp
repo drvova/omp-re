@@ -171,7 +171,11 @@ unaudited by itself."
       (t
         (multiple-value-bind (reply why)
             (handler-case (ask-host :judge (build-audit-prompt items))
-              (error () (values nil +no-verdict-reason+)))
+              (error ()
+                ;; A call given up on while the question was out is not an
+                ;; audit that failed: it ends, and nothing is recorded.
+                (check-cancelled "the support audit")
+                (values nil +no-verdict-reason+)))
           (if (not (stringp reply))
               (unaudited (if (plusp (length why)) why +no-judge-reason+))
               (multiple-value-bind (verdicts parsed) (parse-audit-reply reply)

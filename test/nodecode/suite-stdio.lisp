@@ -21,7 +21,7 @@
   (heard '())                           ; (METHOD . PARAMS) of everything the engine sent, newest first
   (records (make-hash-table :test #'equal)) ; session id => list of entries, oldest first
   (artifacts (make-hash-table :test #'equal))
-  (judge nil)                           ; (lambda (prompt)) => reply text, or NIL for nobody to ask
+  (judge nil)                           ; (lambda (prompt)) => reply text, NIL for nobody to ask, :WITHHELD to never answer
   (asked (make-hash-table))             ; request id => its method
   (violations '())                      ; what was said that the protocol does not have
   first-line)
@@ -64,7 +64,9 @@
          (omp-re:obj "id" id)))
       ((string= method "judge")
        (let ((reply (and (omp-judge omp) (funcall (omp-judge omp) (gethash "prompt" params)))))
-         (if reply (omp-re:obj "text" reply) (omp-re:obj))))
+         (cond ((eq reply :withheld) :withheld)
+               (reply (omp-re:obj "text" reply))
+               (t (omp-re:obj)))))
       ((string= method "saveArtifact")
        (let ((id (format nil "~d" (hash-table-count (omp-artifacts omp)))))
          (setf (gethash id (omp-artifacts omp)) (gethash "content" params))
@@ -142,9 +144,10 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                              (push (cons method params) (omp-heard omp)))
                            (when id
                              (let ((result (omp-answer omp method params)))
-                               (conforming (omp "the stand-in answered")
-                                 (omp-re-stdio::conform-result "toHost" method result))
-                               (omp-write omp (omp-re:obj "id" id "result" result))))))))))
+                               (unless (eq result :withheld)
+                                 (conforming (omp "the stand-in answered")
+                                   (omp-re-stdio::conform-result "toHost" method result))
+                                 (omp-write omp (omp-re:obj "id" id "result" result)))))))))))
      :name "omp stand-in reader")
     (omp-ask omp "hello" "protocol" omp-re-stdio:+protocol+ "stateDir" state
                          "variables" (apply #'omp-re:obj "PATH" (uiop:getenv "PATH") variables))
@@ -456,12 +459,14 @@ waits for nothing."
 (if (not *rizin*)
     (format t "  SKIPPED (rizin or ~a is absent)~%" *binary*)
     (let ((omp (start-omp :judge (lambda (prompt)
-                                   (omp-re:json-encode
-                                    (map 'vector (lambda (line)
-                                                   (omp-re:obj "index" (parse-integer line :start 6 :junk-allowed t)
-                                                            "verdict" "supported" "reason" "it says so"))
-                                         (remove-if-not (lambda (line) (eql 0 (search "CLAIM " line)))
-                                                        (omp-re:split-lines prompt)))))))
+                                   (if (search "CLAIM 0: Withheld" prompt)
+                                       :withheld
+                                       (omp-re:json-encode
+                                        (map 'vector (lambda (line)
+                                                       (omp-re:obj "index" (parse-integer line :start 6 :junk-allowed t)
+                                                                "verdict" "supported" "reason" "it says so"))
+                                             (remove-if-not (lambda (line) (eql 0 (search "CLAIM " line)))
+                                                            (omp-re:split-lines prompt))))))))
           (children '()))
       (unwind-protect
            (progn
@@ -513,6 +518,19 @@ waits for nothing."
                         (and (has "record_finding: recorded" text)
                              (omp-heard-of omp "judge" "s1")
                              (eql 30 (gethash "seconds" (first (omp-heard-of omp "judge" "s1")))))))
+               (check "a call omp cancels while the engine waits for omp's own answer ends at once, as aborted, and records nothing"
+                      (let ((findings (band-count (session-state omp "s1") "findings"))
+                            (asking (omp-request omp "call" "session" (session-of "s1") "name" "record_finding"
+                                                 "arguments" (omp-re:obj "claim" "Withheld: main is a function."
+                                                                         "evidence" (vector (subseq id 0 8)))
+                                                 "callId" "call-withheld")))
+                        (wait-until (lambda () (= 2 (length (omp-heard-of omp "judge" "s1")))) 20)
+                        (omp-tell omp "cancel" "id" asking)
+                        (let ((answer (omp-await omp asking 10)))
+                          (and (hash-table-p answer)
+                               (equal "omp-re: the support audit aborted" (gethash "text" answer))
+                               (eq t (gethash "refused" answer))
+                               (eql findings (band-count (session-state omp "s1") "findings"))))))
                (check "/re cite offers the evidence as a draft for the operator's input box"
                       (let ((cite (typed-line omp "s1" (format nil "cite ~a" (subseq id 0 8)))))
                         (and (has (format nil "Re: evidence ~a (rizin_command @ " (subseq id 0 8))

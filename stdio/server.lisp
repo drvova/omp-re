@@ -35,6 +35,7 @@
   directory                             ; where that session works
   has-ui
   (cancelled nil)
+  (waiting nil)                         ; the semaphore its thread sleeps on, while it does: what a cancel wakes
   (seen '()))                           ; the sessions whose record this request has already asked omp for
 
 (defvar *request* nil "The request this thread serves.")
@@ -48,6 +49,26 @@ id for the question: (SEMAPHORE . ANSWER).")
 
 (defvar *asked* 0)
 (defvar *closing* nil "True once the pipe has ended: nobody is left to answer.")
+
+(defun await (semaphore done-p what)
+  "Sleep on SEMAPHORE until DONE-P answers true. Whoever ends the wait some
+other way signals the same semaphore — a cancel of the request this thread
+serves, the end of the pipe — and the wait then leaves with an error naming
+WHAT was waited for. Nothing is polled."
+  (when *request* (setf (request-waiting *request*) semaphore))
+  (unwind-protect
+       (loop
+         ;; Asked before sleeping: a cancel or an end that came before the
+         ;; semaphore was this request's had nothing to signal.
+         (when (funcall done-p) (return))
+         (when *closing* (error "omp is gone"))
+         (check-cancelled what)
+         (sb-thread:wait-on-semaphore semaphore))
+    (when *request* (setf (request-waiting *request*) nil))))
+
+(defun wake (request)
+  (let ((semaphore (request-waiting request)))
+    (when semaphore (sb-thread:signal-semaphore semaphore))))
 
 (defun tell-omp (method &rest members)
   (let ((params (apply #'obj members)))
@@ -65,9 +86,7 @@ error here; so is a question or an answer that is not the protocol's."
     (unwind-protect
          (progn
            (send (obj "id" id "method" method "params" params))
-           (loop until (sb-thread:wait-on-semaphore (car waiting) :timeout 0.1)
-                 do (when *closing* (error "omp is gone"))
-                    (check-cancelled (format nil "asking omp for ~a" method)))
+           (await (car waiting) (lambda () (cdr waiting)) (format nil "asking omp for ~a" method))
            (let ((answer (cdr waiting)))
              (when (jget answer "error")
                (error "~a" (or (jstring answer "error" "message") "omp refused")))
@@ -230,7 +249,8 @@ once that thread holds the session: a call that arrives next waits its turn
 behind the analysis, it does not race it. While another call holds the
 session this waits with the restore, for as long as omp waits for the
 answer."
-  (let ((held (sb-thread:make-semaphore))
+  (let ((turn (sb-thread:make-semaphore))
+        (taken nil)
         (session-id (request-session-id request)))
     (sb-thread:make-thread
      (lambda ()
@@ -242,9 +262,12 @@ answer."
                 (ignore-errors
                  (engine-hold session-id
                               (lambda ()
-                                (sb-thread:signal-semaphore held)
+                                (setf taken t)
+                                (sb-thread:signal-semaphore turn)
                                 (setf answer (engine-restore session-id :open open)))))
-             (sb-thread:signal-semaphore held))
+             ;; A restore that could not have the session ends the wait too.
+             (setf taken t)
+             (sb-thread:signal-semaphore turn))
            (handler-case
                (progn
                  (when (and answer (jstring answer "text"))
@@ -255,8 +278,7 @@ answer."
              (error (condition)
                (format *error-output* "~&omp-re: after restoring ~a: ~a~%" session-id condition))))))
      :name "omp-re restore")
-    (loop until (sb-thread:wait-on-semaphore held :timeout 0.1)
-          do (check-cancelled "restoring the session"))))
+    (await turn (lambda () taken) "restoring the session")))
 
 (defun members-of (object &rest names)
   "OBJECT's members NAMES, those it has: what of an answer of the engine's
@@ -298,7 +320,9 @@ is done in the order it came or on a thread of its own."
 
 (define-method "cancel" (params request)
   (let ((cancelled (gethash (jget params "id") *requests*)))
-    (when cancelled (setf (request-cancelled cancelled) t))))
+    (when cancelled
+      (setf (request-cancelled cancelled) t)
+      (wake cancelled))))
 
 (define-method "shutdown" (params request)
   (throw 'leave nil))
@@ -479,4 +503,10 @@ happens to one message, the next is still read."
                            ;; Nobody waits for a notification's answer: the log has it.
                            (format *error-output* "~&~a~%" condition)))))))))
   (setf *closing* t)
+  ;; Whoever sleeps waiting for omp, or for a turn omp asked for, has nobody left to wait for.
+  (sb-ext:with-locked-hash-table (*answers*)
+    (loop for waiting being the hash-values of *answers*
+          do (sb-thread:signal-semaphore (car waiting))))
+  (sb-ext:with-locked-hash-table (*requests*)
+    (loop for request being the hash-values of *requests* do (wake request)))
   (shutdown-sessions))

@@ -256,7 +256,7 @@
     (check "a /re line inside a held session, too"
            (has "/re status" (omp-re::in-session (id "a composed line") (values (omp-re::run-slash-line id "help")))))
     (check "anything that goes wrong in a session is an answer naming what was being done"
-           (equal '("omp-re: counting failed: lost count" t)
+           (equal '("omp-re: counting failed: lost count" :refused)
                   (multiple-value-list (omp-re::in-session (id "counting") (error "lost count")))))))
 
 (suite "evidence ids")
@@ -314,7 +314,8 @@
               (equal "Path" (omp-re:jstring open "row" "ask")))))
 (check "a call the engine refuses is an answer that failed, with the reason as its text"
        (let ((answer (omp-re:engine-call (fresh-session) "rizin_command" (omp-re:obj "command" "aflj"))))
-         (and (eq t (gethash "failed" answer)) (has "no binary open" (gethash "text" answer)))))
+         (and (eq t (gethash "failed" answer)) (eq t (gethash "refused" answer))
+              (has "no binary open" (gethash "text" answer)))))
 (check "a /re line's answer says how loudly: error when it failed"
        (and (equal "info" (gethash "level" (omp-re:engine-command (fresh-session) "help")))
             (equal "error" (gethash "level" (omp-re:engine-command (fresh-session) "cite")))))
@@ -368,6 +369,11 @@
                          (string= (tagged-evidence (gethash "text" answer))
                                   (subseq (gethash "evidenceId" answer) 0 8))
                          (equal (gethash "evidenceId" answer) (omp-re:jget answer "details" "evidenceId")))))
+           (check "a read rizin answers with an error alone is a result that failed, not a call the engine refused"
+                  (let ((answer (omp-re:engine-call id "rizin_command" (omp-re:obj "command" "pdfj" "addr" "0x1"))))
+                    (and (eq t (gethash "failed" answer))
+                         (not (nth-value 1 (gethash "refused" answer)))
+                         (has "(no output; rizin said:)" (gethash "text" answer)))))
            (multiple-value-bind (data id) (re:json "aflj")
              (check "(re:json) answers the decoded data, whole, and its evidence id"
                     (and (vectorp data) (> (length data) 10)

@@ -69,8 +69,9 @@ asks again rather than keeping the answer."
   {text, failed, refused?, raw?, evidenceId?, artifactPath?, details?}
 TEXT is what the model reads. REFUSED is true when the call never came to a
 result — the tool is off, unknown or mis-called, the session could not be
-had, or its body signalled — as against a result that says it failed. RAW is the whole of what rizin printed, for a
-tool that reads the binary, where TEXT may be cut; EVIDENCE-ID the id of the
+had, or its body signalled — as against a result that says it failed. RAW is
+the whole of what rizin printed, for a tool that reads the binary, where
+TEXT may be cut; EVIDENCE-ID the id of the
 evidence record the call left; ARTIFACT-PATH where all of a TEXT that was
 cut is kept. DETAILS is the result's own, for a host that renders more than
 text: {ea?, truncated?, artifactId?, artifactPath?, commands?, reproHash?,
@@ -80,8 +81,7 @@ CALL-ID is the host's own id for the call, written to the audit log."
       (call-tool session name arguments :call-id call-id)
     (obj "text" text
          "failed" (and failed t)
-         ;; CALL-TOOL answers a result's details, and IN-SESSION none.
-         "refused" (if (and failed (null details)) t :absent)
+         "refused" (if (eq failed :refused) t :absent)
          "raw" (if (stringp raw) raw :absent)
          "evidenceId" (or evidence-id :absent)
          "artifactPath" (or artifact-path :absent)

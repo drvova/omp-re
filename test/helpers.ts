@@ -161,6 +161,24 @@ export interface BootOptions {
 	/** omp settings, isolated from the user's. */
 	settings?: Record<string, unknown>;
 	cwd?: string;
+	/** The session's side model: what it replies to a prompt. Without one the session has no model at all. */
+	sideModel?: (prompt: string) => string | Promise<string>;
+}
+
+/**
+ * No suite calls a model. A session booted on a machine with provider credentials would have one, and the extension
+ * reaches it one way: the side turn the engine's claim audit asks for (host.ts, `askSideModel`), which reads the
+ * session's `model` and calls its `runEphemeralTurn`. Both are replaced here, on every session the harness boots: no
+ * model and a side turn that says so, or the test's own stand-in for both.
+ */
+function isolateFromModels(session: AgentSession, sideModel: BootOptions["sideModel"]): void {
+	Object.defineProperty(session, "model", { get: () => (sideModel ? { provider: "omp-re-test", id: "side-model-stand-in" } : undefined) });
+	Object.defineProperty(session, "runEphemeralTurn", {
+		value: async ({ promptText }: { promptText: string }) => {
+			if (!sideModel) throw new Error("omp-re: the bun suites call no model");
+			return { replyText: await sideModel(promptText) };
+		},
+	});
 }
 
 /** Boot a session through omp's SDK and extension runner, as a mode does. An extension that fails to load rejects with its error. */
@@ -182,6 +200,7 @@ export async function boot(sessionManager: unknown, options: BootOptions = {}): 
 		...(options.settings ? { settings: (sdk as unknown as { Settings: { isolated(overrides: Record<string, unknown>): never } }).Settings.isolated(options.settings) } : {}),
 	});
 	if (extensionsResult.errors.length > 0) throw new Error(extensionsResult.errors.map((failure) => failure.error).join("\n"));
+	isolateFromModels(session, options.sideModel);
 	for (const [name, value] of Object.entries(options.flags ?? {})) session.extensionRunner!.setFlagValue(name, value);
 	if (!options.headless) setToolUIContext(ui as never, false);
 	await initializeExtensions(session, {

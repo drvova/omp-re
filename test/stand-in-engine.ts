@@ -76,10 +76,7 @@ const tell = (method: string, params: Record<string, unknown>) => say({ method, 
 
 const state = (memory: Record<string, unknown> = {}) => ({ band: ["stand-in  ELF64 x86/64  entry 0x1000", "3 fn · 0 findings · 1 evidence"], evidence: [["0a1b2c3d", "rizin_command @ main"]], memory });
 
-/**
- * Everything the engine may ask omp, asked once of `session`, and what omp answered — but for `judge`: omp would put
- * it to whatever model the machine running the suite has configured, and no suite calls a model.
- */
+/** Everything the engine may ask omp, asked once of `session`, and what omp answered. */
 async function askEverything(session: string, request: number): Promise<Record<string, unknown>> {
 	const before = await ask("entries", { session, after: null, count: 0 });
 	const appended = (await ask("append", { session, type: "re.stand-in", data: { n: 1 } })) as { id: string };
@@ -101,6 +98,7 @@ async function askEverything(session: string, request: number): Promise<Record<s
 		readBack: saved.id === undefined ? null : ((await ask("readArtifact", { session, id: saved.id })) as { text?: string }).text === big,
 		readMissing: await ask("readArtifact", { session, id: "no-such-artifact" }),
 		kept: await ask("keepSession", { session, name: "kept by the stand-in" }),
+		judged: await ask("judge", { session, prompt: "CLAIM 0: the stand-in asks", seconds: 30 }),
 		unknownSession: await ask("append", { session: "no-such-session", type: "re.stand-in", data: null }),
 		unknownMethod: await ask("noSuchMethod", { session }),
 	};
