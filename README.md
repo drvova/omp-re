@@ -61,18 +61,21 @@ extensions:
   - /path/to/omp-re/extensions/re
 ```
 
-There is no build step. The TypeScript in `extensions/re` loads natively
-through Bun, and the engine's Lisp is compiled by ASDF when the engine starts:
-an edit to either is picked up on the next omp start. Never use a real home
+There is no build step of yours. The TypeScript in `extensions/re` loads
+natively through Bun, and the engine's Lisp is compiled, and saved as an
+image, when the engine first starts after a change: an edit to either is
+picked up on the next omp start. Never use a real home
 directory in this config (`/path/to/omp-re`, not a machine-specific path).
 
 **SBCL and cl-ppcre are required.** The extension starts the engine with the
 `sbcl` on your `PATH` (or the one `OMPRE_SBCL_PATH` names). Without SBCL, or
 without cl-ppcre where SBCL's ASDF can find it, the extension does not load
 and the error says what to install. The first omp start after an install or an
-upgrade compiles the engine, which takes a few seconds; later starts take a
-fraction of a second. [`docs/install.md`](docs/install.md#sbcl-and-cl-ppcre)
-has the steps for each OS.
+upgrade compiles the engine and saves an image of it, which takes a few
+seconds; later starts run the image and take a few milliseconds. A release's
+prebuilt image runs without SBCL at all.
+[`docs/install.md`](docs/install.md#sbcl-and-cl-ppcre) has the steps for each
+OS, and [what the image is](docs/install.md#the-engine-image).
 
 **rizin is required, and it is yours.** omp-re does not bundle, download,
 or build rizin: it runs the `rizin` on your `PATH` (or the one
@@ -449,7 +452,7 @@ records no evidence.
 | --- | --- |
 | `omp` ≥ 18.11.1 | Developed and tested against 18.11.1 (its `getAllTools()` returns tool objects, and Tern renders tools natively). The dev dependencies pin it, so `bun install` tests against the same host. |
 | `bun` | The runtime `omp` invokes plugin code with; omp ships it as a dependency, but you need it to run this repo's own `bun install`/`bun test` for local development. |
-| **SBCL — required under omp, not bundled** | The engine runs on it. Found on `PATH` or via `OMPRE_SBCL_PATH`. Developed against SBCL 2.2.9 (Debian's package). Other Common Lisp implementations will not do: the engine uses SBCL's threads and process interface. |
+| **SBCL — required under omp, not bundled** | The engine runs on it. Found on `PATH` or via `OMPRE_SBCL_PATH`. Developed against SBCL 2.2.9 (Debian's package). Other Common Lisp implementations will not do: the engine uses SBCL's threads, process interface, package locks and saved images. The one way to do without it is a prebuilt [engine image](docs/install.md#the-engine-image). |
 | **cl-ppcre — required, not bundled** | The one Lisp library the engine needs (the read-only command policy is regular expressions). It must be where SBCL's ASDF finds it: the distribution's package, Quicklisp in `~/quicklisp/`, or a copy under `~/common-lisp/`. |
 | **rizin — required, not bundled** | Your own install, found on `PATH` or via `OMPRE_RIZIN_PATH`. Tested with rizin 0.9.1. `/re status` shows which rizin and decompiler omp-re found. |
 | **rz-ghidra — optional, strongly recommended** | Provides `pdg`, a real Ghidra decompile. jsdec (`pdd`) is used when rz-ghidra is absent. With neither, `pdg`/`pdd` error and the code viewer's `d` key falls back to annotated disassembly (`pdf`). `/re status` shows which decompiler is active. |
@@ -553,7 +556,9 @@ closed, and its next call restores it from the record.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `OMPRE_SBCL_PATH` | `sbcl` | The SBCL that runs the engine under omp. Read by the extension, not the engine; nodecode does not use it. |
+| `OMPRE_SBCL_PATH` | `sbcl` | The SBCL that builds the engine's image under omp, and loads the engine where there is no image. Read by the extension, not the engine; nodecode does not use it. |
+| `OMPRE_ENGINE_IMAGE` | unset | An engine image to run as it is, in place of the one omp-re builds: a release's, or your own (`bun run build:image`). With it omp-re needs no SBCL. If it does not start, the extension does not load. Read by the extension. |
+| `OMPRE_CACHE_DIR` | the user's cache directory, `omp-re` in it | Where the image omp-re builds is kept (`~/.cache/omp-re` on Linux, `~/Library/Caches/omp-re` on macOS, `%LOCALAPPDATA%\omp-re\cache` on Windows). Deleting it is safe: the next start builds the image again. Read by the extension. |
 | `OMPRE_RIZIN_PATH` | `rizin` | Path to the rizin executable; its sibling `rz-*` tools are taken from the same directory. |
 | `OMPRE_RIZIN_PATH_64`, `OMPRE_RIZIN_PATH_32` | unset | A rizin to use instead for a 64-bit or a 32-bit target. |
 | `OMPRE_ALLOWED_DIRS` | unset | Comma-separated directories binaries and other input files may be opened from, links resolved. Unset: any file you can read. |

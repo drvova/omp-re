@@ -7,6 +7,11 @@ Two suites run without a terminal or a model, and CI runs both:
 | The Lisp suite | `bun run test:engine` (`sbcl --non-interactive --load test/nodecode/run.lisp`) | the engine, and both hosts' Lisp |
 | The bun suites | `bun test test/` | the omp extension, loaded through omp's real SDK, with the engine behind it |
 
+Two checks stand beside them, and CI runs both: `bun run check:warnings`
+(the three Lisp systems compile from scratch with no warning) and
+`bun run cover:engine` (the Lisp suite again, under sb-cover). They are
+below.
+
 Four more tiers drive a real omp terminal under tmux or a real model. They are
 manual: no workflow runs them, and each exits 0 with a printed `SKIP` when a
 program it needs to start at all is missing. `bash test/tui.sh`,
@@ -74,6 +79,63 @@ launch is refused cleanly instead.
 The harness uses POSIX calls and `/bin/sh` stand-ins, so this suite does not
 run on Windows.
 
+## Compiler warnings — `bun run check:warnings`
+
+`scripts/check-warnings.lisp` compiles `omp-re`, `omp-re-stdio` and
+`nodecode-re` (over the suite's stand-in for nodecode's kernel) with every
+file recompiled, into a scratch directory, and exits 1 when the compiler
+signalled a warning or a style warning, printing each with its file. It is
+what makes the declared types of the engine's exported functions
+([`ARCHITECTURE.md`](ARCHITECTURE.md#the-engine-engine-system-omp-re)) hold
+for the two hosts: a call that does not fit a declared type is a warning.
+Nothing is allowed by its text. The one thing passed over is what SBCL itself
+signals and never prints (`sb-ext:*muffled-warnings*`): a file's load meeting
+the macros its own compile had just defined.
+
+It was written against SBCL 2.2.9. A later SBCL can warn about what this one
+does not; a failure after an SBCL upgrade is to be read before it is fixed.
+
+## Coverage — `bun run cover:engine`
+
+`scripts/cover.lisp` compiles the three systems with sb-cover's
+instrumentation, runs the Lisp suite, and prints a line for each file of
+`engine/`, `stdio/` and `nodecode/` — expressions run and their number,
+branches run and their number — a total, and then every definition no part
+of whose body ran. sb-cover's own report, a page for each file with what ran
+in green and what did not in red, is `coverage/cover-index.html`; the table
+and the list are also `coverage/summary.md`. `coverage/` is not committed.
+`OMPRE_TEST_SUITES` narrows the run as it does for the suite.
+
+The instrumented files are compiled into `coverage/fasl/`, apart from the
+cache an ordinary load uses, so the suite, the bun suites and omp never run
+instrumented code: instrumentation changes how the Lisp is compiled, and
+slows it. The test files and the generated `nodecode/recipe-data.lisp` are
+not measured. The omp host is a process of its own, which `suite-stdio`
+starts; under coverage each such process loads the instrumented files and
+leaves what it ran for the run to add up when omp's side closes its pipe. A
+host process that a check kills leaves nothing.
+
+When this was written the suite ran 91 % of the expressions and 84 % of the
+branches, against `/bin/ls`, and three definitions were never entered. Why
+each is left:
+
+- `image-main` (`stdio/server.lisp`) runs only in a saved image, which has
+  no instrumented copy: `test/image.test.ts` holds it, with real images.
+- `rotr32` (`engine/sha256.lisp`) is declared inline, so its body runs
+  inside SHA-256 and the function by its own name is never called. The
+  published vectors hold it.
+- `missing-commands-warning` (`engine/tools-core.lisp`) is said only of a
+  rizin build that lacks a command the engine sends. The suite has one
+  rizin, which has them all.
+
+With `OMPRE_COVERAGE_FLOOR=<percent>` in the environment the script also
+exits 1 when the expressions run, over all files, are below that percentage.
+CI sets 80. That is not a target: it is far enough under the measured figure
+that no ordinary change reaches it, and it is there for one failure a green
+suite does not show — a suite, or the rizin half of every suite, that
+stopped running. With rizin absent the suite still exits 0, and the same run
+covers 56 %.
+
 ## The bun suites — `bun test test/`
 
 The dev dependencies pin omp **18.11.1**, so the host APIs under test are the
@@ -87,9 +149,16 @@ the audit's wiring hands `boot` a stand-in to reply in the model's place.
 | --- | --- |
 | `test/extension-sdk.test.ts` | The extension loaded by omp's real SDK and extension runner, driven the way a session drives it: `/re` lines, the tools through omp's own `eval` (`tool.<name>()`), `--binary`, resume with replay, the debugger's opt-in. It is the suite that catches omp API drift. |
 | `test/shim.test.ts` | omp's end of the pipe. Against `test/stand-in-engine.ts`, a bun script that speaks `stdio/protocol.json` and holds everything omp's side sends to it: no SBCL, an engine that cannot load, dies, speaks another protocol version or never becomes ready; message framing; every method, session event and member of the wire sent once; the status band, the list and code overlays and their keys; a headless run's output; an engine that goes silent, loses a request, dies mid-request or will not leave. The side turn the audit asks for, on its own. Against the real engine: two sessions on one engine process, an engine killed and replaced with `/re off` kept, the audit log under omp's own call ids, abort, `/re undo`, the claim audit put to a stand-in side model, a session branched, compacted and switched, every approval sentence. |
+| `test/image.test.ts` | How the engine process is started ([`install.md`](install.md#the-engine-image)), with real images and a real SBCL, each test in a cache directory of its own: a first start builds an image and is that image, and the next runs the same file; an image shipped in `dist/` is run while it is this source's, and a changed source passes it over and builds once; a cached image that will not run is built again; `OMPRE_ENGINE_IMAGE` is run as it is, with no SBCL, and one that is no image is the start's error; where no image can be built the engine loads from source and the log says why; two builds at once leave one whole image. What was started is read from the engine's own `hello` and, on Linux, from `/proc/<pid>/exe`. |
 | `test/versions.test.ts` | One version in `package.json`, the marketplace entry and the three `.asd` files; `extensions/re/protocol.ts` and the tables of `engine-protocol.md` current with `stdio/protocol.json`. |
 | `test/recipes-eval.test.ts` | The recipes in omp's `eval`, both kernels. With rizin, the same recipes are run by the JavaScript script, the Python script and the Lisp verbs on the same binary and their reports compared whole — every line, evidence ids aside. It also runs `scripts/gen-recipes.ts --check`. |
 | `test/omp-eval-contract.test.ts` | omp itself: one test for each behaviour of omp's `eval` that [`omp-eval.md`](omp-eval.md) describes and omp does not document. It uses a probe extension, not the RE tools. Its first test fails until the page names the installed omp version. |
+
+Every suite that boots a session starts the engine the way omp does, so it
+runs the image. `test/setup.ts`, which `bunfig.toml` has `bun test` load
+before any suite, builds that image when the cache has none for this source,
+so that the first compile and save are not inside some test's own time
+limit. Only the tests of `image.test.ts` that are about building build more.
 
 ## Fast smoke tier — `bash test/tui.sh`
 
@@ -144,9 +213,9 @@ mirror on every other branch it could take.
 
 ## What CI runs
 
-`.github/workflows/ci.yml`, on every pull request and every push to `main`:
-one Linux job that installs bun, SBCL, cl-ppcre and rizin 0.9.1 (the portable
-static release build — it cannot load a decompiler plugin), builds
+`.github/workflows/ci.yml`, on every pull request and every push to `main`,
+has two Linux jobs. `suite` installs bun, SBCL, cl-ppcre and rizin 0.9.1 (the
+portable static release build — it cannot load a decompiler plugin), builds
 `test/fixtures/sample.c` as the test binary, and runs
 
 1. `bun run check` — the type check;
@@ -156,16 +225,27 @@ static release build — it cannot load a decompiler plugin), builds
    current with `recipes/tables.json`;
 4. `bun scripts/gen-protocol.ts --check` — `extensions/re/protocol.ts` and the
    tables of `engine-protocol.md` are current with `stdio/protocol.json`;
-5. system `omp-re` loaded in a plain SBCL — the engine needs nothing of either
+5. `scripts/check-warnings.lisp` — the three Lisp systems compile from
+   scratch with no warning;
+6. system `omp-re` loaded in a plain SBCL — the engine needs nothing of either
    host;
-6. the Lisp suite;
-7. `bun test test/`, which runs steps 2 and 4 again (`versions.test.ts`) and
+7. the Lisp suite;
+8. `bun test test/`, which runs steps 2 and 4 again (`versions.test.ts`) and
    step 3 (`recipes-eval.test.ts`), so a plain `bun test` holds them too.
+
+`coverage` installs SBCL, cl-ppcre and rizin, builds the fixture, runs
+`scripts/cover.lisp` with `OMPRE_COVERAGE_FLOOR` set, and writes the table
+and the list of what never ran to the job's summary. It runs the suite a
+second time on purpose: the `suite` job's run is of the code as it ships.
+
+`.github/workflows/release.yml`, after it has tagged a release, builds the
+engine's image on a Linux, a macOS and a Windows runner and attaches the
+three to the GitHub release.
 
 `.github/workflows/cross-os.yml`, on every push to `main` and on manual
 dispatch: one Windows job that installs SBCL (Chocolatey), cl-ppcre (cloned to
 `~/common-lisp/`) and rizin (the release zip), builds the fixture as a PE, and
-runs steps 1, 5 and 7. It cannot run the Lisp suite.
+runs steps 1, 6 and 8. It cannot run the Lisp suite.
 
 Neither workflow runs a tmux tier or calls a model: those tiers exit 0 when a
 prerequisite is missing, which would make them theatre on a hosted runner.
@@ -183,6 +263,17 @@ Stated plainly, so a green badge is not read as more than it is.
   stand-in engine of `shim.test.ts` is a bun script, so the framing tests
   (CRLF line ends among them) no longer skip there; they had not been seen to
   run on Windows when they were written.
+- **The engine image off Linux.** Building an image, running one, and the
+  cache directory were run on Linux only. On Windows an image is an `.exe`
+  and the build's last step replaces a file that may be running; on macOS a
+  downloaded image is quarantined. Neither was seen. If an image does not
+  start, the start from source is what is left, and that is the path the
+  Windows job was written for.
+- **The release's images.** The `image` job of `release.yml` had not run when
+  it was written: not the SBCL each runner installs, not the upload.
+- **The CI steps added with them.** `check-warnings` and the coverage job were
+  run on a developer's machine with SBCL 2.2.9, not on a runner. A runner's
+  newer SBCL may warn where 2.2.9 does not.
 - **macOS.** Nothing in CI runs there, and the authors have not run the engine
   there. The extension's and the engine's code paths are the POSIX ones Linux
   uses, with one known difference: a process tree is ended through `/proc` on
@@ -216,7 +307,9 @@ omp-re@drvova` installs from a local checkout.
 A change under `extensions/re/`, `engine/` or `stdio/` is picked up by a
 **fresh `omp` start** if you dev-load through the `extensions:` config entry
 in [the README](../README.md#install) — there is no build step and no hot
-reload. A changed Lisp file is recompiled at that start. If you installed as a
+reload. A changed Lisp file is recompiled at that start and a new image saved
+(a few seconds, once; `OMPRE_CACHE_DIR` holds the three used last). If you
+installed as a
 plugin instead, the cached copy under `~/.omp/plugins/cache/plugins/...` is a
 **copy, not a symlink**, so an edit to your checkout does nothing until you
 reinstall:

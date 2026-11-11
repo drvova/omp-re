@@ -42,6 +42,15 @@ provides any isolation:
   privileges, as omp does. ASDF keeps the engine's compiled files in its cache
   in your home directory and loads them at the next start, so that cache is as
   trusted as the plugin's own files.
+- What the extension runs as the engine is, in order, the executable
+  `OMPRE_ENGINE_IMAGE` names, an image in the plugin's `dist/` folder, and
+  the image it built itself in omp-re's cache directory
+  ([`docs/install.md`](docs/install.md#the-engine-image)). Each is run with
+  your privileges, so each is as trusted as the plugin's own files: whoever
+  can write to that cache directory, or set that variable for omp, chooses
+  the program omp starts. The extension downloads none of them. An image
+  from a GitHub release is a binary you chose to run; building your own
+  (`bun run build:image`) from source you have read is the alternative.
 - `OMPRE_ALLOWED_DIRS` (nodecode: `allowed_dirs`) limits the directories the
   engine opens a binary, a mapped file, YARA rules or a FLIRT signature file
   (`apply_signatures`) from, compared after links are resolved. It is unset by

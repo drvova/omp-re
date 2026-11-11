@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The engine starts from a saved image under omp.** SBCL can save a loaded
+  engine as one executable, and omp's side now runs one when it can: the
+  first start after an install, an upgrade or an edit to the engine builds
+  the image with your SBCL and keeps it in your cache directory
+  (`~/.cache/omp-re` on Linux), and every later start runs it. Measured on
+  one Linux machine, from starting the process to its `ready`: 2.4 ms from
+  the image, 240 ms from compiled source; the first start, which also saves
+  the image, 3.3 s where loading freshly compiled source took 1.9 s. The image is 48 MB and not
+  compressed (compressed it is 11 MB and takes 63 ms to start, every time).
+  `OMPRE_ENGINE_IMAGE` names an image to run as it is, and an image in the
+  plugin's `dist/` folder is run when it was built from the plugin's own
+  source; with either omp-re needs neither SBCL nor cl-ppcre. Where no image
+  can be built the engine is loaded from source as before, and omp's log
+  says why. Nothing is downloaded. `OMPRE_CACHE_DIR` moves the cache;
+  deleting it is always safe. `docs/install.md` has the whole of it. Built
+  and run on Linux only.
+- **Engine images on a release.** The release workflow builds the image on a
+  Linux, a macOS and a Windows runner and attaches each to the GitHub release
+  as `omp-re-engine-<platform>-<arch>[.exe]`. The workflow had not run when
+  this was written.
+- `bun run build:image` builds an image (into the cache, to `dist/` with
+  `--dist`, or to a path).
+- `bun run cover:engine` runs the Lisp suite under sb-cover and prints, for
+  each file of `engine/`, `stdio/` and `nodecode/`, the expressions and
+  branches the suite ran, then every definition none of which it ran. CI
+  runs it as a job of its own and writes the table to the job's summary.
+- `bun run check:warnings` compiles the three Lisp systems from scratch and
+  fails on any compiler warning or style warning. It is a CI step.
+
+### Changed
+
+- **The engine's exported functions are typed, and its package is locked.**
+  Every function `engine/package.lisp` exports is declared in the types of
+  the new `engine/types.lisp`; SBCL checks a host's calls against them when
+  the host is compiled. Code outside the package can no longer define,
+  redefine or remove an engine function: it is a package-lock violation.
+  For a host written to the documented surface nothing changes.
+- **A call the surface cannot type is refused in its own words.**
+  `engine-call`, `engine-command`, `engine-view` and `engine-restore` given
+  an argument of the wrong type answer `omp-re: engine-call: name must be of
+  type string, not 42` as a failed answer. Before, the text was SBCL's own
+  type error inside the engine's sentence, and `engine-command` with a line
+  that was not a string signalled instead of answering. Under nodecode,
+  `(re:slash 42)` is now a refusal the model reads like any other.
+- **Protocol 3.** `hello`'s answer has a new member, `started`: `"source"`
+  or `"image"`. The two halves of omp-re ship together, so this is seen only
+  as the number in `{"ready": 3}`.
+
 ## [0.11.0] - 2026-11-11
 
 ### Changed

@@ -58,6 +58,35 @@ A tool is declared once (`define-tool`): its name, parameters, approval tier,
 the sentence an approval prompt shows, and how a transcript should draw its
 result. Both hosts read that declaration. Neither holds a list of tools.
 
+What a host may name is what `engine/package.lisp` exports, and two things
+hold a host to it.
+
+**The exported functions are typed.** `engine/types.lisp` names the few kinds
+of thing that cross the boundary (a session's id, a JSON object and array as
+`engine/json.lisp` makes them, an answer, a level, an address as text, a
+record's id, a SHA-256 digest), and every exported function is declared in
+those words beside its definition (`declaim ftype`). SBCL checks a caller
+against a declared type when the caller is compiled, so a host that passes
+the wrong thing gets a compiler warning, and `scripts/check-warnings.lisp`,
+which CI runs, compiles the three systems from scratch and fails on any
+warning. The helpers are ordinary typed functions: called with the wrong
+type they signal a `TYPE-ERROR`. The surface functions that promise never to
+signal keep that promise for a wrong type too (`define-surface` in
+`engine/engine.lisp`): they answer what they answer for any refusal, with
+the text `omp-re: engine-call: name must be of type string, not 42`.
+
+**The package is locked** (`(:lock t)` in its `defpackage`, an SBCL package
+lock). Code in any other package that defines, redefines or removes a
+function, macro or variable named by a symbol of `OMP-RE`, or interns a new
+symbol there, signals a package-lock violation instead of taking effect. So
+a host's helper that happens to share a name with one of the engine's is an
+error when the host is compiled, not a changed engine. The engine's own
+files are in the package and are not affected, and the macros a host builds
+with (`with-host-service`) expand to nothing the lock forbids. A test may
+read an internal with `omp-re::`; to stand in for something of the engine's
+it answers a service of the port (`with-host-service`), it does not
+redefine.
+
 ## The port (`engine/host.lisp`)
 
 A few things only the host can say or do: what the operator configured, who is
@@ -107,6 +136,15 @@ over that pipe; `stdio/voice.lisp` holds omp's phrases and manual. Like the
 nodecode host, it is a package of its own (`omp-re-stdio`) that uses only what
 the engine's package exports.
 
+The process itself is one function, `main` in `stdio/server.lisp`: standard
+output becomes the wire, everything else that prints goes to standard error,
+the first line is `{"ready": …}`, and omp is served until it leaves. It is
+reached two ways. `stdio/serve.lisp` loads the system from source
+(`stdio/load.lisp`) and calls it. A saved image of the system starts in
+`image-main`, which calls it; `scripts/build-image.ts` (with its Lisp half,
+`scripts/build-image.lisp`) is the one thing that saves an image. From the
+`ready` line on the two are the same program, and `hello` says which it is.
+
 The conversation is described once, as data, in `stdio/protocol.json`: each
 method either way, its members and types, the version, the constants and keys
 both sides share. `stdio/protocol.lisp` loads it; the server finds each
@@ -118,9 +156,16 @@ method's handler from it and refuses what it does not have, in and out.
 `extensions/re` is the other end, and is thin on purpose:
 
 - `protocol.ts` is generated: the wire's types, methods, constants and keys.
-- `engine.ts` starts the child, frames messages, bounds how long it waits
-  (a start deadline, and the engine's silence while a request is under way)
-  and ends it. It does not know what a message means.
+- `image.ts` says how the engine process is started, as one rule tried in
+  order: the image `OMPRE_ENGINE_IMAGE` names; an image shipped in the
+  plugin's `dist/`; an image it builds once with the user's SBCL and keeps
+  in the user's cache, under a name that changes with the plugin's version,
+  its Lisp source, the SBCL and the system; and `stdio/serve.lisp`. A way
+  that does not come to say `ready` hands on to the next, and omp's log says
+  why. [`install.md`](install.md#the-engine-image) is the operator's side.
+- `engine.ts` starts the child that rule gives, frames messages, bounds how
+  long it waits (a start deadline, and the engine's silence while a request
+  is under way) and ends it. It does not know what a message means.
 - `host.ts` keeps the one engine of the process (on `globalThis`, because omp
   imports an extension afresh for each session) and answers the engine's
   requests: the session's record is omp's own session file, artifacts are
@@ -136,9 +181,9 @@ method's handler from it and refuses what it does not have, in and out.
 
 The engine is started while the extension's factory runs, not later: omp
 accepts tool registrations only then, and the tool list comes from the engine.
-That start is about a quarter of a second, or a few seconds the first time
-after an install or upgrade, when ASDF compiles the engine into the user's
-cache. If the child dies, the next call starts another and each session comes
+That start is a few milliseconds from an image, or a few seconds the first
+time after an install or upgrade, when the engine is compiled and its image
+saved. If the child dies, the next call starts another and each session comes
 back from its record and the memory omp kept of it.
 
 Every RE tool is registered `discoverable`, so omp mounts it as an
@@ -155,6 +200,8 @@ engine. [`omp-eval.md`](omp-eval.md) is what the plugin relies on there.
 | what `rizin_command` may run | `engine/policy-data.lisp`, `engine/policy.lisp` | `suite-core`, `suite-debug` (the on-hit policy) |
 | a `/re` subcommand | its `define-slash` in `engine/` | the suites; `test/extension-sdk.test.ts` for omp's help and errors |
 | a setting | `+settings+` in `engine/host.lisp` | `suite-core` (the example file equals the declaration) |
+| what a host may call, and with what | the export in `engine/package.lisp`, the `declaim ftype` beside the function, a new kind of value in `engine/types.lisp` | `scripts/check-warnings.lisp` (both hosts compile against it with no warning); `suite-core` (a wrong type is refused in words; the package is locked) |
+| how the engine process is started | `extensions/re/image.ts`; `main` and `image-main` in `stdio/server.lisp`; `scripts/build-image.lisp` | `test/image.test.ts`, with real images; `suite-stdio` for the start from source |
 | what a panel or the code view shows | `engine/views.lisp` | `suite-views` |
 | how omp draws it | `extensions/re/ui.ts`, `render.ts` | `test/shim.test.ts` (the band, the overlays and a result card, drawn without colours); the tmux tiers by hand |
 | a key binding | `keys` in `stdio/protocol.json`, then `bun run gen:protocol` | `test/shim.test.ts`; `suite-stdio` (each names a view the engine has) |

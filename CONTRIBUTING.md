@@ -27,15 +27,17 @@ registers what the engine describes and draws what it sends; a new tool or
 ```bash
 bun run check          # tsc-ts (native TypeScript 7 build) --noEmit — must exit 0
                        # (bun run check:tsc runs the stock tsc as a fallback)
+bun run check:warnings # the three Lisp systems compile from scratch with no warning
 bun run test:engine    # the Lisp suite: the engine and both hosts' Lisp
 bun test test/         # the extension through omp's SDK, the engine behind it
 bun run check:recipes  # the recipes' generated blocks are current
 bun run check:protocol # the shim's types and the protocol page's tables are current
+bun run cover:engine   # the Lisp suite again under sb-cover: what it does not run
 bash test/tui.sh       # fast tmux smoke test
 bun run qa:tui         # full tmux QA pass
 ```
 
-CI runs the first five on Linux with rizin installed. The last two are manual
+CI runs the first seven on Linux with rizin installed. The last two are manual
 tiers: they need tmux, `omp`, a test binary (`/bin/ls` unless
 `OMPRE_TEST_BINARY` names another), and for `qa:tui` a working model; no
 workflow runs them, so run them yourself when you change what the terminal
@@ -46,6 +48,18 @@ A tool is declared once, with `define-tool` in `engine/`: its parameters, its
 approval tier, the sentence its approval prompt shows (`:reason`) and how a
 transcript draws its result (`:render`). Give a new tool all four; the omp
 shim and the nodecode verbs read the declaration and need no change.
+
+A function a host may call is exported from `engine/package.lisp` and
+declared, beside its definition, in the types of `engine/types.lisp`
+(`declaim ftype`); one that must never signal is made with `define-surface`.
+`bun run check:warnings` is what holds callers to those types: a compiler
+warning or style warning anywhere in the three systems fails it, and the fix
+is the code, not a muffled warning. The engine's package is locked: a host
+or a test that needs the engine to behave otherwise answers a service of
+the port (`with-host-service`), it does not define into `omp-re`.
+
+`bun run cover:engine` prints, after the table, every definition no part of
+which the suite ran. A new one on that list wants a check, or a reason.
 
 Every rizin command a tool sends is built from values that went through
 `validate-addr`, `validate-ident` or `rz-quote` (`engine/util.lisp`);

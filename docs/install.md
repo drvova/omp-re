@@ -7,8 +7,8 @@ not apply there; see [`nodecode.md`](nodecode.md#install) for cl-ppcre.
 
 | | Required | Found by |
 | --- | --- | --- |
-| SBCL | yes (omp) | `sbcl` on `PATH`, or `OMPRE_SBCL_PATH` |
-| cl-ppcre | yes | ASDF's default places, or (omp) Quicklisp in `~/quicklisp/` |
+| SBCL | yes (omp), unless you run a prebuilt [engine image](#the-engine-image) | `sbcl` on `PATH`, or `OMPRE_SBCL_PATH` |
+| cl-ppcre | yes, with the same exception | ASDF's default places, or (omp) Quicklisp in `~/quicklisp/` |
 | rizin (tested with 0.9.1) | yes | `rizin` on `PATH`, or `OMPRE_RIZIN_PATH`, or the common install locations |
 | rz-ghidra or jsdec | no | rizin's plugin directory |
 | capa, floss, diec, yara | no | `PATH` |
@@ -19,13 +19,17 @@ the engine on either system when this was written.
 
 ## SBCL and cl-ppcre
 
-The engine is Common Lisp. Under omp the extension starts it as
+The engine is Common Lisp. Under omp the extension runs a saved image of it
+when it has one, and builds that image with your SBCL the first time
+([The engine image](#the-engine-image)). Where it has none and can build
+none, it loads the engine from source:
 
 ```
 sbcl --noinform --no-sysinit --no-userinit --disable-debugger --load <plugin>/stdio/serve.lisp
 ```
 
-Two things follow from that command line. SBCL is started without a shell and
+Building the image starts SBCL the same way, so two things follow for both.
+SBCL is started without a shell and
 by the name `sbcl`, so it must be on the `PATH` omp was started with — or set
 `OMPRE_SBCL_PATH` to the executable. And `--no-userinit` means your
 `~/.sbclrc` is **not** read, so a library path or a Quicklisp location that
@@ -105,19 +109,20 @@ From a checkout of this repository:
 sbcl --noinform --no-sysinit --no-userinit --disable-debugger --load stdio/serve.lisp < /dev/null
 ```
 
-(`< NUL` in `cmd.exe`.) It prints `{"ready":1}` and exits when the engine
+(`< NUL` in `cmd.exe`.) It prints `{"ready":3}` and exits when the engine
 loaded, or `{"fatal":"…"}` with what to install. Inside omp, a missing SBCL or
 cl-ppcre shows as the extension failing to load, with a message that names
 what is missing and how to install it.
 
-### The first start compiles
+### The first start compiles, and saves an image
 
 The first omp start after installing or upgrading omp-re compiles the engine
-(and cl-ppcre, if it was never compiled): a few seconds — about 3 s on the
-machine it was measured on. The compiled files go to ASDF's cache in your home
-directory (`~/.cache/common-lisp/` on Linux), and later starts take a fraction
-of a second. That cache must be writable. The cost is once per omp process,
-not per session.
+(and cl-ppcre, if it was never compiled) and saves an image of it: about
+3.3 s on the machine it was measured on. The compiled files go to ASDF's cache in
+your home directory (`~/.cache/common-lisp/` on Linux) and the image to
+omp-re's own cache (below); both must be writable for the image to be kept.
+Every later start runs the image. The cost of a start is once per omp
+process, not per session.
 
 A start is given two minutes. One that takes longer is ended, and the error
 says what to check: that the SBCL named answers `--version`, that
@@ -125,6 +130,98 @@ says what to check: that the SBCL named answers `--version`, that
 nothing, and that the cache can be written. Whatever the engine writes to its
 standard error, then and later, goes to omp's log as `omp-re engine: …`; the
 end of it is quoted in the error when the engine process ends unasked.
+
+### The engine image
+
+SBCL can save a running Lisp as one executable. An image of the engine is
+that: SBCL's runtime and the engine, loaded. Started, it is serving omp at
+once, and it needs no SBCL, no cl-ppcre and no source beside it. Measured on
+one Linux machine with SBCL 2.2.9, from starting the process to its `ready`:
+
+| Start | Time |
+| --- | --- |
+| the image | 2.4 ms |
+| the source, already compiled | 240 ms |
+| the source, compiled first | 1.9 s |
+
+Through omp's side, which first hashes the source and asks SBCL its version,
+a start from the image took 10 ms. The first start, which compiles and then
+saves, took 3.3 s: a second and a half more than loading the source it had
+just compiled, paid once for each version.
+
+An image is 48 MB and is not compressed. SBCL can compress one to 11 MB, and
+that image took 63 ms to start, on every start, to save disk once.
+
+omp's side looks for an engine in this order, and takes the first that starts
+(`extensions/re/image.ts`):
+
+1. **`OMPRE_ENGINE_IMAGE`**, when set: the image at that path, run as it is.
+   Nothing checks what it was built from; that is yours to know. If it does
+   not start, the extension fails to load and the error names the variable:
+   nothing else is tried.
+2. **An image shipped with the plugin**:
+   `<plugin>/dist/omp-re-engine-<platform>-<arch>`, with `.exe` on Windows.
+   `<platform>` and `<arch>` are what Node calls them: `linux`, `darwin` or
+   `win32`, and `x64` or `arm64`. The image is asked whether it was built
+   from this plugin's source and is passed over when it was not, so one left
+   from another version does no harm.
+3. **An image built here.** With none of the above, the first start builds
+   one with your SBCL from the plugin's source and keeps it in the cache;
+   later starts run it. A cached image that does not start is deleted and
+   built again.
+4. **The source**, as before, when no image could be built (no writable
+   cache, a full disk). omp's log says why: `omp-re engine: no engine image
+   could be built at … (…); loading the engine from source`.
+
+Nothing in this is fetched from the network.
+
+**The cache** is one directory:
+
+| System | Directory |
+| --- | --- |
+| Linux | `$XDG_CACHE_HOME/omp-re`, or `~/.cache/omp-re` |
+| macOS | `$XDG_CACHE_HOME/omp-re` when that is set, or `~/Library/Caches/omp-re` |
+| Windows | `%LOCALAPPDATA%\omp-re\cache` |
+
+`OMPRE_CACHE_DIR` names another. An image there is called
+`omp-re-engine-<version>-<platform>-<arch>-<hash>`, the hash being of
+everything that makes another image necessary: the plugin's version, the
+text of its Lisp source (`engine/`, `stdio/`, the two `.asd` files,
+`stdio/protocol.json`), what your `sbcl --version` says, and the system. So
+an upgrade of omp-re or of SBCL, or an edit to the engine in a checkout,
+builds a new image at the next start. A build keeps the image it made and
+the two used most recently beside it, and deletes older ones.
+
+To clear the cache, delete the directory (`rm -r ~/.cache/omp-re`). It is
+safe at any time: the next start builds the image again. Do that after
+upgrading cl-ppcre, which the hash does not see.
+
+**A prebuilt image.** Each release on GitHub carries images built on a Linux,
+a macOS and a Windows runner, named as in step 2. To use one, download the
+file for your system from the release of the version you have installed
+(`omp plugin list` shows it), make it executable (`chmod +x`), and either
+
+- put it at `<plugin>/dist/` under its own name — an installed plugin is
+  under `~/.omp/plugins/cache/plugins/`; an upgrade of the plugin replaces
+  that folder, and the image with it; or
+- put it anywhere and set `OMPRE_ENGINE_IMAGE` to its path.
+
+With either, omp-re needs neither SBCL nor cl-ppcre. An image is for one
+operating system and processor, and holds the C library calls of the SBCL
+that built it: a Linux image built on a newer distribution may not start on
+an older one. In `dist/` that only costs a line in the log (step 3 follows);
+under `OMPRE_ENGINE_IMAGE` it is the error. On macOS a downloaded executable
+is quarantined until you clear it (`xattr -d com.apple.quarantine <file>`).
+
+To build an image yourself, from a checkout:
+
+```bash
+bun run build:image              # into the cache, where a start looks for it
+bun run build:image -- --dist    # dist/omp-re-engine-<platform>-<arch>, as a release ships it
+```
+
+The release images come from `.github/workflows/release.yml`, which had not
+run when this was written; the image has been built and run on Linux only.
 
 ## rizin
 
@@ -307,7 +404,7 @@ rejects are listed in a warning rather than silently dropped.
 ## Verify the full stack
 
 ```bash
-sbcl --version                          # SBCL present
+sbcl --version                          # SBCL present (not needed with a prebuilt engine image)
 rizin -v                                # rizin present
 rizin -qc 'aaa; pdg @ main' /bin/ls     # rz-ghidra producing typed C
 omp plugin list                         # omp-re installed
