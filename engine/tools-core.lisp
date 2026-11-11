@@ -70,7 +70,7 @@ binary would not go back and how many did."
                             (voice :open-binary-note))))
     (("path" :string :required t :doc "Path to the binary file to open.")
      ("arch" :string :doc "Force the architecture for a raw/headerless target (rizin -a), e.g. x86, arm, mips. Omit for a normal file with a header.")
-     ("bits" :integer :enum '(8 16 32 64) :doc "Force the word size (rizin -b): 8, 16, 32, or 64. Pair with arch for flat shellcode.")
+     ("bits" :integer :enum +word-sizes+ :doc "Force the word size (rizin -b): 8, 16, 32, or 64. Pair with arch for flat shellcode.")
      ("base" :string :doc "Rebase a formatted image (PE/ELF) at this address (rizin -B), e.g. 0x400000. For a raw/headerless file use `map` instead.")
      ("map" :string :doc "Map a raw/flat file at this address (rizin -m), e.g. 0x400000 — the right option for headerless shellcode or firmware dumps.")
      ("format" :string :doc "Force the bin plugin (rizin -F), e.g. elf, pe, mach0, or `any` to open raw bytes with no format."))

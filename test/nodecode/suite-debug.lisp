@@ -14,6 +14,10 @@
 
 (in-package #:nodecode-re-test)
 
+(defparameter +launch-warning+
+  "⚠ The target is now RUNNING under a debugger on this machine. Only debug untrusted samples in an isolated, disposable VM or container."
+  "What a launch must say first, word for word: the model has been taught it.")
+
 (defun debug-call (&rest arguments)
   (apply #'re:call "rizin_debug" arguments))
 
@@ -377,7 +381,7 @@ done
                         (equal '("aa" "dr rip") (log-lines ".cmds")))
                  (check "the result opens with the loud warning and says what was launched"
                         (and (starts (format nil "debug: started ~a~%~a~%Stopped at entry. Target env: arg0=-l, arg1=two words, setenv=LANG=C, chdir=/tmp, aslr=no."
-                                                      *binary* omp-re::+debug-launch-warning+)
+                                                      *binary* +launch-warning+)
                                               text)
                              (has (format nil "~%rip = 0x0000000000401000~%Set breakpoints (break_add), then continue or step.") text)))
                  (check "a build of the wrong bits is called out in the result"
@@ -673,7 +677,7 @@ done
                         (equal (append (shared-flags) (list "-d" "4242" *binary*)) (log-lines ".argv")))
                  (check "the result says what is controlled, with the warning and no bits note"
                         (and (equal (format nil "debug: attached to PID 4242~%~a~%Controlling the live process (attached to PID 4242), symbols from ~a.~%rip = 0x0000000000401000~%Set breakpoints (break_add), then continue or step."
-                                            omp-re::+debug-launch-warning+ *binary*)
+                                            +launch-warning+ *binary*)
                                     text)
                              (not (has "rizin build is" text)))))
                (debug-call :action "stop")
@@ -757,7 +761,7 @@ done
                         rizin-pid (rizin-pid (omp-re::session-dbg session))
                         debuggees (children-of rizin-pid))
                   (check "start launches the process with the loud warning and a stopped program counter"
-                         (and (has omp-re::+debug-launch-warning+ text)
+                         (and (has +launch-warning+ text)
                               (has "Stopped at entry." text)
                               (ppcre:scan "(?m)^\\w+ = 0x[0-9a-f]+$" text)
                               (omp-re::rz-alive-p (omp-re::session-dbg session))))

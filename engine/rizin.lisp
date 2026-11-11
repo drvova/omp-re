@@ -210,6 +210,14 @@ parsed here is stock rizin's, while plugins still load."
   "The flags every rizin process on a pipe shares: `-q0' is the pipe protocol."
   (cons "-q0" (stock-output-flags)))
 
+(defparameter +word-sizes+ '(8 16 32 64)
+  "The word sizes rizin can be told to read code as (-b, ahb).")
+
+(defun plugin-name-p (name)
+  "Whether NAME can name one of rizin's arch or bin plugins: nothing that
+could be read as a flag."
+  (and (stringp name) (js-scan "^[A-Za-z][A-Za-z0-9_.]*$" name)))
+
 (defun build-load-flags (load)
   "The -a/-b/-B/-m/-F flags the JSON object LOAD spells, each value checked
 so a nonsense or flag-shaped one fails here, in words."
@@ -218,18 +226,18 @@ so a nonsense or flag-shaped one fails here, in words."
           (map (jget load "map")) (format (jget load "format")))
       (append
        (when arch
-         (unless (and (stringp arch) (js-scan "^[A-Za-z][A-Za-z0-9_.]*$" arch))
+         (unless (plugin-name-p arch)
            (fail "omp-re: load: invalid arch ~a — a plugin name like x86, arm, mips (see rizin -L)"
                  (js-string arch)))
          (list "-a" arch))
        (when bits
-         (unless (member bits '(8 16 32 64))
+         (unless (member bits +word-sizes+)
            (fail "omp-re: load: invalid bits ~a — one of 8, 16, 32, 64" bits))
          (list "-b" (princ-to-string bits)))
        (when base (list "-B" (validate-addr base)))
        (when map (list "-m" (validate-addr map)))
        (when format
-         (unless (and (stringp format) (js-scan "^[A-Za-z][A-Za-z0-9_.]*$" format))
+         (unless (plugin-name-p format)
            (fail "omp-re: load: invalid format ~a — a bin plugin name like elf, pe, mach0, or any for raw (see rizin -L)"
                  (js-string format)))
          (list "-F" format))))))

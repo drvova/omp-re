@@ -103,7 +103,7 @@ reaches rizin unquoted, so it is held to a charset with no separator in it."
         (cond ((equal key "arch")
                (push (format nil "aha ~a ~a" (validate-ident "arch" (or value "")) at) commands))
               ((equal key "bits")
-               (unless (member value '("8" "16" "32" "64") :test #'equal)
+               (unless (member value (mapcar #'princ-to-string +word-sizes+) :test #'equal)
                  (fail "omp-re: invalid arch hint bits: ~a — one of 8, 16, 32, 64"
                        (if value (js-string value) "none given")))
                (push (format nil "ahb ~a ~a" value at) commands))
@@ -660,7 +660,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
      :description "Hint the architecture and/or word size to disassemble from an address, for a region that differs from the file's default — most often ARM/Thumb switches (bits 16) or mixed-arch firmware. Sets `aha`/`ahb`, verifies the hint landed, and is reversible with /re undo (which deletes it).")
     (("addr" :string :required t :doc "Address (or name/expression) where the hint applies.")
      ("arch" :string :doc "Architecture to disassemble as from here, e.g. `arm`, `x86` (sets an `aha` hint).")
-     ("bits" :integer :enum '(8 16 32 64)
+     ("bits" :integer :enum +word-sizes+
       :doc "Word size from here, e.g. 16 for ARM Thumb (sets an `ahb` hint)."))
     (arguments)
   (let ((arch (jstring arguments "arch"))

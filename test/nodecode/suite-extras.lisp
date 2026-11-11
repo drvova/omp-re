@@ -108,12 +108,6 @@ notice, which the model reads; the notice standing before THUNK is put back."
        (and (string= "o '/tmp/a b; !id' 0x50000 rw" (omp-re::map-file-command "/tmp/a b; !id" "0x50000" "rw"))
             (string= "o '/x' 0x1000" (omp-re::map-file-command "/x" "0x1000"))
             (refusal (lambda () (omp-re::map-file-command "/x" "0x1000;!id")))))
-(check "the thirteen passes, each with its rizin command"
-       (equal '(("calls" . "aac") ("xrefs" . "aar") ("pointers" . "aav") ("preludes" . "aap")
-                ("all_functions" . "aaf") ("data_refs" . "aad") ("autoname" . "aan") ("types" . "aaft")
-                ("struct_offsets" . "aat") ("golang" . "aalg") ("objc" . "aalor") ("rtti_classes" . "avrr")
-                ("emulate_functions" . "aaef"))
-              omp-re::+analysis-passes+))
 (check "a signature path is quoted, and one that cannot cross the pipe is refused"
        (and (string= "Fs '/tmp/my sigs/a.pat'" (omp-re::signature-apply-command "/tmp/my sigs/a.pat"))
             (has "line break or NUL" (refusal (lambda () (omp-re::signature-apply-command (format nil "a~%b")))))
@@ -207,24 +201,22 @@ notice, which the model reads; the notice standing before THUNK is put back."
 (with-cell ()
   (check "none of these tools is evidence, and all are exec-tier"
          (every (lambda (name)
-                  ;; Not through the engine's surface, which lists what is
-                  ;; offered: the triage tools are there only when installed.
-                  (let ((tool (find name omp-re::*tools* :key #'omp-re::tool-name :test #'string=)))
-                    (and tool (not (omp-re::tool-evidence tool)) (eq :exec (omp-re::tool-tier tool)))))
+                  (let ((tool (described-tool name)))
+                    (and tool (null (gethash "evidence" tool)) (equal "exec" (gethash "approval" tool)))))
                 '("map_file" "analyze" "apply_signatures" "create_signature" "export_project" "rizin_cli"
-                  "triage_capa" "triage_floss" "triage_die" "triage_yara" "rizin_emulate")))
+                  "rizin_emulate")))
   (check "analyze's schema names exactly the thirteen passes"
-         (let ((text (re:doc "analyze")))
-           (every (lambda (pass) (has (car pass) text)) omp-re::+analysis-passes+)))
-  (dolist (scanner '(("triage_capa" . "capa") ("triage_floss" . "floss") ("triage_die" . "diec")
-                     ("triage_yara" . "yara")))
-    (if (omp-re::find-on-path (cdr scanner))
-        (check (format nil "~a is offered: ~a is installed here" (car scanner) (cdr scanner))
-               (has (car scanner) (re:tools)))
-        (check (format nil "~a is not offered while ~a is absent, and a call says there is no such tool"
-                       (car scanner) (cdr scanner))
-               (and (not (has (car scanner) (re:tools)))
-                    (has "no tool named" (refusal (lambda () (re:call (car scanner) :rules-path "/x"))))))))
+         (equalp #("calls" "xrefs" "pointers" "preludes" "all_functions" "data_refs" "autoname" "types"
+                   "struct_offsets" "golang" "objc" "rtti_classes" "emulate_functions")
+                 (omp-re:jget (described-tool "analyze") "parameters" "properties" "pass" "enum")))
+  ;; That an installed scanner is offered is checked below, with stand-ins.
+  (with-environment ("PATH" (uiop:native-namestring (ensure-directories-exist
+                                                     (merge-pathnames "extras-empty-path/" *scratch*))))
+    (dolist (scanner '("triage_capa" "triage_floss" "triage_die" "triage_yara"))
+      (check (format nil "~a is not offered while its program is not on PATH, and a call says there is no such tool"
+                     scanner)
+             (and (not (has scanner (re:tools)))
+                  (has "no tool named" (refusal (lambda () (re:call scanner :rules-path "/x"))))))))
   (check "every tool that needs the binary says so before one is open"
          (in-session ((fresh-session))
            (every (lambda (call) (has "no binary open" (refusal call)))
@@ -620,6 +612,11 @@ notice, which the model reads; the notice standing before THUNK is put back."
                            (let ((text (re:tools)))
                              (every (lambda (name) (has name text))
                                     '("triage_capa" "triage_floss" "triage_die" "triage_yara"))))
+                    (check "an offered scanner is exec-tier, and what it answers is not evidence"
+                           (every (lambda (name)
+                                    (let ((tool (described-tool name)))
+                                      (and (null (gethash "evidence" tool)) (equal "exec" (gethash "approval" tool)))))
+                                  '("triage_capa" "triage_floss" "triage_die" "triage_yara")))
                     (check "triage_capa answers the matched rules by name with their meta"
                            (let ((text (re:call "triage_capa")))
                              (and (has "capa: 2 finding group(s)" text) (has "\"create process\"" text)

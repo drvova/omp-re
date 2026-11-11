@@ -51,7 +51,9 @@ through — whatever became of the open after that."
        (link (uiop:native-namestring (merge-pathnames "link.bin" allowed))))
   (uiop:copy-file "/bin/sh" inside)
   (uiop:copy-file "/bin/sh" outside)
-  (ignore-errors (sb-posix:symlink outside link))
+  ;; A link is made where the platform has the call; the check on it is
+  ;; skipped where it does not.
+  #-win32 (ignore-errors (sb-posix:symlink outside link))
   (with-cell (:allowed-dirs (list (uiop:native-namestring allowed)))
     (in-session ((fresh-session))
       (check "a file under an allowed directory may be opened"
@@ -60,6 +62,7 @@ through — whatever became of the open after that."
              (has "allowed_dirs" (kept-out "/bin/sh")))
       (check "a sibling directory whose name only starts the same is refused"
              (kept-out outside))
+      #-win32
       (check "a link inside an allowed directory that points out of it is refused"
              (kept-out link))))
   (with-cell ()

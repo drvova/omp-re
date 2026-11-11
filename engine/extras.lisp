@@ -81,7 +81,7 @@ the mapped region allows, not a file write mode."
                 (()
                  "Map a file into the session's address space at {addr!} (read-only; re-applied on respawn). The file on disk is not modified."))
      :render '(:title "Map file" :subject "path")
-     :description "Open an additional file into the current session at a virtual address (`o <file> <addr>`), alongside the primary binary — e.g. overlay a dumped/unpacked region over the packed image, or map a library for cross-module analysis. The file is mapped read-only (never written on disk) and the map is re-applied automatically on resume/respawn. To just analyze a dump on its own, use open_binary instead. Not an undoable annotation: reopen the binary to drop the map.")
+     :description "Open an additional file into the current session at a virtual address (`o <file> <addr>`), alongside the primary binary — e.g. overlay a dumped/unpacked region over the packed image, or map a library for cross-module analysis. The file is mapped read-only (never written on disk) and the map is re-applied automatically on resume/respawn. To just analyze a dump on its own, use open_binary instead. Not an undoable annotation: the map stays with this binary for the session, reopening included; only a branch from before the call is without it.")
     (("path" :string :required t :doc "Path to the file to map into the session (a memory dump, a library, a raw blob).")
      ("addr" :string :required t :doc "Virtual address to map it at, e.g. 0x50000 — pick a range the primary binary doesn't already occupy.")
      ("perm" :string :doc "Map permissions as r/w/x characters (default rizin's own, usually r). The file stays read-only on disk regardless."))
@@ -101,7 +101,7 @@ the mapped region allows, not a file write mode."
     (record-once "mapped files" (obj "path" path "addr" addr "perm" (or perm :absent)))
     (let ((sample (trimmed (rz-cmd rz (format nil "p8 16 @ ~a" addr)))))
       (text-result (format nil "map_file: ~a @ ~a" path addr)
-                   (format nil "mapped ~a at ~a~@[ (~a)~]; first bytes: ~a~%Re-applied automatically on resume/respawn; reopen the binary to drop it."
+                   (format nil "mapped ~a at ~a~@[ (~a)~]; first bytes: ~a~%Re-applied automatically on resume/respawn and whenever this binary is opened again."
                            path addr perm (if (blank-p sample) "(unreadable)" sample))))))
 
 ;;; --- analyze -------------------------------------------------------------------------------
@@ -146,7 +146,7 @@ it: the one map the tool and the replay share.")
                 (()
                  "Run rizin analysis pass ? — this changes the analysis (it adds functions, xrefs, names, or types)."))
      :render '(:title "analyze" :subject "pass")
-     :description "Re-run a rizin analysis pass to recover more than open_binary's baseline `aaa` found: prelude scans for stripped code, Go/Objective-C recovery, pointer and call/xref analysis, recursive type matching, or per-function emulation. Reports the function count before and after. The pass is re-run automatically on resume/respawn; it is not an undoable annotation (reopen the binary to return to the baseline). Some passes (emulate_functions) can be slow.")
+     :description "Re-run a rizin analysis pass to recover more than open_binary's baseline `aaa` found: prelude scans for stripped code, Go/Objective-C recovery, pointer and call/xref analysis, recursive type matching, or per-function emulation. Reports the function count before and after. The pass is re-run automatically on resume/respawn; it is not an undoable annotation (it stays with this binary for the session, reopening included; only a branch from before the call is at the baseline). Some passes (emulate_functions) can be slow.")
     (("pass" :string :required t :enum (mapcar #'car +analysis-passes+)
       :doc (join-lines
             '("calls: analyze function calls. xrefs: cross-references. pointers: values that reference a section/map."

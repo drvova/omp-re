@@ -275,6 +275,31 @@
                 (has "is too short" (refusal (lambda () (re:slash "cite 1111"))))
                 (has "no evidence found with id 222222" (refusal (lambda () (re:slash "evidence 222222"))))))))
 
+;;; The engine is a system of its own: a plain image with no host in it must
+;;; load it clean and be answered through the surface alone.
+(suite "the engine alone")
+(let ((out (uiop:run-program
+            (list "sbcl" "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
+                  "--eval" "(require :asdf)"
+                  "--eval" (format nil "(asdf:load-asd ~s)"
+                                   (uiop:native-namestring (merge-pathnames "omp-re.asd" *root*)))
+                  "--eval" "(handler-bind ((warning (lambda (w) (unless (typep w (quote style-warning)) (format t \"~&WARNED: ~a~%\" w))))) (asdf:load-system \"omp-re\" :force t))"
+                  "--eval" "(format t \"~&PACKAGES: ~{~a~^ ~}~%\" (mapcar (function package-name) (remove-if-not (lambda (p) (search \"NODECODE\" (package-name p))) (list-all-packages))))"
+                  "--eval" "(format t \"~&HELP: ~a~%\" (omp-re:jstring (omp-re:engine-command \"alone\" \"help\") \"text\"))"
+                  "--eval" "(format t \"~&CALL: ~a~%\" (omp-re:jstring (omp-re:engine-call \"alone\" \"rizin_command\" (omp-re:obj \"command\" \"aflj\")) \"text\"))"
+                  "--eval" "(format t \"~&MANUAL: ~a~%\" (omp-re:jstring (omp-re:engine-call \"alone\" \"rizin_command\" (omp-re:obj \"command\" \"\")) \"text\"))")
+            :output :string :error-output :output :ignore-error-status t)))
+  (check "omp-re loads in a plain image with no warning and no host's package"
+         (and (has "PACKAGES: " out) (not (has "PACKAGES: N" out)) (not (has "WARNED: " out))))
+  (check "with no host the surface answers in the engine's own words"
+         (and (has "HELP: /re open <path>" out)
+              (has "CALL: omp-re: no binary open — use /re open <path> or the open_binary tool first" out)))
+  (check "the manual is one text: the engine's tables between the host's parts, here the engine's own"
+         (and (has "MANUAL: omp-re manual" out)
+              (has "Reading the binary (prefer the JSON `*j` forms" out)
+              (has "recorded as evidence (/re evidence)" out)
+              (has "OMPRE_RIZIN_PATH (rizin if not on PATH)" out))))
+
 (suite "the engine's surface")
 (check "a tool is described with its JSON Schema, its approval class and whether it records evidence"
        (let ((tool (find "rizin_command" (omp-re:engine-tools) :key (lambda (tool) (gethash "name" tool))

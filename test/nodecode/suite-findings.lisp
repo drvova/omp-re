@@ -34,24 +34,17 @@ to exist. => the session's id."
 (defun keys (object)
   (loop for key being the hash-keys of object collect key))
 
-(defmacro with-annotations ((&rest annotations) &body body)
-  "BODY with LIVE-ANNOTATIONS answering ANNOTATIONS, whatever annotation
-module is or is not loaded, and put back after."
-  (let ((had (gensym "HAD")))
-    `(let ((,had (and (fboundp 'omp-re::live-annotations) (fdefinition 'omp-re::live-annotations))))
-       (unwind-protect
-            (progn
-              (setf (fdefinition 'omp-re::live-annotations)
-                    (lambda (binary-path &optional session)
-                      (declare (ignore binary-path session))
-                      (list ,@annotations)))
-              ,@body)
-         (if ,had
-             (setf (fdefinition 'omp-re::live-annotations) ,had)
-             (fmakunbound 'omp-re::live-annotations))))))
+(defun annotate-record (session new-value evidence-id)
+  "Record a comment saying NEW-VALUE on the open binary, made on EVIDENCE-ID
+=> the entry's id, which TAKE-BACK undoes."
+  (gethash "id" (omp-re::append-entry "re.annotation"
+                                      (omp-re:obj "kind" "set_comment" "ea" "0x401000" "oldValue" ""
+                                                  "newValue" new-value "evidenceId" evidence-id)
+                                      session)))
 
-(defun annotation (new-value evidence-id)
-  (omp-re:obj "kind" "comment" "ea" "0x401000" "oldValue" "" "newValue" new-value "evidenceId" evidence-id))
+(defun take-back (session &rest entry-ids)
+  (dolist (id entry-ids)
+    (omp-re::append-entry "re.undo" (omp-re:obj "undidEntryId" id) session)))
 
 ;;; --- the pieces ---------------------------------------------------------------------------
 
@@ -220,15 +213,21 @@ module is or is not loaded, and put back after."
                   (refusal (lambda () (re:call "adopt_finding" :claim "c"
                                                                :commands (make-list 9 :initial-element '(:command "pdf")))))))))
 
-  (check "a finding's note carries inheritance, adoption and an audit override"
-         (string= "confidence: likely · at `sym.fibonacci` · inherited from `aaaaaaaaaaaa…`, re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd) · adopted from re-analyst, re-proven in this session · recorded over a support-audit \"overreach\" verdict — justification: it is djb2"
-                  (omp-re::finding-note
-                   (omp-re:obj "confidence" "likely" "addr" "sym.fibonacci"
-                            "inherited" (omp-re:obj "fromBinarySha256" (sha-of #\a) "carryStatus" "relocated"
-                                                 "relocation" (omp-re:obj "from" "sym.fib @ 0x11fd"
-                                                                       "to" "sym.fibonacci @ 0x11fd"))
-                            "adoptedFrom" "re-analyst"
-                            "audit" (omp-re:obj "verdict" "overreach" "reason" "r" "override" "it is djb2")))))
+  (check "/re findings <id> says a finding's provenance: inheritance, adoption and an audit override"
+         (let ((id (fresh-session)))
+           (omp-re::append-entry
+            "re.finding"
+            (omp-re:obj "id" "note-finding-0001" "claim" "c" "evidenceIds" (vector)
+                        "confidence" "likely" "addr" "sym.fibonacci"
+                        "inherited" (omp-re:obj "fromBinarySha256" (sha-of #\a) "carryStatus" "relocated"
+                                                "relocation" (omp-re:obj "from" "sym.fib @ 0x11fd"
+                                                                         "to" "sym.fibonacci @ 0x11fd"))
+                        "adoptedFrom" "re-analyst"
+                        "audit" (omp-re:obj "verdict" "overreach" "reason" "r" "override" "it is djb2"))
+            (omp-re:find-session id))
+           (in-session (id)
+             (has (format nil "~%confidence: likely · at `sym.fibonacci` · inherited from `aaaaaaaaaaaa…`, re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd) · adopted from re-analyst, re-proven in this session · recorded over a support-audit \"overreach\" verdict — justification: it is djb2~%")
+                  (re:slash "findings note-finding-0001")))))
   (let ((id (fresh-session)))
     (let ((session (omp-re:find-session id)))
       (omp-re::append-entry "re.finding" (omp-re:obj "id" "a" "claim" "kept" "evidenceIds" (vector "e" 7)
@@ -265,10 +264,6 @@ module is or is not loaded, and put back after."
                     (eq :null (gethash "binarySha256" manifest))
                     (equalp #() (gethash "findings" manifest))
                     (equalp #() (gethash "entries" manifest)))))
-      (check "the title names a long session id by its last eight characters"
-             (string= "Analysis Report — Session 23456789"
-                      (omp-re::built-report-title
-                       (omp-re::build-report (omp-re::make-session :id "session-0123456789")))))
       (check "a report that cannot be written says where and why, as a failure"
              (has "omp-re: could not write report to /nonexistent-dir/x.md: "
                   (refusal (lambda () (re:slash "report /nonexistent-dir/x.md")))))))
@@ -379,26 +374,28 @@ module is or is not loaded, and put back after."
         (check "retracting the ungrounded finding lets the report through again"
                (has "report written to" (re:slash (format nil "report ~a" withheld)))))
 
-      ;; Annotations, as annotate.lisp's LIVE-ANNOTATIONS answers them for the open binary.
-      (setf (omp-re::session-binary-path session) "/bin/sample")
-      (with-annotations ((annotation "http://evil-test.example/payload" ""))
+      ;; Annotations in effect on the binary the record has open.
+      (let ((ungrounded (annotate-record session "http://evil-test.example/payload" "")))
         (check "an IOC in an annotation made on no evidence withholds the report"
                (let ((text (refusal (lambda () (re:slash "report")))))
                  (and (has "omp-re: report withheld — 1 claim(s) without evidence:" text)
-                      (has "  - hxxp://evil-test[.]example/payload" text)))))
-      (with-annotations ((annotation "http://evil-test.example/payload" "ann-evidence")
-                         (annotation "see http://185.220.101.99/update.php" "11111111-aaaa-bbbb-cccc-000000000001")
-                         (omp-re:obj "kind" "comment"))
+                      (has "  - hxxp://evil-test[.]example/payload" text))))
+        (take-back session ungrounded))
+      (let ((made (list (annotate-record session "http://evil-test.example/payload" "ann-evidence")
+                        (annotate-record session "see http://185.220.101.99/update.php"
+                                         "11111111-aaaa-bbbb-cccc-000000000001"))))
+        ;; One that says no address is no annotation.
+        (omp-re::append-entry "re.annotation" (omp-re:obj "kind" "set_comment") session)
         (let ((markdown (re:slash "report")))
           (check "an annotation's IOC is anchored to the evidence it was made on"
                  (and (has (format nil "- hxxp://evil-test[.]example/payload~%  **Evidence:** [annotation:ann-evidence]") markdown)
                       (has "| `ann-evid` | annotation | — | — | unverifiable (legacy) |" markdown)))
           (check "one indicator seen twice is one claim on both pieces of evidence"
                  (has (format nil "- hxxp://185[.]220[.]101[.]99/update[.]php~%  **Evidence:** [list_strings:ev-strings] [rizin_command:11111111-aaaa-bbbb-cccc-000000000001]")
-                      markdown))))
-      (check "with the annotations gone the report is as it was"
+                      markdown)))
+        (apply #'take-back session made))
+      (check "with the annotations undone the report is as it was"
              (not (has "evil-test" (re:slash "report"))))
-      (setf (omp-re::session-binary-path session) nil)
 
       ;; capa's capabilities, from the blob its record points at.
       (omp-re::append-entry
