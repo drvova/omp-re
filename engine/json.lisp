@@ -13,7 +13,7 @@
 ;;;; for the values the engine writes, which is what lets a record written
 ;;;; here verify under omp and the other way round.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (define-condition json-refusal (error)
   ((detail :initarg :detail :reader json-refusal-detail))
@@ -195,7 +195,6 @@ JSON.stringify(value, null, INDENT) lays it out."
           (t (error "no JSON form for ~s" value)))))
 
 (defun json-encode (value &key indent)
-  "VALUE as JSON text."
   (with-output-to-string (out) (write-json value out indent)))
 
 (defun obj (&rest pairs)
@@ -219,12 +218,19 @@ read as NIL; NIL as soon as a step is not an object."
     (if (eq value :null) nil value)))
 
 (defun jstring (object &rest path)
-  "The member at PATH when it is a string, else NIL."
   (let ((value (apply #'jget object path)))
     (and (stringp value) value)))
 
+(defun jstring-or-absent (object &rest path)
+  "The member at PATH when it is a string, else :ABSENT — for OBJ, which
+leaves an absent member out."
+  (or (apply #'jstring object path) :absent))
+
+(defun jstrings (object &rest path)
+  "The strings of the array at PATH, as a list."
+  (remove-if-not #'stringp (apply #'jlist object path)))
+
 (defun jnumber (object &rest path)
-  "The member at PATH when it is a number, else NIL."
   (let ((value (apply #'jget object path)))
     (and (realp value) value)))
 

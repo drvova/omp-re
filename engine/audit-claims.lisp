@@ -2,8 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's audit-claims.ts.
-;;;;
 ;;;; The third grounding gate, after the two deterministic ones (existence: a
 ;;;; claim with no evidence id withholds the report; reproducibility: the
 ;;;; repro hash and /re verify). Those prove a claim is cited and
@@ -23,14 +21,7 @@
 ;;;; unsupported or overreach verdict withholds — a failure of the machinery
 ;;;; never fails closed, so a strict report stays emittable.
 
-(in-package #:nodecode-re)
-
-(defvar *claim-judge* nil
-  "Who answers the audit's side question: a function of (PROMPT) answering
-the model's reply text, or NIL when no side question can be asked — and
-then, as a second value, why in words, when the reason is worth more than
-`no model'. NIL here is a host with no judge at all: ClaimJudge and
-ephemeralJudge in one, since on this host asking is all a judge does.")
+(in-package #:omp-re)
 
 (defparameter +no-judge-reason+ "no model / side turns unavailable"
   "auditClaims' reason when there is no judge to ask.")
@@ -94,7 +85,7 @@ has no structured-output path."
           (say "  (no evidence quoted)"))
         (dolist (evidence (audit-item-evidence item))
           (say "  evidence [~a:~a] summary: ~a"
-               (jget evidence "tool") (short-id (jstring evidence "id")) (jget evidence "summary"))
+               (jget evidence "tool") (shown-id (jstring evidence "id")) (jget evidence "summary"))
           ;; The excerpt when one was recorded — an empty one included,
           ;; which then quotes nothing — else the output itself.
           (let ((excerpt (or (jstring evidence "canonicalExcerpt") (jstring evidence "fullText"))))
@@ -160,7 +151,7 @@ does not know reads as unaudited."
 
 ;;; --- the audit ----------------------------------------------------------------------------------
 
-(defun audit-claims (items mode &optional (judge *claim-judge*))
+(defun audit-claims (items mode &optional (judge (host-service :judge)))
   "Put ITEMS to JUDGE and assemble the outcome. Nothing to audit — MODE
 \"off\", no items, no judge — is unaudited. A judge that cannot ask, signals
 or answers nothing readable is unaudited with the reason. A readable reply

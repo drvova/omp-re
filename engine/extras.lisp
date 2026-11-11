@@ -3,14 +3,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's tools-mapfile.ts + mapfiles.ts (map_file),
-;;;; tools-analyze.ts + passes.ts (analyze), tools-signatures.ts +
-;;;; signatures.ts (apply_signatures, create_signature), tools-project.ts
-;;;; (export_project), tools-rzcli.ts (rizin_cli), tools-triage.ts
-;;;; (triage_capa, triage_floss, triage_die, triage_yara) and
-;;;; tools-emulate.ts (rizin_emulate), with the three readers of entries.ts
-;;;; that scope a record to the open binary.
-;;;;
 ;;;; Three of these change what the rizin process holds without being
 ;;;; annotations: a mapped file, an extra analysis pass, a custom signature
 ;;;; file. Each is recorded (re.mapfile, re.analysis, re.signature) and put
@@ -22,7 +14,7 @@
 ;;;; None of these tools is evidence: rizin_command is the one way to observe
 ;;;; the binary on the record.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- small things several tools share ------------------------------------------------------
 
@@ -40,11 +32,6 @@
 (defun function-count (rz)
   "How many functions RZ knows of; 0 when it does not say."
   (or (ignore-errors (parse-integer (trimmed (rz-cmd rz "aflc")))) 0))
-
-(defun fail-result (result)
-  "RESULT marked as a failure: the text is still what the model reads."
-  (setf (result-failed result) t)
-  result)
 
 ;;; --- map_file ------------------------------------------------------------------------------
 ;;; The file is opened with `o', never `o+', so it is mapped read-only and
@@ -196,7 +183,7 @@ unknown or failing pass is a failure line, never the end of the replay."
                                    (if (/= delta 0) (format nil " (+~d)" delta) " (no change)")
                                    (if (blank-p out) "" (format nil "~%~a" out))))
                        :tool "analyze")))
-          (if errored (fail-result result) result))))))
+          (if errored (as-failure result) result))))))
 
 ;;; --- FLIRT signatures ----------------------------------------------------------------------
 ;;; rizin's `aaa' applies the built-in signature database on open, so that
@@ -205,7 +192,7 @@ unknown or failing pass is a failure line, never the end of the replay."
 
 (defun validate-signature-path (path)
   "PATH when it can cross the pipe; quoting makes everything else literal."
-  (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) path)
+  (when (ends-pipe-line-p path)
     (fail "omp-re: apply_signatures: path must not contain a line break or NUL"))
   (when (blank-p path)
     (fail "omp-re: apply_signatures: empty path"))
@@ -402,7 +389,7 @@ carries a refused capability through."
   (let ((tool (rz-cli-tool definition))
         (repeats '()))
     (dolist (token arguments)
-      (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) token)
+      (when (ends-pipe-line-p token)
         (return-from check-rz-cli "omp-re: rizin_cli: an argument contains a line break or NUL"))
       (when (member token (rz-cli-denied-tokens definition) :test #'string=)
         (return-from check-rz-cli
@@ -432,17 +419,10 @@ carries a refused capability through."
                            tool flag value)))))
     nil))
 
-(defun program-installed-p (name)
-  "Whether NAME can be run: an executable file when it is a path, else found on PATH."
-  (and (if (find-if (lambda (char) (find char "/\\")) name)
-           (executable-p name)
-           (find-on-path name))
-       t))
-
 (defun available-rz-cli-tools ()
   "The rz-* programs installed beside rizin: they ship together, but a
 minimal build may lack some. Asked each time, so one installed later is seen."
-  (remove-if-not (lambda (definition) (program-installed-p (resolve-rizin-tool (rz-cli-tool definition))))
+  (remove-if-not (lambda (definition) (program-available-p (resolve-rizin-tool (rz-cli-tool definition))))
                  +rz-cli-tools+))
 
 (define-tool "rizin_cli"
@@ -561,7 +541,7 @@ non-zero exit must not read as \"0 findings\"."
 (define-tool "triage_capa"
     (:label "Triage: capa" :tier :exec
      :description "Run capa rules against the binary to detect capabilities and ATT&CK techniques."
-     :available (lambda () (program-installed-p "capa")))
+     :available (lambda () (program-available-p "capa")))
     ()
     (arguments)
   (run-plain-triage "capa" "capa" 300 #'capa-findings))
@@ -569,7 +549,7 @@ non-zero exit must not read as \"0 findings\"."
 (define-tool "triage_floss"
     (:label "Triage: floss" :tier :exec
      :description "Extract obfuscated strings (stack, decoded, static) from the binary using FLOSS."
-     :available (lambda () (program-installed-p "floss")))
+     :available (lambda () (program-available-p "floss")))
     ()
     (arguments)
   (run-plain-triage "floss" "floss" 600 #'floss-findings))
@@ -578,7 +558,7 @@ non-zero exit must not read as \"0 findings\"."
 (define-tool "triage_die"
     (:label "Triage: die" :tier :exec
      :description "Detect packers, compilers, and file types using Detect It Easy."
-     :available (lambda () (program-installed-p "diec")))
+     :available (lambda () (program-available-p "diec")))
     ()
     (arguments)
   (run-plain-triage "die" "diec" 60 #'die-findings))
@@ -596,7 +576,7 @@ array of objects. A line with no space (a warning) is skipped, not misread."
 (define-tool "triage_yara"
     (:label "Triage: yara" :tier :exec
      :description "Scan the binary with user-supplied YARA rules."
-     :available (lambda () (program-installed-p "yara")))
+     :available (lambda () (program-available-p "yara")))
     (("rules_path" :string :required t :doc "Path to a YARA rules file."))
     (arguments)
   (when (blank-p (jstring arguments "rules_path"))
@@ -618,22 +598,16 @@ array of objects. A line with no space (a warning) is skipped, not misread."
 ;;; static rizin session and no OS process runs. `aezi @ addr' starts it
 ;;; without moving the session's seek, so no other tool is disturbed.
 
-(defun emulate-seconds ()
-  "The budget for one run of the VM: a step that never returns is cut here.
-The debugger's own bound, as in the TypeScript."
-  (let ((ms (ignore-errors (parse-integer (or (env "OMPRE_DEBUG_TIMEOUT_MS") "")))))
-    (if (and ms (plusp ms)) (/ ms 1000) 60)))
-
 (defun validate-vm-variable (name)
   "NAME when it is a VM variable's name (PC, rsp, rax, zf, xmm0): rizin
 refuses anything else anyway, and refusing here keeps the message ours."
-  (unless (js-scan "^[A-Za-z][A-Za-z0-9_]*$" name)
+  (unless (plain-name-p name)
     (fail "omp-re: emulate: bad variable name ~a — use a name from the vars action" (js-string name)))
   name)
 
 (defun validate-vm-value (value)
   "VALUE when it is a decimal or 0x hex number, the forms `aezv' takes."
-  (unless (js-scan "^0x[0-9a-fA-F]+$|^[0-9]+$" value)
+  (unless (number-text-p value)
     (fail "omp-re: emulate: bad value ~a — use a decimal or 0x hex number" (js-string value)))
   value)
 
@@ -644,12 +618,6 @@ optional 0x taken off."
     (unless (and (plusp (length hex)) (evenp (length hex)) (js-scan "^[0-9a-fA-F]+$" hex))
       (fail "omp-re: emulate: bad bytes ~a — use an even number of hex digits, e.g. 41424344" (js-string value)))
     (string-downcase hex)))
-
-(defun clamp-step-count (value)
-  "The step count held to 1..1000 instructions; 1 when none was given."
-  (if (realp value)
-      (max 1 (min (floor value) 1000))
-      1))
 
 (define-tool "rizin_emulate"
     (:label "emulator" :tier :exec
@@ -683,14 +651,14 @@ optional 0x taken off."
              (answer (format nil "emulate: VM initialized at ~a" ea)
                      (format nil "~@[~a~%~]~a" note (if (blank-p vars) "(no VM state)" vars))))))
         ((string= action "step")
-         (let* ((count (clamp-step-count (jget arguments "count")))
-                (out (trimmed (rz-cmd rz (format nil "aezsej ~d" count) :seconds (emulate-seconds)))))
+         (let* ((count (clamped-count (jget arguments "count") 1 1000))
+                (out (trimmed (rz-cmd rz (format nil "aezsej ~d" count) :seconds (dynamic-seconds)))))
            (answer (format nil "emulate: step ~d" count)
                    (if (blank-p out) "(no changes — init the VM first)" out))))
         ((string= action "step_until")
          (unless addr (fail "omp-re: emulate step_until needs addr"))
          (let ((ea (validate-addr addr)))
-           (rz-cmd rz (format nil "aezsu ~a" ea) :seconds (emulate-seconds))
+           (rz-cmd rz (format nil "aezsu ~a" ea) :seconds (dynamic-seconds))
            (let ((vars (vm-state)))
              (answer (format nil "emulate: step_until ~a" ea)
                      (if (blank-p vars) "(no VM state — the run may have stalled)" vars)))))
@@ -719,7 +687,7 @@ optional 0x taken off."
            (rz-cmd rz "e io.cache=true")
            (let ((err (trimmed (nth-value 1 (rz-run rz (format nil "wx ~a @ ~a" hex ea))))))
              (if (not (blank-p err))
-                 (fail-result (answer (format nil "emulate: set_mem @ ~a" ea)
+                 (as-failure (answer (format nil "emulate: set_mem @ ~a" ea)
                                       (format nil "wx ~a @ ~a: ~a" hex ea err)))
                  (let* ((size (/ (length hex) 2))
                         (back (trimmed (rz-cmd rz (format nil "pxj ~d @ ~a" size ea)))))
@@ -728,10 +696,10 @@ optional 0x taken off."
         (t (fail "omp-re: emulate: unknown action ~a" (js-string action)))))))
 
 ;;; --- putting the record back on a fresh process ----------------------------------------------
-;;; In the order runtime.ts's spawn replays them. The annotations register
-;;; after these (annotate.lisp loads later), so they land on what the maps,
-;;; passes and signatures produced.
+;;; Mapped files bring address space, analysis passes find functions in it,
+;;; signatures name the functions that now exist; the annotations (order 60)
+;;; are the analyst's edits on top of all three.
 
-(register-replay "mapfiles" #'replay-map-files)
-(register-replay "passes" #'replay-analysis-passes)
-(register-replay "signatures" #'replay-signatures)
+(contribute "mapped files" :order 10 :noun "mapped file(s)" :replay #'replay-map-files)
+(contribute "analysis passes" :order 20 :noun "analysis pass(es)" :replay #'replay-analysis-passes)
+(contribute "signatures" :order 30 :noun "signature file(s)" :replay #'replay-signatures)

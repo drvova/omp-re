@@ -4,7 +4,7 @@
  *
  * Looks at the commits in a range, decides whether they warrant a release and
  * at what level, and — if so — bumps the version in `package.json`,
- * `.omp-plugin/marketplace.json` and `nodecode-re.asd` (kept in lock-step) and stamps a dated
+ * `.omp-plugin/marketplace.json`, `omp-re.asd` and `nodecode-re.asd` (kept in lock-step) and stamps a dated
  * section in `CHANGELOG.md`. It only edits files; the workflow does the git
  * commit / tag / push. Run it locally with `--dry-run` to preview a decision
  * without touching anything.
@@ -38,8 +38,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = join(ROOT, "package.json");
 const MARKET = join(ROOT, ".omp-plugin", "marketplace.json");
 const CHANGELOG = join(ROOT, "CHANGELOG.md");
-// The nodecode cell's system definition carries the same version (see docs/nodecode.md).
-const ASD = join(ROOT, "nodecode-re.asd");
+// The engine's system definition and the nodecode cell's carry the same version.
+const ASDS = [join(ROOT, "omp-re.asd"), join(ROOT, "nodecode-re.asd")];
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
@@ -181,7 +181,13 @@ if (dryRun) {
 
 writeFileSync(PKG, setJsonVersion(pkgRaw, next));
 writeFileSync(MARKET, setJsonVersion(readFileSync(MARKET, "utf8"), next));
-writeFileSync(ASD, readFileSync(ASD, "utf8").replace(/^(\s*:version\s+")[^"]*(")/m, `$1${next}$2`));
+for (const asd of ASDS) {
+	const before = readFileSync(asd, "utf8");
+	const after = before.replace(/^(\s*:version\s+")[^"]*(")/m, `$1${next}$2`);
+	// A system file with no version line to bump would silently fall out of step.
+	if (after === before && !before.includes(`:version "${next}"`)) throw new Error(`release: no :version line in ${asd}`);
+	writeFileSync(asd, after);
+}
 
 const date = new Date().toISOString().slice(0, 10);
 const changelog = readFileSync(CHANGELOG, "utf8");

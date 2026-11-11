@@ -2,14 +2,13 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/rizin.ts (the validators and the
-;;;; quoting every model-supplied value passes through before it reaches
-;;;; rizin's pipe) and extensions/re/format.ts (truncation, and the canonical
-;;;; projection of rizin output that the reproducibility hashes are taken
-;;;; over). The messages are the engine's, word for word: the model has been
-;;;; taught to repair from them.
+;;;; The validators and the quoting every model-supplied value passes through
+;;;; before it reaches rizin's pipe; truncation; and the canonical projection
+;;;; of rizin output that the reproducibility hashes are taken over. The
+;;;; messages are fixed, word for word: the model has been taught to repair
+;;;; from them.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- small things ---------------------------------------------------------------
 
@@ -18,16 +17,6 @@
 
 (defun blank-p (text)
   (zerop (length (trimmed text))))
-
-(defun env (name)
-  "The environment variable NAME, trimmed, or NIL when unset or blank."
-  (let ((value (uiop:getenv name)))
-    (and value (not (blank-p value)) (trimmed value))))
-
-(defun env-on-p (name)
-  "Whether NAME is set to 1, true, yes or on — the engine's switch spelling."
-  (let ((value (env name)))
-    (and value (member value '("1" "true" "yes" "on") :test #'string-equal) t)))
 
 (defun split-lines (text)
   "TEXT's lines, as a split on newline gives them: a trailing newline leaves
@@ -45,14 +34,6 @@ an empty last line."
   "TEXT split on blanks, empty pieces dropped."
   (remove "" (uiop:split-string (or text "") :separator '(#\Space #\Tab #\Newline #\Return))
           :test #'string=))
-
-(defun starts-with (prefix text)
-  (and (<= (length prefix) (length text))
-       (string= prefix text :end2 (length prefix))))
-
-(defun ends-with (suffix text)
-  (and (<= (length suffix) (length text))
-       (string= suffix text :start2 (- (length text) (length suffix)))))
 
 (defun js-string (value)
   "VALUE the way JSON.stringify quotes a string in the engine's messages."
@@ -80,7 +61,6 @@ an empty last line."
               year month day hour minute second (floor microseconds 1000)))))
 
 (defun random-octets (count)
-  "COUNT octets from the system's generator."
   (let ((octets (make-array count :element-type '(unsigned-byte 8))))
     (handler-case
         (with-open-file (in "/dev/urandom" :element-type '(unsigned-byte 8))
@@ -108,7 +88,6 @@ an empty last line."
     (if (zerop (length safe)) "session" safe)))
 
 (defun write-text-file (path text)
-  "Write TEXT to PATH whole, creating its folder."
   (ensure-directories-exist path)
   (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create
                             :external-format :utf-8)
@@ -116,12 +95,18 @@ an empty last line."
   path)
 
 (defun append-text-file (path text)
-  "Append TEXT to PATH, creating it and its folder."
   (ensure-directories-exist path)
   (with-open-file (out path :direction :output :if-exists :append :if-does-not-exist :create
                             :external-format :utf-8)
     (write-string text out)
     (finish-output out))
+  path)
+
+(defun write-octets-file (path octets)
+  (ensure-directories-exist path)
+  (with-open-file (out path :direction :output :element-type '(unsigned-byte 8)
+                            :if-exists :supersede :if-does-not-exist :create)
+    (write-sequence octets out))
   path)
 
 (defun read-text-file (path)
@@ -132,12 +117,9 @@ an empty last line."
           (subseq text 0 (read-sequence text in))))
     (error () nil)))
 
-(defun native (path)
-  (uiop:native-namestring path))
-
 ;;; --- patterns, read as JavaScript reads them -----------------------------------------
-;;; The engine's patterns come from the TypeScript engine, and in JavaScript
-;;; `$' is the end of the string and nothing else. In Perl syntax — cl-ppcre's
+;;; The engine's patterns were written for JavaScript, where `$' is the end
+;;; of the string and nothing else. In Perl syntax — cl-ppcre's
 ;;; — `$' also matches before a final newline, so "main\n" would pass a
 ;;; validator anchored with it, and a value ending in a newline ends the pipe
 ;;; line: what follows would run as a command of its own. Every pattern is
@@ -175,7 +157,7 @@ or a pipe."
 0X01100 and \"0x1100 \" key the same evidence; anything not 0x-prefixed is
 lowercased as written."
   (let ((text (string-downcase (trimmed raw))))
-    (if (not (starts-with "0x" text))
+    (if (not (uiop:string-prefix-p "0x" text))
         text
         (let ((digits (string-left-trim "0" (subseq text 2))))
           (cond ((= (length text) 2) "0x")
@@ -191,11 +173,16 @@ lowercased as written."
 (defun ea-from-offset (offset)
   (format nil "0x~(~x~)" offset))
 
+(defun ends-pipe-line-p (text)
+  "Whether TEXT holds a line break or NUL: rizin reads its pipe a line at a
+time, so either would end the command and start another."
+  (and (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) text) t))
+
 (defun rz-quote (value)
   "VALUE as one single-quoted rizin argument. Inside single quotes rizin
 takes `;', `@', `~', `|', `>', backticks, `$(...)' and `#' as text, so no
 model-supplied comment or signature can end the command and start another."
-  (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) value)
+  (when (ends-pipe-line-p value)
     (fail "omp-re: invalid argument: contains a newline or NUL"))
   (with-output-to-string (out)
     (write-char #\' out)
@@ -213,19 +200,36 @@ model-supplied comment or signature can end the command and start another."
       (fail "omp-re: invalid ~a: forbidden character ~a" key (js-string (string char))))))
 
 (defun validate-text (value)
-  "VALUE when it has no line break or NUL, which would end the pipe line."
-  (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) value)
+  "VALUE when it has no line break or NUL."
+  (when (ends-pipe-line-p value)
     (fail "omp-re: invalid text: contains forbidden character"))
   value)
+
+;;; --- what a tool takes from its caller --------------------------------------------------
+
+(defun plain-name-p (text)
+  "Whether TEXT is a bare name — a register, a VM variable: a letter, then
+letters, digits and underscores."
+  (js-scan "^[A-Za-z][A-Za-z0-9_]*$" text))
+
+(defun number-text-p (text)
+  "Whether TEXT is a decimal or 0x hex number, the two forms rizin's
+assignments take."
+  (js-scan "^0x[0-9a-fA-F]+$|^[0-9]+$" text))
+
+(defun clamped-count (value fallback most)
+  "VALUE as a whole number between 1 and MOST; FALLBACK when none was given."
+  (if (realp value)
+      (max 1 (min (floor value) most))
+      fallback))
 
 ;;; --- truncation ---------------------------------------------------------------------
 
 (defparameter +max-lines+ 2000 "The most lines of a result the model is sent.")
 (defparameter +max-octets+ (* 48 1024)
-  "The most bytes of a result's body the model is sent: the TypeScript
-engine's limit, which sits two KiB under its host's so that a header, a
-truncation note and an evidence tag never push a result past it. Kept equal
-here so the two engines cut at the same line.")
+  "The most bytes of a result's body the model is sent: two KiB under omp's
+own limit for a tool result, so that a header, a truncation note and an
+evidence tag never push a result past it.")
 
 (defun format-size (octets)
   (cond ((< octets 1024) (format nil "~dB" octets))
@@ -239,7 +243,7 @@ here so the two engines cut at the same line.")
          (lines (if (zerop (length content))
                     '()
                     (let ((lines (split-lines content)))
-                      (if (ends-with (string #\Newline) content) (butlast lines) lines))))
+                      (if (uiop:string-suffix-p content (string #\Newline)) (butlast lines) lines))))
          (total-lines (length lines)))
     (cond ((and (<= total-lines +max-lines+) (<= total-octets +max-octets+))
            (values content nil total-lines total-lines total-octets total-octets))
@@ -260,7 +264,6 @@ here so the two engines cut at the same line.")
 (defparameter +ansi-escape+ (ppcre:create-scanner "\\x1b\\[[0-9;?]*[A-Za-z]"))
 
 (defun replace-all (text old new)
-  "TEXT with every occurrence of the literal OLD replaced by NEW."
   (if (zerop (length old))
       text
       (with-output-to-string (out)
@@ -311,7 +314,12 @@ so a rebuild that only moves code compares equal."
 differ only in where the code sits."
   (sha256-hex (mask-addresses (canonicalize-rizin-output raw binary-path))))
 
-(defun canonical-excerpt (raw &optional binary-path (max-lines 20) (max-characters 1024))
+(defparameter +excerpt-lines+ 20)
+(defparameter +excerpt-characters+ 1024
+  "An excerpt this long was cut, mid-line.")
+
+(defun canonical-excerpt (raw &optional binary-path (max-lines +excerpt-lines+)
+                                                    (max-characters +excerpt-characters+))
   "The first lines of the canonical output, kept for a human to diff."
   (let* ((lines (split-lines (canonicalize-rizin-output raw binary-path)))
          (head (join-lines (subseq lines 0 (min max-lines (length lines))))))

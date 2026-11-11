@@ -8,7 +8,7 @@
 ;;;; may lean on, so the engine carries the forty lines FIPS 180-4 takes.
 ;;;; test/nodecode checks it against the published vectors and sha256sum.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (deftype octets () '(simple-array (unsigned-byte 8) (*)))
 
@@ -107,15 +107,12 @@
             (setf (aref out (+ (* 4 i) j)) (ldb (byte 8 (* 8 (- 3 j))) word))))))))
 
 (defun sha256-octets (octets)
-  "The SHA-256 of OCTETS, as 32 octets."
   (sha256-finish (sha256-update (%make-sha256) octets)))
 
 (defun utf-8 (string)
-  "STRING as UTF-8 octets."
   (coerce (sb-ext:string-to-octets string :external-format :utf-8) 'octets))
 
 (defun hex (octets)
-  "OCTETS as lowercase hex."
   (with-output-to-string (out)
     (loop for octet across octets do (format out "~(~2,'0x~)" octet))))
 
@@ -151,7 +148,6 @@
         (sha256-finish digest)))))
 
 (defun base64 (octets)
-  "OCTETS as padded base64."
   (let ((alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
     (with-output-to-string (out)
       (loop for i from 0 below (length octets) by 3

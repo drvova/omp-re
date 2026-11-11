@@ -2,11 +2,10 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Three halves, none needing rizin but one check. The port of
-;;;; audit-claims.ts alone: its prompt, its reply parser, every outcome.
-;;;; Then the audit where the engine wires it — record_finding and
-;;;; /re report — with a judge bound by hand, held to the cases of
-;;;; test/findings.test.ts and test/report.test.ts. Then the cell's own
+;;;; Three halves, none needing rizin but one check. The audit alone: its
+;;;; prompt, its reply parser, every outcome. Then the audit where the
+;;;; engine uses it — record_finding and /re report — with a judge put in
+;;;; the host port by hand. Then the cell's own
 ;;;; judge, which asks nodecode a side question: over the stand-in kernel,
 ;;;; so what is proven is what the cell asks for and what it makes of each
 ;;;; way a turn can end, never nodecode's side of it.
@@ -26,8 +25,8 @@
           (re::audit-outcome-by-index outcome)))
 
 (defun judge-saying (verdict &optional (reason "because"))
-  "A judge that gives every claim it is put VERDICT and REASON, as
-findings.test.ts's judgeSaying does — but as a reply to parse."
+  "A judge that gives every claim it is put VERDICT and REASON, as a reply
+to parse."
   (lambda (prompt)
     (re::json-encode
      (map 'vector (lambda (line)
@@ -59,15 +58,6 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
 
 (defun finding-count (id)
   (length (re::live-findings (re::find-session id))))
-
-(defmacro with-store (&body body)
-  "BODY with the stand-in's store open and nothing left of earlier sessions."
-  `(progn
-     (nlk:stub-forget-sessions)
-     (setf nlk:*stub-store-open* t)
-     (unwind-protect (progn ,@body)
-       (setf nlk:*stub-store-open* nil)
-       (nlk:stub-forget-sessions))))
 
 ;;; --- the port ---------------------------------------------------------------------------------
 
@@ -115,7 +105,7 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                   (format nil "    output: ~a…" (make-string 800 :initial-element #\x))))
   (check "a claim with no evidence says so, and the prompt ends without a newline"
          (and (string= (car (last lines)) "  (no evidence quoted)")
-              (re::ends-with "(no evidence quoted)" prompt))))
+              (ends "(no evidence quoted)" prompt))))
 
 (suite "audit: reading the reply")
 (flet ((parsed (text) (mapcar (lambda (audit)
@@ -166,8 +156,9 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                 (unaudited-p (re::audit-claims items "strict" nil) "no model / side turns unavailable" 2)
                 (unaudited-p (re::audit-claims '() "advisory" nil) "no model / side turns unavailable" 0)))
     (check "and with none bound, which is where the engine stands until the cell sets one"
-           (let ((re::*claim-judge* nil))
-             (unaudited-p (re::audit-claims items "advisory") "no model / side turns unavailable" 2)))
+           (let ((judge-now nil))
+             (with-service (:judge judge-now)
+             (unaudited-p (re::audit-claims items "advisory") "no model / side turns unavailable" 2))))
     (check "mode off and no items ask nobody; with a judge there, no reason is given"
            (let* ((asked 0)
                   (judge (lambda (prompt) (declare (ignore prompt)) (incf asked) "[]")))
@@ -234,11 +225,12 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
   (let ((id (audit-session)))
     (in-session (id)
       (let* ((seen nil)
-             (text (let ((re::*claim-judge* (lambda (prompt)
+             (text (let ((judge-now (lambda (prompt)
                                               (setf seen prompt)
                                               (funcall (judge-saying "supported") prompt))))
+                     (with-service (:judge judge-now)
                      (re:call "record_finding" :claim "f multiplies by 33." :evidence '("11111111")
-                                               :addr "sym.f" :confidence "confirmed"))))
+                                               :addr "sym.f" :confidence "confirmed")))))
         (check "a supported finding is recorded, and its result says the auditor's verdict and reason"
                (and (has "record_finding: recorded " text)
                     (has (format nil "~%support audit: supported — because~%") text)
@@ -251,8 +243,9 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                (string= "{\"verdict\":\"supported\",\"reason\":\"because\"}"
                         (re::json-encode (gethash "audit" (last-finding id))))))
 
-      (let ((re::*claim-judge* (judge-saying "overreach" "shows a multiply, not a hash")))
-        (check "an overreaching claim is refused in the TypeScript's words, with the auditor's reason"
+      (let ((judge-now (judge-saying "overreach" "shows a multiply, not a hash")))
+        (with-service (:judge judge-now)
+        (check "an overreaching claim is refused, word for word, with the auditor's reason"
                (equal (format nil "record_finding: NOT recorded — the support auditor judged this claim overreach: shows a multiply, not a hash~%Narrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.")
                       (refusal (lambda () (re:call "record_finding" :claim "f is the djb2 hash of the C2 key."
                                                                     :evidence '("11111111"))))))
@@ -273,26 +266,29 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
           (check "/re findings and the report show the justification beside the finding"
                  (let ((note "recorded over a support-audit \"overreach\" verdict — justification: the constant 33 plus the loop is djb2"))
                    (and (has note (re:slash (format nil "findings ~a" (gethash "id" (last-finding id)))))
-                        (has note (re:slash "report --no-audit")))))))
+                        (has note (re:slash "report --no-audit"))))))))
 
-      (let ((re::*claim-judge* (judge-saying "unsupported" "wrong evidence")))
+      (let ((judge-now (judge-saying "unsupported" "wrong evidence")))
+        (with-service (:judge judge-now)
         (check "an unsupported claim is refused the same way"
                (has "record_finding: NOT recorded — the support auditor judged this claim unsupported: wrong evidence"
-                    (refusal (lambda () (re:call "record_finding" :claim "h decrypts." :evidence '("11111111")))))))
+                    (refusal (lambda () (re:call "record_finding" :claim "h decrypts." :evidence '("11111111"))))))))
 
-      (let ((re::*claim-judge* (judge-saying "supported" "")))
+      (let ((judge-now (judge-saying "supported" "")))
+        (with-service (:judge judge-now)
         (re:call "record_finding" :claim "an override nobody needed." :evidence '("11111111")
                                   :override-audit "not needed")
         (check "an override is kept only when it overrode something, and an empty reason adds no dash"
                (and (string= "{\"verdict\":\"supported\",\"reason\":\"\"}"
                              (re::json-encode (gethash "audit" (last-finding id))))
                     (has (format nil "~%support audit: supported~%")
-                         (re:call "record_finding" :claim "no reason given." :evidence '("11111111"))))))
+                         (re:call "record_finding" :claim "no reason given." :evidence '("11111111")))))))
 
       (flet ((recorded-as (judge)
-               (let ((re::*claim-judge* judge))
+               (let ((judge-now judge))
+                 (with-service (:judge judge-now)
                  (re:call "record_finding" :claim "fails open." :evidence '("11111111"))
-                 (re::json-encode (gethash "audit" (last-finding id))))))
+                 (re::json-encode (gethash "audit" (last-finding id)))))))
         (check "a reply that cannot be read, a judge that signals and a verdict left out all record the finding, unaudited"
                (and (string= "{\"verdict\":\"unaudited\",\"reason\":\"the audit side turn returned no usable verdict\"}"
                              (recorded-as (lambda (prompt) (declare (ignore prompt)) "no JSON here")))
@@ -312,15 +308,15 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
       (let ((id (fresh-session)))
         (in-session (id)
           (re:open *binary*)
-          (let* ((re::*claim-judge* (judge-saying "overreach" "a prologue, not a parser"))
-                 (text (refusal (lambda () (re:call "adopt_finding" :claim "entry0 parses the arguments."
-                                                                    :commands '("pd 2 @ entry0"))))))
+          (with-service (:judge (judge-saying "overreach" "a prologue, not a parser"))
+            (let ((text (refusal (lambda () (re:call "adopt_finding" :claim "entry0 parses the arguments."
+                                                                     :commands '("pd 2 @ entry0"))))))
             (check "adopt_finding is refused the same way, and says the re-run evidence was kept"
                    (and (has "adopt_finding: NOT recorded — the support auditor judged this claim overreach: a prologue, not a parser" text)
                         (has (format nil "~%The re-run evidence was recorded (~a); cite it in record_finding to record a narrower claim."
-                                     (subseq (gethash "id" (car (last (re::collected-evidence (re::find-session id))))) 0 8))
+                                     (subseq (gethash "id" (car (last (re::evidence-records (re::find-session id))))) 0 8))
                              text)
-                        (zerop (finding-count id)))))))))
+                        (zerop (finding-count id))))))))))
 
 (suite "audit: /re report")
 (with-cell ()
@@ -336,10 +332,11 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                                  "summary" "found string: http://185.220.101.99/beacon")
                         session)
       (let* ((seen nil)
-             (markdown (let ((re::*claim-judge* (lambda (prompt)
+             (markdown (let ((judge-now (lambda (prompt)
                                                   (setf seen prompt)
                                                   (funcall (judge-saying "supported" "ok") prompt))))
-                         (re:slash "report"))))
+                         (with-service (:judge judge-now)
+                         (re:slash "report")))))
         (check "advisory, all supported: no flag beside a claim, and a note that counts them"
                (and (not (has "⚠ Support audit" markdown))
                     (has (format nil "~%> _Claim–evidence support audit: 3 supported, 0 flagged, 0 unaudited._~%~%## Verification Manifest")
@@ -351,8 +348,9 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                     (has (format nil "  evidence [list_strings:ev-strin] summary: found string: http://185.220.101.99/beacon~%    output: 0x1 str http://185.220.101.99/beacon")
                          seen))))
 
-      (let ((re::*claim-judge* (lambda (prompt) (declare (ignore prompt))
+      (let ((judge-now (lambda (prompt) (declare (ignore prompt))
                                  "[{\"index\":0,\"verdict\":\"supported\",\"reason\":\"ok\"},{\"index\":1,\"verdict\":\"unsupported\",\"reason\":\"evidence shows only an import\"}]")))
+        (with-service (:judge judge-now)
         (check "advisory: a flagged claim says so under its evidence, and the report is still written"
                (and (has "report written to" (re:slash (format nil "report ~a" path)))
                     (let ((markdown (re::read-text-file path)))
@@ -365,18 +363,20 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                (and (equal (format nil "omp-re: report withheld — 1 claim(s) not supported by their cited evidence:~%  - [unsupported] 185[.]220[.]101[.]99 — evidence shows only an import")
                            (refusal (lambda () (re:slash (format nil "report --audit=strict ~a" strict-path)))))
                     (not (probe-file strict-path))
-                    (has "report withheld" (refusal (lambda () (re:slash "report --audit=strict")))))))
+                    (has "report withheld" (refusal (lambda () (re:slash "report --audit=strict"))))))))
 
-      (let ((re::*claim-judge* (judge-saying "overreach" "misattributed")))
+      (let ((judge-now (judge-saying "overreach" "misattributed")))
+        (with-service (:judge judge-now)
         (check "every flagged claim is listed, in the report's order"
                (equal (format nil "omp-re: report withheld — 3 claim(s) not supported by their cited evidence:~%  - [overreach] f multiplies by 33. — misattributed~%  - [overreach] 185[.]220[.]101[.]99 — misattributed~%  - [overreach] hxxp://185[.]220[.]101[.]99/beacon — misattributed")
-                      (refusal (lambda () (re:slash "report --audit=strict"))))))
+                      (refusal (lambda () (re:slash "report --audit=strict")))))))
 
       (flet ((strict-report (judge)
-               (let ((re::*claim-judge* judge))
+               (let ((judge-now judge))
+                 (with-service (:judge judge-now)
                  (ignore-errors (delete-file strict-path))
                  (re:slash (format nil "report --audit=strict ~a" strict-path))
-                 (re::read-text-file strict-path))))
+                 (re::read-text-file strict-path)))))
         (check "strict fails open: a judge that signals, an unreadable reply and no judge all still write, and say unaudited"
                (and (has "> _Claim–evidence support unaudited — the audit side turn returned no usable verdict._"
                          (strict-report (lambda (prompt) (declare (ignore prompt)) (error "no active model"))))
@@ -388,7 +388,8 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                          (strict-report nil)))))
 
       (let* ((asked 0)
-             (re::*claim-judge* (lambda (prompt) (incf asked) (funcall (judge-saying "unsupported") prompt))))
+             (judge-now (lambda (prompt) (incf asked) (funcall (judge-saying "unsupported") prompt))))
+        (with-service (:judge judge-now)
         (check "--no-audit asks nobody and writes no note, whatever the judge would say"
                (let ((markdown (re:slash "report --no-audit")))
                  (and (zerop asked)
@@ -402,18 +403,18 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
         (check "the existence gate runs first: an ungrounded claim withholds and the judge is never asked"
                (and (has "report withheld — 1 claim(s) without evidence"
                          (refusal (lambda () (re:slash "report --audit=strict"))))
-                    (zerop asked)))))))
+                    (zerop asked))))))))
 
 ;;; --- the cell's judge, over the stand-in kernel ----------------------------------------------------
 
 (suite "audit: the cell's judge")
 (check "start sets the judge and stop clears it"
-       (and (null re::*claim-judge*)
-            (with-cell () (eq re::*claim-judge* #'re::ask-judge))
-            (null re::*claim-judge*)))
+       (and (null (re::host-service :judge))
+            (with-cell () (eq (re::host-service :judge) #'re::ask-judge))
+            (null (re::host-service :judge))))
 
 (with-cell ()
-  (with-store
+  (with-open-store ()
     (let ((id (audit-session)))
       (nlk:create-session :id id)
       (in-session (id)
@@ -502,7 +503,7 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
        (progn
          (setf re::*audit-poll-seconds* 1/20)
          (with-cell (:audit-seconds 1)
-           (with-store
+           (with-open-store ()
              (let ((id (audit-session)))
                (in-session (id)
                  (setf nlk:*stub-judge* :never)
@@ -519,7 +520,7 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                                (null re::*audit-turns*))))))))
 
          (with-cell (:audit-seconds 60)
-           (with-store
+           (with-open-store ()
              (let* ((id (audit-session))
                     (answer nil)
                     (thread (progn
@@ -534,7 +535,7 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                (loop repeat 200 until (nlk:stub-open-turns) do (sleep 1/50))
                (check "an audit is waiting on its turn"
                       (and (= 1 (length (nlk:stub-open-turns))) (= 1 (length re::*audit-turns*))))
-               (re::stop-cell)
+               (stop-running-cell)
                (sb-thread:join-thread thread :default nil :timeout 10)
                (check "stopping the cell ends the wait at once: the turn is asked to stop and the call returns"
                       (and (not (sb-thread:thread-alive-p thread))
@@ -545,12 +546,12 @@ reproducible rizin_command record: findings.test.ts's setup => its id."
                (check "nothing is left running after stop: no open turn, no waiter, no judge"
                       (and (null (nlk:stub-open-turns))
                            (null re::*audit-turns*)
-                           (null re::*claim-judge*)
+                           (null (re::host-service :judge))
                            (equal "the nodecode-re cell stopped" (third (first nlk:*stub-cancels*)))))))))
     (setf re::*audit-poll-seconds* poll)))
 
 (with-cell (:audit nil)
-  (with-store
+  (with-open-store ()
     (let ((id (audit-session)))
       (nlk:create-session :id id)
       (in-session (id)

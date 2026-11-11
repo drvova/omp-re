@@ -2,12 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/tools-debug.ts (the rizin_debug tool),
-;;;; the debug half of runtime.ts (startDebug / stopDebug / requireDebug) and
-;;;; the debug half of rizin.ts (spawnDebug's argv, debugTimeoutMs, and the
-;;;; build-bits check: parseRizinVersionArch, rizinBuildBits,
-;;;; rizinBitsMismatch).
-;;;;
 ;;;; Dynamic analysis is a bridge to rizin's debugger, which LAUNCHES the
 ;;;; target process so it can be stepped and inspected while it runs. It is
 ;;;; the one capability that executes the sample, so it is off unless the
@@ -27,7 +21,7 @@
 ;;;; session) go to the output directory under a bare name. Run untrusted
 ;;;; samples only in an isolated, disposable environment; see SECURITY.md.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 (defparameter +max-dump-bytes+ (* 16 1024 1024)
   "The largest memory dump dump_memory pulls over the command pipe (16 MiB);
@@ -50,24 +44,17 @@ miss that a real process started.")
     "backtrace" "maps" "modules" "libraries" "sections" "processes" "threads" "fds" "signals"
     "windows" "heaps" "heap_blocks" "heap_arenas" "heap_chunks" "heap_bins" "stop"))
 
-(defun debug-seconds ()
-  "The budget for one step or continue: a resumed process runs until it hits
-a breakpoint, signals or exits, and one that never returns — blocked on
-input — is killed at this bound."
-  (let ((ms (ignore-errors (parse-integer (or (env "OMPRE_DEBUG_TIMEOUT_MS") "")))))
-    (if (and ms (plusp ms)) (/ ms 1000) 60)))
-
 ;;; --- what may reach rizin's pipe -------------------------------------------------------
 
 (defun validate-reg-name (reg)
   "A register name for `dr <reg>=...'."
-  (unless (js-scan "^[A-Za-z][A-Za-z0-9_]*$" reg)
+  (unless (plain-name-p reg)
     (fail "omp-re: debug: bad register name ~a" (js-string reg)))
   reg)
 
 (defun validate-reg-value (value)
   "A register value for `dr <reg>=<value>': decimal or 0x hex."
-  (unless (js-scan "^0x[0-9a-fA-F]+$|^[0-9]+$" value)
+  (unless (number-text-p value)
     (fail "omp-re: debug: bad register value ~a — use decimal or 0x hex" (js-string value)))
   value)
 
@@ -93,15 +80,6 @@ libc.so.6 pass."
       (fail "omp-re: debug: watch perm must be r, w, or rw (got ~a)" (js-string perm)))
     lowered))
 
-(defun clamp-int (value fallback max)
-  "VALUE as a whole number between 1 and MAX; FALLBACK when it was not given."
-  (if (realp value)
-      (max 1 (min (floor value) max))
-      fallback))
-
-(defun json-object-p (value)
-  (hash-table-p value))
-
 (defun build-debug-target (attach)
   "The `-d <target>' string an attach object spells: a pid (\"1234\") or a
 remote stub's URI (gdb://host:port, windbg://...); NIL when ATTACH is :ABSENT
@@ -109,7 +87,7 @@ and the open binary is to be launched. Exactly one of pid and remote. The
 URI reaches rizin through argv, with no shell, but a flag-shaped or spaced
 value is still refused here, in words."
   (cond ((eq attach :absent) nil)
-        ((not (json-object-p attach))
+        ((not (hash-table-p attach))
          (fail "omp-re: debug: attach must be an object with a pid or remote"))
         (t
          (multiple-value-bind (pid has-pid) (gethash "pid" attach)
@@ -137,12 +115,12 @@ everywhere. A `!' stdio target runs a shell command on this machine and
 stays out of the contract."
   (cond
     ((eq run :absent) nil)
-    ((not (json-object-p run))
+    ((not (hash-table-p run))
      (fail "omp-re: debug: run must be an object of rz-run settings"))
     (t
      (let ((directives '()))
        (flet ((clean (key value)
-                (when (find-if (lambda (char) (member char '(#\Return #\Newline))) value)
+                (when (ends-pipe-line-p value)
                   (fail "omp-re: debug: run.~a must not contain line breaks" key))
                 value)
               (add (directive) (push directive directives)))
@@ -158,7 +136,7 @@ stays out of the contract."
                      for index from 0
                      do (add (format nil "arg~d=~a" index (clean key argument)))))
               ((string= key "env")
-               (unless (json-object-p raw)
+               (unless (hash-table-p raw)
                  (fail "omp-re: debug: run.env must be an object"))
                (maphash (lambda (name value)
                           (unless (js-scan "^[A-Za-z_][A-Za-z0-9_]*$" name)
@@ -174,7 +152,7 @@ stays out of the contract."
               ((member key '("stdin" "stdout" "stderr") :test #'string=)
                (unless (stringp raw)
                  (fail "omp-re: debug: run.~a must be a file path" key))
-               (when (starts-with "!" raw)
+               (when (uiop:string-prefix-p "!" raw)
                  (fail "omp-re: debug: run.~a does not accept command targets" key))
                (add (format nil "~a=~a" key (clean key raw))))
               ((string= key "input")
@@ -212,6 +190,39 @@ there being no new local process to configure."
       (append (build-load-flags load)
               (loop for directive in run-directives append (list "-R" directive))
               (list "-d" binary-path))))
+
+;;; --- the session's debug process ---------------------------------------------------------
+;;; The session knows nothing of the debugger: the process is kept on the
+;;; session under this group's own name, and what a status says of it and
+;;; how it ends with the session are this group's to say.
+
+(defun debugger-enabled-p ()
+  "Whether dynamic analysis — which executes the sample — was switched on."
+  (setting-value :debugger))
+
+(defun session-dbg (session)
+  (session-held session "debugger"))
+
+(defun (setf session-dbg) (process session)
+  (setf (session-held session "debugger") process))
+
+(defun kill-debuggee (dbg)
+  "Kill the process under the debug rizin DBG, through rizin. Killing only
+the debug rizin detaches its tracee, which would then run on to completion:
+the sample, executing with nothing watching it. Best effort: closing DBG
+afterwards ends the session regardless."
+  (when (rz-alive-p dbg)
+    (ignore-errors (rz-cmd dbg "dk 9" :seconds 5))))
+
+(contribute "debugger" :order 40
+  :status (lambda (session)
+            (list (if (debugger-enabled-p)
+                      (format nil "debugger: enabled~:[ (the re section's debugger setting); executes the sample~; — a process is running under it~]"
+                              (rz-alive-p (session-dbg session)))
+                      "debugger: off (set the re section's debugger to true to enable dynamic analysis — it executes the sample)")))
+  :close (lambda (session)
+           (kill-debuggee (session-dbg session))
+           (stop-debug session)))
 
 (defun start-debug (&key run-directives target (session *session*))
   "SESSION's debug rizin, launched now unless one is already running. This
@@ -285,13 +296,6 @@ dump at what was read, which the caller reports."
                (when (< count want) (return))))
     (coerce bytes '(simple-array (unsigned-byte 8) (*)))))
 
-(defun write-octets-file (path octets)
-  (with-open-file (out (uiop:parse-native-namestring path)
-                       :direction :output :element-type '(unsigned-byte 8)
-                       :if-exists :supersede :if-does-not-exist :create)
-    (write-sequence octets out))
-  path)
-
 (defun epoch-milliseconds ()
   (multiple-value-bind (seconds microseconds) (sb-ext:get-time-of-day)
     (+ (* 1000 seconds) (floor microseconds 1000))))
@@ -341,10 +345,7 @@ answered as it stands, so the builder refuses it as not an object."
 
 (defun debug-stop ()
   "Action `stop': kill the debuggee, then end the debug rizin."
-  (let ((dbg (session-dbg *session*)))
-    (when (rz-alive-p dbg)
-      ;; Best effort: closing the process below ends the session regardless.
-      (ignore-errors (rz-cmd dbg "dk 9" :seconds 5))))
+  (kill-debuggee (session-dbg *session*))
   (plain-result (if (stop-debug)
                     "debug: stopped — process killed and debug session closed"
                     "debug: no debug session to stop")))
@@ -394,7 +395,7 @@ names, or T."
 
 (defun debug-action (action arguments dbg)
   "Every action but start and stop, against the running debug rizin DBG."
-  (let* ((seconds (debug-seconds))
+  (let* ((seconds (dynamic-seconds))
          (addr (jstring arguments "addr"))
          (ea (and addr (validate-addr addr)))
          (read (assoc action +debug-reads+ :test #'string=))
@@ -412,7 +413,7 @@ names, or T."
                (let ((out (run command seconds)))
                  (text-result header (format nil "~a~%~a" (text-or out "(resumed)") (pc)))))
              (steps (fallback max)
-               (clamp-int (jnumber arguments "count") fallback max)))
+               (clamped-count (jnumber arguments "count") fallback max)))
       (cond
         (read
          (destructuring-bind (command empty &optional named) (rest read)
@@ -495,7 +496,7 @@ names, or T."
                      (text-or (run (format nil "dr ~a" reg)) "(set)"))))
            ("read_memory"
             (need-addr)
-            (let ((n (clamp-int (jnumber arguments "size") 64 4096)))
+            (let ((n (clamped-count (jnumber arguments "size") 64 4096)))
               (named (format nil "debug: read_memory ~d @ ~a" n ea)
                      (text-or (run (format nil "pxj ~d @ ~a" n ea)) "(no output)"))))
            ("dump_memory"
@@ -518,7 +519,7 @@ names, or T."
                   (when (zerop (length bytes))
                     (fail "omp-re: debug dump_memory: read nothing at ~a (unmapped or unreadable); no file written"
                           ea))
-                  (write-octets-file path bytes)
+                  (write-octets-file (uiop:parse-native-namestring path) bytes)
                   (named (format nil "debug: dump_memory ~d bytes @ ~a" (length bytes) ea)
                          (format nil "wrote ~d bytes~@[ (short read: ~d requested, memory ended)~] to ~a~%sha256: ~a~%first bytes: ~a"
                                  (length bytes) (and (< (length bytes) size) size) path
@@ -602,7 +603,7 @@ names, or T."
             ;; list, so break_remove takes it off.
             (need-addr)
             (let ((perm (validate-watch-perm (jstring arguments "perm")))
-                  (size (and (jnumber arguments "size") (clamp-int (jnumber arguments "size") 4 8))))
+                  (size (and (jnumber arguments "size") (clamped-count (jnumber arguments "size") 4 8))))
               (run (format nil "dbw ~a~@[ ~d~] @ ~a" perm size ea))
               (breakpoints (format nil "debug: watch_add ~a @ ~a" perm ea) "(no watchpoints)")))
            ("heap_blocks"

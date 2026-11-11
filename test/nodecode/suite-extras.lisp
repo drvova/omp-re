@@ -17,13 +17,6 @@
   "Why the rz-* policy refuses ARGUMENTS for TOOL, or NIL when it allows them."
   (re::check-rz-cli (find tool re::+rz-cli-tools+ :key #'re::rz-cli-tool :test #'string=) arguments))
 
-(defun extras-kill-rizin (id)
-  "Kill the session's rizin and wait until the engine sees it gone => the dead process."
-  (let ((old (re::session-rz (re::find-session id))))
-    (nlk:kill-tree (re::rz-pid old))
-    (loop repeat 50 while (re::rz-alive-p old) do (sleep 0.1))
-    old))
-
 (defun extras-replay-warnings (thunk)
   "Run THUNK => the replay failures the engine reported while it ran. A
 replay that fails is something that lasts, so the cell says it as its keyed
@@ -115,7 +108,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
        (and (string= "o '/tmp/a b; !id' 0x50000 rw" (re::map-file-command "/tmp/a b; !id" "0x50000" "rw"))
             (string= "o '/x' 0x1000" (re::map-file-command "/x" "0x1000"))
             (refusal (lambda () (re::map-file-command "/x" "0x1000;!id")))))
-(check "the thirteen passes are the TypeScript's, each with its rizin command"
+(check "the thirteen passes, each with its rizin command"
        (equal '(("calls" . "aac") ("xrefs" . "aar") ("pointers" . "aav") ("preludes" . "aap")
                 ("all_functions" . "aaf") ("data_refs" . "aad") ("autoname" . "aan") ("types" . "aaft")
                 ("struct_offsets" . "aat") ("golang" . "aalg") ("objc" . "aalor") ("rtti_classes" . "avrr")
@@ -129,9 +122,6 @@ notice, which the model reads; the notice standing before THUNK is put back."
        (and (eql 4 (re::parse-applied-count "Found 4 FLIRT signatures via /x.pat"))
             (eql 1 (re::parse-applied-count "found 1 flirt signature via x"))
             (null (re::parse-applied-count "nothing"))))
-(check "the step count is held to 1..1000 whole instructions"
-       (equal '(1 1 2 1000 1 7)
-              (mapcar #'re::clamp-step-count '(nil 0 2.9 5000 -3 7))))
 (check "the emulator's own validators say what a good value looks like"
        (and (string= "41424344" (re::validate-emulate-hex "0x41424344"))
             (string= "ab" (re::validate-emulate-hex "AB"))
@@ -192,16 +182,14 @@ notice, which the model reads; the notice standing before THUNK is put back."
          (and (equal '("/s1.pat" "/s3.pat") (re::recorded-signatures "/a" session))
               (equal '("/s2.pat") (re::recorded-signatures "/b" session))
               (null (re::recorded-signatures "/c" session)))))
-(check "the replays run maps, then passes, then signatures, before any annotation"
-       (let ((names (mapcar #'car re::*replay-hooks*)))
-         (and (equal '("mapfiles" "passes" "signatures") (subseq names 0 (min 3 (length names)))))))
-
 ;;; --- with the cell, and with rizin --------------------------------------------------------
 
 (suite "extras: what is offered")
 (with-cell ()
   (check "none of these tools is evidence, and all are exec-tier"
          (every (lambda (name)
+                  ;; Not through the engine's surface, which lists what is
+                  ;; offered: the triage tools are there only when installed.
                   (let ((tool (find name re::*tools* :key #'re::tool-name :test #'string=)))
                     (and tool (not (re::tool-evidence tool)) (eq :exec (re::tool-tier tool)))))
                 '("map_file" "analyze" "apply_signatures" "create_signature" "export_project" "rizin_cli"
@@ -531,7 +519,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
 
                         ;; --- replay -----------------------------------------------------------
                         (suite "extras: the record is put back on a fresh rizin")
-                        (let ((old (extras-kill-rizin id))
+                        (let ((old (kill-rizin id))
                               (warnings nil)
                               (text nil))
                           (setf warnings (extras-replay-warnings
@@ -556,7 +544,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
                         (check "a recorded pass this engine does not know is a failure line, and the rest still replays"
                                (progn
                                  (re::append-entry "re.analysis" (re::obj "pass" "bogus") (re::find-session id))
-                                 (extras-kill-rizin id)
+                                 (kill-rizin id)
                                  (let ((warnings (extras-replay-warnings (lambda () (re:cmd "aflc")))))
                                    (and (= 1 (length warnings))
                                         (has "analysis pass bogus: unknown" (first warnings))
@@ -647,7 +635,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                  (and (not (has "triage_capa" (re:tools)))
                                       (has "no tool named" (refusal (lambda () (re:call "triage_capa"))))))))
                     (check "no triage call is evidence"
-                           (notany (lambda (record) (re::starts-with "triage_" (gethash "tool" record)))
+                           (notany (lambda (record) (starts "triage_" (gethash "tool" record)))
                                    (re::evidence-records (re::find-session id)))))))))
        (setf (uiop:getenv "PATH") previous-path)
        (setf (uiop:getenv "OMPRE_OUTPUT_DIR") (or previous-output ""))))))

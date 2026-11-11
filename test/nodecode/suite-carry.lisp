@@ -3,7 +3,7 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; The first half needs no rizin: reading a manifest, the diff and the
-;;;; roll-up are held to test/carry.test.ts's own cases. The second half
+;;;; roll-up. The second half
 ;;;; writes a real report on a copy of the test binary and carries it — onto
 ;;;; the same bytes, onto a different program (a copy of /bin/cat), and, for
 ;;;; the classifications two unrelated binaries cannot produce, from
@@ -17,12 +17,9 @@
 (defun carry-keys (object)
   (loop for key being the hash-keys of object collect key))
 
-(defun scratch-file (name)
-  (uiop:native-namestring (merge-pathnames name *scratch*)))
-
 (defun write-manifest (name object)
   "OBJECT written as the manifest NAME in the scratch home => its path."
-  (let ((path (scratch-file name)))
+  (let ((path (scratch-path name)))
     (re::write-text-file path (re::json-encode object :indent 2))
     path))
 
@@ -44,16 +41,14 @@
         :key (lambda (row) (gethash "evidenceId" row)) :test #'string=))
 
 (defun carried (path &rest options)
-  "Carry the manifest at PATH for the running turn's session, under its lock
-=> the result object (and the text and the failure as further values)."
-  (re::with-session ((re::find-session nle:*stub-session*))
-    (multiple-value-bind (text failed result) (apply #'re::carry-manifest-file path options)
-      (values result text failed))))
-
-(defun evidence-of (text)
-  "The 8-character evidence id a tool result ends with."
-  (let ((at (search "[evidence " text :from-end t)))
-    (subseq text (+ at 10) (+ at 18))))
+  "Carry the manifest at PATH in the running turn's session => the result
+object (and the text and the failure as further values); a refusal is signalled."
+  (multiple-value-bind (result text failed)
+      (re::in-session (nle:*stub-session* "carry")
+        (multiple-value-bind (text failed result) (apply #'re::carry-manifest-file path options)
+          (values result text failed)))
+    (when (stringp result) (re::fail "~a" result))
+    (values result text failed)))
 
 ;;; --- the pieces ---------------------------------------------------------------------------------
 
@@ -207,15 +202,15 @@
     (check "a manifest that is not there is refused by name, as is a folder"
            (and (equal "omp-re: carry: could not read manifest /nonexistent/r.md.manifest.json: ENOENT: no such file or directory, open '/nonexistent/r.md.manifest.json'"
                        (refusal (lambda () (re:slash "carry /nonexistent/r.md.manifest.json"))))
-                (equal "omp-re: carry: could not read manifest no such.json: ENOENT: no such file or directory, open 'no such.json'"
+                (equal "omp-re: carry: could not read manifest no  such.json: ENOENT: no such file or directory, open 'no  such.json'"
                        (refusal (lambda () (re:slash "carry no  such.json --strict"))))
                 (equal (format nil "omp-re: carry: could not read manifest ~a: EISDIR: illegal operation on a directory, read"
-                               (scratch-file "carry-dir"))
+                               (scratch-path "carry-dir"))
                        (progn (ensure-directories-exist (merge-pathnames "carry-dir/" *scratch*))
-                              (refusal (lambda () (re:slash (format nil "carry ~a" (scratch-file "carry-dir")))))))))
+                              (refusal (lambda () (re:slash (format nil "carry ~a" (scratch-path "carry-dir")))))))))
     (check "a file that is not JSON, or not a manifest, is refused before anything is asked of the binary"
-           (let ((junk (scratch-file "junk.manifest.json"))
-                 (wrong (scratch-file "wrong.manifest.json")))
+           (let ((junk (scratch-path "junk.manifest.json"))
+                 (wrong (scratch-path "wrong.manifest.json")))
              (re::write-text-file junk "# Analysis Report")
              (re::write-text-file wrong "{\"claims\": []}")
              (and (has "omp-re: carry: manifest is not valid JSON ("
@@ -234,9 +229,9 @@
 (if (not (and *rizin* (probe-file "/bin/cat")))
     (format t "  SKIPPED (no rizin, test binary or /bin/cat)~%")
     (with-cell ()
-      (let* ((v1 (scratch-file "carry-v1"))
-             (other (scratch-file "carry-other"))
-             (report (scratch-file "carry-report.md"))
+      (let* ((v1 (scratch-path "carry-v1"))
+             (other (scratch-path "carry-other"))
+             (report (scratch-path "carry-report.md"))
              (manifest-path (format nil "~a.manifest.json" report))
              (other-flags '())
              (gone-flag nil)
@@ -257,13 +252,13 @@
             (re:open v1)
             (setf v1-sha (re::session-binary-sha256 (re::find-session id))
                   gone-flag (find-if (lambda (name)
-                                       (and (re::starts-with "str." name)
+                                       (and (starts "str." name)
                                             (not (member name other-flags :test #'string=))))
                                      (map 'list (lambda (flag) (gethash "name" flag))
                                           (re::rz-cmdj (re::session-rz (re::find-session id)) "flj"))))
             (flet ((finding (claim command &optional addr)
                      (apply #'re:call "record_finding" :claim claim :confidence "confirmed"
-                            :evidence (list (evidence-of (re:cmd command addr)))
+                            :evidence (list (tagged-evidence (re:cmd command addr)))
                             (and addr (list :addr addr)))))
               (finding "It targets x86." "e asm.arch")
               (finding "Its header is this build's." "iIj")
@@ -317,13 +312,13 @@
         ;; Another program altogether.
         (let* ((id (fresh-session))
                (session (re::find-session id))
-               (out (scratch-file "carry-out.md"))
+               (out (scratch-path "carry-out.md"))
                (other-sha nil))
           (in-session (id)
             (re:open other)
             (setf other-sha (re::session-binary-sha256 session))
             (let ((text (refusal (lambda () (re:slash (format nil "carry ~a" manifest-path))))))
-              (check "on another program the gone anchor BREAKS the claim and fails the line, in the TypeScript's lines"
+              (check "on another program the gone anchor BREAKS the claim and fails the line, word for word"
                      (string= (format nil "omp-re: carry ~a… → ~a… — 2 hold, 0 relocated, 1 drifted, 1 BROKEN, 0 unchecked (of 4 claim(s))~%  BROKEN    It holds a string of its own.~%  DRIFTED   Its header is this build's.~%  HOLDS     It targets x86.~%  HOLDS     entry0 begins with endbr64."
                                       (subseq v1-sha 0 12) (subseq other-sha 0 12))
                               text)))
@@ -344,8 +339,8 @@
                        (let ((diff (coerce (gethash "diff" (aref rows 1)) 'list)))
                          (and (equal '("evidenceId" "tool" "command" "status" "detail" "diff")
                                      (carry-keys (aref rows 1)))
-                              (some (lambda (line) (re::starts-with "- {" line)) diff)
-                              (some (lambda (line) (re::starts-with "+ {" line)) diff))))))
+                              (some (lambda (line) (starts "- {" line)) diff)
+                              (some (lambda (line) (starts "+ {" line)) diff))))))
 
             ;; --out.
             (let ((text (refusal (lambda () (re:slash (format nil "carry ~a --out ~a" manifest-path out))))))
@@ -353,7 +348,7 @@
                      (has (format nil "~%carry report written to ~a (+ ~a.json)" out out) text)))
             (let ((markdown (re::read-text-file out)))
               (check "the carry report: manifest, both hashes, the claim matrix, the evidence"
-                     (and (re::starts-with
+                     (and (starts
                            (format nil "# Carry Report~%~%- **Manifest:** `~a`~%- **From binary:** `~a`~%- **To binary:** `~a` (~a)~%- **Claims:** 2 hold · 0 relocated · 1 drifted · 1 broken · 0 unchecked~%~%## Claims~%~%| Status | Claim | Evidence |~%| --- | --- | --- |~%| holds | It targets x86. | `"
                                    manifest-path v1-sha other-sha other)
                            markdown)
@@ -372,12 +367,12 @@
                           (= 4 (length (gethash "evidence" sidecar)))
                           (equal '("holds" "drifted" "holds" "broken")
                                  (map 'list (lambda (claim) (gethash "status" claim)) (gethash "claims" sidecar)))
-                          (re::ends-with (format nil "}~%") (re::read-text-file (format nil "~a.json" out))))))
+                          (ends (format nil "}~%") (re::read-text-file (format nil "~a.json" out))))))
             (check "a carry report that cannot be written is said, and is not what fails the line"
                    (has (format nil "~%carry report not written: ")
                         (refusal (lambda ()
                                    (re:slash (format nil "carry ~a --out ~a" manifest-path
-                                                     (scratch-file "no-such-folder/out.md")))))))
+                                                     (scratch-path "no-such-folder/out.md")))))))
 
             ;; --strict, on a manifest with nothing broken in it.
             (let* ((manifest (re::json-decode (re::read-text-file manifest-path)))
@@ -403,7 +398,7 @@
                                text)
                           (has (format nil " `iIj`: drifted — output changed~%     ```diff~%     - {") text)
                           (has (format nil "~%     ```~%2. [broken] It holds a string of its own.~%   - evidence ") text)
-                          (re::ends-with (format nil " `px 16 @ ~a`: broken — anchor `~a` no longer resolves in this binary"
+                          (ends (format nil " `px 16 @ ~a`: broken — anchor `~a` no longer resolves in this binary"
                                                  gone-flag gone-flag)
                                          text)
                           (not (has "resolve:" text)))))
@@ -422,8 +417,8 @@
                           (equal '("command") (carry-keys (gethash "args" (first evidence))))
                           (equal '("command" "addr") (carry-keys (gethash "args" (second evidence))))
                           (equalp #("pd 4 @ entry0") (gethash "commands" (second evidence)))
-                          (re::starts-with "0x" (gethash "ea" (second evidence)))))
-              (check "an inherited finding has the TypeScript's fields, citing only the fresh evidence"
+                          (starts "0x" (gethash "ea" (second evidence)))))
+              (check "an inherited finding has its fields in the record's order, citing only the fresh evidence"
                      (and (= 2 (length findings))
                           (equal '("id" "claim" "evidenceIds" "confidence" "audit" "binarySha256" "inherited")
                                  (carry-keys (first findings)))
@@ -485,7 +480,7 @@
           (in-session (id)
             (re:open v1)
             (check "on the same build --inherit re-proves every finding and there is no agenda"
-                   (re::ends-with (format nil "~%  HOLDS     It holds a string of its own.~%inherit: 4 finding(s) re-proven on this build and recorded, 0 need another look")
+                   (ends (format nil "~%  HOLDS     It holds a string of its own.~%inherit: 4 finding(s) re-proven on this build and recorded, 0 need another look")
                                   (re:slash (format nil "carry ~a --resolve --strict" manifest-path))))
             (check "all four are live, inherited, and the report can be written from them"
                    (and (has "findings on this branch: 4 (4 inherited)" (re:status))
@@ -493,7 +488,7 @@
             (let ((manifest (re::json-decode (re::read-text-file manifest-path))))
               (remhash "findings" manifest)
               (check "a manifest from before findings has none to inherit, and the line says what to do"
-                     (re::ends-with (format nil "~%inherit: 0 finding(s) re-proven on this build and recorded, 0 need another look (this manifest has no findings — record them with record_finding before /re report)")
+                     (ends (format nil "~%inherit: 0 finding(s) re-proven on this build and recorded, 0 need another look (this manifest has no findings — record them with record_finding before /re report)")
                                     (re:slash (format nil "carry ~a --inherit"
                                                       (write-manifest "old.manifest.json" manifest))))))))
 
@@ -504,7 +499,7 @@
           (in-session (id)
             (re:open v1)
             (let* ((rz (re::session-rz session))
-                   (fingerprint (re::report-anchor-fingerprint rz "main"))
+                   (fingerprint (re::anchor-fingerprint rz "main"))
                    (name (gethash "function" fingerprint))
                    (start (gethash "offset" fingerprint))
                    (listing (re::rz-run rz (format nil "pdf @ ~a" start)))
@@ -626,7 +621,7 @@
                                                    entry-ea)
                                            (gethash "detail" row))
                                     (equal "- 0x00000010      nop" (aref (gethash "diff" row) 0))
-                                    (some (lambda (line) (and (re::starts-with "+ " line) (has "endbr64" line)))
+                                    (some (lambda (line) (and (starts "+ " line) (has "endbr64" line)))
                                           (gethash "diff" row)))))
                       (check "one whose excerpt still matches drifted further down, and its fingerprint found nothing"
                              (let ((row (row-of result "ev-pinned-fp")))
@@ -637,7 +632,7 @@
                                     (not (nth-value 1 (gethash "diff" row))))))
                       (check "a command that now prints nothing is broken"
                              (and (equal "broken" (status "ev-silent"))
-                                  (re::starts-with "command now produces no output" (detail "ev-silent"))
+                                  (starts "command now produces no output" (detail "ev-silent"))
                                   (equal "pdf @ 0x10" (gethash "command" (row-of result "ev-silent")))))
                       (check "another tool's record, and one with no hash, are unchecked and never run"
                              (and (equal "unchecked" (status "ev-prov"))
@@ -648,7 +643,7 @@
                                   (equal '("evidenceId" "tool" "status" "detail") (carry-keys (row-of result "ev-legacy")))))
                       (check "the manifest is untrusted: a write, or an address that smuggles one in, is never sent"
                              (and (equal "unchecked" (status "ev-write"))
-                                  (re::starts-with "not runnable here: omp-re: rizin_command: \"wx\" is not available here: only read-only"
+                                  (starts "not runnable here: omp-re: rizin_command: \"wx\" is not available here: only read-only"
                                                    (detail "ev-write"))
                                   (equal "wx 90" (gethash "command" (row-of result "ev-write")))
                                   (equal "unchecked" (status "ev-addr"))

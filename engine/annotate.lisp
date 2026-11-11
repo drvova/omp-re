@@ -3,10 +3,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/annotations.ts and tools-mutate.ts,
-;;;; with the annotation half of runtime.ts (markAnnotationsApplied, the
-;;;; replay on spawn) and of index.ts (/re undo, the status line).
-;;;;
 ;;;; An annotation is the analyst's edit to rizin's picture of the binary: a
 ;;;; rename, a comment, a type, a hint. It lives in the rizin process's memory
 ;;;; and nowhere else, so the record is what keeps it: one re.annotation entry
@@ -22,31 +18,12 @@
 ;;;; read-back — never the request — so a tool cannot claim a value that did
 ;;;; not land; a mismatch is a refusal that says what rizin actually holds.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- what may reach the pipe ---------------------------------------------------------
-;;; The spine's validators anchor with `$', which in a Perl regular expression
-;;; also matches before a final newline, where the engine's JavaScript `$' does
-;;; not. A name or address ending in a newline would end the pipe line early
-;;; and leave the rest of the command — the `@ <ea>' seek — to run as one of
-;;; its own. These hold the line the TypeScript holds, with its messages.
-
 (defun full-match-p (regex text)
-  "Whether REGEX — written without anchors — matches all of TEXT, the way the
-engine's ^...$ patterns do in JavaScript."
-  (and (stringp text)
-       (ppcre:scan (format nil "\\A(?:~a)\\z" regex) text)
-       t))
-
-(defun annotation-addr (addr)
-  (unless (full-match-p "[0-9a-zA-Z_.:$+-]+" addr)
-    (fail "omp-re: invalid address or expression: ~a" (js-string addr)))
-  (validate-addr addr))
-
-(defun annotation-ident (key value)
-  (unless (full-match-p "[A-Za-z_][A-Za-z0-9_.]*" value)
-    (fail "omp-re: invalid ~a: ~a" key (js-string value)))
-  (validate-ident key value))
+  "Whether REGEX — written without anchors — matches all of TEXT."
+  (and (stringp text) (js-scan (format nil "^(?:~a)$" regex) text)))
 
 (defun js-split (text separator limit)
   "TEXT split on the character SEPARATOR as JavaScript's split with a limit
@@ -91,7 +68,7 @@ not at rizin."
                    (js-string value)))
            v)
           ((string= kind "opcode_size") (int-arg "opcode_size" v))
-          ((string= kind "jump_target") (annotation-addr v))
+          ((string= kind "jump_target") (validate-addr v))
           ((string= kind "return_value")
            (unless (full-match-p "0x[0-9a-fA-F]+|[0-9]+" v)
              (fail "omp-re: invalid return_value: ~a — a decimal or 0x-hex integer" (js-string value)))
@@ -124,7 +101,7 @@ reaches rizin unquoted, so it is held to a charset with no separator in it."
     (dolist (part (uiop:split-string encoded :separator '(#\;)))
       (destructuring-bind (&optional key value) (js-split part #\= 2)
         (cond ((equal key "arch")
-               (push (format nil "aha ~a ~a" (annotation-ident "arch" (or value "")) at) commands))
+               (push (format nil "aha ~a ~a" (validate-ident "arch" (or value "")) at) commands))
               ((equal key "bits")
                (unless (member value '("8" "16" "32" "64") :test #'equal)
                  (fail "omp-re: invalid arch hint bits: ~a — one of 8, 16, 32, 64"
@@ -159,7 +136,7 @@ command sees its arguments, so the seek never reaches the type."
                (fail "omp-re: invalid stack delta: ~a — a decimal or 0x-hex offset" (js-string location)))
              (list (format nil "afvs ~a ~a~a ~a" location name type-arg at)))
             ((string= storage "reg")
-             (list (format nil "afvr ~a ~a~a ~a" (annotation-ident "reg" location) name type-arg at)))
+             (list (format nil "afvr ~a ~a~a ~a" (validate-ident "reg" location) name type-arg at)))
             (t (fail "omp-re: invalid variable storage: ~a — stack or reg" (js-string storage)))))))
 
 (defun annotation-commands (kind ea to from &optional target)
@@ -168,7 +145,7 @@ FROM is the value being replaced — rename_variable and set_flag address what
 is there by its current name. TARGET is the one identifier a kind needs
 beyond those: the variable's or global's name, or which hint. An empty TO is
 the annotation taken away, which is what an undo onto nothing asks for."
-  (let ((at (format nil "@ ~a" (annotation-addr ea)))
+  (let ((at (format nil "@ ~a" (validate-addr ea)))
         (to (or to ""))
         (from (or from "")))
     (flet ((kind-p (name) (string= kind name))
@@ -177,10 +154,10 @@ the annotation taken away, which is what an undo onto nothing asks for."
                  (fail "omp-re: ~a annotation is missing the ~a" kind what))))
       (cond
         ((kind-p "rename_function")
-         (list (format nil "afn ~a ~a" (rz-quote (annotation-ident "name" to)) at)))
+         (list (format nil "afn ~a ~a" (rz-quote (validate-ident "name" to)) at)))
         ((kind-p "rename_variable")
-         (list (format nil "afvn ~a ~a ~a" (rz-quote (annotation-ident "name" to))
-                       (rz-quote (annotation-ident "name" from)) at)))
+         (list (format nil "afvn ~a ~a ~a" (rz-quote (validate-ident "name" to))
+                       (rz-quote (validate-ident "name" from)) at)))
         ((kind-p "set_comment")
          ;; rizin's CC appends to a comment already there, so a replace is
          ;; always clear, then write.
@@ -198,11 +175,11 @@ the annotation taken away, which is what an undo onto nothing asks for."
          (let ((name (target "variable name")))
            (if (string= to "")
                '()
-               (list (format nil "afvt ~a ~a ~a" (rz-quote (annotation-ident "var" name))
+               (list (format nil "afvt ~a ~a ~a" (rz-quote (validate-ident "var" name))
                              (rz-quote (validate-type-like "type" to)) at)))))
         ((kind-p "define_variable")
          ;; TO encodes `<storage> <location> [<type>]'; afv- deletes by name.
-         (let ((name (annotation-ident "name" (target "variable name"))))
+         (let ((name (validate-ident "name" (target "variable name"))))
            (if (string= to "")
                (list (format nil "afv- ~a ~a" name at))
                (define-variable-commands name to at))))
@@ -210,7 +187,7 @@ the annotation taken away, which is what an undo onto nothing asks for."
          ;; TO is the C type. avga adds a global at EA; avgm deletes it by
          ;; name, so it takes no seek. The type is quoted so `char *' and
          ;; `unsigned int' pass as one argument.
-         (let ((name (annotation-ident "name" (target "variable name"))))
+         (let ((name (validate-ident "name" (target "variable name"))))
            (if (string= to "")
                (list (format nil "avgm ~a" name))
                (list (format nil "avga ~a ~a ~a" name (rz-quote (validate-type-like "type" to)) at)))))
@@ -219,14 +196,14 @@ the annotation taken away, which is what an undo onto nothing asks for."
          (list (format nil "~:[af~;af-~] ~a" (string= to "") at)))
         ((kind-p "set_calling_convention")
          ;; A function always has some convention, so neither side is empty.
-         (list (format nil "afc ~a ~a" (annotation-ident "cc" to) at)))
+         (list (format nil "afc ~a ~a" (validate-ident "cc" to) at)))
         ((kind-p "set_flag")
          ;; The flag at EA is to be named TO and was named FROM: drop the old
          ;; name, add the new. Either side may be empty — no flag.
          (append (unless (string= from "")
-                   (list (format nil "f- ~a" (annotation-ident "flag" from))))
+                   (list (format nil "f- ~a" (validate-ident "flag" from))))
                  (unless (string= to "")
-                   (list (format nil "f ~a ~a" (annotation-ident "flag" to) at)))))
+                   (list (format nil "f ~a ~a" (validate-ident "flag" to) at)))))
         ((kind-p "set_arch_hint")
          (if (string= to "")
              (list (format nil "aha- ~a" at) (format nil "ahb- ~a" at))
@@ -301,36 +278,37 @@ a list of their data objects, in the order made."
 same fingerprint need the same rizin state."
   (format nil "~{~a~^,~}" (mapcar #'car (live-annotation-entries binary-path session))))
 
-(defun mark-annotations-applied (&optional (session *session*))
-  "Say that SESSION's rizin now holds exactly the record's annotations: a
-tool or an undo has just applied the one that changed."
-  (when (session-binary-path session)
-    (setf (session-applied-annotations session)
-          (annotation-fingerprint session (session-binary-path session)))))
-
 (defun apply-commands (rz commands)
   (dolist (command commands)
     (rz-cmd rz command)))
 
 (defun replay-annotations (session rz binary-path)
   "Put the annotations in effect back into the freshly analyzed RZ, in
-order => the failure lines. One that no longer applies — rizin's analysis
-changed between versions — is reported, and the rest still go in."
-  (let ((failures '()))
+order => (values FAILURES APPLIED): a line for each that no longer applies —
+rizin's analysis changed between versions — and how many went in. One that
+fails does not stop the rest."
+  (let ((failures '())
+        (applied 0))
     (dolist (data (live-annotations binary-path session))
       (handler-case
-          (apply-commands rz (annotation-commands (jstring data "kind") (jstring data "ea")
-                                                  (jstring data "newValue") (jstring data "oldValue")
-                                                  (jstring data "target")))
+          (progn
+            (apply-commands rz (annotation-commands (jstring data "kind") (jstring data "ea")
+                                                    (jstring data "newValue") (jstring data "oldValue")
+                                                    (jstring data "target")))
+            (incf applied))
         (error (condition)
           (push (format nil "~a @ ~a: ~a" (jstring data "kind") (jstring data "ea") condition)
                 failures))))
-    (nreverse failures)))
+    (values (nreverse failures) applied)))
 
-(setf *live-annotations* #'live-annotations
-      *annotation-fingerprint* #'annotation-fingerprint)
-
-(register-replay "annotations" #'replay-annotations)
+(contribute "annotations" :order 60 :noun "annotation(s)"
+  :replay #'replay-annotations
+  :fingerprint #'annotation-fingerprint
+  :status (lambda (session)
+            (let ((binary-path (session-binary-path session)))
+              (when binary-path
+                (list (format nil "annotations in effect: ~d"
+                              (length (live-annotations binary-path session))))))))
 
 ;;; --- reading rizin's side ------------------------------------------------------------------
 
@@ -345,7 +323,7 @@ changed between versions — is reported, and the rest still go in."
   "The function containing ADDR => (values START-EA NAME). An annotation
 keys on the start address, so it stays addressable after the name it was
 asked by is gone: a rename can retire the old flag."
-  (let* ((numeric (ea-from-offset (resolve-numeric-addr rz (annotation-addr addr))))
+  (let* ((numeric (ea-from-offset (resolve-numeric-addr rz (validate-addr addr))))
          (row (first-row (rz-cmdj rz (format nil "afij @ ~a" numeric))))
          (start (and row (row-offset row)))
          (name (and row (jstring row "name"))))
@@ -354,7 +332,7 @@ asked by is gone: a rename can retire the old flag."
     (values (ea-from-offset start) name)))
 
 (defun resolved-ea (rz addr)
-  (ea-from-offset (resolve-numeric-addr rz (annotation-addr addr))))
+  (ea-from-offset (resolve-numeric-addr rz (validate-addr addr))))
 
 (defun variables-at (rz ea)
   "Every variable of the function at EA: `afvlj' groups them by storage kind
@@ -451,7 +429,7 @@ answer what the model reads."
                        "target" (or target :absent)
                        "evidenceId" evidence
                        "ungrounded" (and (string= evidence "") t)))
-    (mark-annotations-applied)
+    (mark-applied "annotations")
     (plain-result (format nil "~a: ~@[~a: ~]~a -> ~a @ ~a"
                           kind target (js-string old-value) (js-string new-value) ea)
                   ea)))
@@ -473,7 +451,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
      ("new" :string :required t :doc "New function name (identifier characters only)."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (new-name (annotation-ident "new" (jstring arguments "new"))))
+         (new-name (validate-ident "new" (jstring arguments "new"))))
     (multiple-value-bind (ea name) (function-at rz (jstring arguments "addr"))
       (apply-commands rz (annotation-commands "rename_function" ea new-name name))
       (let ((landed (jstring (first-row (rz-cmdj rz (format nil "afij @ ~a" ea))) "name")))
@@ -490,8 +468,8 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
      ("new" :string :required t :doc "New variable name."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (old-name (annotation-ident "old" (jstring arguments "old")))
-         (new-name (annotation-ident "new" (jstring arguments "new"))))
+         (old-name (validate-ident "old" (jstring arguments "old")))
+         (new-name (validate-ident "new" (jstring arguments "new"))))
     (multiple-value-bind (ea name) (function-at rz (jstring arguments "addr"))
       (let ((before (variables-at rz ea)))
         (unless (variable-named old-name before)
@@ -549,7 +527,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
      ("type" :string :required t :doc "New C-style type, e.g. `char *` or `struct sockaddr_in *`."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (variable (annotation-ident "var" (jstring arguments "var")))
+         (variable (validate-ident "var" (jstring arguments "var")))
          (type (validate-type-like "type" (trimmed (jstring arguments "type")))))
     (multiple-value-bind (ea name) (function-at rz (jstring arguments "addr"))
       (let ((old (variable-named variable (variables-at rz ea))))
@@ -574,7 +552,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
      ("type" :string :doc "C type, e.g. `int` or `char *`; omit to let rizin default it (int)."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (name (annotation-ident "name" (jstring arguments "name"))))
+         (name (validate-ident "name" (jstring arguments "name"))))
     (multiple-value-bind (ea function) (function-at rz (jstring arguments "addr"))
       (when (variable-named name (variables-at rz ea))
         (fail "omp-re: define_variable: ~a already has a variable ~a" function (js-string name)))
@@ -596,7 +574,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
      ("type" :string :required t :doc "C type, e.g. `int`, `char *`, or a named struct/typedef."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (name (annotation-ident "name" (jstring arguments "name")))
+         (name (validate-ident "name" (jstring arguments "name")))
          (type (validate-type-like "type" (trimmed (jstring arguments "type"))))
          (ea (resolved-ea rz (jstring arguments "addr"))))
     (when (global-named rz name)
@@ -634,7 +612,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
       :doc "Calling convention name, e.g. `amd64`, `ms`, `cdecl`, `stdcall` — see the list from rizin_command afcl."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (cc (annotation-ident "cc" (trimmed (jstring arguments "cc"))))
+         (cc (validate-ident "cc" (trimmed (jstring arguments "cc"))))
          (ea (function-at rz (jstring arguments "addr")))
          (old-value (calling-convention-at rz ea)))
     (apply-commands rz (annotation-commands "set_calling_convention" ea cc old-value))
@@ -652,7 +630,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
       :doc "Flag name (identifier characters, dots allowed), e.g. `str.banner` or `decrypt_key`."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (name (annotation-ident "name" (jstring arguments "name")))
+         (name (validate-ident "name" (jstring arguments "name")))
          (ea (resolved-ea rz (jstring arguments "addr")))
          (old-value (flag-at rz ea)))
     (apply-commands rz (annotation-commands "set_flag" ea name old-value))
@@ -677,7 +655,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
     (let* ((rz (ensure-rizin))
            (ea (resolved-ea rz (jstring arguments "addr")))
            (encoded (format nil "~{~a~^;~}"
-                            (append (when arch (list (format nil "arch=~a" (annotation-ident "arch" arch))))
+                            (append (when arch (list (format nil "arch=~a" (validate-ident "arch" arch))))
                                     (when bits (list (format nil "bits=~d" bits)))))))
       (apply-commands rz (annotation-commands "set_arch_hint" ea encoded ""))
       (let ((landed (hints-at rz ea)))
@@ -785,21 +763,11 @@ back instead of applying the same reversal again => the line that says so."
                                               (jstring data "oldValue") (jstring data "newValue")
                                               (jstring data "target")))
       (append-entry "re.undo" (obj "undidEntryId" (car last)) session)
-      (mark-annotations-applied session)
+      (mark-applied "annotations" session)
       (format nil "omp-re: undid ~a @ ~a (restored ~a)"
               (jstring data "kind") (jstring data "ea") (js-string (jstring data "oldValue"))))))
 
-(define-slash "undo" (:description "revert the last annotation") (words)
+(define-slash "undo" (:description "revert the last annotation" :order 80
+                      :row (110 "Undo the last annotation"))
+    (words)
   (undo-last-annotation))
-
-;;; --- /re status ----------------------------------------------------------------------------------
-
-(defun annotation-status-lines ()
-  "The status line for the annotations, said only while a binary is open."
-  (let ((binary-path (and *session* (session-binary-path *session*))))
-    (when binary-path
-      (list (format nil "annotations in effect: ~d" (length (live-annotations binary-path)))))))
-
-;; A named function, so loading this file again replaces the line, not adds one.
-(setf *status-lines*
-      (append (remove 'annotation-status-lines *status-lines*) (list 'annotation-status-lines)))

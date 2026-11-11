@@ -2,10 +2,6 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's findings.ts, the collectEvidence half of entries.ts
-;;;; it reads through, the `/re findings' panel of ui.ts (its headless
-;;;; branch) and the findings line of index.ts's status text.
-;;;;
 ;;;; A report's other claims come from machinery — capa's capability lines,
 ;;;; IOC strings mined from evidence. The conclusions that matter in reverse
 ;;;; engineering ("checksum is djb2") would otherwise live only in chat,
@@ -26,26 +22,15 @@
 ;;;; Findings are re.finding / re.finding.retract entries of the record, read
 ;;;; back from it like all other state, so they survive a restart.
 
-(in-package #:nodecode-re)
+(in-package #:omp-re)
 
 ;;; --- reading the record --------------------------------------------------------------------
 
 (defparameter +confidences+ '("confirmed" "likely" "speculative"))
 
-(defparameter +min-id-prefix+ 6
-  "The shortest evidence or finding id prefix accepted — a result shows 8 characters.")
-
-(defun collected-evidence (&optional (session *session*))
-  "The record's evidence as collectEvidence reads it: a row needs an id, a
-tool and a summary to count, where the spine's EVIDENCE-RECORDS asks only
-for an id. A finding, the report and /re verify must not rest on less."
-  (remove-if-not (lambda (record)
-                   (and (jstring record "id") (jstring record "tool") (jstring record "summary")))
-                 (entries-of "re.evidence" session)))
-
-(defun string-member (object key)
-  "OBJECT's member KEY when it is a string, else :ABSENT — for OBJ."
-  (or (jstring object key) :absent))
+(defun known-confidence (confidence)
+  "CONFIDENCE when it is one the engine knows, else the middle one."
+  (if (member confidence +confidences+ :test #'equal) confidence "likely"))
 
 (defun normalized-finding (data)
   "One re.finding entry's DATA as a finding, or NIL when it is not one: only
@@ -56,15 +41,13 @@ the members a finding has, a confidence the engine knows."
       (obj "id" (jstring data "id")
            "claim" (jstring data "claim")
            "evidenceIds" (coerce (remove-if-not #'stringp ids) 'simple-vector)
-           "addr" (string-member data "addr")
-           "confidence" (if (member (jstring data "confidence") +confidences+ :test #'equal)
-                            (jstring data "confidence")
-                            "likely")
-           "supersedes" (string-member data "supersedes")
+           "addr" (jstring-or-absent data "addr")
+           "confidence" (known-confidence (jstring data "confidence"))
+           "supersedes" (jstring-or-absent data "supersedes")
            "audit" (if (hash-table-p (jget data "audit")) (jget data "audit") :absent)
-           "binarySha256" (string-member data "binarySha256")
+           "binarySha256" (jstring-or-absent data "binarySha256")
            "inherited" (if (hash-table-p (jget data "inherited")) (jget data "inherited") :absent)
-           "adoptedFrom" (string-member data "adoptedFrom")))))
+           "adoptedFrom" (jstring-or-absent data "adoptedFrom")))))
 
 (defun live-findings (&optional (session *session*))
   "The findings in effect, in order: every re.finding minus those a later
@@ -88,25 +71,6 @@ finding superseded or a re.finding.retract withdrew."
                                 (setf live (append live (list (cons (jstring finding "id") finding)))))))))))
       (mapcar #'cdr live))))
 
-(defun short-id (id)
-  (subseq id 0 (min 8 (length id))))
-
-(defun resolve-id (items id)
-  "The one of ITEMS whose id is ID or uniquely begins with it
-=> (values ITEM NIL), or (values NIL REASON)."
-  (let ((exact (find id items :key (lambda (item) (jstring item "id")) :test #'equal)))
-    (cond (exact (values exact nil))
-          ((< (length id) +min-id-prefix+)
-           (values nil (format nil "~a is too short (use at least ~d characters of the id)"
-                               (js-string id) +min-id-prefix+)))
-          (t
-           (let ((matches (remove-if-not (lambda (item) (starts-with id (jstring item "id"))) items)))
-             (cond ((= 1 (length matches)) (values (first matches) nil))
-                   ((null matches)
-                    (values nil (format nil "no id starting ~a on this branch" (js-string id))))
-                   (t (values nil (format nil "~a is ambiguous (~d matches)"
-                                          (js-string id) (length matches))))))))))
-
 (defun finding-note (finding)
   "One line of a finding's provenance for the report and /re findings:
 confidence, inheritance, and any audit override."
@@ -120,7 +84,7 @@ confidence, inheritance, and any audit override."
             (relocation (jget inherited "relocation")))
         (push (format nil "inherited from ~a, re-verified on this build (~a~a)"
                       (if (plusp (length from))
-                          (format nil "`~a…`" (subseq from 0 (min 12 (length from))))
+                          (format nil "`~a…`" (shown-hash from))
                           "an earlier build")
                       (or (jget inherited "carryStatus") "undefined")
                       (if relocation
@@ -135,12 +99,36 @@ confidence, inheritance, and any audit override."
             parts))
     (format nil "~{~a~^ · ~}" (nreverse parts))))
 
+;;; --- writing one ------------------------------------------------------------------------------
+
+(defun record-finding (&key claim evidence-ids addr confidence supersedes audit adopted-from inherited
+                            (session *session*))
+  "Write one re.finding entry => its id. The one writer: a finding recorded
+by the model, one adopted from elsewhere and one inherited from an earlier
+build differ only in which of these they say."
+  (let ((id (uuid))
+        (open-sha (session-binary-sha256 session)))
+    (append-entry "re.finding"
+                  (obj "id" id
+                       "claim" claim
+                       "evidenceIds" (coerce evidence-ids 'simple-vector)
+                       "addr" (if (plusp (length addr)) addr :absent)
+                       "confidence" (known-confidence confidence)
+                       "supersedes" (if (plusp (length supersedes)) supersedes :absent)
+                       "audit" audit
+                       ;; Binds the finding to the bytes it is about.
+                       "binarySha256" (if (plusp (length open-sha)) open-sha :absent)
+                       "inherited" (or inherited :absent)
+                       "adoptedFrom" (if (plusp (length adopted-from)) adopted-from :absent))
+                  session)
+    id))
+
 ;;; --- the gate every finding passes ------------------------------------------------------------
 
 (defun schema-refusal (tool problem &rest arguments)
   "Refuse a call whose arguments break a bound the tool's schema states —
-the lengths and counts the TypeScript's zod schema holds and the spine's
-parameter types cannot say — in the words the spine uses for the rest."
+the lengths and counts a parameter's type cannot say — in the words the
+engine uses for the rest."
   (fail "omp-re: ~a was called with arguments that do not fit its schema: ~?" tool problem arguments))
 
 (defun check-text-length (tool name text least most)
@@ -161,44 +149,36 @@ record_finding and adopt_finding, so the two can never gate differently."
                                               (obj "id" (jstring record "id")
                                                    "tool" (jstring record "tool")
                                                    "summary" (jstring record "summary")
-                                                   "canonicalExcerpt" (string-member record "canonicalExcerpt")))
+                                                   "canonicalExcerpt" (jstring-or-absent record "canonicalExcerpt")))
                                             resolved)))
                    "advisory"))
          (verdict (outcome-verdict outcome 0))
          (refused (and verdict (flagged-p verdict)))
          (override (and (plusp (length override-audit)) override-audit))
          (evidence-list (format nil "~{~a~^, ~}"
-                                (mapcar (lambda (record) (short-id (jstring record "id"))) resolved))))
+                                (mapcar (lambda (record) (shown-id (jstring record "id"))) resolved))))
     (when (and refused (not override))
       (return-from gate-and-record
         (failed-result
          (format nil "~a: NOT recorded — the support auditor judged this claim ~a: ~a~%Narrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.~@[~%The re-run evidence was recorded (~a); cite it in record_finding to record a narrower claim.~]"
                  tool (claim-audit-verdict verdict) (claim-audit-reason verdict)
                  (and (string= tool "adopt_finding") evidence-list)))))
-    (let* ((id (uuid))
-           (open-sha (session-binary-sha256 *session*))
-           (audit (if verdict
+    (let* ((audit (if verdict
                       (obj "verdict" (claim-audit-verdict verdict)
                            "reason" (claim-audit-reason verdict)
                            "override" (if refused override :absent))
                       (obj "verdict" "unaudited"
                            "reason" (or (audit-outcome-unaudited-reason outcome) "side turn unavailable"))))
-           (reproducible (count "reproducible" resolved :key #'recorded-status :test #'equal)))
-      (append-entry "re.finding"
-                    (obj "id" id
-                         "claim" claim
-                         "evidenceIds" (map 'simple-vector (lambda (record) (jstring record "id")) resolved)
-                         "addr" (if (plusp (length addr)) addr :absent)
-                         "confidence" (or confidence "likely")
-                         "supersedes" (if (plusp (length supersedes)) supersedes :absent)
-                         "audit" audit
-                         "binarySha256" (if (plusp (length open-sha)) open-sha :absent)
-                         "adoptedFrom" (if (plusp (length adopted-from)) adopted-from :absent)))
+           (reproducible (count "reproducible" resolved :key #'evidence-status :test #'equal))
+           (id (record-finding :claim claim
+                               :evidence-ids (mapcar (lambda (record) (jstring record "id")) resolved)
+                               :addr addr :confidence confidence :supersedes supersedes
+                               :audit audit :adopted-from adopted-from)))
       (plain-result
        (join-lines
         (append
-         (list (format nil "~a: recorded ~a~@[ (supersedes ~a)~]" tool (short-id id)
-                       (and (plusp (length supersedes)) (short-id supersedes)))
+         (list (format nil "~a: recorded ~a~@[ (supersedes ~a)~]" tool (shown-id id)
+                       (and (plusp (length supersedes)) (shown-id supersedes)))
                (format nil "claim: ~a" claim))
          (when (plusp (length adopted-from))
            (list (format nil "adopted from ~a: re-proven in this session on evidence ~a"
@@ -226,14 +206,14 @@ record_finding and adopt_finding, so the two can never gate differently."
      ("override_audit" :string :doc "Only if the support auditor refused this claim and you are confident it is wrong: a one-line justification, recorded and shown beside the finding."))
     (arguments)
   (let ((cited (jlist arguments "evidence"))
-        (evidence (collected-evidence))
+        (evidence (evidence-records))
         (resolved '())
         (problems '()))
     (check-text-length "record_finding" "claim" (jstring arguments "claim") 1 600)
     (unless (<= 1 (length cited) 16)
       (schema-refusal "record_finding" "evidence must cite 1 to 16 evidence ids (was ~d)" (length cited)))
     (dolist (raw cited)
-      (multiple-value-bind (record reason) (resolve-id evidence (trimmed raw))
+      (multiple-value-bind (record reason) (find-by-id evidence (trimmed raw))
         (cond (reason (push reason problems))
               ((not (member record resolved)) (push record resolved)))))
     (setf resolved (nreverse resolved))
@@ -249,11 +229,11 @@ record_finding and adopt_finding, so the two can never gate differently."
                                         resolved))))
       (when foreign
         (fail "omp-re: record_finding: evidence ~{~a~^, ~} was taken against a different binary than the one open — re-gather it on this binary."
-              (mapcar (lambda (record) (short-id (jstring record "id"))) foreign))))
+              (mapcar (lambda (record) (shown-id (jstring record "id"))) foreign))))
     (let ((supersedes nil))
       (when (plusp (length (jstring arguments "supersedes")))
         (multiple-value-bind (finding reason)
-            (resolve-id (live-findings) (trimmed (jstring arguments "supersedes")))
+            (find-by-id (live-findings) (trimmed (jstring arguments "supersedes")))
           (when reason
             (fail "omp-re: record_finding: cannot supersede — ~a" reason))
           (setf supersedes (jstring finding "id"))))
@@ -265,11 +245,10 @@ record_finding and adopt_finding, so the two can never gate differently."
                        :override-audit (jstring arguments "override_audit")))))
 
 (defun adopt-command (text)
-  "One of adopt_finding's commands => (values COMMAND ADDR). The TypeScript
-takes an object {command, addr?}; the spine's parameter types have no
-object, so each arrives as a string: the line as the re-analyst writes it in
+  "One of adopt_finding's commands => (values COMMAND ADDR). A tool's
+parameter types have no object, so each arrives as a string: the line as the re-analyst writes it in
 `reproduce' — `pdf @ sym.f', split at its ` @ ' — or that object as JSON."
-  (let ((object (and (starts-with "{" (trimmed text)) (json-parse text))))
+  (let ((object (and (uiop:string-prefix-p "{" (trimmed text)) (json-parse text))))
     (cond ((hash-table-p object)
            (unless (jstring object "command")
              (schema-refusal "adopt_finding" "a command given as an object needs a string `command` (was ~a)"
@@ -303,7 +282,7 @@ object, so each arrives as a string: the line as the re-analyst writes it in
       (check-text-length "adopt_finding" "source" (jstring arguments "source") 0 80))
     (when (and (plusp (length expected)) open-sha (string/= (string-downcase expected) open-sha))
       (fail "omp-re: adopt_finding: the finding was made on binary ~a… but ~a… is open — open the same binary first."
-            (subseq expected 0 (min 12 (length expected))) (subseq open-sha 0 (min 12 (length open-sha)))))
+            (shown-hash expected) (shown-hash open-sha)))
     ;; Re-prove: every command runs through rizin_command's own read-only gate
     ;; and is recorded exactly as a live rizin_command result, bound to the
     ;; open binary. A claim is adopted only on evidence this session observed
@@ -319,7 +298,7 @@ object, so each arrives as a string: the line as the re-analyst writes it in
           (let* ((id (record-evidence "rizin_command"
                                       (obj "command" command "addr" (or addr :absent))
                                       (result-text result) (result-details result)))
-                 (record (find id (collected-evidence) :key (lambda (record) (jstring record "id"))
+                 (record (find id (evidence-records) :key (lambda (record) (jstring record "id"))
                                                        :test #'equal)))
             (when record (push record resolved))))))
     (gate-and-record "adopt_finding" (nreverse resolved)
@@ -338,44 +317,43 @@ object, so each arrives as a string: the line as the re-analyst writes it in
      ("reason" :string :required t :doc "Why it no longer stands."))
     (arguments)
   (check-text-length "retract_finding" "reason" (jstring arguments "reason") 1 300)
-  (multiple-value-bind (finding reason) (resolve-id (live-findings) (trimmed (jstring arguments "id")))
+  (multiple-value-bind (finding reason) (find-by-id (live-findings) (trimmed (jstring arguments "id")))
     (when reason
       (fail "omp-re: retract_finding: ~a" reason))
     (append-entry "re.finding.retract"
                   (obj "id" (jstring finding "id") "reason" (jstring arguments "reason")))
     (plain-result (format nil "retract_finding: withdrew ~a — ~a~%reason: ~a"
-                          (short-id (jstring finding "id")) (jstring finding "claim")
+                          (shown-id (jstring finding "id")) (jstring finding "claim")
                           (jstring arguments "reason")))))
 
 ;;; --- /re findings and the status line -------------------------------------------------------------
 
 (defun finding-detail (finding)
   (format nil "finding ~a: ~a~%~a~%evidence: ~{~a~^, ~}"
-          (short-id (jstring finding "id")) (jstring finding "claim") (finding-note finding)
-          (mapcar #'short-id (jlist finding "evidenceIds"))))
+          (shown-id (jstring finding "id")) (jstring finding "claim") (finding-note finding)
+          (mapcar #'shown-id (jlist finding "evidenceIds"))))
 
-(define-slash "findings" (:usage "[id]" :description "findings the model recorded on this branch") (words)
+(define-slash "findings" (:usage "[id]" :description "findings the model recorded on this branch" :order 70
+                          :row (80 "Findings" :detail "the conclusions recorded, each on its evidence"))
+    (words)
   (let ((all (live-findings))
         (id (first words)))
     (cond (id
-           (let ((match (or (find id all :key (lambda (finding) (jstring finding "id")) :test #'equal)
-                            (find-if (lambda (finding) (starts-with id (jstring finding "id"))) all))))
-             (if match
-                 (finding-detail match)
-                 (values (format nil "omp-re: no live finding with id ~a" id) t))))
+           (multiple-value-bind (match reason why) (find-by-id all id)
+             (cond (match (finding-detail match))
+                   ((eq why :missing) (values (format nil "omp-re: no live finding with id ~a" id) t))
+                   (t (values (format nil "omp-re: finding id ~a" reason) t)))))
           ((null all)
            "omp-re: no findings on this branch yet — the model records them with record_finding")
           (t
            (clip-list "omp-re: findings"
                       (mapcar (lambda (finding)
-                                (format nil "[~a] ~a" (short-id (jstring finding "id")) (jstring finding "claim")))
+                                (format nil "[~a] ~a" (shown-id (jstring finding "id")) (jstring finding "claim")))
                               all))))))
 
-(defun findings-status-lines ()
-  (let* ((findings (live-findings))
-         (inherited (count-if (lambda (finding) (jget finding "inherited")) findings)))
-    (list (format nil "findings on this branch: ~d~[~:; (~:*~d inherited)~]" (length findings) inherited))))
-
-;; Named, not a closure, so loading this file again does not say it twice.
-(setf *status-lines* (append (remove 'findings-status-lines *status-lines*)
-                             (list 'findings-status-lines)))
+(contribute "findings" :order 70
+  :status (lambda (session)
+            (let* ((findings (live-findings session))
+                   (inherited (count-if (lambda (finding) (jget finding "inherited")) findings)))
+              (list (format nil "findings on this branch: ~d~[~:; (~:*~d inherited)~]"
+                            (length findings) inherited)))))

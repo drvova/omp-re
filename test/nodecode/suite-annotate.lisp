@@ -3,10 +3,9 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; The rizin half follows omp-re's test/tools-mutate-registry.test.ts: each
-;;;; tool's change is read back independently, through the read verb, so a
-;;;; wrong command template fails here even where a tool's own check agreed
-;;;; with it.
+;;;; In the rizin half each tool's change is read back independently, through
+;;;; the read verb, so a wrong command template fails here even where a
+;;;; tool's own check agreed with it.
 
 (in-package #:nodecode-re-test)
 
@@ -172,12 +171,8 @@
                        (re::json-encode (first (re::live-annotations "/a" session))))))
   (check "the fingerprint is the ids of the entries in effect"
          (and (string= "n1,n5" (re::annotation-fingerprint session "/a"))
-              (string= "n3" (funcall re::*annotation-fingerprint* session "/b"))
+              (string= "n3" (re::annotation-fingerprint session "/b"))
               (string= "" (re::annotation-fingerprint session "/c"))))
-  (check "the spine is handed both functions"
-         (and (functionp re::*live-annotations*)
-              (= 2 (length (funcall re::*live-annotations* "/a" session)))
-              (assoc "annotations" re::*replay-hooks* :test #'string=)))
   (check "an annotation that no longer applies is a failure line, and does not stop the replay"
          (let ((session (ann-record
                          (ann-entry "re.binary" (re::obj "path" "/a"))
@@ -232,7 +227,7 @@ the address, so a test asks for the key, not for the row."
 (defun ann-in-step-p (id)
   "Whether the session says its rizin holds exactly the record's annotations."
   (let ((session (re::find-session id)))
-    (string= (re::session-applied-annotations session)
+    (string= (re::applied-fingerprint session "annotations")
              (re::annotation-fingerprint session (re::session-binary-path session)))))
 
 (if (not *rizin*)
@@ -245,8 +240,9 @@ the address, so a test asks for the key, not for the row."
                                    "set_variable_type" "define_variable" "define_global" "define_function"
                                    "set_calling_convention" "set_flag" "set_arch_hint" "set_hint" "set_data"
                                    "set_string" "set_format")
-                     always (let ((tool (re::find-tool name)))
-                              (and tool (eq :write (re::tool-tier tool)) (not (re::tool-evidence tool))))))
+                     always (let ((tool (described-tool name)))
+                              (and tool (equal "write" (gethash "approval" tool))
+                                   (not (gethash "evidence" tool))))))
         (check "/re help lists undo"
                (has "/re undo" (re:slash "help")))
         (check "with no binary open a tool says how to open one, undo has nothing, and status is silent"
@@ -282,7 +278,7 @@ the address, so a test asks for the key, not for the row."
                    (session (re::find-session id)))
               (check "rename_function says what it replaced, keyed on the function's start"
                      (and (equal (format nil "rename_function: \"main\" -> \"omp_re_main\" @ ~a" main) renamed)
-                          (re::starts-with "0x" main)))
+                          (starts "0x" main)))
               (check "the rename is visible to a following read"
                      (equal "omp_re_main" (gethash "name" (ann-function main))))
               (check "the re.annotation entry has the engine's fields, ungrounded with no evidence there"
@@ -292,7 +288,7 @@ the address, so a test asks for the key, not for the row."
               (check "the entry is on disk, not only in memory"
                      (has "\"customType\":\"re.annotation\"" (re::read-text-file (re::record-path session))))
               (check "the session says its rizin holds the record's annotations"
-                     (and (ann-in-step-p id) (plusp (length (re::session-applied-annotations session)))))
+                     (and (ann-in-step-p id) (plusp (length (re::applied-fingerprint session "annotations")))))
               (check "status counts it"
                      (has "annotations in effect: 1" (re:status)))
 
@@ -540,7 +536,7 @@ the address, so a test asks for the key, not for the row."
                 (let* ((victim (let ((row (find-if (lambda (row)
                                                      (and (/= (gethash "offset" row) base)
                                                           (> (gethash "size" row) 16)
-                                                          (re::starts-with "fcn." (gethash "name" row))))
+                                                          (starts "fcn." (gethash "name" row))))
                                                    (re:json "aflj"))))
                                  (format nil "0x~(~x~)" (gethash "offset" row)))))
                   (check "define_function refuses where a function already begins"
@@ -553,7 +549,7 @@ the address, so a test asks for the key, not for the row."
                               (has (format nil "define_function: \"\" -> \"fcn.") (re:call "define_function" :addr victim))
                               (eql (parse-integer victim :start 2 :radix 16)
                                    (gethash "offset" (ann-function victim)))
-                              (re::starts-with "fcn." (gethash "newValue" (ann-data id "re.annotation")))))
+                              (starts "fcn." (gethash "newValue" (ann-data id "re.annotation")))))
                   (check "/re undo undefines it again"
                          (and (equal (format nil "omp-re: undid define_function @ ~a (restored \"\")" victim)
                                      (re:slash "undo"))
@@ -602,8 +598,7 @@ the address, so a test asks for the key, not for the row."
                   ;; The process dies; the record is the truth.
                   (let ((old (re::session-rz session))
                         (count (ann-count id)))
-                    (nlk:kill-tree (re::rz-pid old))
-                    (loop repeat 50 while (re::rz-alive-p old) do (sleep 0.1))
+                    (kill-rizin id)
                     (check "a killed rizin comes back with every annotation replayed"
                            (and (everything-holds)
                                 (not (eq old (re::session-rz session)))))
@@ -656,14 +651,13 @@ the address, so a test asks for the key, not for the row."
                                 (ann-unhinted-p main)
                                 (not (member "Cd" (ann-marks data-ea) :test #'equal))
                                 (not (member "Cs" (ann-marks string-ea) :test #'equal))
-                                (notany (lambda (variable) (re::starts-with "omp_re" (car variable)))
+                                (notany (lambda (variable) (starts "omp_re" (car variable)))
                                         (ann-variables main)))))
                   (check "and a rizin started from that record has nothing put back into it"
                          ;; The session was forgotten above: this is the one restored since.
                          (let* ((session (re::find-session id))
                                 (old (re::session-rz session)))
-                           (nlk:kill-tree (re::rz-pid old))
-                           (loop repeat 50 while (re::rz-alive-p old) do (sleep 0.1))
+                           (kill-rizin id)
                            (and (equal "main" (gethash "name" (ann-function main)))
                                 (not (eq old (re::session-rz session)))
-                                (string= "" (re::session-applied-annotations session)))))))))))))
+                                (string= "" (re::applied-fingerprint session "annotations")))))))))))))
