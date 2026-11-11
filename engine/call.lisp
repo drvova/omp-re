@@ -3,12 +3,11 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; CALL-TOOL is the one way a tool runs, whoever asks — a verb in eval, a
-;;;; host that registered the tool, a recipe: the `/re off' gate, then
-;;;; RUN-TOOL — a line in the audit log, the body, and for a result that
-;;;; observes the binary an evidence record whose id is appended to what the
-;;;; model reads. A tool or a /re line that makes reads of its own
+;;;; recipe: RUN-TOOL — a line in the audit log, the body, and for a result
+;;;; that observes the binary an evidence record whose id is appended to
+;;;; what the model reads. A tool or a /re line that makes reads of its own
 ;;;; (adopt_finding, /re carry --inherit) makes each through RUN-TOOL, so it
-;;;; is audited and recorded like any other and gated once, where it was asked.
+;;;; is audited and recorded like any other.
 
 (in-package #:omp-re)
 
@@ -110,13 +109,9 @@ where."
 
 (defstruct (tool (:copier nil))
   (name "" :type string)
-  (label nil)                           ; what a host that lists tools to a person calls it
   (description "")                      ; a string, or a function answering one where a host's voice is in it
   (parameters '())                      ; ((NAME TYPE &key required doc enum properties) ...)
   (function nil)                        ; (lambda (ARGS)) => a RESULT
-  (tier :exec)                          ; :read observes, :write annotates, :exec runs code or writes files
-  (reason nil)                          ; what an approval prompt says of one call: see APPROVAL-CASES
-  (render nil)                          ; (&key title subject body): how a host that draws results shows one
   (evidence nil)                        ; a successful result is recorded as evidence
   (available nil))                      ; NIL, or a predicate: offered only while it answers true
 
@@ -138,7 +133,7 @@ evaluated, and the members of an object are parameters in turn."
                                           `(list ,@(mapcar #'parameter-form value))
                                           value)))))))
 
-(defmacro define-tool (name (&key label description (tier :exec) reason render evidence available)
+(defmacro define-tool (name (&key description evidence available)
                        parameters (arguments) &body body)
   "Define the engine tool NAME. PARAMETERS is a list of
 (\"name\" TYPE &key required doc enum properties) with TYPE one of :string,
@@ -146,14 +141,11 @@ evaluated, and the members of an object are parameters in turn."
 object whose values are strings), :object and :objects (an object, an array
 of objects, whose members PROPERTIES lists the same way); the body runs
 with ARGUMENTS bound to the validated JSON object and *SESSION* to the
-session, and answers a RESULT. REASON is what an approval prompt says of
-one call (APPROVAL-CASES); RENDER, (&key title subject body), how a host
-that draws a result shows it: under TITLE (the label when there is none),
-naming the argument SUBJECT, the text shown as BODY says — :text, :json or
-:none."
+session, and answers a RESULT. With EVIDENCE a successful result is recorded
+as evidence; AVAILABLE, a predicate, offers the tool only while it answers
+true."
   `(register-engine-tool
-    (make-tool :name ,name :label ,label :description ,description :tier ,tier
-               :reason ,reason :render ,render
+    (make-tool :name ,name :description ,description
                :evidence ,evidence :available ,available
                :parameters (list ,@(mapcar #'parameter-form parameters))
                :function (lambda (,arguments) (declare (ignorable ,arguments)) ,@body))))
@@ -275,86 +267,16 @@ never coerced; null reads as absent."
             (tool-name tool) problems))
     checked))
 
-;;; --- what an approval prompt says ----------------------------------------------------------
-;;; A host that asks its operator before a call shows a sentence about that
-;;; call — which function is renamed to what, which command is run. The host
-;;; may have to say it without asking the engine (omp computes it in a
-;;; synchronous callback), so the sentence is data: cases tried in order, each
-;;; a list of parts, a part a literal or a slot filled from the arguments.
-
-(defun approval-slot (pieces &key (quote t) clip)
-  "A slot: the arguments named by PIECES run together — each an argument's
-path (\"addr\", \"attach.pid\") or (PATH &key prefix missing): PREFIX goes
-before a value that is there, MISSING stands for one that is not — then cut
-to CLIP characters and, with QUOTE, written as a JSON string."
-  (obj "pieces" (map 'simple-vector
-                     (lambda (piece)
-                       (destructuring-bind (path &key prefix missing) (if (listp piece) piece (list piece))
-                         (obj "arg" path "prefix" (or prefix :absent) "missing" (or missing :absent))))
-                     pieces)
-       "quote" (if quote t :absent)
-       "clip" (or clip :absent)))
-
-(defun approval-parts (template)
-  "TEMPLATE as parts. In a string, {addr} is the argument addr quoted and
-cut at 80 characters, ? when it is not given; {addr!} is its value as it
-stands. A list is parts already: strings and slots."
-  (if (listp template)
-      (coerce template 'simple-vector)
-      (let ((parts '()) (at 0))
-        (loop
-          (let* ((open (position #\{ template :start at))
-                 (close (and open (position #\} template :start open))))
-            (when (null close)
-              (when (< at (length template)) (push (subseq template at) parts))
-              (return))
-            (when (< at open) (push (subseq template at open) parts))
-            (let* ((name (subseq template (1+ open) close))
-                   (raw (uiop:string-suffix-p name "!"))
-                   (path (if raw (subseq name 0 (1- (length name))) name)))
-              (push (if raw
-                        (approval-slot (list (list path :missing "?")) :quote nil)
-                        (approval-slot (list (list path :missing "?")) :clip 80))
-                    parts))
-            (setf at (1+ close))))
-        (coerce (nreverse parts) 'simple-vector))))
-
-(defun approval-cases (reason)
-  "REASON, as DEFINE-TOOL takes it, as the data a host is given: a vector of
-{when?, parts}. REASON is one template, or (:cases (WHEN TEMPLATE) ...)
-tried in order, WHEN a list of (PATH VALUE) — the argument is VALUE — and
-(PATH :string) or (PATH :number) — it is one of those; the first case whose
-WHEN all hold is the sentence."
-  (map 'simple-vector
-       (lambda (one)
-         (destructuring-bind (conditions template) one
-           (obj "when" (if conditions
-                           (map 'simple-vector
-                                (lambda (condition)
-                                  (destructuring-bind (path test) condition
-                                    (if (keywordp test)
-                                        (obj "arg" path "type" (string-downcase test))
-                                        (obj "arg" path "equals" test))))
-                                conditions)
-                           :absent)
-                "parts" (approval-parts template))))
-       (if (and (consp reason) (eq (first reason) :cases))
-           (rest reason)
-           (list (list nil reason)))))
-
 ;;; --- the audit log -------------------------------------------------------------------------
 
-(defun append-audit-line (session call-id tool &key (arguments nil arguments-p) (approved nil approved-p) reason)
+(defun append-audit-line (session call-id tool arguments)
   "Append one line to the session's audit log, signed when the signing key
-is set: for a call, its ARGUMENTS; for what a host's approval gate decided
-of one, APPROVED and the REASON given. Never signals: the log is a mirror
+is set: the call CALL-ID to TOOL with its ARGUMENTS. Never signals: the log is a mirror
 for the operator, and must not abort the call it records."
   (handler-case
       (let* ((base (obj "ts" (iso-now) "sessionId" (session-id session)
                         "toolCallId" call-id "tool" tool
-                        "args" (if arguments-p arguments :absent)
-                        "approved" (if approved-p (and approved t) :absent)
-                        "reason" (or reason :absent)))
+                        "args" arguments))
              (canonical (json-encode base))
              (key (setting-value :audit-hmac-key)))
         (cond (key
@@ -380,29 +302,23 @@ for the operator, and must not abort the call it records."
                               "HMAC-SHA256"
                               (format nil "unsigned (set ~a)" (setting-variable :audit-hmac-key)))))))
 
-(defparameter +tools-off+
-  "omp-re: RE tools are off for this session — the user can re-enable them with /re on")
-
 ;;; --- one call --------------------------------------------------------------------------------
 
-(defun run-tool (name arguments &key call-id gated (session *session*))
+(defun run-tool (name arguments &key call-id (session *session*))
   "The tool NAME run with the JSON object ARGUMENTS in SESSION, which the
 caller holds => (values RESULT RAW EVIDENCE-ID): the arguments held to the
 schema, a line in the audit log, the body, and for a result that observes
-the binary its evidence record. GATED is for a call the model made: `/re
-off' refuses it. CALL-ID is the host's own id for the call, where it has
-one: the audit line carries it, so what the host's approval gate decided of
-the call can be paired with it."
+the binary its evidence record. CALL-ID is the host's own id for the call,
+where it has one, and is what the audit line names it by; without one the
+line carries the session's own count of its calls."
   (let* ((tool (or (find-tool name)
                    (fail "omp-re: no tool named ~a~a" (js-string name) (voice :list-tools))))
          (arguments (check-arguments tool (or arguments (obj)))))
-    (when (and gated (session-tools-off session))
-      (fail +tools-off+))
     (append-audit-line session
                        (or call-id
                            (format nil "~a-~d" (file-safe (session-id session))
                                    (incf (session-calls session))))
-                       name :arguments arguments)
+                       name arguments)
     (multiple-value-bind (result raw) (let ((*running-tool* name))
                                         (funcall (tool-function tool) arguments))
       (let ((id (and (tool-evidence tool) (result-observation result) (not (result-failed result))
@@ -426,7 +342,7 @@ whole of what rizin printed, where TEXT may be cut. EVIDENCE-ID is the
 record this call left, whose tag TEXT ends with; ARTIFACT-PATH where all of
 a TEXT that was cut is kept; DETAILS the result's own details object."
   (in-session (session name)
-    (multiple-value-bind (result raw id) (run-tool name arguments :call-id call-id :gated t)
+    (multiple-value-bind (result raw id) (run-tool name arguments :call-id call-id)
       (let ((text (result-text result))
             (details (result-details result)))
         ;; The id rides on its own trailing line, so a *j result's body

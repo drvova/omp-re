@@ -1,4 +1,4 @@
-;;;; slash-lines.lisp --- /re help, open, on, off, status, the lists, evidence, cite.
+;;;; slash-lines.lisp --- /re help, open, status, tools, doc, the lists, evidence, cite.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
@@ -7,28 +7,14 @@
 
 (in-package #:omp-re)
 
-(define-slash "help" (:immediate t :description "show this list" :order 150 :row (140 "Help")) (words)
+(define-slash "help" (:immediate t :description "show this list" :order 150) (words)
   (slash-help))
 
-(define-slash "open" (:usage "<path>" :description "open a binary and analyze it with rizin" :order 10
-                      :row (10 "Open a binary" :ask "Path" :placeholder "/path/to/binary" :verb "open"))
+(define-slash "open" (:usage "<path>" :description "open a binary and analyze it with rizin" :order 10)
     (words path)
   (if (null words)
       (values "Usage: /re open <path>" t)
-      (multiple-value-bind (text failures) (open-binary path)
-        (values text nil (and (plusp failures) (list :level :warning))))))
-
-(define-slash "on" (:immediate t :description "enable the RE tools for this session" :order 130
-                    :row (130 "Turn the tools on"))
-    (words)
-  (setf (session-tools-off *session*) nil)
-  "omp-re: RE tools enabled for this session")
-
-(define-slash "off" (:immediate t :description "disable the RE tools for this session" :order 140
-                     :row (120 "Turn the tools off"))
-    (words)
-  (setf (session-tools-off *session*) t)
-  "omp-re: RE tools disabled for this session — /re on to re-enable")
+      (values (open-binary path))))
 
 ;;; --- /re status --------------------------------------------------------------------------------
 
@@ -69,13 +55,12 @@
                 (cond ((null now)
                        (list "  the file is no longer readable there"))
                       ((and opened (string/= opened now))
-                       (list "  CHANGED ON DISK since it was opened: evidence so far is of the earlier bytes — /re open it again to analyze what is there now"))))
+                       (list "  CHANGED ON DISK since it was opened: evidence so far is of the earlier bytes — open it again to analyze what is there now"))))
               (unless (rz-alive-p (session-rz session))
                 (list "rizin process: not running (starts on next use)")))
-      (list "binary: none — /re open <path>")))
+      (list (format nil "binary: none — ~a" (voice :open-first)))))
 
-(define-slash "status" (:immediate t :description "rizin, decompiler, binary, and evidence status" :order 120
-                        :row (20 "Status" :detail "rizin, the open binary, evidence and findings"))
+(define-slash "status" (:immediate t :description "rizin, decompiler, binary, and evidence status" :order 120)
     (words)
   (join-lines
    (append (rizin-status-lines)
@@ -84,6 +69,64 @@
                  when (contribution-status contribution)
                    append (funcall (contribution-status contribution) *session*)))))
 
+;;; --- /re tools and /re doc ---------------------------------------------------------------------
+;;; What the tools are and what one takes, as the model reads it. How a call
+;;; is written and what an argument's name and type look like there are the
+;;; host's (host.lisp, +VOICE+): the schema is the engine's.
+
+(defun first-sentence (text)
+  (let* ((text (substitute #\Space #\Newline (or text "")))
+         (stop (search ". " text)))
+    (if stop (subseq text 0 (1+ stop)) text)))
+
+(defun argument-name (name)
+  (let ((spell (voice :argument-name)))
+    (if spell (funcall spell name) name)))
+
+(defun parameter-lines (schema)
+  "One line per property of a tool's JSON SCHEMA: how it is named where the
+model calls the tool, what it takes, what it means."
+  (flet ((names (properties)
+           (and properties
+                (loop for key being the hash-keys of properties collect (argument-name key)))))
+    (let ((required (jlist schema "required")))
+      (loop for name being the hash-keys of (jget schema "properties") using (hash-value property)
+            collect (format nil "  ~a  ~a~:[~;, required~]~@[ — ~a~]"
+                            (argument-name name)
+                            (let ((enum (jlist property "enum"))
+                                  (type (jstring property "type")))
+                              (cond (enum (format nil "one of ~{~a~^, ~}" (mapcar #'json-encode enum)))
+                                    ((equal type "boolean") (voice :type-boolean))
+                                    ((equal type "object")
+                                     (format nil (voice :type-object) (names (jget property "properties"))))
+                                    ((and (equal type "array") (equal (jstring property "items" "type") "object"))
+                                     (format nil (voice :type-objects)
+                                             (names (jget property "items" "properties"))))
+                                    ((equal type "array") (voice :type-strings))
+                                    (t type)))
+                            (member name required :test #'equal)
+                            (jstring property "description"))))))
+
+(define-slash "tools" (:immediate t :description "the tools, one line each" :order 160) (words)
+  (join-lines (map 'list
+                   (lambda (tool)
+                     (format nil "~a — ~a" (jstring tool "name")
+                             (first-sentence (jstring tool "description"))))
+                   (engine-tools))))
+
+(define-slash "doc" (:immediate t :usage "<tool>" :description "what one tool does and the arguments it takes"
+                     :order 170)
+    (words)
+  (if (null words)
+      (values "Usage: /re doc <tool>" t)
+      (let* ((name (engine-name (first words)))
+             (found (find name (engine-tools) :key (lambda (tool) (jstring tool "name")) :test #'string=)))
+        (unless found
+          (fail "omp-re: no tool named ~a~a" (js-string name) (voice :list-tools)))
+        (format nil "~a~%~a~%~?~%~{~a~^~%~}"
+                name (jstring found "description") (voice :doc-takes) (list name)
+                (or (parameter-lines (jget found "parameters")) '("  nothing"))))))
+
 ;;; --- lists -------------------------------------------------------------------------------------
 
 (defun rizin-rows (command)
@@ -91,7 +134,7 @@
   (jlist (rz-cmdj (ensure-rizin) command)))
 
 (define-list "functions" (:description "the functions rizin found, with address and size" :order 20
-                          :row (30 "Functions") :enter "open")
+                          :enter "open")
   (loop for function in (rizin-rows "aflj")
         for addr = (row-address function)
         for size = (or (jnumber function "realsz") (jnumber function "size"))
@@ -101,8 +144,7 @@
                               :description (format nil "~a~@[ · ~db~]" ea size)
                               :enter (code-request ea (jstring function "name"))))))
 
-(define-list "strings" (:description "the strings rizin found, with address" :order 30
-                        :row (40 "Strings") :enter "open")
+(define-list "strings" (:description "the strings rizin found, with address" :order 30 :enter "open")
   (loop for entry in (rizin-rows "izj")
         when (jnumber entry "vaddr")
           collect (let ((ea (ea-from-offset (jnumber entry "vaddr"))))
@@ -110,7 +152,7 @@
                               :line (format nil "~a  ~a" ea (jstring entry "string"))
                               :enter (view-request "string-xrefs" "addr" ea "label" (jstring entry "string"))))))
 
-(define-list "imports" (:description "the imports, with address" :order 40 :row (50 "Imports") :enter "open")
+(define-list "imports" (:description "the imports, with address" :order 40 :enter "open")
   (loop for entry in (rizin-rows "iij")
         ;; An import that is bound at load time has no stub of its own.
         collect (let ((ea (and (jnumber entry "plt") (plusp (jnumber entry "plt"))
@@ -136,8 +178,6 @@
           (and (jstring record "artifactId") (locate-artifact (jstring record "artifactId")))))
 
 (define-list "evidence" (:description "evidence recorded on this branch" :order 50
-                         :completes :evidence
-                         :row (60 "Evidence" :detail "what has been observed on this branch")
                          :enter "cite"
                          :one (lambda (id)
                                 (multiple-value-bind (record why-not) (named-evidence id)
@@ -152,18 +192,11 @@
                       :enter (obj "draft" (format nil "~a~%~%" (cite-text record)))))
           (evidence-records)))
 
-(define-slash "cite" (:usage "<id>" :description "cite an evidence entry in your next message" :order 60
-                      :completes :evidence
-                      :row (70 "Cite evidence" :ask "Evidence id" :placeholder "1a2b3c4d" :verb "cite"))
+(define-slash "cite" (:usage "<id>" :description "an evidence record as the opening of a message about it" :order 60)
     (words)
   (if (null words)
       (values "Usage: /re cite <id>" t)
       (multiple-value-bind (record why-not) (named-evidence (first words))
         (if (null record)
             (values why-not t)
-            (let* ((shown (shown-id (jstring record "id")))
-                   (text (cite-text record)))
-              (values text nil
-                      (list :draft (make-draft :text (format nil "~a~%~%" text)
-                                               :notice (format nil "Evidence ~a is in your draft."
-                                                               shown)))))))))
+            (cite-text record)))))

@@ -204,9 +204,7 @@ then says it stays on the record."
 ;;; --- the tools ----------------------------------------------------------------------------------
 
 (define-tool "record_finding"
-    (:label "Record Finding" :tier :read
-     :render '(:title "record_finding" :subject "claim")
-     :description "Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it — each RE tool result ends with an `[evidence xxxxxxxx]` tag; cite those ids. Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.")
+    (:description "Record an analytical conclusion as a finding in the report, backed by the evidence ids that establish it — each RE tool result ends with an `[evidence xxxxxxxx]` tag; cite those ids. Refused when an id doesn't resolve or was taken against a different binary; the claim is then checked by a support auditor and refused, with the reason, if the evidence doesn't establish it or it claims more than the evidence shows — narrow the claim or cite better evidence. Cite rizin_command evidence where you can: only that is machine-reproducible, so only those findings carry to the next build (/re carry). Use supersedes to revise a finding; retract_finding to withdraw one.")
     (("claim" :string :required t :doc "The conclusion, stated as narrowly as the evidence supports — one finding per claim.")
      ("evidence" :strings :required t :doc "Evidence ids the claim rests on: the 8-character id in the `[evidence xxxxxxxx]` tag at the end of each RE tool result.")
      ("addr" :string :doc "The address or function the finding is about, when it is about one.")
@@ -254,9 +252,7 @@ then says it stays on the record."
                        :override-audit (jstring arguments "override_audit")))))
 
 (define-tool "adopt_finding"
-    (:label "Adopt Finding" :tier :read
-     :render '(:title "adopt_finding" :subject "claim")
-     :description "Adopt a finding made elsewhere — typically one returned by the re-analyst subagent, whose evidence lives in its own session — by re-proving it here: each given rizin command is re-run read-only on the open binary and recorded as evidence in THIS session, then the claim passes the same gates as record_finding (support audit included). Refused if expect_sha256 doesn't match the open binary or a command fails. Use the subagent's `reproduce` lines as the commands.")
+    (:description "Adopt a finding made elsewhere — typically one returned by the re-analyst subagent, whose evidence lives in its own session — by re-proving it here: each given rizin command is re-run read-only on the open binary and recorded as evidence in THIS session, then the claim passes the same gates as record_finding (support audit included). Refused if expect_sha256 doesn't match the open binary or a command fails. Use the subagent's `reproduce` lines as the commands.")
     (("claim" :string :required t :doc "The finding's claim, as narrowly as its evidence supports.")
      ("commands" :objects :required t
       :doc "The rizin command(s) that reproduce the finding's evidence — re-run here and recorded as this session's evidence."
@@ -301,9 +297,7 @@ then says it stays on the record."
                      :override-audit (jstring arguments "override_audit"))))
 
 (define-tool "retract_finding"
-    (:label "Retract Finding" :tier :read
-     :render '(:title "retract_finding" :subject "id")
-     :description "Withdraw a finding recorded earlier with record_finding (it leaves the report). Give the reason; to revise rather than withdraw, call record_finding with supersedes instead.")
+    (:description "Withdraw a finding recorded earlier with record_finding (it leaves the report). Give the reason; to revise rather than withdraw, call record_finding with supersedes instead.")
     (("id" :string :required t :doc "Id (or ≥6-char prefix) of the finding to withdraw.")
      ("reason" :string :required t :doc "Why it no longer stands."))
     (arguments)
@@ -325,7 +319,6 @@ then says it stays on the record."
           (mapcar #'shown-id (jlist finding "evidenceIds"))))
 
 (define-list "findings" (:description "findings the model recorded on this branch" :order 70
-                         :row (80 "Findings" :detail "the conclusions recorded, each on its evidence")
                          :enter "discuss"
                          :none "omp-re: no findings on this branch yet — the model records them with record_finding"
                          :one (lambda (id)

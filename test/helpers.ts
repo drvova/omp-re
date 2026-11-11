@@ -3,7 +3,8 @@
  * the one harness — omp's real SDK booted into a session, with this plugin's
  * extension loaded (the engine behind it a real SBCL child, as in a session)
  * or another in its place, a scratch agent directory, a screen that records
- * what is drawn on it, and cells run through omp's own `eval`.
+ * what is drawn on it, and cells run through omp's own `eval` — which is how
+ * a model reaches the engine, so it is how the suites do.
  *
  * It reaches into omp past its extension API (`modes/runtime-init`,
  * `eval/py/kernel`, the extension runner): a test that exists to catch omp
@@ -11,7 +12,7 @@
  * this file.
  */
 import { afterAll, beforeAll } from "bun:test";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -106,6 +107,8 @@ export interface SdkHarness {
 	widget: (key: string, width?: number) => string[] | undefined;
 	/** The overlays open now, oldest first: drawn with `render`, driven with `handleInput`. */
 	overlays: Component[];
+	/** Press a key the extension bound, as omp's input does. */
+	press: (key: string) => Promise<void>;
 	shutdown: () => Promise<void>;
 }
 
@@ -152,8 +155,6 @@ function makeUi(notes: string[], editor: { text: string }, widgets: Map<string, 
 export interface BootOptions {
 	/** Without a UI, as `omp -p` runs. */
 	headless?: boolean;
-	/** Extension flags (like `--binary`), set before session_start fires. */
-	flags?: Record<string, string>;
 	/** Load the plugin's skills, as an installed plugin has them; or these. */
 	skills?: true | unknown[];
 	/** Extensions to load in place of this plugin's. */
@@ -201,7 +202,6 @@ export async function boot(sessionManager: unknown, options: BootOptions = {}): 
 	});
 	if (extensionsResult.errors.length > 0) throw new Error(extensionsResult.errors.map((failure) => failure.error).join("\n"));
 	isolateFromModels(session, options.sideModel);
-	for (const [name, value] of Object.entries(options.flags ?? {})) session.extensionRunner!.setFlagValue(name, value);
 	if (!options.headless) setToolUIContext(ui as never, false);
 	await initializeExtensions(session, {
 		reportSendError: () => {},
@@ -218,17 +218,53 @@ export async function boot(sessionManager: unknown, options: BootOptions = {}): 
 			return lines && [...lines];
 		},
 		overlays,
+		press: async (key) => {
+			const runner = session.extensionRunner!;
+			await runner.getShortcuts().get(key as never)!.handler(runner.createContext());
+		},
 		shutdown: () => session.dispose(),
 	};
 }
 
-/** The tools this plugin's extension registered in `session`, as opposed to omp's own and other extensions'. */
-export const reTools = (session: AgentSession) => session.extensionRunner!.getAllRegisteredTools().filter((tool) => tool.extensionPath.includes(join("extensions", "re")));
-const reToolNames = (session: AgentSession) => new Set(reTools(session).map((tool) => tool.definition.name));
-/** Those of them in the model's top-level tool list. */
-export const activeRe = (session: AgentSession) => session.getActiveToolNames().filter((name) => reToolNames(session).has(name));
-/** Those of them mounted as `xd://` devices. */
-export const mountedRe = (session: AgentSession) => session.getMountedXdevToolNames().filter((name) => reToolNames(session).has(name));
+/**
+ * A session with a file and a directory of its own, as `omp` starts one. omp keys an eval kernel by the session's
+ * file, so its kernels are its own; sessions without a file share one kernel per directory, which the plugin cannot
+ * tell apart (extensions/re/host.ts) — the suites that mean that boot `SessionManager.inMemory()` themselves.
+ */
+export async function ownSession(agentDir: string): Promise<unknown> {
+	const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+	const cwd = mkdtempSync(join(tmpdir(), "omp-re-cwd-"));
+	return SessionManager.create(cwd, join(agentDir, "sessions"));
+}
+
+/** The line that loads the plugin's library into each of eval's kernels: what the skill teaches. */
+export const LOAD = { js: "%load skill://re-triage/recipes.js", py: "%load skill://re-triage/recipes.py" } as const;
+
+/** Boot a session of its own with the plugin and its skill, and load the library into its JavaScript kernel, as a model that read the skill has. */
+export async function bootLoaded(agentDir: string, options: BootOptions = {}): Promise<SdkHarness> {
+	const manager = (await ownSession(agentDir)) as { getCwd(): string };
+	const harness = await boot(manager, { skills: true, cwd: manager.getCwd(), ...options });
+	const loaded = await runCell(harness.session, "js", LOAD.js);
+	if (loaded.isError) throw new Error(`the library did not load: ${loaded.text}`);
+	return harness;
+}
+
+/** What this plugin's extension registered with omp that a model or an operator could call: its tools and flags, and every extension command the session has (omp does not say whose a command is). */
+export function registeredByRe(session: AgentSession): { tools: string[]; commands: string[]; flags: string[] } {
+	const runner = session.extensionRunner!;
+	const ours = (path: string) => path.includes(join("extensions", "re"));
+	return {
+		tools: runner
+			.getAllRegisteredTools()
+			.filter((tool) => ours(tool.extensionPath))
+			.map((tool) => tool.definition.name),
+		commands: runner
+			.getRegisteredCommands()
+			.map((command) => command.name)
+			.sort(),
+		flags: [...runner.getFlags().values()].filter((flag) => ours(flag.extensionPath)).map((flag) => flag.name),
+	};
+}
 
 export interface Cell {
 	text: string;
@@ -238,10 +274,10 @@ export interface Cell {
 	details: Record<string, unknown> | undefined;
 }
 
-/** Run one cell through omp's own `eval` tool, as the model does. An error the cell threw comes back as its output, with isError. */
-export async function runCell(session: AgentSession, language: "js" | "py", code: string, more: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Cell> {
+/** Run one cell through omp's own `eval` tool, as the model does. An error the cell threw comes back as its output, with isError. `callId` is the tool call's id, where a test reads it back. */
+export async function runCell(session: AgentSession, language: "js" | "py", code: string, more: Record<string, unknown> = {}, signal?: AbortSignal, callId = `t-eval-${Math.random().toString(36).slice(2)}`): Promise<Cell> {
 	try {
-		const result = await session.getToolByName("eval")!.execute(`t-eval-${Math.random().toString(36).slice(2)}`, { language, code, ...more } as never, signal);
+		const result = await session.getToolByName("eval")!.execute(callId, { language, code, ...more } as never, signal);
 		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
 		return { text, isError: (result as { isError?: boolean }).isError === true, thrown: false, details: result.details as Record<string, unknown> | undefined };
 	} catch (error) {

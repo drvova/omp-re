@@ -2,12 +2,17 @@
  * omp's half of the engine's port: the one engine of this omp process, the
  * sessions it serves, and the answers to what it asks of omp
  * (docs/engine-protocol.md, "What the engine asks omp") — the session's
- * record, artifacts, the side model, telling the operator.
+ * record, artifacts, the side model, telling the operator. And the way in
+ * for the model: what a cell of omp's `eval` asks through the listener of
+ * bridge.ts is answered here, for the session that cell belongs to.
  */
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { resolve } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { logger } from "@oh-my-pi/pi-utils";
-import { Engine, type EngineRequest, type HostHandlers, type Json, type Start } from "./engine.ts";
+import { type Bridge, type BridgeMethod, type Kernel, Refusal, startBridge } from "./bridge.ts";
+import { Engine, type EngineRequest, type HostHandlers, type Json, type JsonObject, type Start } from "./engine.ts";
 import { launcher } from "./image.ts";
 import { CONSTANTS, type Entry, type Level, PROTOCOL, type Session as SessionRef, type State, type ToEngine, type ToHost } from "./protocol.ts";
 
@@ -15,16 +20,21 @@ interface Session {
 	pi: ExtensionAPI;
 	/** The latest context omp handed this session: what an engine request made outside any call is answered with. */
 	ctx: ExtensionContext;
-	/** What the engine last said of the session (the protocol's `state`): what omp draws between calls, and the memory it hands back. */
+	/** What the engine last said of the session (the protocol's `state`): what omp draws between calls. */
 	state: State;
 	onState?: (ctx: ExtensionContext, state: State) => void;
+	/** The `eval` call omp is running for the session, and how many requests its cell has made: what the audit log names each by. */
+	cell?: { toolCallId: string; requests: number };
+	/** What hangs up on the requests of the session's kernels that are still open. */
+	open: Set<AbortController>;
 }
 
 /**
  * What this module touches of the omp process itself, outside omp's extension
  * API: a headless run's standard output and error and its exit status, the
- * process's log, and how the engine is started. They are here so a
- * test can put its own in their place instead of reaching for the process's.
+ * process's log, how the engine is started, and the listener omp's eval
+ * reaches it through. They are here so a test can put its own in their place
+ * instead of reaching for the process's.
  */
 export interface Outside {
 	/** A headless run's standard output: what a pipeline reads. */
@@ -36,17 +46,18 @@ export interface Outside {
 	log(line: string): void;
 	/** How an engine is started: for each one, the ways of image.ts from the first. */
 	engineCommand(): Start;
+	/** Start the listener of bridge.ts. */
+	listen: typeof startBridge;
 }
 
 interface Shared {
 	sessions: Map<string, Session>;
-	/** The extension instances omp has loaded and not shut down: the engine ends with the last of them. */
+	/** The extension instances omp has loaded and not shut down: the engine and the listener end with the last of them. */
 	instances: Set<ExtensionAPI>;
-	/** Tool calls under way, by the engine request that serves each: where its progress is shown. */
-	updates: Map<number, (partial: AgentToolResult) => void>;
 	tickers: Map<string, ReturnType<typeof setInterval>>;
 	outside: Outside;
 	running?: Engine;
+	listening?: Bridge;
 }
 
 /**
@@ -61,7 +72,6 @@ interface Shared {
 const shared: Shared = ((globalThis as Record<symbol, unknown>)[Symbol.for(`omp-re.host/${PROTOCOL}`)] ??= {
 	sessions: new Map(),
 	instances: new Set(),
-	updates: new Map(),
 	tickers: new Map(),
 	outside: {
 		print: (text) => console.log(text),
@@ -71,9 +81,10 @@ const shared: Shared = ((globalThis as Record<symbol, unknown>)[Symbol.for(`omp-
 		},
 		log: (line) => logger.warn(`omp-re engine: ${line}`),
 		engineCommand: () => launcher((line) => shared.outside.log(line)),
+		listen: startBridge,
 	},
 } satisfies Shared) as Shared;
-const { sessions, instances, updates, tickers } = shared;
+const { sessions, instances, tickers } = shared;
 export const outside = shared.outside;
 
 /** Remember `ctx` as its session's latest and say which session a request is for. */
@@ -85,14 +96,10 @@ export function sessionOf(pi: ExtensionAPI, ctx: ExtensionContext, onState?: Ses
 		known.pi = pi;
 		if (onState) known.onState = onState;
 	} else {
-		known = { pi, ctx, state: { band: null, evidence: [], memory: {} }, onState };
+		known = { pi, ctx, state: { band: null }, onState, open: new Set() };
 		sessions.set(id, known);
 	}
-	return { id, cwd: ctx.cwd, hasUI: ctx.hasUI, memory: known.state.memory };
-}
-
-export function stateOf(sessionId: string): State | undefined {
-	return sessions.get(sessionId)?.state;
+	return { id, cwd: ctx.cwd };
 }
 
 /** Take the state the engine sent, and redraw what shows it. */
@@ -104,8 +111,9 @@ function applyState(sessionId: string, state: State): void {
 }
 
 /**
- * Tell the user something a `/re` line or a background open has to say. With
- * a UI it is a notification. Headless (`omp -p`) has no notification surface:
+ * Tell the user something that is said outside any call: a session's binary
+ * that could not be analyzed again when the session came back. With a UI it
+ * is a notification. Headless (`omp -p`) has no notification surface:
  * information goes to stdout, and anything else to stderr, an error with a
  * failing exit status, so a pipeline sees it.
  */
@@ -169,16 +177,6 @@ export async function askSideModel(ctx: ExtensionContext, prompt: string, second
 	}
 }
 
-/**
- * Write the session's file now. omp writes one on a session's first model turn, so a headless run that only ran a
- * `/re` line would lose what it recorded. The session manager has `ensureOnDisk` for this, but omp 18's extension
- * API shows extensions a read-only view of the manager that leaves it out: there is no API to call. A manager
- * without the method is left as it is.
- */
-async function writeSessionNow(ctx: ExtensionContext): Promise<void> {
-	await (ctx.sessionManager as { ensureOnDisk?: () => Promise<void> }).ensureOnDisk?.();
-}
-
 function forSession<P extends { session: string }, R>(handle: (session: Session, params: P) => R): (params: P) => R {
 	return (params) => {
 		const session = sessions.get(params.session);
@@ -218,12 +216,6 @@ const handlers: HostHandlers = {
 		const path = await ctx.sessionManager.getArtifactPath(id);
 		return path ? { text: await readFile(path, "utf8") } : {};
 	}),
-	keepSession: forSession(async ({ pi, ctx }, { name }) => {
-		await writeSessionNow(ctx);
-		// `omp -c` skips a session with no turn and no title. An interactive session is left for omp to title.
-		if (!ctx.hasUI && !pi.getSessionName()) await pi.setSessionName(name);
-		return {};
-	}),
 	notify: forSession(({ pi, ctx }, { text, level }) => {
 		if (ctx.hasUI) ctx.ui.notify(text, level);
 		else if (level === "error") pi.logger.error(text);
@@ -234,10 +226,9 @@ const handlers: HostHandlers = {
 		pi.sendMessage({ customType: type, content: text, display: true, details });
 	}),
 	state: ({ session, state }) => applyState(session, state),
-	progress: forSession(({ ctx }, { request, text }) => {
-		const update = request === null ? undefined : updates.get(request);
-		if (update) showProgress(`request ${request}`, text, (line) => line !== undefined && update({ content: [{ type: "text", text: line }], details: undefined }));
-		else if (ctx.hasUI) showProgress(`session ${ctx.sessionManager.getSessionId()}`, text, (line) => ctx.ui.setStatus("re", line));
+	// A cell's card is omp's, and shows nothing of a request under way inside it: the status line does.
+	progress: forSession(({ ctx }, { text }) => {
+		if (ctx.hasUI) showProgress(ctx.sessionManager.getSessionId(), text, (line) => ctx.ui.setStatus("re", line));
 	}),
 };
 
@@ -253,52 +244,128 @@ export function engine(): Engine {
 	return shared.running;
 }
 
-/** omp loaded the extension into a session: the engine is kept until `leaveSession` has ended every one of them. */
+/** omp loaded the extension into a session: the engine and the listener are kept until `leaveSession` has ended every one of them. */
 export function enter(pi: ExtensionAPI): void {
 	instances.add(pi);
+	shared.listening ??= outside.listen(answerKernel);
+}
+
+// --- what a cell of omp's eval asks ----------------------------------------------------------------
+
+/** Two paths that name one file, however each was spelled. Windows compares without regard to case. */
+function samePath(a: string, b: string): boolean {
+	const real = (path: string) => {
+		let whole = resolve(path);
+		try {
+			whole = realpathSync(whole);
+		} catch {
+			// A path that is not there is compared as written.
+		}
+		return process.platform === "win32" ? whole.toLowerCase() : whole;
+	};
+	return real(a) === real(b);
+}
+
+/**
+ * The session a kernel serves. omp keys a kernel by the session's file and directory, or by the directory alone for
+ * a session with no file (omp's eval/session-id.ts), and that key is all a kernel knows of its session; so the
+ * session is found by the same two. Sessions with no file that work in one directory share one kernel, and nothing
+ * in a request says which of them a cell belongs to: that is refused, not guessed.
+ */
+function sessionOfKernel(kernel: Kernel): Session {
+	const live = new Map<string, Session>();
+	for (const session of sessions.values()) {
+		try {
+			live.set(session.ctx.sessionManager.getSessionId(), session);
+		} catch {
+			// A context omp has retired names no session any more.
+		}
+	}
+	const served = [...live.values()].filter(({ ctx }) => {
+		const file = ctx.sessionManager.getSessionFile();
+		return kernel.sessionFile ? file !== undefined && samePath(file, kernel.sessionFile) : file === undefined && samePath(ctx.sessionManager.getCwd(), kernel.cwd);
+	});
+	const where = kernel.sessionFile ? `with the session file ${kernel.sessionFile}` : `without a session file in ${kernel.cwd}`;
+	if (served.length === 0) throw new Refusal(409, `omp-re: omp has no session ${where} that this plugin is loaded in`);
+	if (served.length > 1) {
+		throw new Refusal(409, `omp-re: ${served.length} sessions ${where} share this eval kernel, and a cell cannot say which of them it runs for. Give each a directory of its own, or let omp keep a session file.`);
+	}
+	return served[0]!;
+}
+
+/** Answer one request a kernel made through the listener. Hanging up cancels the engine's work on it. */
+async function answerKernel(method: BridgeMethod, kernel: Kernel, body: JsonObject, hungUp: AbortSignal): Promise<Json> {
+	const session = sessionOfKernel(kernel);
+	if (method === "whoami") return { bridge: CONSTANTS.bridgeVersion };
+	const over = new AbortController();
+	const signal = AbortSignal.any([hungUp, over.signal]);
+	session.open.add(over);
+	try {
+		if (method === "command") {
+			if (typeof body.line !== "string") throw new Refusal(400, "omp-re: a line is a string");
+			const { text, failed } = await ask(session.pi, session.ctx, "command", { line: body.line }, signal);
+			return { text, failed };
+		}
+		const args = body.arguments ?? {};
+		if (typeof body.name !== "string" || args === null || typeof args !== "object" || Array.isArray(args)) throw new Refusal(400, "omp-re: a call names a tool with a string and gives its arguments as one object");
+		const callId = session.cell && `${session.cell.toolCallId}#${++session.cell.requests}`;
+		const { text, failed, refused, raw, evidence } = await ask(session.pi, session.ctx, "call", { name: body.name, arguments: args, ...(callId ? { callId } : {}) }, signal);
+		return { text, failed, ...(refused ? { refused } : {}), ...(raw === undefined ? {} : { raw }), ...(evidence === undefined ? {} : { evidence }) };
+	} finally {
+		session.open.delete(over);
+	}
+}
+
+/** omp started running an `eval` call for `ctx`'s session: the requests its cell makes are counted under it. */
+export function cellStarted(pi: ExtensionAPI, ctx: ExtensionContext, toolCallId: string): void {
+	sessionOf(pi, ctx);
+	sessions.get(ctx.sessionManager.getSessionId())!.cell = { toolCallId, requests: 0 };
+}
+
+/**
+ * The `eval` call is over. A request its cell left open has nobody to answer: the kernel's hanging up says so for a
+ * cell that timed out or was interrupted, and this says it for one that ended without waiting for what it asked.
+ */
+export function cellEnded(ctx: ExtensionContext, toolCallId: string): void {
+	const session = sessions.get(ctx.sessionManager.getSessionId());
+	if (session?.cell?.toolCallId !== toolCallId) return;
+	session.cell = undefined;
+	for (const request of session.open) request.abort();
 }
 
 /** The engine's methods that are about a session. */
 type SessionMethod = { [M in EngineRequest]: ToEngine[M]["params"] extends { session: SessionRef } ? M : never }[EngineRequest];
 
-/** Ask the engine about `ctx`'s session, and take the state its answer carries. `onUpdate` is where a tool call's progress goes. */
-export async function ask<M extends SessionMethod>(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	method: M,
-	params: Omit<ToEngine[M]["params"], "session">,
-	options: { signal?: AbortSignal; onUpdate?: (partial: AgentToolResult) => void } = {},
-): Promise<ToEngine[M]["result"]> {
+/** Ask the engine about `ctx`'s session, and take the state its answer carries. Aborting `signal` tells the engine the asker gave up. */
+export async function ask<M extends SessionMethod>(pi: ExtensionAPI, ctx: ExtensionContext, method: M, params: Omit<ToEngine[M]["params"], "session">, signal?: AbortSignal): Promise<ToEngine[M]["result"]> {
 	const session = sessionOf(pi, ctx);
-	let requestId: number | undefined;
-	try {
-		const answer: ToEngine[SessionMethod]["result"] = await engine().request<SessionMethod>(method, { session, ...params } as ToEngine[M]["params"], options.signal, (id) => {
-			requestId = id;
-			if (options.onUpdate) updates.set(id, options.onUpdate);
-		});
-		if ("state" in answer && answer.state) applyState(session.id, answer.state);
-		return answer as ToEngine[M]["result"];
-	} finally {
-		if (requestId !== undefined) {
-			updates.delete(requestId);
-			showProgress(`request ${requestId}`, null, () => {});
-		}
-	}
+	const answer: ToEngine[SessionMethod]["result"] = await engine().request<SessionMethod>(method, { session, ...params } as ToEngine[M]["params"], signal);
+	if ("state" in answer && answer.state) applyState(session.id, answer.state);
+	return answer as ToEngine[M]["result"];
+}
+
+/** A session went on under another id (a branch into a new session file): what was held under the old one is dropped. */
+export function forgetSession(id: string): void {
+	sessions.delete(id);
 }
 
 /**
  * omp left a session for another, or is done with it: the engine ends its processes. `over` when omp is done with
- * the extension instance too; the engine ends with the last of them, inside omp's shutdown budget. A failure to say
+ * the extension instance too; the engine and the listener end with the last of them, inside omp's shutdown budget. A failure to say
  * so to an engine that is going anyway is logged, not raised: nothing can be done about it here.
  */
 export async function leaveSession(pi: ExtensionAPI, ctx: ExtensionContext, over: boolean): Promise<void> {
 	const id = ctx.sessionManager.getSessionId();
 	const live = shared.running;
 	if (live) await ask(pi, ctx, "event", { kind: over ? "shutdown" : "before-switch" }).catch((error) => outside.log(`leaving session ${id}: ${error instanceof Error ? error.message : String(error)}`));
+	for (const request of sessions.get(id)?.open ?? []) request.abort();
 	sessions.delete(id);
 	if (!over) return;
 	instances.delete(pi);
-	if (live && instances.size === 0 && shared.running === live) {
+	if (instances.size > 0) return;
+	shared.listening?.stop();
+	shared.listening = undefined;
+	if (live && shared.running === live) {
 		shared.running = undefined;
 		await live.stop();
 	}

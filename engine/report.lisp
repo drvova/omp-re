@@ -549,8 +549,7 @@ deterministic gates block in every mode."
 
 (define-slash "report" (:usage "[path] [--audit=strict]"
                         :description "write the evidence-gated report (claim-support audit advisory by default; --audit=strict gates it, --no-audit skips)"
-                        :order 90
-                        :row (100 "Write the report" :ask "File" :placeholder "analysis.md" :verb "write"))
+                        :order 90)
     (words line)
   (multiple-value-bind (path flags)
       (line-flags line :switches '("--no-audit" "--audit=off" "--audit" "--audit=advisory" "--audit=strict"))

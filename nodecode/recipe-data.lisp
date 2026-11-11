@@ -317,18 +317,7 @@
           ": no function at "
           (obj "get" (vector "addr"))
           " — list them with "
-          (obj "get" (vector "listFunctions")))
-        "cutOutput" (vector
-          "omp-re: "
-          (obj "get" (vector "recipe"))
-          ": the output of rizin_command "
-          (obj "get" (vector "label") "as" "json")
-          " was cut at the size cap and the whole of it could not be read back ("
-          (obj "get" (vector "why"))
-          "). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands.")
-        "cutNoArtifact" (vector "the engine saved no artifact for it")
-        "cutUnreadable" (vector "artifact://" (obj "get" (vector "artifact")) ": " (obj "get" (vector "error")))
-        "cutNotText" (vector "artifact://" (obj "get" (vector "artifact")) " did not read as text")))
+          (obj "get" (vector "listFunctions")))))
     "host" (obj "listFunctions" "(re:json \"aflj\")")
     "recipes" (vector
       (obj

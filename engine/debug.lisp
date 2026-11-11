@@ -611,40 +611,8 @@ names, or T."
            (t
             (fail "omp-re: debug: unknown action ~a" (js-string action)))))))))
 
-(defun debug-approval-reason ()
-  "What an approval prompt says of one rizin_debug call: an attach by what
-it attaches to, anything else by what its action does to the process."
-  (flet ((of (action)
-           (cond ((string= action "start") "Launch the target under a debugger — this EXECUTES it on this machine.")
-                 ((string= action "stop") "Terminate the debugged process.")
-                 ((string= action "trace_start") "Start recording a debug trace session (enables stepping backward).")
-                 ((string= action "trace_stop") "Stop the debug trace session.")
-                 ((string= action "trace_save") "Write the recorded debug trace session to a directory in omp-re's output directory.")
-                 ((string= action "trace_load") "Load a previously saved debug trace session from omp-re's output directory.")
-                 ((member action '("step_back" "continue_back") :test #'string=)
-                  (format nil "Move the debugged process backward through the recorded trace (~a)." action))
-                 ((member action '("continue" "continue_until" "continue_to_syscall" "continue_to_call"
-                                   "continue_to_ret" "step" "step_over")
-                          :test #'string=)
-                  (format nil "Resume execution of the debugged process (~a)." action))
-                 ((member action '("write_register" "write_memory" "watch_add" "break_add_hw") :test #'string=)
-                  (format nil "Modify the debugged process (~a)." action))
-                 ((string= action "dump_memory")
-                  "Read a region of the debugged process's live memory and write it to a file in omp-re's output directory.")
-                 (t (format nil "Inspect the debugged process (~a)." action)))))
-    `(:cases
-      ((("action" "start") ("attach.pid" :number))
-       "Attach the debugger to running PID {attach.pid!} — it will control that process.")
-      ((("action" "start") ("attach.remote" :string))
-       ("Connect the debugger to the remote target " ,(approval-slot '("attach.remote")) "."))
-      ,@(loop for action in +debug-actions+ collect (list (list (list "action" action)) (list (of action))))
-      (() "Drive the debugged process."))))
-
 (define-tool "rizin_debug"
-    (:label "debugger" :tier :exec
-     :reason (debug-approval-reason)
-     :render '(:subject "action")
-     :description "Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, reverse-step (record a trace with trace_start, then step_back / continue_back), read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected."
+    (:description "Dynamic analysis: launch the open binary under rizin's debugger and drive it — breakpoints and watchpoints, continue (incl. to the next syscall/call/return), single-step, reverse-step (record a trace with trace_start, then step_back / continue_back), read and write registers and memory, disassemble live (post-unpacking) memory, backtrace, and inspect maps, modules, libraries, sections, processes, threads, file descriptors, signals, Windows and glibc heaps. 'start' can instead attach to a running pid or connect to a remote gdb/windbg stub (via `attach`) — e.g. a sample running in an isolated VM. This drives a live process; use only in an isolated, disposable environment. Start with action 'start', then set breakpoints and continue/step; 'stop' ends it. The static analysis tools are unaffected."
      ;; Opt-in only: without the operator's switch the sample is never executed.
      :available (lambda () (debugger-enabled-p)))
     (("action" :string :required t :enum +debug-actions+

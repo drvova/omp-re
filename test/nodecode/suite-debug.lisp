@@ -71,7 +71,7 @@ its threads runs the debugger, so every thread's list is read."
     (check "with the debugger off the tool is not offered"
            (and (not (has "rizin_debug" (re:tools)))
                 (null (omp-re::find-tool "rizin_debug"))
-                (has "no tool is named" (refusal (lambda () (re:doc "rizin_debug"))))))
+                (has "no tool named \"rizin_debug\"" (refusal (lambda () (re:doc "rizin_debug"))))))
     (check "and a call to it says there is no such tool"
            (has "no tool named \"rizin_debug\"" (debug-refusal :action "start")))
     (check "nor does it run through the name the engine knows it by"
@@ -89,9 +89,8 @@ its threads runs the debugger, so every thread's list is read."
                            "condition" "command" "lib" "name" "run" "attach"))
                   (has ":action  one of \"start\", \"continue\"" text)
                   (has "\"heap_bins\", \"stop\", required" text))))
-    (check "it is exec-tier and never evidence"
-           (let ((tool (described-tool "rizin_debug")))
-             (and (equal "exec" (gethash "approval" tool)) (not (gethash "evidence" tool)))))
+    (check "it is never evidence"
+           (not (gethash "evidence" (described-tool "rizin_debug"))))
     (check "the status line says it is enabled"
            (in-session ((fresh-session)) (has "debugger: enabled" (re:status)))))
   (with-environment ("OMPRE_ENABLE_DEBUGGER" "1")

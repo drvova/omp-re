@@ -100,13 +100,18 @@
        (has "not running" (refusal (lambda () (re:status)))))
 
 (with-cell ()
-  (check "the help topic and the /re command are contributed"
-         (and (assoc :re nle:*help*) (assoc "re" nle:*commands* :test #'string=)))
+  (check "the help topic is contributed, and no command: the cell has none"
+         (and (assoc :re nle:*help*) (null nle:*commands*)))
   (check "(re:tools) lists the engine's tools"
          (let ((text (re:tools))) (and (has "rizin_command" text) (has "open_binary" text) (has "rizin_help" text))))
   (check "(re:doc) spells a tool's parameters as eval keywords"
          (let ((text (re:doc "open-binary"))) (and (has ":path" text) (has "required" text) (has "one of 8, 16, 32, 64" text))))
-  (check "(re:doc) refuses an unknown tool" (has "no tool is named" (refusal (lambda () (re:doc "nope")))))
+  (check "(re:doc) refuses an unknown tool, as a call to it is refused"
+         (equal "omp-re: no tool named \"nope\" — (re:tools) lists them" (refusal (lambda () (re:doc "nope")))))
+  (check "(re:tools) and (re:doc) are the lines tools and doc"
+         (and (string= (re:tools) (re:slash "tools"))
+              (string= (re:doc "set_comment") (re:slash "doc set_comment"))
+              (equal "Usage: /re doc <tool>" (refusal (lambda () (re:slash "doc"))))))
   (check "a call that does not fit the schema is RE-ERROR saying which member"
          (has "command is required" (refusal (lambda () (re:call "rizin_command")))))
   (check "a member of the wrong type is refused, never coerced"
@@ -121,24 +126,11 @@
   (check "reading with no binary open says how to open one"
          (in-session ((fresh-session))
            (has "no binary open" (refusal (lambda () (re:cmd "aflj"))))))
-  (check "/re typed alone answers a dialog of what it offers: rows that run a line, rows that ask for a word"
-         (multiple-value-bind (text dialog)
-             (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) "" "cell")
-           (let ((rows (getf (rest (rest dialog)) :rows)))
-             (and (stringp text)
-                  (find "/re status" rows :key (lambda (row) (second (getf row :run))) :test #'equal)
-                  (equal "/re open" (getf (getf (find "Open a binary" rows :key (lambda (row) (getf row :label))
-                                                      :test #'equal)
-                                                :ask)
-                                          :line))))))
-  (check "/re help answers the list of subcommands as text"
-         (let ((text (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) "help" "cell")))
-           (and (has "/re open" text) (has "/re status" text))))
   (check "an unknown /re line says so"
          (has "unknown /re subcommand" (refusal (lambda () (re:slash "frobnicate")))))
   (check "/re help lists the subcommands in the order they declare"
          (equal '("open" "functions" "strings" "imports" "evidence" "cite" "findings" "undo" "report"
-                  "verify" "carry" "status" "on" "off" "help")
+                  "verify" "carry" "status" "help" "tools" "doc")
                 (mapcar (lambda (line) (second (omp-re::words line))) (omp-re:split-lines (re:slash "help")))))
   (check "(re:status) is RE-ERROR when the line fails, as (re:slash \"status\") is"
          (with-service (:entries (lambda (session) (declare (ignore session)) (error "away")))
@@ -147,22 +139,10 @@
   (check "a tool, a parameter and a subcommand are named by one rule: lowercase, underscores"
          (and (has ":path" (re:doc "Open-Binary"))
               (has "command is required" (refusal (lambda () (re:call "Rizin-Command"))))
-              (has "/re status" (re:slash "HELP"))))
-  (check "/re off refuses every tool call until /re on"
-         (in-session ((fresh-session))
-           (typed "off")
-           (and (has "RE tools are off" (refusal (lambda () (re:cmd ""))))
-                (progn (typed "on") (has "omp-re manual" (re:cmd ""))))))
-  (check "/re off gates the model's /re lines too — it cannot turn the tools back on — and never the operator's"
-         (in-session ((fresh-session))
-           (typed "off")
-           (and (has "RE tools are off" (refusal (lambda () (re:slash "on"))))
-                (has "RE tools are off" (refusal (lambda () (re:status))))
-                (has "rizin:" (typed "status"))
-                (progn (typed "on") (has "rizin:" (re:status)))))))
+              (has "/re status" (re:slash "HELP")))))
 
-(check "stop takes the help topic and the command back"
-       (and (null nle:*help*) (null nle:*commands*)))
+(check "stop takes the help topic back"
+       (null nle:*help*))
 
 ;;; --- the host port --------------------------------------------------------------------
 
@@ -288,7 +268,7 @@
          (and (has "PACKAGES: " out) (not (has "PACKAGES: N" out)) (not (has "WARNED: " out))))
   (check "with no host the surface answers in the engine's own words"
          (and (has "HELP: /re open <path>" out)
-              (has "CALL: omp-re: no binary open — use /re open <path> or the open_binary tool first" out)))
+              (has "CALL: omp-re: no binary open — open one with the open_binary tool first" out)))
   (check "the manual is one text: the engine's tables between the host's parts, here the engine's own"
          (and (has "MANUAL: omp-re manual" out)
               (has "Reading the binary (prefer the JSON `*j` forms" out)
@@ -296,24 +276,24 @@
               (has "OMPRE_RIZIN_PATH (rizin if not on PATH)" out))))
 
 (suite "the engine's surface")
-(check "a tool is described with its JSON Schema, its approval class and whether it records evidence"
+(check "a tool is described with its JSON Schema and whether it records evidence"
        (let ((tool (find "rizin_command" (omp-re:engine-tools) :key (lambda (tool) (gethash "name" tool))
                                                             :test #'string=)))
-         (and (equal "exec" (gethash "approval" tool)) (eq t (gethash "evidence" tool))
+         (and (eq t (gethash "evidence" tool))
+              (equal '("name" "description" "parameters" "evidence")
+                     (loop for key being the hash-keys of tool collect key))
               (equalp #("command") (gethash "required" (gethash "parameters" tool)))
               (equal "string" (omp-re:jstring tool "parameters" "properties" "addr" "type")))))
-(check "a /re subcommand is described with its usage and its dialog row"
-       (let ((open (find "open" (omp-re:engine-commands) :key (lambda (command) (gethash "name" command))
-                                                      :test #'string=)))
-         (and (equal "<path>" (gethash "usage" open))
-              (equal "Path" (omp-re:jstring open "row" "ask")))))
 (check "a call the engine refuses is an answer that failed, with the reason as its text"
        (let ((answer (omp-re:engine-call (fresh-session) "rizin_command" (omp-re:obj "command" "aflj"))))
          (and (eq t (gethash "failed" answer)) (eq t (gethash "refused" answer))
               (has "no binary open" (gethash "text" answer)))))
-(check "a /re line's answer says how loudly: error when it failed"
-       (and (equal "info" (gethash "level" (omp-re:engine-command (fresh-session) "help")))
-            (equal "error" (gethash "level" (omp-re:engine-command (fresh-session) "cite")))))
+(check "a /re line's answer is its text and whether it failed, and no more"
+       (let ((help (omp-re:engine-command (fresh-session) "help"))
+             (cite (omp-re:engine-command (fresh-session) "cite")))
+         (and (null (gethash "failed" help)) (eq t (gethash "failed" cite))
+              (equal "Usage: /re cite <id>" (gethash "text" cite))
+              (equal '("text" "failed") (loop for key being the hash-keys of help collect key)))))
 
 ;;; The surface is declared in types (engine/types.lisp). A host's call is
 ;;; held to them when the host is compiled; what arrives all the same must
@@ -342,7 +322,7 @@
          (and (has ":TELEPATHY is not a known argument keyword"
                    (warned '(omp-re:install-host :telepathy (lambda ()))))
               (has ":LOUDLY is not a known argument keyword"
-                   (warned '(omp-re:engine-command "s" "help" :loudly t))))))
+                   (warned '(omp-re:engine-call "s" "rizin_help" (omp-re:obj) :loudly t))))))
 (check "every function the engine exports is declared: none is left to what the compiler can work out"
        (let ((undeclared '()))
          (do-external-symbols (symbol '#:omp-re)
@@ -368,7 +348,7 @@
 (check "a /re line that is not text fails as a line does, and a view that is not named is a notice"
        (let ((line (omp-re:engine-command (fresh-session) (as-it-arrives 42)))
              (view (omp-re:engine-view (fresh-session) (as-it-arrives :functions))))
-         (and (eq t (gethash "failed" line)) (equal "error" (gethash "level" line))
+         (and (eq t (gethash "failed" line))
               (equal "omp-re: engine-command: line must be of type (or null string), not 42" (gethash "text" line))
               (equal "notice" (gethash "type" view)) (equal "error" (gethash "level" view))
               (equal "omp-re: engine-view: kind must be of type string, not :FUNCTIONS" (gethash "text" view)))))
@@ -376,19 +356,14 @@
        (with-cell ()
          (equal "omp-re: engine-command: line must be of type (or null string), not 42"
                 (refusal (lambda () (re:slash (as-it-arrives 42)))))))
-(check "what answers with data answers with none: no facts, no evidence, no lines, an empty memory"
+(check "what answers with data answers with none: no facts, no lines"
        (let ((session (as-it-arrives 42)))
          (and (null (omp-re:engine-facts session))
-              (equalp #() (omp-re:engine-evidence session 10))
-              (equalp #() (omp-re:engine-evidence (fresh-session) (as-it-arrives "ten")))
               (equalp #() (omp-re:engine-preserved session))
-              (zerop (hash-table-count (omp-re:engine-memory session)))
-              (eq t (omp-re:engine-remember session (omp-re:obj)))
-              (eq t (omp-re:engine-approval session "call" "tool" t))
               (eq t (omp-re:engine-rekey session "other"))
               (eq t (omp-re:engine-close session))
-              (equal "omp-re: engine-restore: open must be of type (or null string), not 42"
-                     (gethash "text" (omp-re:engine-restore (fresh-session) :open session))))))
+              (equal "omp-re: engine-restore: session must be of type session-id, not 42"
+                     (gethash "text" (omp-re:engine-restore session))))))
 (check "the vocabulary's types tell their values: an address, a digest, a level, a JSON value"
        (and (typep (omp-re:ea-from-offset 16400) 'omp-re:address-text)
             (not (typep "0X4010" 'omp-re:address-text)) (not (typep "main" 'omp-re:address-text))
@@ -545,11 +520,7 @@
                   (in-session (other)
                     (funcall open other)
                     (has (scratch-path "sample  two.bin") (re:status))))))
-         (check "a typed /re open reads a relative path against the session's directory"
-                (opens-p (lambda (other)
-                           (funcall (cdr (assoc "re" nle:*commands* :test #'string=))
-                                    "open sample  two.bin" other))))
-         (check "and so does (re:slash \"open ...\")"
+         (check "(re:slash \"open ...\") reads a relative path against the session's directory"
                 (opens-p (lambda (other) (declare (ignore other)) (re:slash "open sample  two.bin"))))
          (check "and (re:open)"
                 (opens-p (lambda (other) (declare (ignore other)) (re:open "sample  two.bin"))))

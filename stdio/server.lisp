@@ -5,9 +5,10 @@
 ;;;; The omp host. omp is a TypeScript program, so the engine runs beside it
 ;;;; as one SBCL process for the whole omp process, and the two speak the
 ;;;; protocol docs/engine-protocol.md writes down: one JSON object a line,
-;;;; both ways. omp's side (extensions/re) asks for what the engine's surface
-;;;; offers (engine/engine.lisp); the engine asks back for what only omp can
-;;;; do, which is the port of engine/host.lisp answered over the wire.
+;;;; both ways. omp's side (extensions/re) passes on what the model asks
+;;;; from omp's eval — a call, a line — and says how each session lives
+;;;; (engine/engine.lisp); the engine asks back for what only omp can do,
+;;;; which is the port of engine/host.lisp answered over the wire.
 ;;;;
 ;;;; One thread reads the pipe. Every request runs on a thread of its own, so
 ;;;; a long decompile in one session holds up nothing in another, and the
@@ -33,7 +34,6 @@
   id                                    ; omp's id for it; NIL for work the engine started itself
   (session-id +default-session+)
   directory                             ; where that session works
-  has-ui
   (cancelled nil)
   (waiting nil)                         ; the semaphore its thread sleeps on, while it does: what a cancel wakes
   (seen '()))                           ; the sessions whose record this request has already asked omp for
@@ -99,9 +99,6 @@ error here; so is a question or an answer that is not the protocol's."
   "omp's environment, as it last said it: the engine's own process was
 started once and omp's variables can change after.")
 (defvar *state-directory* nil "omp's agent directory: everything is kept under its re/ folder.")
-(defvar *met* (make-hash-table :test #'equal :synchronized t)
-  "The sessions this process has been asked about. One it meets for the
-first time may come with what an earlier engine held of it (ENGINE-MEMORY).")
 
 (defun asking-session-id ()
   (if *request* (request-session-id *request*) +default-session+))
@@ -119,7 +116,7 @@ they were read from. What the engine appends meanwhile it adds itself.
 
 The vector answered is never changed afterwards: a longer record is a new
 vector. So whoever reads it beside the call that appends — a status band,
-an immediate /re line — walks a record that holds still, and the engine
+an immediate line — walks a record that holds still, and the engine
 sees by identity when there is something new (the port's :ENTRIES)."
   (sb-thread:with-recursive-lock (*record-lock*)
     (let ((held (or (session-held session "omp record") (vector))))
@@ -186,10 +183,7 @@ sees by identity when there is something new (the port's :ENTRIES)."
                       (format nil "artifact://~a" id))
    :transcript (lambda (session type text details)
                  (tell-omp "transcript" "session" (session-id session) "type" type "text" text
-                                        "details" details))
-   :has-ui (lambda () (and *request* (request-has-ui *request*)))
-   :keep-session (lambda (session name)
-                   (ask-omp "keepSession" "session" (session-id session) "name" name))))
+                                        "details" details))))
 
 ;;; --- what omp asks ---------------------------------------------------------------------------
 
@@ -226,24 +220,18 @@ them: one line, short enough for a finding's note."
                     (or (said "fnCount") 0) (or (said "findings") 0) (or (said "evidence") 0)))))
 
 (defun session-state (session-id)
-  "What omp's own surface shows of the session between calls — the status
-band's lines, and the evidence ids its /re completion offers, newest first,
-each as it is shown — and what the session holds that no record has, for
-omp to hand back to an engine started after this one. Sent with every
-answer that may have changed them, so drawing never costs a round trip.
-None of it waits for a call that holds the session or asks rizin anything."
+  "What omp's own surface shows of the session between calls: the status
+band's lines. Sent with every answer that may have changed them, so drawing
+never costs a round trip. It does not wait for a call that holds the session
+and asks rizin nothing."
   (let ((facts (engine-facts session-id)))
-    (obj "band" (if facts (band-lines facts) :null)
-         "evidence" (map 'simple-vector
-                         (lambda (row) (vector (shown-id (aref row 0)) (aref row 1)))
-                         (engine-evidence session-id (protocol-constant "completedEvidence")))
-         "memory" (engine-memory session-id))))
+    (obj "band" (if facts (band-lines facts) :null))))
 
 (defun with-state (answer session-id)
   (setf (gethash "state" answer) (session-state session-id))
   answer)
 
-(defun restore-in-background (request &key open)
+(defun restore-in-background (request)
   "Start restoring the request's session on a thread of its own and return
 once that thread holds the session: a call that arrives next waits its turn
 behind the analysis, it does not race it. While another call holds the
@@ -255,8 +243,7 @@ answer."
     (sb-thread:make-thread
      (lambda ()
        (let ((*request* (make-request :session-id session-id
-                                      :directory (request-directory request)
-                                      :has-ui (request-has-ui request))))
+                                      :directory (request-directory request))))
          (let ((answer nil))
            (unwind-protect
                 (ignore-errors
@@ -264,7 +251,7 @@ answer."
                               (lambda ()
                                 (setf taken t)
                                 (sb-thread:signal-semaphore turn)
-                                (setf answer (engine-restore session-id :open open)))))
+                                (setf answer (engine-restore session-id)))))
              ;; A restore that could not have the session ends the wait too.
              (setf taken t)
              (sb-thread:signal-semaphore turn))
@@ -272,7 +259,7 @@ answer."
                (progn
                  (when (and answer (jstring answer "text"))
                    (tell-omp "tell" "session" session-id "text" (jstring answer "text")
-                                    "level" (jstring answer "level")))
+                                    "level" "error"))
                  (tell-omp "state" "session" session-id "state" (session-state session-id)))
              ;; Nobody waits for this thread: what it could not say is in the log.
              (error (condition)
@@ -334,22 +321,14 @@ it loaded the system, \"image\" when it is a saved image of it.")
 (define-method "shutdown" (params request)
   (throw 'leave nil))
 
-(define-method "describe" (params request)
-  (obj "tools" (map 'vector
-                    (lambda (tool)
-                      (members-of tool "name" "label" "description" "parameters" "approval"
-                                       "approvalReason" "render"))
-                    (engine-tools))
-       "commands" (map 'vector
-                       (lambda (command) (members-of command "name" "usage" "description" "view" "completes"))
-                       (engine-commands))))
-
 (define-method "call" (params request)
-  (let ((session-id (request-session-id request)))
-    (with-state (members-of (engine-call session-id (jstring params "name") (jget params "arguments")
-                                         :call-id (jstring params "callId"))
-                            "text" "failed" "refused" "details")
-      session-id)))
+  (let* ((session-id (request-session-id request))
+         (answer (engine-call session-id (jstring params "name") (jget params "arguments")
+                              :call-id (jstring params "callId")))
+         (said (members-of answer "text" "failed" "refused" "raw" "details")))
+    (when (jstring answer "evidenceId")
+      (setf (gethash "evidence" said) (shown-id (jstring answer "evidenceId"))))
+    (with-state said session-id)))
 
 (define-method "command" (params request)
   (let ((session-id (request-session-id request)))
@@ -361,17 +340,12 @@ it loaded the system, \"image\" when it is a saved image of it.")
 (define-method "preserved" (params request)
   (obj "lines" (engine-preserved (request-session-id request))))
 
-(define-method "approval" (params request)
-  (engine-approval (request-session-id request) (jstring params "callId") (jstring params "tool")
-                   (jget params "approved") (jstring params "reason"))
-  (obj))
-
 (defun session-arrives (params request)
   "omp entered the session, or moved within it: bring it in line with its
 branch, after the answer."
-  (let ((session-id (request-session-id request)))
-    (restore-in-background request :open (jstring params "binary"))
-    (obj "state" (session-state session-id))))
+  (declare (ignore params))
+  (restore-in-background request)
+  (obj "state" (session-state (request-session-id request))))
 
 (defun session-branches (params request)
   (when (jstring params "previous")
@@ -381,7 +355,6 @@ branch, after the answer."
 (defun session-leaves (params request)
   (declare (ignore params))
   (engine-close (request-session-id request))
-  (remhash (request-session-id request) *met*)
   (obj))
 
 (defparameter +events+
@@ -416,21 +389,12 @@ error: an event never falls to another's meaning.")
 
 (check-methods)
 
-(defun meet-session (session-id memory)
-  "A session omp asks about for the first time since this process started
-is given what an earlier engine held of it, when omp sends that."
-  (unless (gethash session-id *met*)
-    (setf (gethash session-id *met*) t)
-    (when (and memory (plusp (hash-table-count memory)))
-      (engine-remember session-id memory))))
-
 (defun serve-request (id method params)
   "Answer omp's request ID on a thread of its own."
   (let* ((session (jget params "session"))
          (request (make-request :id id
                                 :session-id (or (jstring session "id") +default-session+)
-                                :directory (jstring session "cwd")
-                                :has-ui (eq t (jget session "hasUI")))))
+                                :directory (jstring session "cwd"))))
     (setf (gethash id *requests*) request)
     (sb-thread:make-thread
      (lambda ()
@@ -446,8 +410,6 @@ is given what an earlier engine held of it, when omp sends that."
                                                                       "level" "warning"))
                                                   (muffle-warning warning))))
                           (conform-params "toEngine" method params :request t)
-                          (when session
-                            (meet-session (request-session-id request) (jget session "memory")))
                           (obj "id" id "result"
                                (conform-result "toEngine" method
                                                (funcall (gethash method *methods*) params request))))

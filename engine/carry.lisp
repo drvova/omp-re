@@ -592,19 +592,13 @@ that names it."
                     ((not (uiop:file-exists-p file)) "no such file")
                     (t "the file cannot be read"))))))
 
-(defun carry-manifest-file (manifest-path &key strict out inherit resolve (session *session*))
+(defun carry-manifest-file (manifest-path &key strict out inherit (session *session*))
   "Carry the manifest at MANIFEST-PATH onto the open binary and say what
-became of its claims => (values TEXT FAILED-P REPLY), REPLY what
-else a /re line's answer carries (DEFINE-SLASH). A broken claim fails; under
+became of its claims => (values TEXT FAILED-P). A broken claim fails; under
 STRICT so does a relocated, drifted or unchecked one. OUT also writes the
 markdown carry report and, beside it, `<out>.json' with the whole result.
-INHERIT re-proves the manifest's findings here.
-
-What is left to re-examine is an agenda for the model. Where an operator is
-watching it is offered as a draft, or with RESOLVE asked to be sent as
-their next message. Where nobody is, a command cannot start a turn: the
-line says so and the agenda follows the summary, to be passed on as the
-next prompt."
+INHERIT re-proves the manifest's findings here; what is left to re-examine
+is an agenda for the model, and follows the summary."
   (let* ((manifest (parse-manifest (read-manifest-file manifest-path)))
          (result (build-carry manifest session))
          (claims (jlist result "claims"))
@@ -620,16 +614,6 @@ next prompt."
              (agenda (length (jlist outcome "agenda")))
              (already-present (gethash "alreadyPresent" outcome)))
         (setf (gethash "inheritance" result) outcome)
-        ;; Findings recorded by a line, with no model turn to follow: a host
-        ;; that writes a session lazily is asked to write this one now.
-        (when (jlist outcome "inherited")
-          (handler-case
-              (ask-host :keep-session session
-                        (format nil "re carry ~a~@[ → ~a~]" (path-basename manifest-path)
-                                (and (session-binary-path session)
-                                     (path-basename (session-binary-path session)))))
-            (re-error (condition)
-              (notify :warning "omp-re: carry: the inherited findings are recorded, but ~a" condition))))
         (push (format nil "inherit: ~d finding(s) re-proven on this build and recorded, ~d need another look~[~:;, ~:*~d already present~]~:[~; (this manifest has no findings — record them with record_finding before /re report)~]"
                       (length (jlist outcome "inherited")) agenda already-present
                       (null (carry-manifest-findings manifest)))
@@ -646,50 +630,27 @@ next prompt."
               (error (condition)
                 (format nil "carry report not written: ~a" condition)))
             lines))
-    (let* ((watched (ignore-errors (ask-host :has-ui)))
-           (resolving (and resolve inherit agenda-prompt))
-           (level (cond (failed :error)
-                        ((plusp (carry-count "drifted" claims)) :warning)
-                        (t :info))))
-      (cond ((and resolving watched)
-             (push (format nil "resolve: sent ~d finding(s) to the model to re-examine"
-                           (length (jlist result "inheritance" "agenda")))
-                   lines))
-            (resolving
-             (push (format nil "resolve: a headless run cannot start a model turn from a command — the agenda for ~d finding(s) follows; pass it to the model as the next prompt~@[ ~a~]"
-                           (length (jlist result "inheritance" "agenda")) (voice :next-prompt))
-                   lines)))
-      (let ((summary (join-lines (reverse lines))))
-        (values (if (and agenda-prompt (not watched))
-                    (format nil "~a~%~a" summary agenda-prompt)
-                    summary)
-                (and failed t)
-                (append (list :level level)
-                        (cond ((and resolving watched) (list :user-message agenda-prompt))
-                              ((and agenda-prompt watched)
-                               (list :draft (make-draft :text agenda-prompt :notice summary))))))))))
+    (values (format nil "~a~@[~%~a~]" (join-lines (reverse lines)) agenda-prompt)
+            (and failed t))))
 
 (define-slash "carry" (:usage "<manifest>"
-                       :description "replay a report on another build (--against, --inherit, --resolve, --strict, --out)"
+                       :description "replay a report on another build (--against, --inherit, --strict, --out)"
                        :order 110)
     (words line)
   (multiple-value-bind (path flags)
-      (line-flags line :switches '("--strict" "--inherit" "--resolve") :valued '("--against" "--out"))
+      (line-flags line :switches '("--strict" "--inherit") :valued '("--against" "--out"))
     (if (zerop (length path))
-        (values "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]"
+        (values "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit] [--strict] [--out <path>]"
                 t)
         ;; The open says something only when the record had something to
         ;; put back; otherwise the carry's own lines are the answer.
         (multiple-value-bind (opened failures applied)
             (if (getf flags :--against) (open-binary (getf flags :--against)) (values nil 0 0))
-          (multiple-value-bind (text failed reply)
-              ;; --resolve implies --inherit: re-prove what holds, then hand over the rest.
+          (multiple-value-bind (text failed)
               (carry-manifest-file path
                                    :strict (getf flags :--strict) :out (getf flags :--out)
-                                   :inherit (or (getf flags :--inherit) (getf flags :--resolve))
-                                   :resolve (getf flags :--resolve))
+                                   :inherit (getf flags :--inherit))
             (values (if (plusp (+ failures applied))
                         (format nil "~a~%~a" opened text)
                         text)
-                    failed
-                    reply))))))
+                    failed))))))

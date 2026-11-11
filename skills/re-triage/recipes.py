@@ -1,48 +1,68 @@
-# recipes.py — wide reads composed over the one read tool, for omp's eval:
-# triage, imports, one function, comparisons, cryptographic constants.
-# The Python kernel's twin of recipes.js.
+# recipes.py — omp-re in omp's eval, for the Python kernel: the verbs that reach
+# the engine, and the recipes composed over them. The twin of recipes.js.
 #
 # SPDX-License-Identifier: MIT
 #
-# Load it once a session, in a standalone Python eval cell (language: "py"):
+# Load it once per kernel, in a Python eval cell (language: "py") that holds
+# only this line:
 #
 #   %load skill://re-triage/recipes.py
 #
-# (or `%load` with this file's path). It defines one global, `omp_re`:
+# (or `%load` with this file's path). It defines one global, `omp_re`. Its
+# functions are plain calls, like omp's own Python helpers: nothing is awaited.
+#
+#   omp_re.open("/path/to/binary")                      # open and analyze; do this first
+#   print(omp_re.cmd("pdg", "main"))                    # one read-only rizin command, its text
+#   data, evidence = omp_re.json("aflj")                # a *j command, as data, with its evidence id
+#   omp_re.call("set_comment", addr="main", text="entry")   # any other tool
+#   print(omp_re.tools()); print(omp_re.doc("record_finding"))
+#   print(omp_re.slash("report out.md"))                # a line: evidence, findings, verify, report, carry, undo
+#   print(omp_re.status()); print(omp_re.help())        # the session's state; the engine's manual
 #
 #   print(omp_re.triage(max_strings=25, max_functions=15))
 #   print(omp_re.scan_imports(callers=True, max_callers=12))
 #   print(omp_re.inspect_function("main", max_items=30))
 #   print(omp_re.find_comparisons("main", max_items=80))
 #   print(omp_re.find_crypto(references=True))
-#   print(omp_re.help())
+#   print(omp_re.recipes())                             # what each recipe answers and takes
 #
-# Each answers its report as a string and prints nothing.
+# Each answers a string and prints nothing (omp_re.json answers data). A call
+# the engine refuses, or that failed, raises RuntimeError with the engine's
+# words. A cell that runs past its timeout or is interrupted is stopped inside
+# the call it waits in (KeyboardInterrupt), the engine is told, and the kernel
+# and `omp_re` are kept: nothing has to be loaded again.
 #
-# THE NAME IS `omp_re`, NOT `re`. In the JavaScript kernel the recipes are the
+# THE NAME IS `omp_re`, NOT `re`. In the JavaScript kernel the library is the
 # global `re`. In omp's Python kernel `re` is already taken: omp's prelude runs
 # in the cell namespace and imports the standard library's regex module there
 # (eval/py/prelude.py: `import asyncio, …, json, math, re, time, …`), so every
 # Python cell starts with `re` bound to it and may use `re.search(…)` without
-# an import. Binding the recipes to `re` would take that away from every later
+# an import. Binding the library to `re` would take that away from every later
 # cell. `omp_re` is the plugin's own name as a Python identifier: no standard
 # library module, builtin or omp helper is called that, and it is not a name a
 # cell would pick for a variable of its own.
 #
-# Python helpers in omp's eval are synchronous and take keyword arguments
-# (`read(path, offset=…)`), and so do these: no `await` is needed. The one
-# asynchronous helper is `tool.<name>(…)`, which answers a coroutine; a recipe
-# settles each of its reads before it goes on. Since a cell that awaits its
-# tool calls will reach for `await` here too, a report may also be awaited
+# Since a cell written after the JavaScript kernel's habits will reach for
+# `await`, a text this library answers may also be awaited
 # (`print(await omp_re.triage())`) and answers the same text.
 #
-# These are not tools, and nothing here is registered with omp.
-# rizin_command is the one way to read the binary and eval is where reads
-# are composed; a recipe is that composition, written once: the dozen reads
-# every analysis opens with and a plain reading of them. Every read a recipe
-# makes is `tool.rizin_command(...)` — a tool call in its own right, approved,
-# audited and recorded as evidence like one typed by hand — so a recipe can do
-# nothing the model could not, and `/re off` stops it at its first read.
+# Nothing here is a tool, and nothing is registered with omp. The engine runs
+# beside omp, and omp gives a plugin no way to put anything into an eval
+# kernel; so the plugin listens on the loopback interface of this machine and
+# this file asks it (extensions/re/bridge.ts). The listener is found by a file
+# only this user can read, named for the omp process this kernel is a child
+# of, which holds its address and the token every request must carry. Each
+# request says which session the kernel serves, as omp told the kernel.
+#
+# The verbs are written from recipes/api.json by scripts/gen-api.ts, which
+# writes the same verbs for the JavaScript kernel (recipes.js) and for the
+# nodecode host (nodecode/verb-forms.lisp) — edit the JSON and run the script,
+# never the marked block.
+#
+# A recipe is a composition of reads, written once: the dozen reads every
+# analysis opens with and a plain reading of them. Every read a recipe makes is
+# one rizin_command call — audited and recorded as evidence like one made by
+# hand — so a recipe can do nothing the model could not.
 #
 # A recipe is not an oracle and must not read like one. Every section names
 # the evidence id of the read it rests on, so a line here is a pointer to an
@@ -59,23 +79,24 @@
 # recipes/tables.json, and scripts/gen-recipes.ts writes them into the marked
 # block below — with each recipe's Python signature — so edit the JSON and run
 # the script, never the block. This file keeps what Python forces on it
-# (rizin's JSON read as JavaScript would print it, the bridge for one read,
-# how a number is printed), the loop that renders a recipe from that data, and
-# under FACTS the few things a section needs code for. A change to any of
-# those is a change in the other two files.
+# (rizin's JSON read as JavaScript would print it, the way to the engine, how a
+# number is printed), the loop that renders a recipe from that data, and under
+# FACTS the few things a section needs code for. A change to any of those is a
+# change in the other two files.
 #
 # Where this file and recipes.js differ, because the kernels do:
 #  - The global is `omp_re` (above); recipes and options are spelled in
 #    snake_case, and options are keyword arguments, not one object. An
 #    unknown option is Python's own TypeError; the JavaScript ignores one.
-#  - A refusal that says how to list functions names this kernel's call
-#    (`await tool.rizin_command({"command": "aflj"})`); help() shows this
-#    kernel's call forms.
-#  - A refusal is raised as RuntimeError (TypeError for an address that is
-#    not a string), with the same message the JavaScript throws.
-#  - A report is a `str` whose repr is its own text, so a report left as a
-#    cell's last expression is shown as written — as the JavaScript kernel
-#    shows a string — instead of as one quoted line.
+#  - omp_re.json answers a pair, (data, evidence), where the JavaScript answers
+#    an object with those two members.
+#  - A refusal that says how to list functions names this kernel's call;
+#    recipes() shows this kernel's call forms.
+#  - A refusal is raised as RuntimeError (TypeError for an argument of the
+#    wrong type), with the same message the JavaScript throws.
+#  - A text is a `str` whose repr is its own text, so one left as a cell's
+#    last expression is shown as written — as the JavaScript kernel shows a
+#    string — instead of as one quoted line.
 #
 # A note for whoever edits this: omp rewrites a line that begins with `%` or `!`
 # as a magic or a shell escape, even inside an expression, so no line here may
@@ -88,13 +109,14 @@
 
 
 def _omp_re_recipes():
-    import asyncio
-    import contextvars
-    import inspect
+    import collections
+    import http.client
     import json
     import math
+    import os
     import re
-    import threading
+    import tempfile
+    import urllib.parse
     from decimal import ROUND_HALF_UP, Decimal
 
 # <generated:tables> — from recipes/tables.json by scripts/gen-recipes.ts; do not edit
@@ -470,26 +492,14 @@ def _omp_re_recipes():
             {"get": ["addr"]},
             " — list them with ",
             {"get": ["listFunctions"]}
-          ],
-          "cutOutput": [
-            "omp-re: ",
-            {"get": ["recipe"]},
-            ": the output of rizin_command ",
-            {"get": ["label"], "as": "json"},
-            " was cut at the size cap and the whole of it could not be read back (",
-            {"get": ["why"]},
-            "). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands."
-          ],
-          "cutNoArtifact": ["the engine saved no artifact for it"],
-          "cutUnreadable": ["artifact://", {"get": ["artifact"]}, ": ", {"get": ["error"]}],
-          "cutNotText": ["artifact://", {"get": ["artifact"]}, " did not read as text"]
+          ]
         }
       },
       "host": {
-        "listFunctions": "await tool.rizin_command({\"command\": \"aflj\"})",
-        "help": "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own\nrizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.\nOpen a binary first (await tool.open_binary({\"path\": ...})). The recipes themselves need no await.\n\n  omp_re.triage(max_strings=25, max_functions=15)\n      what the binary is, build protections, sections with entropy, imports and what they reach,\n      notable strings, the largest functions, entry points.\n  omp_re.scan_imports(callers=True, max_callers=12)\n      the imports a reviewer stops at, why, and who calls each; what the program can reach.\n  omp_re.inspect_function(\"main\", max_items=30)\n      one function's shape, variables, callers, callees and the strings it refers to.\n  omp_re.find_comparisons(\"main\", max_items=80)\n      every compare with the branch that follows, calls that compare or validate, strings on the way.\n  omp_re.find_crypto(references=True)\n      rizin's key and certificate search, and where published constants of common algorithms lie.\n\nEvery section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the\nreads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",
-        "loaded": "omp-re recipes loaded: omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto — print(omp_re.help()) says what each answers.",
-        "shown": "<omp-re recipes: triage, scan_imports, inspect_function, find_comparisons, find_crypto — print(omp_re.help()) says what each answers>"
+        "listFunctions": "omp_re.json(\"aflj\")",
+        "help": "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own\nrizin_command call (audited, recorded as evidence). Each returns its report as a string; print() it.\nOpen a binary first (omp_re.open(path)).\n\n  omp_re.triage(max_strings=25, max_functions=15)\n      what the binary is, build protections, sections with entropy, imports and what they reach,\n      notable strings, the largest functions, entry points.\n  omp_re.scan_imports(callers=True, max_callers=12)\n      the imports a reviewer stops at, why, and who calls each; what the program can reach.\n  omp_re.inspect_function(\"main\", max_items=30)\n      one function's shape, variables, callers, callees and the strings it refers to.\n  omp_re.find_comparisons(\"main\", max_items=80)\n      every compare with the branch that follows, calls that compare or validate, strings on the way.\n  omp_re.find_crypto(references=True)\n      rizin's key and certificate search, and where published constants of common algorithms lie.\n\nEvery section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the\nreads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",
+        "loaded": "omp-re loaded: omp_re.open, omp_re.cmd, omp_re.json, omp_re.call, omp_re.tools, omp_re.doc, omp_re.slash, omp_re.status, omp_re.help, and the recipes omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto. Every one is a plain call: nothing is awaited. print(omp_re.help()) is the manual; print(omp_re.recipes()) says what each recipe answers.",
+        "shown": "<omp-re: open, cmd, json, call, tools, doc, slash, status, help; recipes triage, scan_imports, inspect_function, find_comparisons, find_crypto — print(omp_re.help()) is the manual>"
       },
       "recipes": [
         {
@@ -1343,7 +1353,7 @@ def _omp_re_recipes():
         return kind(fill(TEXT["refusals"][name], facts))
 
     class Report(str):
-        """A recipe's report: its text, shown as written when it is a cell's value, and awaitable for a cell that awaits it."""
+        """A text this library answers: shown as written when it is a cell's value, and awaitable for a cell that awaits it."""
 
         __slots__ = ()
 
@@ -1354,100 +1364,242 @@ def _omp_re_recipes():
             return str(self)
             yield  # what makes this a generator, which is what `await` asks of __await__
 
-    # --- one observation ----------------------------------------------------------------------
+    # --- the way to the engine --------------------------------------------------------------------
 
-    # How much of an evidence record's id the engine shows, in a tag and in a report, and takes in record_finding.
-    SHOWN_ID = 8
+    def kernel():
+        """What this kernel serves, as omp told it: the session's file, where it has one, and its directory."""
+        return {"language": "py", "cwd": os.getcwd(), "sessionFile": os.environ.get("PI_SESSION_FILE") or None}
 
-    def evidence_id_of(details):
-        """The id of the evidence record a call left, as it is cited. The engine says it as data: the text is the binary's own and may hold anything."""
-        full = details.get("evidenceId")
-        return full[:SHOWN_ID] if isinstance(full, str) else None
-
-    def settled(value):
+    def post(found, method, body):
         """
-        `value`, or what it resolves to when it is awaitable. In omp's Python kernel `tool.<name>(…)`
-        answers a coroutine and the cell runs inside a running event loop, where a synchronous
-        function cannot wait for one. So it is run to its end on a thread of its own, under a copy
-        of the cell's context — omp attributes a bridged tool call to the running cell through a
-        context variable — while this thread waits, as it does inside omp's own `read()`.
+        One request of omp's listener => (status, body). http.client and not urllib: a loopback
+        request must not be sent to a proxy the environment names. The connection is closed
+        whatever ends the wait — a cell's timeout arrives here as KeyboardInterrupt — which is
+        what tells the listener nobody waits any more.
         """
-        if not inspect.isawaitable(value):
-            return value
-        context = contextvars.copy_context()
-        outcome = {}
-
-        async def wait():
-            return await value
-
-        def work():
-            try:
-                outcome["value"] = context.run(asyncio.run, wait())
-            except BaseException as error:  # handed to the caller's thread, where it belongs
-                outcome["error"] = error
-
-        worker = threading.Thread(target=work, name="omp-re-recipe-read", daemon=True)
-        worker.start()
-        worker.join()
-        if "error" in outcome:
-            raise outcome["error"]
-        return outcome.get("value")
-
-    def after_header(full):
-        return full[full.index("\n") + 1 :] if "\n" in full else ""
-
-    def whole_output(run, label, text, details):
-        """
-        The whole of what rizin printed for a call. A result's text is the header line, the output,
-        and, when the call left an evidence record, one last line that names it; past the size cap the output in the text is cut — for a `*j` command,
-        whose JSON is one line, cut to nothing — and the engine keeps all of it as a session
-        artifact, which eval's own read() returns raw. A recipe that parsed cut JSON would report a
-        binary with no functions, so when the whole output cannot be had it stops and says so.
-        """
-        if details.get("truncated") is not True:
-            recorded = evidence_id_of(details) is not None and "\n" in text
-            return after_header(text[: text.rindex("\n")] if recorded else text)
-
-        def lost(why, more=None):
-            return refusal("cutOutput", {"recipe": run["name"], "label": label, "why": fill(TEXT["refusals"][why], more)})
-
-        artifact = details.get("artifactId")
-        if not isinstance(artifact, str):
-            raise lost("cutNoArtifact")
+        address = urllib.parse.urlsplit(found["url"])
+        sent = json.dumps(dict(body, kernel=kernel())).encode("utf-8")
+        connection = http.client.HTTPConnection(address.hostname, address.port)
         try:
-            # `read` is omp's helper, a global of the cell namespace; for a bare artifact:// id it returns the file raw and whole.
-            full = settled(read("artifact://" + artifact))  # noqa: F821
-        except Exception as error:
-            raise lost("cutUnreadable", {"artifact": artifact, "error": str(error)}) from None
-        if not isinstance(full, str):
-            raise lost("cutNotText", {"artifact": artifact})
-        return after_header(full)
+            connection.request(
+                "POST",
+                "/v" + str(BRIDGE["version"]) + "/" + method,
+                body=sent,
+                headers={"Authorization": "Bearer " + found["token"], "Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            received = response.read().decode("utf-8")
+        finally:
+            connection.close()
+        try:
+            return response.status, json.loads(received)
+        except ValueError:
+            raise RuntimeError("omp-re: omp's listener answered what is not JSON (status " + str(response.status) + ")") from None
+
+    def bridge_directories():
+        """The directories the listener's file may be in: the same two extensions/re/bridge.ts works out."""
+        runtime = (os.environ.get("XDG_RUNTIME_DIR") or "").strip()
+        own = os.path.join(tempfile.gettempdir(), BRIDGE["directory"] + "-" + (str(os.getuid()) if hasattr(os, "getuid") else "user"))
+        return [os.path.join(runtime, BRIDGE["directory"]), own] if runtime else [own]
+
+    def read_bridge(file):
+        """The listener a file names, or nothing: a file that is not this user's own, or not a listener's, names none."""
+        try:
+            if hasattr(os, "getuid") and os.stat(file).st_uid != os.getuid():
+                return None
+            with open(file, encoding="utf-8") as stream:
+                found = json.load(stream)
+        except (OSError, ValueError):
+            return None
+        return found if isinstance(found, dict) and isinstance(found.get("url"), str) and isinstance(found.get("token"), str) else None
+
+    def error_of(status, body):
+        said = body.get("error") if isinstance(body, dict) else None
+        return said if isinstance(said, str) else "omp-re: omp's listener answered status " + str(status)
+
+    def connect():
+        """
+        Find omp's listener. It is the one of the omp process this kernel is a child of. Where that
+        process has none — a launcher stands between omp and the kernel, as a virtual environment's
+        python does on Windows — a listener that knows this kernel's session file is the one, and a
+        session with no file has no such name to be known by.
+        """
+        directories = bridge_directories()
+        own = [os.path.join(directory, str(pid) + ".json") for pid in (os.getppid(), os.getpid()) for directory in directories]
+        others = []
+        if kernel()["sessionFile"] is not None:
+            for directory in directories:
+                try:
+                    others += [os.path.join(directory, name) for name in sorted(os.listdir(directory)) if name.endswith(".json")]
+                except OSError:
+                    pass
+        for file in own + [file for file in others if file not in own]:
+            found = read_bridge(file)
+            if found is None:
+                continue
+            if found.get("bridge") != BRIDGE["version"]:
+                raise RuntimeError(
+                    "omp-re: this library speaks version " + str(BRIDGE["version"]) + " of the way to omp-re's engine and the plugin loaded in omp version " + str(found.get("bridge")) + ": load the library of the plugin omp runs"
+                )
+            try:
+                status, body = post(found, "whoami", {})
+            except (OSError, RuntimeError):
+                continue
+            if status == 200:
+                return found
+            # omp's own listener is there and will not serve this kernel: its reason is the answer.
+            if file in own and status != 401:
+                raise RuntimeError(error_of(status, body))
+        raise RuntimeError(
+            "omp-re: no omp-re listener for this eval kernel was found in " + " or ".join(directories) + ". The plugin is not loaded in this omp, or is switched off (OMPRE_DISABLED=1)."
+        )
+
+    bridge = [None]
+
+    def ask(method, body):
+        """Ask omp's listener `method` => the engine's answer. A listener that is gone, or no longer knows the token, is looked for again once: omp may have started another."""
+        again = False
+        while True:
+            if bridge[0] is None:
+                bridge[0] = connect()
+            try:
+                status, answer = post(bridge[0], method, body)
+            except ConnectionRefusedError:
+                bridge[0] = None
+                if again:
+                    raise
+                again = True
+                continue
+            if status == 200:
+                return answer
+            if status == 401 and not again:
+                bridge[0] = None
+                again = True
+                continue
+            raise RuntimeError(error_of(status, answer))
+
+    def engine_call(name, given):
+        return ask("call", {"name": name, "arguments": given})
+
+    def engine_line(line):
+        return ask("command", {"line": line})
+
+    # --- what a verb is written in --------------------------------------------------------------
+
+    def text(answer):
+        """The engine's text, or an error carrying it when the call was refused or failed."""
+        if answer.get("failed"):
+            raise RuntimeError(answer.get("text"))
+        return Report(answer.get("text"))
+
+    Read = collections.namedtuple("Read", ["data", "evidence"])
+
+    def data(command, answer):
+        """The data a `*j` command printed, whole, and the id of the evidence record the read left."""
+        text(answer)
+        try:
+            decoded = json.loads(trim(answer.get("raw") or ""), parse_float=json_number, parse_constant=not_json)
+        except (ValueError, RecursionError):
+            raise RuntimeError(command + " did not answer JSON; read it with omp_re.cmd(" + json_string(command) + ") instead") from None
+        return Read(decoded, answer.get("evidence"))
+
+    def shown(value):
+        return "a function" if callable(value) else encode(value)
+
+    def refused(before, given, after):
+        return TypeError(before + shown(given) + after)
+
+    def rest(what, given, more):
+        """The further arguments of a verb: keywords, after one dict for the names that are no Python identifier."""
+        if given is None:
+            return dict(more)
+        if not isinstance(given, dict):
+            raise TypeError(what + " are keywords, or one dict before them, e.g. {\"name\": value}, not " + shown(given))
+        return dict(given, **more)
+
+# <generated:api> — from recipes/api.json by scripts/gen-api.ts; do not edit
+    BRIDGE = {"version": 1, "directory": "omp-re"}
+
+    def api_functions():
+        def open(path, options=None, **more):
+            """
+            Open the binary at `path` for this session and analyze it; every other verb acts on the
+            binary opened last. The options arch, bits, base, map and format force how a raw or
+            headerless file is loaded.
+            """
+            if not (isinstance(path, str) and trim(path) != ""):
+                raise refused("a path must be a non-empty string, not ", path, "")
+            return text(engine_call("open_binary", dict(rest("options", options, more), **{"path": path})))
+
+        def cmd(command, addr=None):
+            """
+            Run one read-only rizin `command` on the open binary, at `addr` when given: the one way
+            to read it. An empty command answers the engine's manual.
+            """
+            if not (isinstance(command, str)):
+                raise refused("a rizin command is a string, not ", command, "")
+            return text(engine_call("rizin_command", {"command": command, "addr": addr}))
+
+        def json(command, addr=None):
+            """
+            Run one read-only rizin `command` whose output is JSON, a *j command, and answer the
+            data itself with the id of the evidence record the read left. Reads the whole output
+            even when it is past the size cap a result's text is cut at.
+            """
+            if not (isinstance(command, str)):
+                raise refused("a rizin command is a string, not ", command, "")
+            return data(command, engine_call("rizin_command", {"command": command, "addr": addr}))
+
+        def call(tool, arguments=None, **more):
+            """Call the engine's `tool`, a name the verb tools lists, with its arguments."""
+            if not (isinstance(tool, str)):
+                raise refused("a tool is named by a string, as omp_re.tools() lists them, not ", tool, "")
+            return text(engine_call(tool, rest("arguments", arguments, more)))
+
+        def tools():
+            """Every tool the engine offers, one line each."""
+            return text(engine_line("tools"))
+
+        def doc(tool):
+            """What the engine's `tool` does and the arguments it takes."""
+            return text(engine_line("doc " + str(tool)))
+
+        def slash(line):
+            """
+            Run one of the lines the engine's text calls /re lines ("functions", "evidence",
+            "findings", "verify", "report out.md", "undo", "help") and answer what it says.
+            """
+            return text(engine_line("" if line is None else line))
+
+        def status():
+            """The engine's state for this session: rizin, the open binary, evidence and findings."""
+            return text(engine_line("status"))
+
+        def help():
+            """
+            The engine's manual: which rizin commands read what, the tools, the lines, how a result
+            reads.
+            """
+            return text(engine_call("rizin_command", {"command": ""}))
+
+        return [open, cmd, json, call, tools, doc, slash, status, help]
+# </generated:api>
+
+    # --- one observation ----------------------------------------------------------------------
 
     def observe(run, command, addr=None):
         """
-        One rizin_command call — the same approval, audit line and evidence record as any other —
-        answering its whole output and the id of its record. A refused call raises from the tool;
-        one rizin answered with an error comes back marked, and is raised here with rizin's words.
+        One rizin_command call — the same audit line and evidence record as any other — answering
+        the whole of what rizin printed and the id of its record. A call the engine refused, or one
+        rizin answered with an error, is raised with the engine's words.
         """
-        label = command if addr is None else "%s @ %s" % (command, addr)
-        # `tool` is omp's helper, a global of the cell namespace.
-        result = settled(tool.rizin_command({"command": command} if addr is None else {"command": command, "addr": addr}))  # noqa: F821
-        if isinstance(result, str):
-            text = result
-        else:
-            given = get(result, "text")
-            text = "" if given is None else given if isinstance(given, str) else str(given)
-        details = get(result, "details")
-        if not isinstance(details, dict):
-            details = {}
-        if get(result, "hasError") is True:
-            raise RuntimeError(text)
-        evidence_id = evidence_id_of(details)
+        answer = engine_call("rizin_command", {"command": command, "addr": addr})
+        text(answer)
+        evidence_id = answer.get("evidence")
         if evidence_id:
-            run["evidence"].append({"label": label, "id": evidence_id})
-        # Only a call that printed something carries the command it ran; "(no output)" is the engine's words, not rizin's.
-        raw = whole_output(run, label, text, details) if isinstance(details.get("commands"), list) else ""
-        return raw, evidence_id
+            run["evidence"].append({"label": command if addr is None else command + " @ " + addr, "id": evidence_id})
+        # A call that printed nothing has no output to hand over: "(no output)" is the engine's words, not rizin's.
+        return answer.get("raw") or "", evidence_id
 
     def observe_json(run, command, addr=None):
         """observe() for a `*j` command: its data, absent when the output was empty or not JSON."""
@@ -1695,27 +1847,27 @@ def _omp_re_recipes():
 
     # --- what is handed to eval -----------------------------------------------------------------
 
-    class Recipes:
-        """omp-re's recipes for omp's Python kernel; help() says what each answers."""
+    class Library:
+        """omp-re for omp's Python kernel; help() is the engine's manual and recipes() says what each recipe answers."""
 
         __slots__ = ()
 
         def __repr__(self):
             return HOST["shown"]
 
-    def help():  # noqa: A001 - the name the JavaScript twin gives it; it shadows nothing outside this function
+    def recipes():
         """What each recipe answers, and how each is called."""
         return Report(HOST["help"])
 
-    for recipe in recipe_functions(run_recipe) + [help]:
-        if recipe.__name__ in RECIPES:
-            recipe.__doc__ = RECIPES[recipe.__name__]["doc"]
+    for function in api_functions() + recipe_functions(run_recipe) + [recipes]:
+        if function.__name__ in RECIPES:
+            function.__doc__ = RECIPES[function.__name__]["doc"]
         # So that Python's own complaint about a call names what was called: "omp_re.triage() got an unexpected keyword argument …".
-        recipe.__qualname__ = "omp_re." + recipe.__name__
-        setattr(Recipes, recipe.__name__, staticmethod(recipe))
+        function.__qualname__ = "omp_re." + function.__name__
+        setattr(Library, function.__name__, staticmethod(function))
     # A %load cell shows what the script printed, and the source is not echoed: say what now exists.
     print(HOST["loaded"])
-    return Recipes()
+    return Library()
 
 
 try:

@@ -104,12 +104,6 @@ through — whatever became of the open after that."
            (check "each read a recipe makes is a rizin_command call in the audit log"
                   (let ((log (omp-re::read-text-file (omp-re::state-path "audit" (format nil "~a.log" id)))))
                     (and (has "\"command\":\"iSj entropy\"" log) (has "\"command\":\"iej\"" log))))
-           (check "/re off stops a recipe at its first read, like any call"
-                  (let ((before (length (recorded-commands id))))
-                    (typed "off")
-                    (prog1 (and (has "RE tools are off" (refusal (lambda () (re:triage))))
-                                (= before (length (recorded-commands id))))
-                      (typed "on"))))
            (check "a finding can cite what triage read, and passes the gate"
                   (stringp (re:call "record_finding"
                                     :claim "The build has a stack canary and non-executable data pages."

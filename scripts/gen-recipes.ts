@@ -7,8 +7,8 @@
  * Lisp verbs under nodecode (nodecode/recipes.lisp), and under omp one
  * `%load`-able script for each of eval's kernels (skills/re-triage/recipes.js
  * for JavaScript, recipes.py for Python). Each of those three files keeps only
- * what its language forces on it: reading rizin's JSON, the host's bridge for
- * one read, how a number is printed, the loop that renders a recipe, and the
+ * what its language forces on it: reading rizin's JSON, the host's way to the
+ * engine for one read, how a number is printed, the loop that renders a recipe, and the
  * few facts a section needs code for. Everything else lives once, in
  * recipes/tables.json, and is written from there into each host's language:
  *
@@ -26,7 +26,9 @@
  *                       the judgement and the constants the facts are worked out with.
  *   formats             what a template's `commas`, `s`, `es` … stand for.
  *   text                sentences every recipe shares, and every refusal.
- *   hosts, help         what differs by host (how it names a call), and the help text's frame.
+ *   hosts, help         what differs by host (how it names a call), and the frame of what recipes()
+ *                       answers and of the line a load prints. That line also names the verbs, which
+ *                       are recipes/api.json's (scripts/gen-api.ts writes them).
  *   facts               for each step a host works out in code, the names it leaves for the templates.
  *   recipes             each recipe: its options with defaults and bounds, its steps in order
  *                       (a read, or a fact worked out in code), its title and its sections.
@@ -119,13 +121,16 @@ interface Tables {
 	whitespace: string[];
 	formats: { joins: Record<string, string>; plurals: Record<string, [string, string]> };
 	text: { more: string; evidenceTaken: string; evidenceRow: string; nameless: string; refusals: Record<string, string> };
-	hosts: Record<Host, { global?: string; listFunctions: string; openFirst?: string }>;
+	hosts: Record<Host, { global?: string; listFunctions: string; openFirst?: string; calling?: string; manual?: string }>;
 	help: { header: string[]; footer: string[]; loaded: string; shown: string };
 	facts: Record<string, string[]>;
 	recipes: Recipe[];
 }
 
 const tables = JSON.parse(readFileSync(SOURCE, "utf8")) as Tables;
+/** The verbs each kernel's library has beside the recipes, by name. */
+const verbs = (JSON.parse(readFileSync(join(ROOT, "recipes", "api.json"), "utf8")) as { verbs: { name: string; hosts?: Host[] }[] }).verbs;
+const verbNames = (host: Host) => verbs.filter((verb) => verb.hosts === undefined || verb.hosts.includes(host)).map((verb) => verb.name);
 const refuse = (why: string): never => {
 	throw new Error(`gen-recipes: ${why}`);
 };
@@ -436,6 +441,10 @@ function hostSays(host: Host): Record<string, string> {
 		line
 			.replaceAll("{openFirst}", says.openFirst!)
 			.replaceAll("{global}", says.global!)
+			.replaceAll("{calling}", says.calling!)
+			.replaceAll("{manual}", says.manual!)
+			.replaceAll("{verbs}", verbNames(host).map((name) => `${says.global}.${name}`).join(", "))
+			.replaceAll("{verbNames}", verbNames(host).join(", "))
 			.replaceAll("{calls}", tables.recipes.map((recipe) => `${says.global}.${callName(host, recipe)}`).join(", "))
 			.replaceAll("{names}", tables.recipes.map((recipe) => callName(host, recipe)).join(", "));
 	return {
@@ -446,7 +455,7 @@ function hostSays(host: Host): Record<string, string> {
 	};
 }
 
-const REFUSAL_FACTS = new Set(["recipe", "given", "addr", "listFunctions", "label", "why", "artifact", "error"]);
+const REFUSAL_FACTS = new Set(["recipe", "given", "addr", "listFunctions"]);
 
 function hostTables(host: Host): Record<string, unknown> {
 	// cl-ppcre takes case-insensitivity as a prefix; JavaScript and Python take it as a flag where the pattern is compiled.

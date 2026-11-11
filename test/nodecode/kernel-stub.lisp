@@ -33,7 +33,6 @@
   (:nicknames #:nle)
   (:export #:define-cell #:turn #:notice #:on-stop
            #:submit #:set-session-title
-           #:list-dialog #:run-row #:ask-row #:bare-args-p #:*slash-effects*
            #:*notices* #:*help* #:*commands* #:*stub-session* #:*stub-turn*))
 
 (in-package #:nodecode.kernel)
@@ -243,27 +242,6 @@ an anchor are the two edges and never both."
 
 (defun turn ()
   (and *stub-session* (list :session-id *stub-session* :turn-id *stub-turn*)))
-
-;;; --- a command's dialog and effects, as tui/commands/bare.lisp shapes them --------------
-
-(defvar *slash-effects* nil "The effects the caller of a command performs: (:clipboard :draft) from a shell.")
-
-(defun bare-args-p (args)
-  (zerop (length (string-trim '(#\Space #\Tab #\Return #\Newline) (or args "")))))
-
-(defun run-row (label line &rest keys &key detail mark mark-tone key verb suffix)
-  (declare (ignore detail mark mark-tone key verb suffix))
-  (list* :label label :run (list :enter line) keys))
-
-(defun ask-row (label ask line &rest keys &key placeholder detail mark mark-tone key verb)
-  (declare (ignore detail mark mark-tone key))
-  (list* :label label
-         :ask (list :label ask :line line :placeholder (or placeholder "") :verb (or verb ""))
-         keys))
-
-(defun list-dialog (&rest keys &key title rows summary &allow-other-keys)
-  (declare (ignore title rows summary))
-  (list* :dialog :list keys))
 
 ;;; --- the one in-process ingress, as gateway.lisp shapes it -------------------------------
 

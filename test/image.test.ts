@@ -61,7 +61,7 @@ interface Started {
 async function start(root = ROOT): Promise<Started> {
 	const logged: string[] = [];
 	const engine = new Engine({ command: launcher((line) => void logged.push(line), root), handlers: {} as HostHandlers, log: (line) => void logged.push(line) });
-	const failure = await engine.request("describe", {}).then(
+	const failure = await engine.request("preserved", { session: { id: "image-test", cwd: ROOT } }).then(
 		() => undefined,
 		(error: Error) => error.message,
 	);

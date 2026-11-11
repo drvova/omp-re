@@ -1,0 +1,95 @@
+{
+  "verbs": [
+    {
+      "name": "open",
+      "takes": [{ "name": "path", "type": "string", "nonEmpty": true, "refusal": "a path must be a non-empty string, not {given}" }],
+      "rest": "options",
+      "does": { "call": "open_binary", "arguments": { "path": "path" } },
+      "answers": "text",
+      "doc": [
+        "Open the binary at {path} for this session and analyze it; every other verb acts on the binary",
+        "opened last. The options arch, bits, base, map and format force how a raw or headerless file is",
+        "loaded."
+      ]
+    },
+    {
+      "name": "cmd",
+      "takes": [
+        { "name": "command", "type": "string", "refusal": "a rizin command is a string, not {given}" },
+        { "name": "addr", "type": "string", "optional": true }
+      ],
+      "does": { "call": "rizin_command", "arguments": { "command": "command", "addr": "addr" } },
+      "answers": "text",
+      "doc": [
+        "Run one read-only rizin {command} on the open binary, at {addr} when given: the one way to read it.",
+        "An empty command answers the engine's manual."
+      ]
+    },
+    {
+      "name": "json",
+      "takes": [
+        { "name": "command", "type": "string", "refusal": "a rizin command is a string, not {given}" },
+        { "name": "addr", "type": "string", "optional": true }
+      ],
+      "does": { "call": "rizin_command", "arguments": { "command": "command", "addr": "addr" } },
+      "answers": "data",
+      "doc": [
+        "Run one read-only rizin {command} whose output is JSON, a *j command, and answer the data itself",
+        "with the id of the evidence record the read left. Reads the whole output even when it is past the",
+        "size cap a result's text is cut at."
+      ]
+    },
+    {
+      "name": "call",
+      "takes": [{ "name": "tool", "type": "name", "refusal": "a tool is named by a string, as {listTools} lists them, not {given}" }],
+      "rest": "arguments",
+      "does": { "call": { "param": "tool" } },
+      "answers": "text",
+      "doc": ["Call the engine's {tool}, a name the verb tools lists, with its arguments."]
+    },
+    {
+      "name": "tools",
+      "takes": [],
+      "does": { "line": ["tools"] },
+      "answers": "text",
+      "doc": ["Every tool the engine offers, one line each."]
+    },
+    {
+      "name": "doc",
+      "takes": [{ "name": "tool", "type": "name" }],
+      "does": { "line": ["doc ", { "param": "tool" }] },
+      "answers": "text",
+      "doc": ["What the engine's {tool} does and the arguments it takes."]
+    },
+    {
+      "name": "slash",
+      "takes": [{ "name": "line", "type": "string" }],
+      "does": { "line": [{ "param": "line" }] },
+      "answers": "text",
+      "doc": [
+        "Run one of the lines the engine's text calls /re lines (\"functions\", \"evidence\", \"findings\",",
+        "\"verify\", \"report out.md\", \"undo\", \"help\") and answer what it says."
+      ]
+    },
+    {
+      "name": "status",
+      "takes": [],
+      "does": { "line": ["status"] },
+      "answers": "text",
+      "doc": ["The engine's state for this session: rizin, the open binary, evidence and findings."]
+    },
+    {
+      "name": "help",
+      "hosts": ["js", "py"],
+      "takes": [],
+      "does": { "call": "rizin_command", "arguments": { "command": { "value": "" } } },
+      "answers": "text",
+      "doc": ["The engine's manual: which rizin commands read what, the tools, the lines, how a result reads."]
+    }
+  ],
+  "hosts": {
+    "js": { "listTools": "await re.tools()" },
+    "py": { "listTools": "omp_re.tools()" },
+    "lisp": { "listTools": "(re:tools)" }
+  }
+}

@@ -26,4 +26,5 @@
                (:file "recipe-data")
                (:file "recipes")
                (:file "verbs")
+               (:file "verb-forms")
                (:file "cell")))

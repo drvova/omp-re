@@ -1,11 +1,12 @@
 {
-  "version": 3,
+  "version": 4,
   "constants": {
     "entryPrefix": "re.",
     "environmentPrefix": "OMPRE_",
-    "completedEvidence": 200,
     "judgeSeconds": 30,
-    "aliveSeconds": 5
+    "aliveSeconds": 5,
+    "bridgeVersion": 1,
+    "bridgeDirectory": "omp-re"
   },
   "keys": {
     "views": [
@@ -21,15 +22,11 @@
   },
   "types": {
     "session": {
-      "members": { "id": "string", "cwd": "string", "hasUI": "boolean", "memory?": "object" }
+      "members": { "id": "string", "cwd": "string" }
     },
     "level": { "enum": ["info", "warning", "error"] },
     "state": {
-      "members": {
-        "band": { "oneOf": [{ "array": "string" }, "null"] },
-        "evidence": { "array": { "tuple": ["string", "string"] } },
-        "memory": "object"
-      }
+      "members": { "band": { "oneOf": [{ "array": "string" }, "null"] } }
     },
     "entry": {
       "members": { "id": "string", "customType": "string", "data": "json" }
@@ -45,48 +42,6 @@
         "canonicalExcerpt?": "string",
         "shiftHash?": "string",
         "evidenceId?": "string"
-      }
-    },
-    "reasonCase": {
-      "members": {
-        "when?": { "array": { "members": { "arg": "string", "equals?": "json", "type?": { "enum": ["string", "number"] } } } },
-        "parts": {
-          "array": {
-            "oneOf": [
-              "string",
-              {
-                "members": {
-                  "pieces": { "array": { "members": { "arg": "string", "prefix?": "string", "missing?": "string" } } },
-                  "quote?": "boolean",
-                  "clip?": "integer"
-                }
-              }
-            ]
-          }
-        }
-      }
-    },
-    "render": {
-      "members": { "title": "string", "subject?": "string", "body": { "enum": ["text", "json", "none"] } }
-    },
-    "tool": {
-      "members": {
-        "name": "string",
-        "label?": "string",
-        "description": "string",
-        "parameters": "object",
-        "approval": { "enum": ["read", "write", "exec"] },
-        "approvalReason?": { "array": "@reasonCase" },
-        "render?": "@render"
-      }
-    },
-    "command": {
-      "members": {
-        "name": "string",
-        "usage?": "string",
-        "description": "string",
-        "view?": "boolean",
-        "completes?": { "enum": ["evidence"] }
       }
     },
     "viewRequest": {
@@ -132,31 +87,25 @@
       "ordered": true,
       "params": { "variables": { "map": "string" }, "stateDir": "string" }
     },
-    "describe": {
-      "kind": "request",
-      "params": {},
-      "result": { "members": { "tools": { "array": "@tool" }, "commands": { "array": "@command" } } }
-    },
     "call": {
       "kind": "request",
-      "params": { "session": "@session", "name": "string", "arguments": "object", "callId": "string" },
+      "params": { "session": "@session", "name": "string", "arguments": "object", "callId?": "string" },
       "result": {
-        "members": { "text": "string", "failed": "boolean", "refused?": "boolean", "details?": "@details", "state": "@state" }
+        "members": {
+          "text": "string",
+          "failed": "boolean",
+          "refused?": "boolean",
+          "raw?": "string",
+          "evidence?": "string",
+          "details?": "@details",
+          "state": "@state"
+        }
       }
     },
     "command": {
       "kind": "request",
       "params": { "session": "@session", "line": "string" },
-      "result": {
-        "members": {
-          "text": "string",
-          "failed": "boolean",
-          "level": "@level",
-          "draft?": { "members": { "text": "string", "notice": "string" } },
-          "userMessage?": "string",
-          "state": "@state"
-        }
-      }
+      "result": { "members": { "text": "string", "failed": "boolean", "state": "@state" } }
     },
     "view": {
       "kind": "request",
@@ -168,18 +117,12 @@
       "params": { "session": "@session" },
       "result": { "members": { "lines": { "array": "string" } } }
     },
-    "approval": {
-      "kind": "request",
-      "params": { "session": "@session", "callId": "string", "tool": "string", "approved": "boolean", "reason?": "string" },
-      "result": { "members": {} }
-    },
     "event": {
       "kind": "request",
       "params": {
         "session": "@session",
         "kind": { "enum": ["start", "switch", "tree", "branch", "before-switch", "shutdown"] },
-        "previous?": "string",
-        "binary?": "string"
+        "previous?": "string"
       },
       "result": { "members": { "state?": "@state" } }
     },
@@ -219,11 +162,6 @@
       "kind": "request",
       "params": { "session": "string", "id": "string" },
       "result": { "members": { "text?": "string" } }
-    },
-    "keepSession": {
-      "kind": "request",
-      "params": { "session": "string", "name": "string" },
-      "result": { "members": {} }
     },
     "notify": {
       "kind": "notification",

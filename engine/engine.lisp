@@ -9,20 +9,15 @@
 ;;;;
 ;;;;   (engine-tools)                        what tools there are
 ;;;;   (engine-call SESSION NAME ARGUMENTS)  call one
-;;;;   (engine-commands)                     what /re subcommands there are
-;;;;   (engine-command SESSION LINE &key by-model)   run one /re line
+;;;;   (engine-command SESSION LINE)         run one /re line
 ;;;;
-;;;; and, for a host with a screen and a session it starts, moves and ends:
+;;;; Those are all the model has, on every host: its calls and its lines.
+;;;; For a host with a screen and a session it starts, moves and ends:
 ;;;;
 ;;;;   (engine-view SESSION KIND ARGUMENT)   a list to pick from, a function's code
 ;;;;   (engine-facts SESSION)                the open binary, for a status band
-;;;;   (engine-evidence SESSION LIMIT)       the newest evidence, to complete an id from
 ;;;;   (engine-preserved SESSION)            lines to keep through a compaction
-;;;;   (engine-memory SESSION)               what no record holds: `/re off'
-;;;;   (engine-remember SESSION MEMORY)      give it back under a new engine
-;;;;   (engine-approval SESSION CALL-ID TOOL APPROVED REASON)
-;;;;                                         what the host's gate decided of a call
-;;;;   (engine-restore SESSION &key open)    bring rizin up when a session starts
+;;;;   (engine-restore SESSION)              bring rizin up when a session starts
 ;;;;   (engine-rekey FROM TO)                a session goes on under a new id
 ;;;;   (engine-close SESSION)                a session is over
 ;;;;   (engine-hold SESSION THUNK)           several of the above as one sequence
@@ -87,31 +82,16 @@ here takes anything and checks for itself."
 (declaim (ftype (function () (values json-array &optional)) engine-tools))
 (defun engine-tools ()
   "The tools offered now, in the order defined => a vector of
-  {name, label, description, parameters, approval, approvalReason?, render?,
-   evidence}
-PARAMETERS is the tool's arguments as JSON Schema; APPROVAL one of \"read\",
-\"write\" and \"exec\" — whether it observes, annotates, or runs code and
-writes files; APPROVAL-REASON what a prompt asking the operator about one
-call says, as data a host fills from the call's arguments (call.lisp,
-APPROVAL-CASES); RENDER, {title, subject?, body}, how a host that draws
-results shows one; EVIDENCE whether a successful result is recorded as
-evidence.
+  {name, description, parameters, evidence}
+PARAMETERS is the tool's arguments as JSON Schema; EVIDENCE whether a
+successful result is recorded as evidence.
 A tool can come and go (rizin_debug with the debugger setting), so a host
 asks again rather than keeping the answer."
   (map 'vector
        (lambda (tool)
          (obj "name" (tool-name tool)
-              "label" (or (tool-label tool) :absent)
               "description" (tool-description-text tool)
               "parameters" (tool-schema tool)
-              "approval" (string-downcase (tool-tier tool))
-              "approvalReason" (if (tool-reason tool) (approval-cases (tool-reason tool)) :absent)
-              "render" (if (tool-render tool)
-                           (destructuring-bind (&key title subject (body :text)) (tool-render tool)
-                             (obj "title" (or title (tool-label tool) (tool-name tool))
-                                  "subject" (or subject :absent)
-                                  "body" (string-downcase body)))
-                           :absent)
               "evidence" (and (tool-evidence tool) t)))
        (offered-tools)))
 
@@ -140,56 +120,12 @@ CALL-ID is the host's own id for the call, written to the audit log."
          "artifactPath" (or artifact-path :absent)
          "details" (or details :absent))))
 
-(declaim (ftype (function () (values json-array &optional)) engine-commands))
-(defun engine-commands ()
-  "The /re subcommands, in the order /re help lists them => a vector of
-  {name, usage?, description, view?, completes?, row?}
-VIEW is true for a subcommand that is also a list a host with a screen may
-open instead of printing (ENGINE-VIEW by the same name). COMPLETES is
-\"evidence\" where the subcommand's argument is an evidence id, for a host
-that completes one as it is typed. ROW, where the
-subcommand has one, is its row in a dialog of what /re
-offers, for a host that draws one: {position, label, detail?, ask?,
-placeholder?, verb?}. A row with ASK asks for a word under that label —
-PLACEHOLDER in the empty box, VERB on the button — and runs the subcommand
-with it; any other runs the subcommand as it is. Rows are shown by POSITION."
-  (map 'vector
-       (lambda (slash)
-         (obj "name" (slash-name slash)
-              "usage" (or (slash-usage slash) :absent)
-              "description" (slash-description slash)
-              "view" (if (slash-listing slash) t :absent)
-              "completes" (if (slash-completes slash) (string-downcase (slash-completes slash)) :absent)
-              "row" (if (slash-row slash)
-                        (destructuring-bind (position label &key detail ask placeholder verb)
-                            (slash-row slash)
-                          (obj "position" position "label" label
-                               "detail" (or detail :absent) "ask" (or ask :absent)
-                               "placeholder" (or placeholder :absent) "verb" (or verb :absent)))
-                        :absent)))
-       *slash-commands*))
-
-(define-surface engine-command ((session session-id) (line (or null string)) &key (by-model t))
-    (answer (lambda (text) (obj "text" text "failed" t "level" "error")))
-  "Run one /re LINE — \"status\", \"open /bin/ls\" — in SESSION =>
-  {text, failed, level, draft?, userMessage?}
-BY-MODEL is true where the line comes from the model and not the operator:
-`/re off' then refuses it, as it refuses a tool call.
-LEVEL is how loudly to say TEXT: \"info\", \"warning\" or \"error\" — error
-for a line that failed, unless the line says otherwise. DRAFT, {text,
-notice}, is offered by a line such as cite: a host with an input box puts
-DRAFT's text in it and shows the notice instead of TEXT; any other host
-shows TEXT. USER-MESSAGE is text the line asks to have sent to the model as
-the operator's next message."
-  (multiple-value-bind (text failed reply) (run-slash-line session line :by-model by-model)
-    (destructuring-bind (&key draft level user-message) reply
-      (obj "text" text
-           "failed" (and failed t)
-           "level" (string-downcase (or level (if failed :error :info)))
-           "draft" (if draft
-                       (obj "text" (draft-text draft) "notice" (draft-notice draft))
-                       :absent)
-           "userMessage" (or user-message :absent)))))
+(define-surface engine-command ((session session-id) (line (or null string)))
+    (answer (lambda (text) (obj "text" text "failed" t)))
+  "Run one /re LINE — \"status\", \"report out.md\" — in SESSION =>
+  {text, failed}"
+  (multiple-value-bind (text failed) (run-slash-line session line)
+    (obj "text" text "failed" (and failed t))))
 
 (define-surface engine-view ((session session-id) (kind string) &optional (argument (or null json-object)))
     (answer (lambda (text) (notice-view :error "~a" text)))
@@ -214,40 +150,6 @@ had."
                                          (session-facts))
     (and (not failed) answer)))
 
-(define-surface engine-evidence ((session session-id) (limit (integer 0)))
-    (json-array (constantly (vector)))
-  "The newest LIMIT evidence records of SESSION, newest first => a vector of
-[id, \"tool @ address\"], for a host that completes an evidence id as it is
-typed. As the session stands, like ENGINE-FACTS; empty when it could not be
-read."
-  (multiple-value-bind (answer failed)
-      (in-session (session "listing evidence" :wait nil)
-        (map 'simple-vector
-             (lambda (record) (vector (jstring record "id") (evidence-place record)))
-             (reverse (last (evidence-records) limit))))
-    (if failed (vector) answer)))
-
-(define-surface engine-memory ((session session-id))
-    (json-object (lambda (text) (declare (ignore text)) (obj)))
-  "What SESSION holds that is in no record, and so would be gone with this
-process => a JSON object, {toolsOff?}. A host that outlives the engine keeps
-the latest and hands it to ENGINE-REMEMBER when the session meets another
-engine. As the session stands, like ENGINE-FACTS."
-  (multiple-value-bind (answer failed)
-      (in-session (session "the session's memory" :wait nil)
-        (obj "toolsOff" (if (session-tools-off *session*) t :absent)))
-    (if failed (obj) answer)))
-
-(define-surface engine-remember ((session session-id) (memory json-object))
-    ((member t) (constantly t))
-  "Give SESSION back what ENGINE-MEMORY answered of it under an engine that
-is gone."
-  (in-session (session "the session's memory" :wait nil)
-    (when (eq t (jget memory "toolsOff"))
-      (setf (session-tools-off *session*) t))
-    nil)
-  t)
-
 (define-surface engine-preserved ((session session-id))
     (json-array (constantly (vector)))
   "The lines to fold into a summary of SESSION's conversation when the host
@@ -256,37 +158,18 @@ compacts it => a vector of strings, empty when there is nothing to keep."
                                          (coerce (preserved-lines) 'simple-vector))
     (if failed (vector) answer)))
 
-(define-surface engine-approval ((session session-id) (call-id (or null string)) (tool (or null string))
-                                 (approved t) &optional (reason (or null string)))
-    ((member t) (constantly t))
-  "Write to SESSION's audit log what the host's approval gate decided of the
-call CALL-ID to TOOL. A call that was denied never reaches ENGINE-CALL, so
-this line is all the log has of it."
-  (in-session (session "the audit log" :wait nil)
-    (append-audit-line *session* call-id tool :approved approved :reason reason)
-    nil)
-  t)
-
-(define-surface engine-restore ((session session-id) &key (open (or null string)))
-    (answer (lambda (text) (obj "text" text "failed" t "level" "error")))
-  "Bring SESSION's rizin up without waiting to be called: when a session
-starts or its branch moved => {text?, failed, level}. OPEN, a path the
-operator started the host with, is opened unless the branch already has it
-open; otherwise the binary the branch has open is analyzed again when no
-process holds it. TEXT is what to tell the operator, when there is
-something: a failure, or what would not be put back."
-  (multiple-value-bind (text failed level)
+(define-surface engine-restore ((session session-id))
+    (answer (lambda (text) (obj "text" text "failed" t)))
+  "Bring SESSION's rizin up without waiting to be called, when a session
+starts or its branch moved: the binary the branch has open is analyzed again
+when no process holds it => {text?, failed}. TEXT is why it failed."
+  (multiple-value-bind (text failed)
       (in-session (session "restoring the session")
-        (let ((recorded (session-binary-path *session*)))
-          (cond ((and open (not (equal recorded (resolve-binary-path open))))
-                 (multiple-value-bind (text failures) (open-binary open)
-                   (values (and (plusp failures) text) nil :warning)))
-                (recorded
-                 (ensure-rizin)
-                 (values nil nil :info)))))
-    (obj "text" (or text :absent)
-         "failed" (and failed t)
-         "level" (string-downcase (if failed :error (or level :info))))))
+        (when (session-binary-path *session*)
+          (ensure-rizin))
+        nil)
+    (obj "text" (if failed text :absent)
+         "failed" (and failed t))))
 
 (define-surface engine-rekey ((from session-id) (to session-id))
     ((member t) (constantly t))

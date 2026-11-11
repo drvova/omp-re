@@ -4,103 +4,51 @@
  * plain modules.
  *
  * The reverse engineering is done by the engine, a Common Lisp program this
- * extension runs beside omp (engine.ts). What is here is omp's side only: it
- * asks the engine what tools and `/re` subcommands it has and registers them
- * with omp under the engine's names, forwards calls and the session's life,
- * and draws what the engine sends (ui.ts, render.ts).
+ * extension runs beside omp (engine.ts), and the model reaches it from omp's
+ * own `eval` tool: the re-triage skill's library, loaded into a kernel, asks
+ * the listener of bridge.ts. So nothing is registered with omp here that a
+ * model or an operator calls — no tool, no slash command, no flag. What is
+ * here is omp's side of a session: its life forwarded to the engine, the
+ * lines kept through a compaction, and what the engine sends drawn (ui.ts).
  *
  * The factory runs once per omp session — the main session and each task
- * subagent get their own ExtensionAPI — while the engine is one for the
- * whole process (host.ts).
+ * subagent get their own ExtensionAPI — while the engine and the listener
+ * are one for the whole process (host.ts).
  */
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
+import { Text } from "@oh-my-pi/pi-tui";
 import { drawStatusBand, openView, type ViewSource } from "./ui.ts";
-import type { JsonObject } from "./engine.ts";
-import { ask, engine, enter, leaveSession, sessionOf, stateOf, tell } from "./host.ts";
-import { KEYS, type ReasonCase, type ToEngine, type ToHost } from "./protocol.ts";
-import { RE_LOAD_MODE, reRenderers } from "./render.ts";
+import { ask, cellEnded, cellStarted, enter, forgetSession, leaveSession, sessionOf, tell } from "./host.ts";
+import { CONSTANTS, KEYS, type ToEngine, type ToHost } from "./protocol.ts";
 
-/** How many evidence ids a completion offers at once. */
-const COMPLETIONS_SHOWN = 50;
+/** The operator's switch for the whole plugin, read once when omp loads it: with it set, nothing below runs. */
+const DISABLED = `${CONSTANTS.environmentPrefix}DISABLED`;
 
-function argumentAt(args: unknown, path: string): unknown {
-	let value = args;
-	for (const key of path.split(".")) {
-		if (value === null || typeof value !== "object") return undefined;
-		value = (value as Record<string, unknown>)[key];
-	}
-	return value;
-}
-
-/** The sentence an approval prompt shows for one call, filled from its arguments. omp asks for it synchronously, so the engine sent it as data. */
-function approvalSentence(cases: ReasonCase[], args: unknown): string | undefined {
-	const holds = (condition: NonNullable<ReasonCase["when"]>[number]) => {
-		const value = argumentAt(args, condition.arg);
-		return condition.type !== undefined ? typeof value === condition.type : value === condition.equals;
-	};
-	const chosen = cases.find((one) => (one.when ?? []).every(holds));
-	return chosen?.parts
-		.map((part) => {
-			if (typeof part === "string") return part;
-			let filled = "";
-			for (const piece of part.pieces) {
-				const value = argumentAt(args, piece.arg);
-				const said = typeof value === "string" || typeof value === "number" ? String(value) : Array.isArray(value) ? value.filter((item) => typeof item === "string").join(" ") : (piece.missing ?? "");
-				if (said !== "") filled += (piece.prefix ?? "") + said;
-			}
-			if (part.clip !== undefined && filled.length > part.clip) filled = `${filled.slice(0, part.clip - 3)}...`;
-			return part.quote ? JSON.stringify(filled) : filled;
-		})
-		.join("");
-}
+/**
+ * How a cell that used the library before loading it fails, in each kernel's own words, and the line that loads it.
+ * omp has no way to load a script into a kernel for the model (docs/omp-eval.md), and a JavaScript kernel loses
+ * what was loaded at every timeout and interrupt; the skill says so, and this says it again where it happens.
+ */
+const UNLOADED = {
+	js: { said: /\bre is not defined\b|Can't find variable: re\b/, load: "%load skill://re-triage/recipes.js" },
+	py: { said: /name 'omp_re' is not defined/, load: "%load skill://re-triage/recipes.py" },
+} as const;
 
 export default async function (pi: ExtensionAPI): Promise<void> {
-	// The engine is asked here, once per session, because omp takes tool registrations only while the factory runs,
-	// and which tools there are depends on the environment the session starts in.
-	const { tools, commands } = await engine().request("describe", {});
+	if (process.env[DISABLED] === "1") return;
 	enter(pi);
-	const toolNames = new Set(tools.map((tool) => tool.name));
 	/** Session id this instance last saw, to tell a branch into a new session file apart from navigation within one. */
 	let lastSessionId: string | undefined;
-	/** Latest context, for argument completion (which receives no ctx of its own). */
-	let latestCtx: ExtensionContext | undefined;
 
 	const seen = (ctx: ExtensionContext) => {
-		latestCtx = ctx;
 		lastSessionId = ctx.sessionManager.getSessionId();
 		return sessionOf(pi, ctx, drawStatusBand);
 	};
 	const viewSource: ViewSource = (ctx, request) => ask(pi, ctx, "view", { kind: request.kind, arg: request.arg });
 
-	for (const tool of tools) {
-		const reasons = tool.approvalReason;
-		pi.registerTool({
-			name: tool.name,
-			label: tool.label ?? tool.name,
-			description: tool.description,
-			approval: reasons ? (args: unknown) => ({ tier: tool.approval, reason: approvalSentence(reasons, args) }) : tool.approval,
-			loadMode: RE_LOAD_MODE,
-			parameters: tool.parameters,
-			...(tool.render ? reRenderers(tool.render) : {}),
-			execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-				seen(ctx);
-				const answer = await ask(pi, ctx, "call", { name: tool.name, arguments: params as JsonObject, callId: toolCallId }, { signal, onUpdate });
-				// A refusal is thrown, so eval sees a rejection it can catch; a tool's own failed result is returned as one.
-				if (answer.refused) throw new Error(answer.text);
-				return { content: [{ type: "text", text: answer.text }], details: answer.details, ...(answer.failed ? { isError: true } : {}) };
-			},
-		});
-	}
-
 	// The line the engine asks to have shown when a binary is opened (the protocol's `transcript`).
 	const openedLine: ToHost["transcript"]["params"]["type"] = "re.binary";
 	pi.registerMessageRenderer(openedLine, (message, _options, theme) => new Text(theme.fg("accent", typeof message.content === "string" ? message.content : ""), 0, 0));
-
-	pi.registerFlag("binary", {
-		description: "Path to a binary to open with rizin at startup",
-		type: "string",
-	});
 
 	/** omp entered a session, or moved within one. */
 	const arrive = (ctx: ExtensionContext, event: Omit<ToEngine["event"]["params"], "session">) => {
@@ -108,8 +56,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		return ask(pi, ctx, "event", event).catch((error) => tell(ctx, error instanceof Error ? error.message : String(error), "error"));
 	};
 	pi.on("session_start", async (_event, ctx) => {
-		const flag = pi.getFlag("binary");
-		await arrive(ctx, { kind: "start", ...(typeof flag === "string" && flag.length > 0 ? { binary: flag } : {}) });
+		await arrive(ctx, { kind: "start" });
 	});
 	// A switch (/new, /resume, fork, handoff) leaves this session for another: its rizin is freed first.
 	pi.on("session_before_switch", async (_event, ctx) => {
@@ -122,6 +69,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	pi.on("session_branch", async (_event, ctx) => {
 		const previous = lastSessionId;
 		await arrive(ctx, { kind: "branch", ...(previous ? { previous } : {}) });
+		if (previous && previous !== ctx.sessionManager.getSessionId()) forgetSession(previous);
 	});
 	pi.on("session_tree", async (_event, ctx) => {
 		await arrive(ctx, { kind: "tree" });
@@ -130,18 +78,25 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		await leaveSession(pi, ctx, true);
 	});
 
-	// A call omp's approval gate denied never reaches the engine; what the gate decided is forwarded so the audit log has it.
-	pi.on("tool_approval_resolved", async (decided, ctx) => {
-		if (!toolNames.has(decided.toolName)) return;
-		await ask(pi, ctx, "approval", { callId: decided.toolCallId, tool: decided.toolName, approved: decided.approved, ...(decided.reason ? { reason: decided.reason } : {}) }).catch((error) =>
-			// The audit log is the operator's record of what was approved: a line that could not be written is said.
-			pi.logger.warn(`omp-re: the approval of ${decided.toolName} was not written to the audit log: ${error instanceof Error ? error.message : String(error)}`),
-		);
-	});
-
 	pi.on("session.compacting", async (_event, ctx) => {
 		const { lines } = await ask(pi, ctx, "preserved", {});
 		return lines.length > 0 ? { context: lines } : undefined;
+	});
+
+	// The model's calls all arrive inside `eval`, so that is the one tool watched: which call a request belongs to, and when it is over.
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName === "eval") cellStarted(pi, ctx, event.toolCallId);
+	});
+	pi.on("tool_execution_end", async (event, ctx) => {
+		if (event.toolName === "eval") cellEnded(ctx, event.toolCallId);
+	});
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.toolName !== "eval") return;
+		cellEnded(ctx, event.toolCallId);
+		const unloaded = UNLOADED[event.input.language === "py" ? "py" : "js"];
+		const text = event.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+		if (!event.isError || !unloaded.said.test(text)) return;
+		return { content: [...event.content, { type: "text", text: `omp-re: its library is not loaded in this kernel. Run a cell that holds only this line, then run yours again: ${unloaded.load}` }] };
 	});
 
 	for (const { key, view } of KEYS.views) {
@@ -153,49 +108,4 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			},
 		});
 	}
-
-	function completeArguments(prefix: string): AutocompleteItem[] | null {
-		const space = prefix.indexOf(" ");
-		if (space === -1) {
-			const lower = prefix.toLowerCase();
-			const matches = commands
-				.filter((command) => command.name.startsWith(lower))
-				.map((command) => ({ value: `${command.name} `, label: command.name, description: command.description, hint: command.usage }));
-			return matches.length > 0 ? matches : null;
-		}
-		const sub = prefix.slice(0, space).toLowerCase();
-		if (commands.find((command) => command.name === sub)?.completes !== "evidence" || !latestCtx) return null;
-		const idPrefix = prefix.slice(space + 1).trim();
-		const matches = (stateOf(latestCtx.sessionManager.getSessionId())?.evidence ?? [])
-			.filter(([id]) => id.startsWith(idPrefix))
-			.slice(0, COMPLETIONS_SHOWN)
-			.map(([id, description]) => ({ value: `${sub} ${id} `, label: id, description }));
-		return matches.length > 0 ? matches : null;
-	}
-
-	pi.registerCommand("re", {
-		description: `reverse engineering with rizin: ${commands.map((command) => command.name).join(" | ")}`,
-		getArgumentCompletions: completeArguments,
-		handler: async (args, ctx) => {
-			seen(ctx);
-			try {
-				const words = args.trim().split(/\s+/).filter(Boolean);
-				// A list is an overlay where there is a screen for one, and the same list as text where there is not.
-				if (ctx.hasUI && words.length === 1 && commands.some((command) => command.view && command.name === words[0])) {
-					await openView(ctx, viewSource, { kind: words[0]! });
-					return;
-				}
-				const answer = await ask(pi, ctx, "command", { line: args });
-				if (answer.userMessage) pi.sendUserMessage(answer.userMessage);
-				if (answer.draft && ctx.hasUI) {
-					ctx.ui.setEditorText(answer.draft.text);
-					tell(ctx, answer.draft.notice, answer.level);
-				} else {
-					tell(ctx, answer.text, answer.level);
-				}
-			} catch (error) {
-				tell(ctx, error instanceof Error ? error.message : String(error), "error");
-			}
-		},
-	});
 }

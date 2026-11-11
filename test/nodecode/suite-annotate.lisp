@@ -235,14 +235,13 @@ the address, so a test asks for the key, not for the row."
     (progn
       (suite (format nil "annotations against rizin (~a)" *binary*))
       (with-cell ()
-        (check "the fifteen tools are offered, write tier, and none is an observation"
+        (check "the fifteen tools are offered, and none is an observation"
                (loop for name in '("rename_function" "rename_variable" "set_comment" "set_prototype"
                                    "set_variable_type" "define_variable" "define_global" "define_function"
                                    "set_calling_convention" "set_flag" "set_arch_hint" "set_hint" "set_data"
                                    "set_string" "set_format")
                      always (let ((tool (described-tool name)))
-                              (and tool (equal "write" (gethash "approval" tool))
-                                   (not (gethash "evidence" tool))))))
+                              (and tool (not (gethash "evidence" tool))))))
         (check "/re help lists undo"
                (has "/re undo" (re:slash "help")))
         (check "with no binary open a tool says how to open one, undo has nothing, and status is silent"

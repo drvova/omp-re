@@ -5,14 +5,15 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 export type JsonObject = { [key: string]: Json | undefined };
 
 /** The version of the wire. An engine that speaks another is refused, and refuses. */
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 
 export const CONSTANTS = {
 	"entryPrefix": "re.",
 	"environmentPrefix": "OMPRE_",
-	"completedEvidence": 200,
 	"judgeSeconds": 30,
-	"aliveSeconds": 5
+	"aliveSeconds": 5,
+	"bridgeVersion": 1,
+	"bridgeDirectory": "omp-re"
 } as const;
 
 /** The keys omp-re binds: the ones that open a view, and the ones a code view reads. The engine's help names them from the same list. */
@@ -53,23 +54,15 @@ export const KEYS = {
 	]
 } as const;
 
-export type Session = { id: string; cwd: string; hasUI: boolean; memory?: JsonObject };
+export type Session = { id: string; cwd: string };
 
 export type Level = "info" | "warning" | "error";
 
-export type State = { band: string[] | null; evidence: [string, string][]; memory: JsonObject };
+export type State = { band: string[] | null };
 
 export type Entry = { id: string; customType: string; data: Json };
 
 export type Details = { ea?: string; truncated?: boolean; artifactId?: string; artifactPath?: string; commands?: string[]; reproHash?: string; canonicalExcerpt?: string; shiftHash?: string; evidenceId?: string };
-
-export type ReasonCase = { when?: ({ arg: string; equals?: Json; type?: "string" | "number" })[]; parts: (string | { pieces: { arg: string; prefix?: string; missing?: string }[]; quote?: boolean; clip?: number })[] };
-
-export type Render = { title: string; subject?: string; body: "text" | "json" | "none" };
-
-export type Tool = { name: string; label?: string; description: string; parameters: JsonObject; approval: "read" | "write" | "exec"; approvalReason?: ReasonCase[]; render?: Render };
-
-export type Command = { name: string; usage?: string; description: string; view?: boolean; completes?: "evidence" };
 
 export type ViewRequest = { kind: string; arg?: JsonObject };
 
@@ -81,13 +74,11 @@ export type View = { type: "notice"; text: string; level: Level } | { type: "pan
 export interface ToEngine {
 	hello: { params: { protocol: number; variables: { [name: string]: string }; stateDir: string }; result: { protocol: number; version: string; started: "source" | "image" } };
 	environment: { params: { variables: { [name: string]: string }; stateDir: string } };
-	describe: { params: {}; result: { tools: Tool[]; commands: Command[] } };
-	call: { params: { session: Session; name: string; arguments: JsonObject; callId: string }; result: { text: string; failed: boolean; refused?: boolean; details?: Details; state: State } };
-	command: { params: { session: Session; line: string }; result: { text: string; failed: boolean; level: Level; draft?: { text: string; notice: string }; userMessage?: string; state: State } };
+	call: { params: { session: Session; name: string; arguments: JsonObject; callId?: string }; result: { text: string; failed: boolean; refused?: boolean; raw?: string; evidence?: string; details?: Details; state: State } };
+	command: { params: { session: Session; line: string }; result: { text: string; failed: boolean; state: State } };
 	view: { params: { session: Session; kind: string; arg?: JsonObject }; result: View };
 	preserved: { params: { session: Session }; result: { lines: string[] } };
-	approval: { params: { session: Session; callId: string; tool: string; approved: boolean; reason?: string }; result: {} };
-	event: { params: { session: Session; kind: "start" | "switch" | "tree" | "branch" | "before-switch" | "shutdown"; previous?: string; binary?: string }; result: { state?: State } };
+	event: { params: { session: Session; kind: "start" | "switch" | "tree" | "branch" | "before-switch" | "shutdown"; previous?: string }; result: { state?: State } };
 	cancel: { params: { id: number } };
 	shutdown: { params: {} };
 }
@@ -99,7 +90,6 @@ export interface ToHost {
 	judge: { params: { session: string; prompt: string; seconds: number }; result: { text?: string; reason?: string } };
 	saveArtifact: { params: { session: string; content: string; label: string }; result: { id?: string } };
 	readArtifact: { params: { session: string; id: string }; result: { text?: string } };
-	keepSession: { params: { session: string; name: string }; result: {} };
 	notify: { params: { session: string; text: string; level: Level } };
 	tell: { params: { session: string; text: string; level: Level } };
 	progress: { params: { session: string; request: number | null; text: string | null } };
@@ -111,12 +101,10 @@ export interface ToHost {
 export const TO_ENGINE = {
 	hello: "request",
 	environment: "notification",
-	describe: "request",
 	call: "request",
 	command: "request",
 	view: "request",
 	preserved: "request",
-	approval: "request",
 	event: "request",
 	cancel: "notification",
 	shutdown: "notification",
@@ -128,7 +116,6 @@ export const TO_HOST = {
 	judge: "request",
 	saveArtifact: "request",
 	readArtifact: "request",
-	keepSession: "request",
 	notify: "notification",
 	tell: "notification",
 	progress: "notification",

@@ -164,41 +164,31 @@ start and cleared at stop. Every one is optional.
                                show TEXT in the session's transcript as a
                                message of TYPE (re.binary), never sent to
                                the model
-  :HAS-UI        ()            whether an operator is watching the call on
-                               this thread and can be handed a draft or have
-                               a message sent for them: without one a /re
-                               line's answer is all that is said
-  :KEEP-SESSION  (SESSION NAME)
-                               what a /re line recorded must outlive the
-                               process even if no model turn follows: write
-                               the session now, and call it NAME where nobody
-                               is watching and it has no name
 With none installed — the engine alone — nothing is configured,
 there is no turn, the record is the session's own file with every entry on
 the branch, a notice is a line on the log, an artifact is a file beside the
-record, nobody is watching and there is nobody to ask.")
+record and there is nobody to ask.")
 
 (declaim (ftype (function (&key (:setting function) (:environment function) (:voice function)
                                 (:home function) (:turn function) (:directory function)
                                 (:entries function) (:append-entry function) (:notify function)
                                 (:judge function) (:progress function) (:cancelled function)
                                 (:save-artifact function) (:read-artifact function)
-                                (:locate-artifact function) (:transcript function)
-                                (:has-ui function) (:keep-session function))
+                                (:locate-artifact function) (:transcript function))
                           (values t &optional))
                 install-host)
          (ftype (function () (values null &optional)) clear-host))
 (defun install-host (&rest services
                      &key setting environment voice home turn directory entries append-entry notify
                           judge progress cancelled save-artifact read-artifact locate-artifact
-                          transcript has-ui keep-session)
+                          transcript)
   "Make SERVICES — a plist as *HOST* describes — the host, and start what
 the engine does for every host by itself: closing idle sessions' processes."
   ;; The keys are named so that a host that installs a service the engine
   ;; never asks for is told when it is compiled; the plist is what is kept.
   (declare (ignore setting environment voice home turn directory entries append-entry notify
                    judge progress cancelled save-artifact read-artifact locate-artifact
-                   transcript has-ui keep-session))
+                   transcript))
   (setf *host* services)
   (start-idle-reaper))
 
@@ -260,7 +250,7 @@ told, it is a warning on the process's log."
 ;;; differently.
 
 (defparameter +voice+
-  '((:open-first . "use /re open <path> or the open_binary tool first")
+  '((:open-first . "open one with the open_binary tool first")
     (:list-tools . "")
     (:read-more . "read the rest with rizin_command")
     (:debugger-switch . "OMPRE_ENABLE_DEBUGGER")
@@ -269,11 +259,15 @@ told, it is a warning on the process's log."
     (:rizin-path . "set OMPRE_RIZIN_PATH")
     (:launcher . "A program launched from a desktop")
     (:open-binary-note . "")
-    (:help-keys . nil)
     (:list-hint . "~a")
     (:references-hint . "open")
-    (:next-prompt . nil)
     (:slash . "/re ~a")
+    (:argument-name . nil)
+    (:type-boolean . "true or false")
+    (:type-object . "an object~@[ (~{~a~^, ~})~]")
+    (:type-objects . "an array of objects (~{~a~^, ~})")
+    (:type-strings . "an array of strings")
+    (:doc-takes . "~a takes:")
     (:manual-start . "omp-re — reverse engineering with rizin. Open a binary with open_binary, look a
 command up with rizin_help, and read the binary with rizin_command.")
     (:manual-results . "How a result reads
@@ -294,14 +288,20 @@ it when no host does:
   :RIZIN-PATH        how the operator says where rizin is
   :LAUNCHER          what, started from a desktop, may not see the shell's PATH
   :OPEN-BINARY-NOTE  a sentence added to open_binary's description
-  :HELP-KEYS         a last line of /re help: the keys the host binds
   :LIST-HINT         under a list on a screen, the keys it answers to; ~a
                      is what choosing a row does (open, cite, discuss)
   :REFERENCES-HINT   the same under a list of references
-  :NEXT-PROMPT       where nobody is watching, how an agenda is passed on as
-                     the next prompt: an example in brackets, or nothing
-  :SLASH             how a /re line is run from where the model is; ~a is
-                     the line
+  :SLASH             how the model runs a /re line here; ~a is the line
+  :ARGUMENT-NAME     a function of a tool argument's name answering how it
+                     is spelled where the model calls the tool, or NIL for
+                     as the engine spells it
+  :TYPE-BOOLEAN      what /re doc says an argument that is true or false takes
+  :TYPE-OBJECT       the same for an object; ~{~} is its members' names,
+                     when the schema lists them
+  :TYPE-OBJECTS      for an array of objects, likewise
+  :TYPE-STRINGS      for an array of strings
+  :DOC-TAKES         the line of /re doc over a tool's arguments: how a call
+                     to the tool ~a (or ~s) is written here
   :MANUAL-START      the manual rizin_command answers for an empty command
                      is the engine's (tools-core.lisp, MANUAL) around four
                      parts in the host's words. This one opens it: how the

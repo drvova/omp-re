@@ -205,7 +205,7 @@ as further values; a refusal is signalled."
            (has "/re carry <manifest>" (re:slash "help")))
     (check "with no manifest it says how it is used, flags or no flags"
            (every (lambda (line)
-                    (equal "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]"
+                    (equal "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit] [--strict] [--out <path>]"
                            (refusal (lambda () (re:slash line)))))
                   '("carry" "carry --strict --inherit" "carry --out x.md" "carry --against")))
     (check "a manifest that is not there is refused by name, as is a folder"
@@ -459,32 +459,13 @@ as further values; a refusal is signalled."
               (check "what was inherited verifies here like any other evidence"
                      (has "2 reproducible, 0 FAILED, 0 unverifiable" (re:slash "verify"))))
 
-            ;; Again: a claim already live is not inherited twice. And --resolve.
-            (let ((text (refusal (lambda () (re:slash (format nil "carry ~a --resolve" manifest-path))))))
-              (check "a second carry inherits nothing twice, and --resolve says what a host with no turn to start does"
-                     (and (has (format nil "~%inherit: 0 finding(s) re-proven on this build and recorded, 2 need another look, 2 already present~%resolve: a headless run cannot start a model turn from a command — the agenda for 2 finding(s) follows; pass it to the model as the next prompt~%These findings from the earlier report do not carry over unchanged")
+            ;; Again: a claim already live is not inherited twice.
+            (let ((text (refusal (lambda () (re:slash (format nil "carry ~a --inherit" manifest-path))))))
+              (check "a second carry inherits nothing twice, and the agenda for what is left follows the summary"
+                     (and (has (format nil "~%inherit: 0 finding(s) re-proven on this build and recorded, 2 need another look, 2 already present~%These findings from the earlier report do not carry over unchanged")
                                text)
                           (= 2 (length (omp-re::evidence-records session)))
                           (= 2 (length (omp-re::live-findings session))))))
-            ;; Where an operator is watching, the agenda is theirs to send.
-            (with-service (:has-ui (lambda () t))
-              (multiple-value-bind (text failed reply)
-                  (omp-re::run-slash-line session (format nil "carry ~a --resolve" manifest-path))
-                (check "with an operator watching, --resolve asks for the agenda to be sent as their next message, and the line only says so"
-                       (and failed
-                            (has "resolve: sent 2 finding(s) to the model to re-examine" text)
-                            (not (has "These findings from the earlier report" text))
-                            (starts "These findings from the earlier report" (getf reply :user-message))
-                            (null (getf reply :draft))
-                            (eq :error (getf reply :level)))))
-              (multiple-value-bind (text failed reply)
-                  (omp-re::run-slash-line session (format nil "carry ~a --inherit" manifest-path))
-                (declare (ignore failed))
-                (check "without --resolve the agenda is offered as a draft, under the summary as its notice"
-                       (and (not (has "These findings from the earlier report" text))
-                            (starts "These findings from the earlier report" (omp-re::draft-text (getf reply :draft)))
-                            (string= text (omp-re::draft-notice (getf reply :draft)))
-                            (null (getf reply :user-message))))))
             (multiple-value-bind (result text failed) (carried manifest-path :inherit t)
               (declare (ignore text failed))
               (let ((inheritance (gethash "inheritance" result)))
@@ -509,7 +490,7 @@ as further values; a refusal is signalled."
             (re:open v1)
             (check "on the same build --inherit re-proves every finding and there is no agenda"
                    (ends (format nil "~%  HOLDS     It holds a string of its own.~%inherit: 4 finding(s) re-proven on this build and recorded, 0 need another look")
-                                  (re:slash (format nil "carry ~a --resolve --strict" manifest-path))))
+                                  (re:slash (format nil "carry ~a --inherit --strict" manifest-path))))
             (check "all four are live, inherited, and the report can be written from them"
                    (and (has "findings on this branch: 4 (4 inherited)" (re:status))
                         (has "_confidence: confirmed · inherited from `" (re:slash "report"))))

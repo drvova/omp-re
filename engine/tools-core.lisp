@@ -63,9 +63,7 @@ binary would not go back and how many did."
      (loop for (nil nil applied) in replayed sum applied))))
 
 (define-tool "open_binary"
-    (:label "Open binary" :tier :read
-     :render '(:subject "path")
-     :description (lambda ()
+    (:description (lambda ()
                     (format nil "Open a binary for analysis in this session's rizin backend and run full analysis (aaa). Every other RE tool (rizin_command, rizin_cli, the annotate tools, ...) acts on whichever binary was most recently opened here — call this first~a. For a raw/headerless target (flat shellcode, firmware, a ROM dump) pass arch/bits/base/format so rizin loads it correctly instead of autodetecting from a header it doesn't have."
                             (voice :open-binary-note))))
     (("path" :string :required t :doc "Path to the binary file to open.")
@@ -162,9 +160,7 @@ reads RAW-OUTPUT, which is whole where the result's text may be cut."
                     output))))))
 
 (define-tool "rizin_help"
-    (:label "rizin help" :tier :read
-     :render '(:subject "query")
-     :description "Look up rizin commands in the installed rizin's own help: the usage, typed arguments, and summary of a command or command family, or a keyword search across every command. Each entry says whether rizin_command can run it. Use before rizin_command when unsure of a command or its arguments.")
+    (:description "Look up rizin commands in the installed rizin's own help: the usage, typed arguments, and summary of a command or command family, or a keyword search across every command. Each entry says whether rizin_command can run it. Use before rizin_command when unsure of a command or its arguments.")
     (("query" :string :required t :doc "A command or prefix (`pd`, `afv`, `/R`, `ph`) for its usage and arguments, or keywords (`entropy`, `rop gadgets`, `call graph`) to find commands."))
     (arguments)
   (multiple-value-bind (header lines) (search-catalog (load-catalog) (jstring arguments "query"))
@@ -181,11 +177,7 @@ evidence record => (values RESULT EVIDENCE-ID)."
     (values result id)))
 
 (define-tool +read-tool+
-    (:label "rizin command" :tier :exec :evidence t
-     :reason (list "Run the rizin command "
-                   (approval-slot '(("command" :missing "?") ("addr" :prefix " @ ")) :clip 120)
-                   " on the open binary.")
-     :render '(:title "rizin" :subject "command")
+    (:evidence t
      :description "omp-re's primary way to read a binary: run one read-only rizin command against the open binary and compose calls in eval. This is how you list functions (aflj), decompile (pdg/pdd), read strings/imports/exports/symbols/sections (izj, iij, iej, isj, iSj), xrefs (axtj, axfj), types (tsj), headers (iHj), hexdumps (px), entropy (ph entropy), and run byte/string/ROP searches (/xj, /Rj) — plus the rest of rizin's print, info, search, graph, and listing commands. Prefer the JSON `*j` forms. Commands that write, set config, open files, run shell commands, or change analysis are refused; annotate with the dedicated tools instead. Call rizin_help first for a command's exact arguments. Pass an empty command for the omp-re manual (needs no open binary).")
     (("command" :string :required t :doc "One read-only rizin command with its arguments, e.g. `aflj`, `pdg`, `izj`, `agc ascii`, `px 64`, `/xj 4889e5`, `ph entropy 4096`. No `;`, `|`, `>`, `@`, or `~`. Pass an empty string to get the omp-re manual.")
      ("addr" :string :doc "Address or name to run the command at (sent as `@ <addr>`)."))

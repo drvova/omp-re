@@ -369,7 +369,7 @@ export class Engine {
 	}
 
 	/** Ask the engine `method`. Aborting `signal` tells the engine the caller gave up; the answer, which then says so, is still what settles this. */
-	async request<M extends EngineRequest>(method: M, params: ToEngine[M]["params"], signal?: AbortSignal, onId?: (id: number) => void): Promise<ResultOf<ToEngine, M>> {
+	async request<M extends EngineRequest>(method: M, params: ToEngine[M]["params"], signal?: AbortSignal): Promise<ResultOf<ToEngine, M>> {
 		await this.#ready;
 		if (this.#failed) throw this.#failed;
 		if (JSON.stringify(environment()) !== this.#sentEnvironment) this.notify("environment", this.#takeEnvironment());
@@ -377,7 +377,6 @@ export class Engine {
 		const cancel = () => this.notify("cancel", { id });
 		const answer = this.#send(method, params, (taken) => {
 			id = taken;
-			onId?.(taken);
 		});
 		if (signal?.aborted) cancel();
 		else signal?.addEventListener("abort", cancel, { once: true });

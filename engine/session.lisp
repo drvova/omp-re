@@ -41,7 +41,6 @@
   (synced-length -1)                    ; and how many there were then
   (applied '())                         ; ((CONTRIBUTION-NAME . FINGERPRINT) ...) of what the live rizin carries
   (kept '())                            ; ((NAME . VALUE) ...): what a tool group or a host keeps for the session
-  (tools-off nil)
   (audit-warned nil)                    ; the operator was told this session's audit log is unsigned
   (calls 0)
   (artifacts 0)

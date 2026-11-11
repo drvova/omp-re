@@ -99,7 +99,7 @@ STRICT, so resuming an old session never spuriously breaks a pipeline."
 
 (define-slash "verify" (:usage "[--strict]"
                         :description "re-run cited rizin commands and check recorded output hashes"
-                        :order 100 :row (90 "Verify" :detail "re-run the evidence and compare"))
+                        :order 100)
     (words)
   (multiple-value-bind (text failed) (verify-evidence :strict (and (member "--strict" words :test #'string=) t))
     (values text failed)))

@@ -132,7 +132,8 @@ whose reproducibility fields are what /re verify later re-runs."
   (format nil "~a @ ~a" (jstring record "tool") (or (jstring record "ea") "?")))
 
 (defun cite-text (record)
-  "RECORD as the start of a message about it: what /re cite drafts."
+  "RECORD as the start of a message about it: what /re cite answers, and
+what choosing it in a list on a screen puts in the operator's input box."
   (format nil "Re: evidence ~a (~a)~%~%~a" (shown-id (jstring record "id")) (evidence-place record)
           (jstring record "summary")))
 

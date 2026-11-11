@@ -27,7 +27,7 @@ The first line the engine writes is one of
 <!-- protocol:ready -->
 | Line | Meaning |
 |---|---|
-| `{"ready": 3}` | loaded; the number is the protocol version |
+| `{"ready": 4}` | loaded; the number is the protocol version |
 | `{"fatal": "…"}` | it could not load; the text says what to install. The process exits with status 3 |
 <!-- /protocol:ready -->
 
@@ -70,13 +70,11 @@ Most of omp's requests are about a session and carry
 |---|---|---|
 | `hello` | `protocol: integer`, `variables: {name: string, …}`, `stateDir: string` | `{protocol: integer, version: string, started: "source" \| "image"}` |
 | `environment` (notification) | `variables: {name: string, …}`, `stateDir: string` |  |
-| `describe` |  | `{tools: [tool…], commands: [command…]}` |
-| `call` | `session: session`, `name: string`, `arguments: object`, `callId: string` | `{text: string, failed: boolean, refused?: boolean, details?: details, state: state}` |
-| `command` | `session: session`, `line: string` | `{text: string, failed: boolean, level: level, draft?: {text: string, notice: string}, userMessage?: string, state: state}` |
+| `call` | `session: session`, `name: string`, `arguments: object`, `callId?: string` | `{text: string, failed: boolean, refused?: boolean, raw?: string, evidence?: string, details?: details, state: state}` |
+| `command` | `session: session`, `line: string` | `{text: string, failed: boolean, state: state}` |
 | `view` | `session: session`, `kind: string`, `arg?: object` | `view` |
 | `preserved` | `session: session` | `{lines: [string…]}` |
-| `approval` | `session: session`, `callId: string`, `tool: string`, `approved: boolean`, `reason?: string` | `{}` |
-| `event` | `session: session`, `kind: "start" \| "switch" \| "tree" \| "branch" \| "before-switch" \| "shutdown"`, `previous?: string`, `binary?: string` | `{state?: state}` |
+| `event` | `session: session`, `kind: "start" \| "switch" \| "tree" \| "branch" \| "before-switch" \| "shutdown"`, `previous?: string` | `{state?: state}` |
 | `cancel` (notification) | `id: integer` |  |
 | `shutdown` (notification) |  |  |
 <!-- /protocol:toEngine -->
@@ -144,7 +142,6 @@ For the first four the analysis runs after the answer, holding the session, so a
 | `judge` | `session: string`, `prompt: string`, `seconds: number` | `{text?: string, reason?: string}` |
 | `saveArtifact` | `session: string`, `content: string`, `label: string` | `{id?: string}` |
 | `readArtifact` | `session: string`, `id: string` | `{text?: string}` |
-| `keepSession` | `session: string`, `name: string` | `{}` |
 | `notify` (notification) | `session: string`, `text: string`, `level: level` |  |
 | `tell` (notification) | `session: string`, `text: string`, `level: level` |  |
 | `progress` (notification) | `session: string`, `request: integer \| null`, `text: string \| null` |  |
@@ -172,15 +169,11 @@ All but `alive` name the `session` they are for, by its id.
 <!-- protocol:types -->
 | Type | Is |
 |---|---|
-| `session` | `{id: string, cwd: string, hasUI: boolean, memory?: object}` |
+| `session` | `{id: string, cwd: string}` |
 | `level` | `"info" \| "warning" \| "error"` |
-| `state` | `{band: [string…] \| null, evidence: [[string, string]…], memory: object}` |
+| `state` | `{band: [string…] \| null}` |
 | `entry` | `{id: string, customType: string, data: json}` |
 | `details` | `{ea?: string, truncated?: boolean, artifactId?: string, artifactPath?: string, commands?: [string…], reproHash?: string, canonicalExcerpt?: string, shiftHash?: string, evidenceId?: string}` |
-| `reasonCase` | `{when?: [({arg: string, equals?: json, type?: "string" \| "number"})…], parts: [(string \| {pieces: [{arg: string, prefix?: string, missing?: string}…], quote?: boolean, clip?: integer})…]}` |
-| `render` | `{title: string, subject?: string, body: "text" \| "json" \| "none"}` |
-| `tool` | `{name: string, label?: string, description: string, parameters: object, approval: "read" \| "write" \| "exec", approvalReason?: [reasonCase…], render?: render}` |
-| `command` | `{name: string, usage?: string, description: string, view?: boolean, completes?: "evidence"}` |
 | `viewRequest` | `{kind: string, arg?: object}` |
 | `row` | `{value: string, label: string, description?: string, enter: {draft: string} \| {view: viewRequest}}` |
 | `view` | `{type: "notice", text: string, level: level} \| {type: "panel", title: string, hint: string, rows: [row…]} \| {type: "code", title: string, disasm: [string…], decompile?: {label: string, note: string, tone: "dim" \| "warning", code: string, language?: string}, noDecompile: string, ask: string, xrefs: viewRequest}` |
@@ -195,9 +188,10 @@ All but `alive` name the `session` they are for, by its id.
 |---|---|
 | `entryPrefix` | `"re."` |
 | `environmentPrefix` | `"OMPRE_"` |
-| `completedEvidence` | `200` |
 | `judgeSeconds` | `30` |
 | `aliveSeconds` | `5` |
+| `bridgeVersion` | `1` |
+| `bridgeDirectory` | `"omp-re"` |
 <!-- /protocol:constants -->
 
 `judgeSeconds` is what the engine gives omp's side model for a support audit.

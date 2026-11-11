@@ -1,32 +1,56 @@
 /*
- * recipes.js — wide reads composed over the one read tool, for omp's eval:
- * triage, imports, one function, comparisons, cryptographic constants.
+ * recipes.js — omp-re in omp's eval, for the JavaScript kernel: the verbs that
+ * reach the engine, and the recipes composed over them.
  *
  * SPDX-License-Identifier: MIT
  *
- * Load it once a session, in a standalone JavaScript eval cell:
+ * Load it once per kernel, in a JavaScript eval cell that holds only this line:
  *
  *   %load skill://re-triage/recipes.js
  *
- * (or `%load` with this file's path). It defines one global, `re`:
+ * (or `%load` with this file's path). It defines one global, `re`. Every
+ * function of it is async:
+ *
+ *   await re.open("/path/to/binary");                  // open and analyze; do this first
+ *   print(await re.cmd("pdg", "main"));                // one read-only rizin command, its text
+ *   const { data, evidence } = await re.json("aflj");  // a *j command, as data, with its evidence id
+ *   await re.call("set_comment", { addr: "main", text: "entry" });   // any other tool
+ *   print(await re.tools()); print(await re.doc("record_finding"));
+ *   print(await re.slash("report out.md"));            // a line: evidence, findings, verify, report, carry, undo
+ *   print(await re.status()); print(await re.help());  // the session's state; the engine's manual
  *
  *   print(await re.triage({ maxStrings, maxFunctions }));
  *   print(await re.scanImports({ callers, maxCallers }));
  *   print(await re.inspectFunction("main", { maxItems }));
  *   print(await re.findComparisons("main", { maxItems }));
  *   print(await re.findCrypto({ references }));
- *   print(re.help());
+ *   print(re.recipes());                               // what each recipe answers and takes
  *
- * Each answers its report as a string and prints nothing.
+ * Each answers a string and prints nothing (re.json answers data). A call
+ * the engine refuses, or that failed, throws with the engine's words.
  *
- * These are not tools, and nothing here is registered with omp.
- * rizin_command is the one way to read the binary and eval is where reads
- * are composed; a recipe is that composition, written once: the dozen reads
- * every analysis opens with and a plain reading of them. Every read a recipe
- * makes is `await tool.rizin_command(...)` — a tool call in its own right,
- * approved, audited and recorded as evidence like one typed by hand — so a
- * recipe can do nothing the model could not, and `/re off` stops it at its
- * first read.
+ * A JavaScript kernel is ended by a cell that runs past its timeout or is
+ * interrupted, and `re` goes with it: run the load line again. omp-re says
+ * so when a cell fails for want of it.
+ *
+ * Nothing here is a tool, and nothing is registered with omp. The engine
+ * runs beside omp, and omp gives a plugin no way to put anything into an
+ * eval kernel; so the plugin listens on the loopback interface of this
+ * machine and this file asks it (extensions/re/bridge.ts). The listener is
+ * found by a file only this user can read, named for the omp process this
+ * kernel is a child of, which holds its address and the token every request
+ * must carry. Each request says which session the kernel serves, as omp
+ * told the kernel.
+ *
+ * The verbs are written from recipes/api.json by scripts/gen-api.ts, which
+ * writes the same verbs for the Python kernel (recipes.py, as `omp_re`) and
+ * for the nodecode host (nodecode/verb-forms.lisp) — edit the JSON and run
+ * the script, never the marked block.
+ *
+ * A recipe is a composition of reads, written once: the dozen reads every
+ * analysis opens with and a plain reading of them. Every read a recipe makes
+ * is one rizin_command call — audited and recorded as evidence like one made
+ * by hand — so a recipe can do nothing the model could not.
  *
  * A recipe is not an oracle and must not read like one. Every section names
  * the evidence id of the read it rests on, so a line here is a pointer to an
@@ -34,21 +58,20 @@
  * still has to cite those ids to pass record_finding. The tables are
  * judgement, worded as "worth a look", never as a verdict.
  *
- * This file has two twins: recipes.py beside it, the same five for omp's
- * Python kernel (as `omp_re`, since `re` there is the regex module), and
- * nodecode/recipes.lisp, the same five as Lisp verbs for the nodecode host.
- * All three answer the same text for the same binary, reads and all, and
- * test/recipes-eval.test.ts holds them to it.
+ * This file has two twins: recipes.py and nodecode/recipes.lisp, the same
+ * five recipes for the other two hosts. All three answer the same text for
+ * the same binary, reads and all, and test/recipes-eval.test.ts holds them
+ * to it.
  *
  * What a recipe reads, in which order, how each section is worded, its
  * options and their bounds, the tables and every sentence are data: they
  * live in recipes/tables.json, and scripts/gen-recipes.ts writes them into
  * the marked block below — edit the JSON and run the script, never the
  * block. This file keeps what JavaScript forces on it (rizin's JSON with its
- * integers whole, the bridge for one read, how a number is printed), the
- * loop that renders a recipe from that data, and under FACTS the few things
- * a section needs code for. A change to any of those is a change in the
- * other two files.
+ * integers whole, the way to the engine, how a number is printed), the loop
+ * that renders a recipe from that data, and under FACTS the few things a
+ * section needs code for. A change to any of those is a change in the other
+ * two files.
  *
  * The one place the three hosts' words differ is a refusal that says how to
  * list functions: each names its own call (the data's `host.listFunctions`).
@@ -72,8 +95,8 @@ const TABLES = {
   thresholds: {veryHighEntropy:7.2,highEntropyForCode:6.8,fewImports:8,shortConstantHexDigits:8},
   limits: {lineWidth:100,triageRiskyImports:20,cryptoMaterial:40,cryptoHits:60,cryptoReferences:8},
   whitespace: [9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279],
-  text: {more:["  … ",{get:["hidden"],as:"d"}," more ",{get:["what"]}," not shown"],evidenceTaken:"Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",evidenceRow:["  ",{get:[".id"]},"  ",{get:[".label"]}],nameless:"?",refusals:{notAString:["omp-re: ",{get:["recipe"]},": a function is named by a string, not ",{get:["given"]}],optionsNotOneObject:["omp-re: ",{get:["recipe"]},": options are one object, e.g. { maxItems: 20 }, not ",{get:["given"]}],noFunction:["omp-re: ",{get:["recipe"]},": no function at ",{get:["addr"]}," — list them with ",{get:["listFunctions"]},", or define one with define_function"],noInstructions:["omp-re: ",{get:["recipe"]},": no function at ",{get:["addr"]}," — list them with ",{get:["listFunctions"]}],cutOutput:["omp-re: ",{get:["recipe"]},": the output of rizin_command ",{get:["label"],as:"json"}," was cut at the size cap and the whole of it could not be read back (",{get:["why"]},"). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands."],cutNoArtifact:["the engine saved no artifact for it"],cutUnreadable:["artifact://",{get:["artifact"]},": ",{get:["error"]}],cutNotText:["artifact://",{get:["artifact"]}," did not read as text"]}},
-  host: {listFunctions:"await tool.rizin_command({ command: \"aflj\" })",help:"omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own\nrizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.\nOpen a binary first (await tool.open_binary({ path })).\n\n  await re.triage({ maxStrings = 25, maxFunctions = 15 })\n      what the binary is, build protections, sections with entropy, imports and what they reach,\n      notable strings, the largest functions, entry points.\n  await re.scanImports({ callers = true, maxCallers = 12 })\n      the imports a reviewer stops at, why, and who calls each; what the program can reach.\n  await re.inspectFunction(\"main\", { maxItems = 30 })\n      one function's shape, variables, callers, callees and the strings it refers to.\n  await re.findComparisons(\"main\", { maxItems = 80 })\n      every compare with the branch that follows, calls that compare or validate, strings on the way.\n  await re.findCrypto({ references = true })\n      rizin's key and certificate search, and where published constants of common algorithms lie.\n\nEvery section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the\nreads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",loaded:"omp-re recipes loaded: re.triage, re.scanImports, re.inspectFunction, re.findComparisons, re.findCrypto — print(re.help()) says what each answers."},
+  text: {more:["  … ",{get:["hidden"],as:"d"}," more ",{get:["what"]}," not shown"],evidenceTaken:"Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",evidenceRow:["  ",{get:[".id"]},"  ",{get:[".label"]}],nameless:"?",refusals:{notAString:["omp-re: ",{get:["recipe"]},": a function is named by a string, not ",{get:["given"]}],optionsNotOneObject:["omp-re: ",{get:["recipe"]},": options are one object, e.g. { maxItems: 20 }, not ",{get:["given"]}],noFunction:["omp-re: ",{get:["recipe"]},": no function at ",{get:["addr"]}," — list them with ",{get:["listFunctions"]},", or define one with define_function"],noInstructions:["omp-re: ",{get:["recipe"]},": no function at ",{get:["addr"]}," — list them with ",{get:["listFunctions"]}]}},
+  host: {listFunctions:"await re.json(\"aflj\")",help:"omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own\nrizin_command call (audited, recorded as evidence). Each returns its report as a string; print() it.\nOpen a binary first (await re.open(path)).\n\n  await re.triage({ maxStrings = 25, maxFunctions = 15 })\n      what the binary is, build protections, sections with entropy, imports and what they reach,\n      notable strings, the largest functions, entry points.\n  await re.scanImports({ callers = true, maxCallers = 12 })\n      the imports a reviewer stops at, why, and who calls each; what the program can reach.\n  await re.inspectFunction(\"main\", { maxItems = 30 })\n      one function's shape, variables, callers, callees and the strings it refers to.\n  await re.findComparisons(\"main\", { maxItems = 80 })\n      every compare with the branch that follows, calls that compare or validate, strings on the way.\n  await re.findCrypto({ references = true })\n      rizin's key and certificate search, and where published constants of common algorithms lie.\n\nEvery section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the\nreads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",loaded:"omp-re loaded: re.open, re.cmd, re.json, re.call, re.tools, re.doc, re.slash, re.status, re.help, and the recipes re.triage, re.scanImports, re.inspectFunction, re.findComparisons, re.findCrypto. Every one is async: await it. print(await re.help()) is the manual; print(re.recipes()) says what each recipe answers."},
   recipes: [
     {name:"triage",call:"triage",takes:false,options:[{name:"maxStrings",default:25,least:1,most:200},{name:"maxFunctions",default:15,least:1,most:100}],steps:[{read:"path",command:"ij"},{read:"info",command:"iIj"},{read:"sectionData",command:"iSj entropy"},{read:"imports",command:"iij"},{read:"strings",command:"izj"},{read:"functionData",command:"aflj"},{read:"entries",command:"iej"},{derive:"triage"}],title:["triage: ",{get:["path.core.file"],or:"?"}],sections:[{title:["Identity ",{cite:"@info"}],lines:[["  ",{get:["info.class","info.bintype"],or:"unknown format"},", ",{get:["info.arch"],or:"?"}," ",{get:["info.bits"],as:"d",or:"?"},"-bit ",{get:["info.endian"],or:""},", ",{get:["info.os"],or:"?"},{group:[", language ",{get:["info.lang"]}]},{group:[", interpreter ",{get:["info.intrp"]}]}]]},{title:["Build protections ",{cite:"@info"}],lines:[["  stack canary: ",{choose:"info.canary",yes:"yes",no:"NO — a stack overflow reaches the return address unchecked"}],["  NX: ",{choose:"info.nx",yes:"yes",no:"NO — data pages are executable"}],["  PIE: ",{choose:"info.pie",yes:"yes",no:"NO — the image loads at a fixed address"}],["  RELRO: ",{get:["info.relro"],or:"none"},{group:[{if:"info.relro",is:"partial"}," — the GOT stays writable"]},{group:[{unless:"info.relro",is:"partial"},{unless:"info.relro",is:"full"}," — the GOT and other relocated data stay writable"]}],["  fortified libc calls: ",{choose:"info.fortify_source",yes:"yes",no:"no"}],["  stripped: ",{choose:"info.stripped",yes:"yes",no:"no"},"   static: ",{choose:"info.static",yes:"yes",no:"no"}]]},{title:["Sections: ",{count:"sections"}," ",{cite:"@sectionData"}],rows:"sections",row:["  ",{get:[".section.name"],padRight:18}," ",{get:[".section.perm"],padRight:4,or:""}," ",{get:[".section.size"],as:"d",padLeft:9,or:"0"}," bytes  entropy ",{get:[".entropy"],as:"f2",padLeft:4,or:"?"},{group:[{if:".notes"},"  <- ",{join:".notes",with:"; "}]}],after:[[{group:[{if:"flagged"},"  ",{count:"flagged"}," section",{plural:"flagged",one:"",many:"s"}," stand",{plural:"flagged",one:"s",many:""}," out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list."]}]]},{title:["Imports: ",{count:"imports"}," ",{cite:"@imports"}],lines:[[{group:[{if:"reach"},"  reach, by what it links: ",{join:"reach",with:", "}]},{group:[{unless:"reach"},"  none of the capability groups (network, process control, injection, …) is linked"]}],[{group:[{if:"riskyShown"},"  worth a reviewer's look: ",{join:"riskyShown",with:", "}," — scan_imports says why and who calls them"]}],[{choose:"fewImports",yes:"  very few imports for a dynamic binary: resolved at run time, or packed",no:""}]]},{title:["Strings: ",{count:"strings"},"; notable ",{count:"notable"}," ",{cite:"@strings"}],rows:"notable",limit:"maxStrings",row:["  ",{get:[".kind"],padRight:11}," ",{get:[".entry.vaddr"],as:"x",or:"?"},"  ",{get:[".entry.string"],as:"line",or:""}],more:"notable strings"},{title:["Functions: ",{count:"functions"},"; largest by code size ",{cite:"@functionData"}],rows:"functions",limit:"maxFunctions",row:["  ",{get:[".offset",".addr"],as:"x",or:"0x0"},"  ",{get:[".realsz",".size"],as:"d",padLeft:7,or:"0"}," bytes  ",{group:[{get:[".nbbs"],as:"d"}," blocks  "]},{get:[".name"],or:"?"}],more:"functions"},{title:["Entry points ",{cite:"@entries"}],rows:"entries",row:["  ",{get:[".vaddr"],as:"x"},"  ",{get:[".type"],or:""}],empty:["  none reported"]}]},
     {name:"scan_imports",call:"scanImports",takes:false,options:[{name:"callers",flag:true},{name:"maxCallers",default:12,least:1,most:100}],steps:[{read:"imports",command:"iij"},{derive:"scanImports"}],title:["scan_imports: ",{count:"imports"}," imports, ",{count:"risky"}," worth a look"],sections:[{title:["Reach, by what it links ",{cite:"@imports"}],rows:"reach",row:["  ",{get:[".capability"],padRight:18}," ",{join:".names",with:", "}],empty:["  none of the capability groups is linked"]},{title:["Imports worth a reviewer's look ",{cite:"@imports"}],rows:"risky",row:["  [",{get:[".severity"]},"] ",{get:[".bare"]},{group:[" (linked as ",{get:[".linkedAs"]},")"]}," (",{get:[".category"]},")",{group:[" @ ",{get:[".plt"],as:"x"}]}," — ",{get:[".why"]}],under:[{when:".traced",rows:".places",limit:"maxCallers",line:["      called from ",{count:".places"}," place",{plural:".places",one:"",many:"s"}," ",{cite:".@places"},": ",{join:"shown",with:", "}],empty:["      no caller found by analysis ",{cite:".@places"}],more:"callers"}],empty:["  none of the imports in the table is linked"]},{lines:[["An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."]]}]},
@@ -296,54 +319,217 @@ const TABLES = {
 
 	const refusal = (name, facts) => new Error(fill(TEXT.refusals[name], facts));
 
-	// --- one observation -----------------------------------------------------------------------
+	// --- the way to the engine ---------------------------------------------------------------------
 
-	// How much of an evidence record's id the engine shows, in a tag and in a report, and takes in record_finding.
-	const SHOWN_ID = 8;
+	const fs = require("node:fs");
+	const http = require("node:http");
+	const os = require("node:os");
+	const path = require("node:path");
 
-	/** The id of the evidence record a call left, as it is cited. The engine says it as data: the text is the binary's own and may hold anything. */
-	const evidenceId = (details) => (typeof details.evidenceId === "string" ? details.evidenceId.slice(0, SHOWN_ID) : undefined);
-
-	/**
-	 * The whole of what rizin printed for a call. A result's text is the header line, the output,
-	 * and, when the call left an evidence record, one last line that names it; past the size cap the output in the text is cut — for a `*j` command,
-	 * whose JSON is one line, cut to nothing — and the engine keeps all of it as a session
-	 * artifact, which eval's own read() returns raw. A recipe that parsed cut JSON would report a
-	 * binary with no functions, so when the whole output cannot be had it stops and says so.
-	 */
-	async function wholeOutput(run, label, text, details) {
-		const afterHeader = (full) => (full.includes("\n") ? full.slice(full.indexOf("\n") + 1) : "");
-		const recorded = evidenceId(details) !== undefined && text.includes("\n");
-		if (details.truncated !== true) return afterHeader(recorded ? text.slice(0, text.lastIndexOf("\n")) : text);
-		const lost = (why, more) => refusal("cutOutput", { recipe: run.name, label, why: fill(TEXT.refusals[why], more) });
-		const artifact = details.artifactId;
-		if (typeof artifact !== "string") throw lost("cutNoArtifact");
-		let full;
-		try {
-			full = await read(`artifact://${artifact}`);
-		} catch (error) {
-			throw lost("cutUnreadable", { artifact, error: error instanceof Error ? error.message : String(error) });
-		}
-		if (typeof full !== "string") throw lost("cutNotText", { artifact });
-		return afterHeader(full);
+	/** What this kernel serves, as omp told it: omp keys a kernel `js:session:<session file>:cwd:<cwd>`, or `js:cwd:<cwd>` for a session with no file. */
+	function kernel() {
+		const key = String(globalThis.__omp_session__?.sessionId ?? "");
+		const at = key.lastIndexOf(":cwd:");
+		const head = "js:session:";
+		if (at === -1) return { language: "js", cwd: process.cwd() };
+		return { language: "js", cwd: key.slice(at + ":cwd:".length), sessionFile: key.startsWith(head) ? key.slice(head.length, at) : undefined };
 	}
 
+	/** One request of omp's listener => { status, body }. node:http and not fetch: Bun's fetch sends a loopback request to HTTP_PROXY when one is set, and gives up on a silent one after five minutes. */
+	function post(found, method, body) {
+		const sent = JSON.stringify({ kernel: kernel(), ...body });
+		const { promise, resolve, reject } = Promise.withResolvers();
+		const request = http.request(
+			`${found.url}/v${BRIDGE.version}/${method}`,
+			{ method: "POST", agent: false, headers: { authorization: `Bearer ${found.token}`, "content-type": "application/json", "content-length": Buffer.byteLength(sent) } },
+			(response) => {
+				let received = "";
+				response.setEncoding("utf8");
+				response.on("data", (chunk) => (received += chunk));
+				response.on("end", () => {
+					try {
+						resolve({ status: response.statusCode, body: JSON.parse(received) });
+					} catch {
+						reject(new Error(`omp-re: omp's listener answered what is not JSON (status ${response.statusCode})`));
+					}
+				});
+				response.on("error", reject);
+			},
+		);
+		request.on("error", reject);
+		request.end(sent);
+		return promise;
+	}
+
+	/** The directories the listener's file may be in: the same two extensions/re/bridge.ts works out. */
+	function bridgeDirectories() {
+		const runtime = (process.env.XDG_RUNTIME_DIR ?? "").trim();
+		const own = path.join(os.tmpdir(), `${BRIDGE.directory}-${process.getuid?.() ?? "user"}`);
+		return runtime ? [path.join(runtime, BRIDGE.directory), own] : [own];
+	}
+
+	/** The listener a file names, or nothing: a file that is not this user's own, or not a listener's, names none. */
+	function readBridge(file) {
+		try {
+			if (process.getuid && fs.statSync(file).uid !== process.getuid()) return undefined;
+			const found = JSON.parse(fs.readFileSync(file, "utf8"));
+			return typeof found?.url === "string" && typeof found?.token === "string" ? found : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	let bridge;
+
 	/**
-	 * One rizin_command call — the same approval, audit line and evidence record as any other —
-	 * answering its whole output and the id of its record. A refused call throws from the tool;
-	 * one rizin answered with an error comes back marked, and is thrown here with rizin's words.
+	 * Find omp's listener. It is the one of the omp process this kernel is a child of; a kernel omp runs
+	 * as a thread of its own process is that process. Where neither has one — a launcher stands between
+	 * omp and the kernel — a listener that knows this kernel's session file is the one, and a session
+	 * with no file has no such name to be known by.
+	 */
+	async function connect() {
+		const directories = bridgeDirectories();
+		const own = [process.ppid, process.pid].flatMap((pid) => directories.map((directory) => path.join(directory, `${pid}.json`)));
+		const others = kernel().sessionFile === undefined ? [] : directories.flatMap((directory) => {
+			try {
+				return fs.readdirSync(directory).filter((name) => name.endsWith(".json")).map((name) => path.join(directory, name));
+			} catch {
+				return [];
+			}
+		});
+		for (const file of [...own, ...others.filter((file) => !own.includes(file))]) {
+			const found = readBridge(file);
+			if (!found) continue;
+			if (found.bridge !== BRIDGE.version) throw new Error(`omp-re: this library speaks version ${BRIDGE.version} of the way to omp-re's engine and the plugin loaded in omp version ${found.bridge}: load the library of the plugin omp runs`);
+			let answer;
+			try {
+				answer = await post(found, "whoami", {});
+			} catch {
+				continue;
+			}
+			if (answer.status === 200) return found;
+			// omp's own listener is there and will not serve this kernel: its reason is the answer.
+			if (own.includes(file) && answer.status !== 401) throw new Error(answer.body?.error ?? `omp-re: omp's listener refused this kernel (status ${answer.status})`);
+		}
+		throw new Error(`omp-re: no omp-re listener for this eval kernel was found in ${directories.join(" or ")}. The plugin is not loaded in this omp, or is switched off (OMPRE_DISABLED=1).`);
+	}
+
+	/** Ask omp's listener `method` => the engine's answer. A listener that is gone, or no longer knows the token, is looked for again once: omp may have started another. */
+	async function ask(method, body) {
+		for (let again = false; ; again = true) {
+			bridge ??= await connect();
+			let answer;
+			try {
+				answer = await post(bridge, method, body);
+			} catch (error) {
+				bridge = undefined;
+				if (again || error?.code !== "ECONNREFUSED") throw error;
+				continue;
+			}
+			if (answer.status === 200) return answer.body;
+			if (answer.status === 401 && !again) {
+				bridge = undefined;
+				continue;
+			}
+			throw new Error(answer.body?.error ?? `omp-re: omp's listener answered status ${answer.status}`);
+		}
+	}
+
+	const engineCall = (name, given) => ask("call", { name, arguments: given });
+	const engineLine = (line) => ask("command", { line });
+
+	// --- what a verb is written in ---------------------------------------------------------------------
+
+	/** The engine's text, or an error carrying it when the call was refused or failed. */
+	function text(answer) {
+		if (answer.failed) throw new Error(answer.text);
+		return answer.text;
+	}
+
+	/** The data a `*j` command printed, whole, and the id of the evidence record the read left. */
+	function data(command, answer) {
+		text(answer);
+		const decoded = parseJson(trim(answer.raw ?? ""));
+		if (decoded === undefined) throw new Error(`${command} did not answer JSON; read it with re.cmd(${JSON.stringify(command)}) instead`);
+		return { data: decoded, evidence: answer.evidence };
+	}
+
+	const shown = (value) => (typeof value === "function" ? "a function" : encode(value));
+	const refused = (before, given, after) => new TypeError(`${before}${shown(given)}${after}`);
+
+	/** The further arguments of a verb: one object, or nothing. */
+	function rest(what, given) {
+		if (given === undefined || given === null) return {};
+		if (!isObject(given)) throw new TypeError(`${what} are one object, e.g. { name: value }, not ${shown(given)}`);
+		return given;
+	}
+
+	// <generated:api> — from recipes/api.json by scripts/gen-api.ts; do not edit
+	const BRIDGE = { version: 1, directory: "omp-re" };
+	const API = {
+		// Open the binary at `path` for this session and analyze it; every other verb acts on the
+		// binary opened last. The options arch, bits, base, map and format force how a raw or
+		// headerless file is loaded.
+		open: async (path, options) => {
+			if (!(typeof path === "string" && trim(path) !== "")) throw refused("a path must be a non-empty string, not ", path, "");
+			return text(await engineCall("open_binary", { ...rest("options", options), path }));
+		},
+		// Run one read-only rizin `command` on the open binary, at `addr` when given: the one way
+		// to read it. An empty command answers the engine's manual.
+		cmd: async (command, addr) => {
+			if (!(typeof command === "string")) throw refused("a rizin command is a string, not ", command, "");
+			return text(await engineCall("rizin_command", { command, addr }));
+		},
+		// Run one read-only rizin `command` whose output is JSON, a *j command, and answer the
+		// data itself with the id of the evidence record the read left. Reads the whole output
+		// even when it is past the size cap a result's text is cut at.
+		json: async (command, addr) => {
+			if (!(typeof command === "string")) throw refused("a rizin command is a string, not ", command, "");
+			return data(command, await engineCall("rizin_command", { command, addr }));
+		},
+		// Call the engine's `tool`, a name the verb tools lists, with its arguments.
+		call: async (tool, arguments) => {
+			if (!(typeof tool === "string")) throw refused("a tool is named by a string, as await re.tools() lists them, not ", tool, "");
+			return text(await engineCall(tool, { ...rest("arguments", arguments) }));
+		},
+		// Every tool the engine offers, one line each.
+		tools: async () => {
+			return text(await engineLine("tools"));
+		},
+		// What the engine's `tool` does and the arguments it takes.
+		doc: async (tool) => {
+			return text(await engineLine(`doc ${tool}`));
+		},
+		// Run one of the lines the engine's text calls /re lines ("functions", "evidence",
+		// "findings", "verify", "report out.md", "undo", "help") and answer what it says.
+		slash: async (line) => {
+			return text(await engineLine(line ?? ""));
+		},
+		// The engine's state for this session: rizin, the open binary, evidence and findings.
+		status: async () => {
+			return text(await engineLine("status"));
+		},
+		// The engine's manual: which rizin commands read what, the tools, the lines, how a result
+		// reads.
+		help: async () => {
+			return text(await engineCall("rizin_command", { command: "" }));
+		},
+	};
+	// </generated:api>
+
+	// --- one observation -----------------------------------------------------------------------
+
+	/**
+	 * One rizin_command call — the same audit line and evidence record as any other — answering
+	 * the whole of what rizin printed and the id of its record. A call the engine refused, or one
+	 * rizin answered with an error, is thrown with the engine's words.
 	 */
 	async function observe(run, command, addr) {
-		const label = addr === undefined ? command : `${command} @ ${addr}`;
-		const result = await tool.rizin_command(addr === undefined ? { command } : { command, addr });
-		const text = typeof result === "string" ? result : String(result?.text ?? "");
-		const details = isObject(result) && isObject(result.details) ? result.details : {};
-		if (isObject(result) && result.hasError === true) throw new Error(text);
-		const id = evidenceId(details);
-		if (id) run.evidence.push({ label, id });
-		// Only a call that printed something carries the command it ran; "(no output)" is the engine's words, not rizin's.
-		const raw = Array.isArray(details.commands) ? await wholeOutput(run, label, text, details) : "";
-		return { raw, id };
+		const answer = await engineCall("rizin_command", { command, addr });
+		text(answer);
+		if (answer.evidence) run.evidence.push({ label: addr === undefined ? command : `${command} @ ${addr}`, id: answer.evidence });
+		// A call that printed nothing has no output to hand over: "(no output)" is the engine's words, not rizin's.
+		return { raw: answer.raw ?? "", id: answer.evidence };
 	}
 
 	/** observe() for a `*j` command: its data, absent when the output was empty or not JSON. */
@@ -573,8 +759,9 @@ const TABLES = {
 	// --- what is handed to eval ----------------------------------------------------------------------
 
 	globalThis.re = {
+		...API,
 		...Object.fromEntries(TABLES.recipes.map((recipe) => [recipe.call, recipe.takes ? async (addr, given) => runRecipe(recipe, addr, given) : async (given) => runRecipe(recipe, undefined, given)])),
-		help: () => HOST.help,
+		recipes: () => HOST.help,
 	};
 	// A %load cell shows the value of the script's last expression, and the source is not echoed: say what now exists.
 	return HOST.loaded;

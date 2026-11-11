@@ -1,4 +1,4 @@
-;;;; cell.lisp --- the primer, the /re command, the declaration.
+;;;; cell.lisp --- the primer, the support auditor, the declaration.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
@@ -45,6 +45,7 @@ it from eval, as verbs in the RE package; each answers a string, but re:json.
   (re:tools)                the tools, one line each.   (re:doc \"tool\")  one tool's arguments.
   (re:slash \"functions\")    a /re line: functions, strings, imports, evidence [id], cite <id>,
                             findings [id], undo, verify [--strict], report [path], carry <manifest>.
+                            /re is only what the engine's text calls a line; this verb runs one.
   (re:status)               rizin, the open binary, evidence and findings so far.
 How a result reads: its first line is a header (rizin> <cmd>); a command that observes the
 binary ends with a line [evidence xxxxxxxx — cite it in record_finding]; a *j command's lines
@@ -64,13 +65,12 @@ Compose in Lisp: a helper you define in eval stays, so a loop over the ten large
 a filter over strings is a defun away. A slow call yields to the background like any eval.
 Safety: every verb above reads or annotates; none runs the sample. Dynamic analysis
 (rizin_debug) exists only when the operator set debugger true, and it executes the binary on
-this machine: use it only when they asked, never on untrusted samples outside a sandbox.
-The operator has the same lines as /re: /re open <path>, /re status, /re report."
+this machine: use it only when they asked, never on untrusted samples outside a sandbox."
   "What (help :re) answers while the cell runs: the omp plugin's re-triage
 skill, in the cell's voice.")
 
 (defparameter +nodecode-voice+
-  '((:open-first . "use /re open <path>, (re:open \"path\") or the open_binary tool first")
+  `((:open-first . "use (re:open \"path\") first")
     (:list-tools . " — (re:tools) lists them")
     (:read-more . "read the rest with (re:cmd …)")
     (:debugger-switch . "the re section's debugger setting")
@@ -79,6 +79,12 @@ skill, in the cell's voice.")
     (:rizin-path . "set the re section's rizin_path (or OMPRE_RIZIN_PATH)")
     (:launcher . "An organism launched from a desktop")
     (:slash . "(re:slash \"~a\")")
+    (:argument-name . ,(lambda (name) (format nil ":~a" (substitute #\- #\_ name))))
+    (:type-boolean . "t or :false")
+    (:type-object . "a list of keys and values~@[ (~{~a~^ ~})~]")
+    (:type-objects . "list of lists of keys and values (~{~a~^ ~})")
+    (:type-strings . "list of strings")
+    (:doc-takes . "(re:call ~s ...) takes:")
     (:manual-start . "omp-re — reverse engineering with rizin, driven from code.
 
 You observe the binary by running rizin's own commands through one tool,
@@ -108,42 +114,6 @@ them and (re:doc \"<name>\") shows one's arguments")
   "The engine's phrases (engine/host.lisp, +VOICE+) that this host says its
 own way: the operator's settings are a config section, and the model reaches
 the tools as verbs in eval.")
-
-;;; --- the operator's command ----------------------------------------------------------
-
-(defun re-dialog ()
-  "What /re offers typed alone: a row a thing it does, as the subcommands
-declare them. A command is its name — nobody types after it — so the lines
-that need a word ask for it."
-  (nle:list-dialog
-   :title "Reverse engineering"
-   :summary "rizin, with every read recorded as evidence"
-   :rows (loop for command in (sort (remove-if-not (lambda (command) (jget command "row"))
-                                                   (coerce (engine-commands) 'list))
-                                    #'< :key (lambda (command) (jget command "row" "position")))
-               for row = (jget command "row")
-               for line = (format nil "/re ~a" (jstring command "name"))
-               collect (if (jstring row "ask")
-                           (nle:ask-row (jstring row "label") (jstring row "ask") line
-                                        :placeholder (jstring row "placeholder")
-                                        :verb (jstring row "verb"))
-                           (apply #'nle:run-row (jstring row "label") line
-                                  (and (jstring row "detail") (list :detail (jstring row "detail"))))))))
-
-(defun run-slash (&optional args session-id)
-  "One /re invocation for the session it was typed in: typed alone, the
-dialog of what it offers; with a line, the engine's answer, and — where the
-caller has an input box and the line offers a draft — the draft put in it."
-  (if (nle:bare-args-p args)
-      (values "Reverse engineering with rizin" (re-dialog))
-      (let* ((answer (engine-command (if (and (stringp session-id) (plusp (length session-id)))
-                                         session-id
-                                         +default-session+)
-                                     args))
-             (draft (jget answer "draft")))
-        (if (and draft (member :draft nle:*slash-effects*))
-            (values (jstring draft "notice") nil (list (list :draft (jstring draft "text"))))
-            (jstring answer "text")))))
 
 ;;; --- the support auditor ---------------------------------------------------------------
 ;;; The engine's claim audit asks its host one question (the port's :JUDGE)
@@ -218,18 +188,12 @@ and returns by itself."
 reason is a host with nobody to ask. Never signals and never outlasts
 audit_seconds.
 
-The wait is on the calling thread, which is safe only where that thread is
-a turn's own: a verb inside eval, which yields a long form to the
-background by itself. A /re line the operator typed runs where the gateway
-answers commands, and that thread must not sit through a model turn — so
-there the question is not asked, and the report says its claims went
-unaudited and how to have them audited."
+The wait is on the calling thread, which is a turn's own: a verb inside
+eval, which yields a long form to the background by itself."
   (let ((settings *re*)
         (origin (getf (nle:turn) :session-id)))
     (cond ((not settings) nil)
           ((not (nlk:store-open-p)) nil)
-          ((null (nle:turn))
-           (values nil "a /re line typed as a command does not wait for the audit's side question; (re:slash \"report\") from eval asks it"))
           (t
            (handler-case
                (let* ((seconds (setting :audit-seconds))
@@ -358,7 +322,5 @@ every session's process closed on stop."
                 (:help :re
                        "re: reverse engineering with rizin - (re:open \"path\"), (re:cmd \"aflj\"), evidence-backed findings - (help :re)"
                        +primer+)
-                (:command "re" 'run-slash
-                          :description "Reverse engineering with rizin: open <path>, status, functions, findings, report")
                 (:start #'start))))
   (declare-cell))

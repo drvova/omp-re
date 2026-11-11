@@ -199,10 +199,10 @@ notice, which the model reads; the notice standing before THUNK is put back."
 
 (suite "extras: what is offered")
 (with-cell ()
-  (check "none of these tools is evidence, and all are exec-tier"
+  (check "none of these tools is evidence"
          (every (lambda (name)
                   (let ((tool (described-tool name)))
-                    (and tool (null (gethash "evidence" tool)) (equal "exec" (gethash "approval" tool)))))
+                    (and tool (null (gethash "evidence" tool)))))
                 '("map_file" "analyze" "apply_signatures" "create_signature" "export_project" "rizin_cli"
                   "rizin_emulate")))
   (check "analyze's schema names exactly the thirteen passes"
@@ -612,10 +612,8 @@ notice, which the model reads; the notice standing before THUNK is put back."
                            (let ((text (re:tools)))
                              (every (lambda (name) (has name text))
                                     '("triage_capa" "triage_floss" "triage_die" "triage_yara"))))
-                    (check "an offered scanner is exec-tier, and what it answers is not evidence"
-                           (every (lambda (name)
-                                    (let ((tool (described-tool name)))
-                                      (and (null (gethash "evidence" tool)) (equal "exec" (gethash "approval" tool)))))
+                    (check "what an offered scanner answers is not evidence"
+                           (every (lambda (name) (null (gethash "evidence" (described-tool name))))
                                   '("triage_capa" "triage_floss" "triage_die" "triage_yara")))
                     (check "triage_capa answers the matched rules by name with their meta"
                            (let ((text (re:call "triage_capa")))

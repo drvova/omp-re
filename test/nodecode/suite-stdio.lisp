@@ -176,21 +176,21 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
     (dolist (violation violations violations)
       (format t "    ~a~%" violation))))
 
-(defun session-of (id &key (ui t) memory)
-  (omp-re:obj "id" id "cwd" (uiop:native-namestring *scratch*) "hasUI" ui "memory" (or memory :absent)))
+(defun session-of (id)
+  (omp-re:obj "id" id "cwd" (uiop:native-namestring *scratch*)))
 
 (defun tool-call (omp session name &rest arguments)
   (omp-ask omp "call" "session" (session-of session) "name" name
                       "arguments" (apply #'omp-re:obj arguments)
                       "callId" (format nil "call-~a-~a" session name)))
 
-(defun typed-line (omp session line &key (ui t))
-  (omp-ask omp "command" "session" (session-of session :ui ui) "line" line))
+(defun run-line (omp session line)
+  (omp-ask omp "command" "session" (session-of session) "line" line))
 
 (defun session-state (omp session)
   "The state the engine sends with an answer in SESSION, had by a line that
 waits for nothing."
-  (gethash "state" (typed-line omp session "help")))
+  (gethash "state" (run-line omp session "help")))
 
 (defun band-count (state what)
   "The number the status band's second line gives for WHAT: \"fn\",
@@ -200,9 +200,14 @@ waits for nothing."
     (and end
          (parse-integer line :start (1+ (or (position #\Space line :end end :from-end t) -1)) :end end))))
 
-(defun described (omp name)
-  (find name (coerce (gethash "tools" (omp-ask omp "describe")) 'list)
-        :key (lambda (tool) (gethash "name" tool)) :test #'string=))
+(defun offered-p (omp name)
+  "Whether the line `tools' lists the tool NAME."
+  (find name (omp-re:split-lines (gethash "text" (run-line omp "s-none" "tools")))
+        :key (lambda (line) (subseq line 0 (position #\Space line))) :test #'string=))
+
+(defun serving-p (omp)
+  "Whether the engine still answers a request."
+  (hash-table-p (omp-ask omp "preserved" "session" (session-of "s-none"))))
 
 (defun audit-lines (session)
   (mapcar #'omp-re:json-parse
@@ -230,7 +235,7 @@ waits for nothing."
                 (progn
                   (omp-write omp "this is not json")
                   (omp-write omp "")
-                  (omp-write omp (format nil "{\"id\":9001,\"method\":\"describe\",\"params\":{}}~c" #\Return))
+                  (omp-write omp (format nil "{\"id\":9001,\"method\":\"preserved\",\"params\":{\"session\":{\"id\":\"s-none\",\"cwd\":\"/\"}}}~c" #\Return))
                   (hash-table-p (omp-await omp 9001 20))))
          (check "an omp of another protocol version is refused at hello, told to reinstall"
                 (multiple-value-bind (result message)
@@ -246,17 +251,16 @@ waits for nothing."
          (check "a method the engine does not have is an error answer naming it, and the pipe goes on"
                 (multiple-value-bind (result message) (let ((*off-protocol* t)) (omp-ask omp "no_such_method"))
                   (and (null result) (has "no_such_method" message)
-                       (hash-table-p (omp-ask omp "describe")))))
+                       (serving-p omp))))
          (check "a member the protocol does not have, or one it requires and is not there, is an error naming it"
                 (let ((*off-protocol* t))
                   (and (has "has no member lineX"
                             (nth-value 1 (omp-ask omp "command" "session" (session-of "s-none") "line" "help" "lineX" "help")))
-                       (has "lacks callId"
+                       (has "lacks arguments"
                             (nth-value 1 (omp-ask omp "call" "session" (session-of "s-none")
-                                                         "name" "rizin_help" "arguments" (omp-re:obj))))
-                       (has "session lacks hasUI"
-                            (nth-value 1 (omp-ask omp "preserved"
-                                                  "session" (omp-re:obj "id" "s-none" "cwd" "/")))))))
+                                                         "name" "rizin_help")))
+                       (has "session lacks cwd"
+                            (nth-value 1 (omp-ask omp "preserved" "session" (omp-re:obj "id" "s-none")))))))
          (check "a session event of a kind the protocol does not have is an error: it neither restores nor closes"
                 (let ((*off-protocol* t))
                   (multiple-value-bind (result message)
@@ -265,149 +269,96 @@ waits for nothing."
                          (null (omp-heard-of omp "state" "s-none"))))))
          (check "a notification is not answered, a request sent as one is refused, and the pipe goes on"
                 (let ((*off-protocol* t))
-                  (omp-write omp (omp-re:obj "method" "describe" "params" (omp-re:obj)))
+                  (omp-write omp (omp-re:obj "method" "preserved" "params" (omp-re:obj "session" (session-of "s-none"))))
                   (and (has "environment is a notification"
                             (nth-value 1 (omp-ask omp "environment" "stateDir" (scratch-path "agent/")
                                                   "variables" (omp-re:obj))))
-                       (hash-table-p (let ((*off-protocol* nil)) (omp-ask omp "describe"))))))
-         (check "the keys the help names are views the engine has"
-                (let ((commands (coerce (gethash "commands" (omp-ask omp "describe")) 'list)))
-                  (every (lambda (key)
-                           (find-if (lambda (command)
-                                      (and (equal (gethash "view" key) (gethash "name" command))
-                                           (eq t (gethash "view" command))))
-                                    commands))
-                         (coerce (omp-re:jget omp-re-stdio::*protocol* "keys" "views") 'list))))
-         (check "the tools are described with JSON Schema and approval class"
-                (let* ((tools (coerce (gethash "tools" (omp-ask omp "describe")) 'list))
-                       (names (mapcar (lambda (tool) (gethash "name" tool)) tools)))
-                  (and (subsetp '("open_binary" "map_file" "export_project" "analyze" "apply_signatures"
-                                  "create_signature" "record_finding" "adopt_finding" "retract_finding"
-                                  "rizin_help" "rizin_command" "rizin_emulate"
-                                  "rename_function" "rename_variable" "set_comment" "set_prototype"
-                                  "set_variable_type" "define_variable" "define_global" "define_function"
-                                  "set_calling_convention" "set_flag" "set_arch_hint" "set_hint" "set_data"
-                                  "set_string" "set_format")
-                                names :test #'string=)
-                       (= 15 (count "write" tools :key (lambda (tool) (gethash "approval" tool)) :test #'equal))
-                       (every (lambda (tool) (equal "object" (omp-re:jstring tool "parameters" "type"))) tools))))
-         (check "adopt_finding's commands are an array of {command, addr} objects in the schema"
-                (let ((commands (omp-re:jget (described omp "adopt_finding") "parameters" "properties" "commands")))
-                  (and (equal "array" (gethash "type" commands))
-                       (equal "object" (omp-re:jstring commands "items" "type"))
-                       (equalp #("command") (omp-re:jget commands "items" "required"))
-                       (equal "string" (omp-re:jstring commands "items" "properties" "addr" "type")))))
-         (check "an annotation tool carries the sentence its approval prompt says, as parts and slots, and how it is drawn"
-                (let* ((tool (described omp "rename_function"))
-                       (parts (coerce (omp-re:jget (aref (gethash "approvalReason" tool) 0) "parts") 'list)))
-                  (and (equal "Rename function " (first parts))
-                       (equal "addr" (omp-re:jstring (aref (gethash "pieces" (second parts)) 0) "arg"))
-                       (eql 80 (gethash "clip" (second parts)))
-                       (eq t (gethash "quote" (second parts)))
-                       (equal ". Reversible with /re undo." (car (last parts)))
-                       (equal "Rename function" (omp-re:jstring tool "render" "title"))
-                       (equal "addr" (omp-re:jstring tool "render" "subject"))
-                       (equal "none" (omp-re:jstring tool "render" "body")))))
-         (check "apply_signatures' sentence depends on its arguments: a case for a file, one for the rest"
-                (let ((cases (coerce (gethash "approvalReason" (described omp "apply_signatures")) 'list)))
-                  (and (= 2 (length cases))
-                       (equal "file" (omp-re:jstring (aref (gethash "when" (first cases)) 0) "equals"))
-                       (equal "string" (omp-re:jstring (aref (gethash "when" (first cases)) 1) "type"))
-                       (null (gethash "when" (second cases))))))
-         (check "a read tool has no sentence: nothing is asked before it"
-                (null (gethash "approvalReason" (described omp "rizin_help"))))
-         (check "the /re subcommands are described: which are lists a screen may open, which take an evidence id"
-                (let ((commands (coerce (gethash "commands" (omp-ask omp "describe")) 'list)))
-                  (flet ((command (name) (find name commands :key (lambda (c) (gethash "name" c)) :test #'string=)))
-                    (and (= 15 (length commands))
-                         (equal "<path>" (gethash "usage" (command "open")))
-                         (eq t (gethash "view" (command "functions")))
-                         (eq t (gethash "view" (command "evidence")))
-                         (equal "evidence" (gethash "completes" (command "cite")))
-                         (null (gethash "completes" (command "open")))
-                         (null (gethash "view" (command "status")))))))
+                       (let ((*off-protocol* nil)) (serving-p omp)))))
+         (check "the keys omp binds are views the engine has"
+                (every (lambda (key) (omp-re::find-list (gethash "view" key)))
+                       (coerce (omp-re:jget omp-re-stdio::*protocol* "keys" "views") 'list)))
+         (check "the line tools names every tool the engine offers, one a line with what it does"
+                (let ((lines (omp-re:split-lines (gethash "text" (run-line omp "s-none" "tools")))))
+                  (and (every (lambda (name) (offered-p omp name))
+                              '("open_binary" "map_file" "export_project" "analyze" "apply_signatures"
+                                "create_signature" "record_finding" "adopt_finding" "retract_finding"
+                                "rizin_help" "rizin_command" "rizin_emulate"
+                                "rename_function" "rename_variable" "set_comment" "set_prototype"
+                                "set_variable_type" "define_variable" "define_global" "define_function"
+                                "set_calling_convention" "set_flag" "set_arch_hint" "set_hint" "set_data"
+                                "set_string" "set_format"))
+                       (every (lambda (line) (has " — " line)) lines))))
+         (check "the line doc says how a tool is called in both of omp's kernels, each argument by the engine's own name"
+                (let ((text (gethash "text" (run-line omp "s-none" "doc adopt_finding"))))
+                  (and (starts (format nil "adopt_finding~%") text)
+                       (has "await re.call(\"adopt_finding\", { name: value, … }) — in Python omp_re.call(\"adopt_finding\", name=value, …) — takes:"
+                            text)
+                       (has (format nil "~%  claim  string, required — ") text)
+                       (has (format nil "~%  commands  an array of objects (command, addr); in Python a list of dicts, required — ") text)
+                       (has (format nil "~%  confidence  one of \"confirmed\", \"likely\", \"speculative\"") text))))
+         (check "doc of a tool the engine does not have is refused in omp's words"
+                (let ((answer (run-line omp "s-none" "doc nope")))
+                  (and (eq t (gethash "failed" answer))
+                       (equal "omp-re: no tool named \"nope\" — re.tools() lists them" (gethash "text" answer)))))
          (check "the debugger is offered only once omp's environment switches it on: the engine reads omp's variables, not its own"
-                (and (null (described omp "rizin_debug"))
+                (and (null (offered-p omp "rizin_debug"))
                      (progn
                        (omp-tell omp "environment" "stateDir" (scratch-path "agent/")
                                                    "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")
                                                                         "OMPRE_ENABLE_DEBUGGER" "1"))
                        t)
-                     (let ((debug (described omp "rizin_debug")))
-                       (and debug
-                            (equal "object" (omp-re:jstring debug "parameters" "properties" "attach" "type"))
-                            (equal "number" (omp-re:jstring debug "parameters" "properties" "attach"
-                                                               "properties" "pid" "type"))
-                            (equal "string" (omp-re:jstring debug "parameters" "properties" "run" "properties"
-                                                               "env" "additionalProperties" "type"))))
+                     (offered-p omp "rizin_debug")
+                     (let ((text (gethash "text" (run-line omp "s-none" "doc rizin_debug"))))
+                       (and (has (format nil "~%  attach  an object (pid, remote); in Python a dict") text)
+                            (has (format nil "~%  count  number — ") text)))
                      (progn
                        (omp-tell omp "environment" "stateDir" (scratch-path "agent/")
                                                    "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")))
                        t)
-                     (null (described omp "rizin_debug"))))
+                     (null (offered-p omp "rizin_debug"))))
          (check "a call with no binary open fails in omp's words"
                 (let ((answer (tool-call omp "s-none" "rizin_command" "command" "aflj")))
                   (and (eq t (gethash "failed" answer))
-                       (equal "omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first"
+                       (eq t (gethash "refused" answer))
+                       (equal "omp-re: no binary open — open one first: await re.open(\"/path/to/binary\") — in Python, omp_re.open(\"/path/to/binary\")"
                               (gethash "text" answer)))))
-         (check "the manual is omp's: it reaches the tools as tool.<name>() and needs no binary"
+         (check "the manual is omp's: the library of both kernels, how a line is run, and it needs no binary"
                 (let ((text (gethash "text" (tool-call omp "s-none" "rizin_command" "command" ""))))
-                  (and (has "await tool.rizin_command(" text) (has "await tool.rizin_help(" text)
-                       (not (has "(re:cmd" text)))))
-         (check "/re help lists the subcommands and ends with omp's keys; an unknown subcommand is an error"
-                (let ((help (typed-line omp "s-none" "help"))
-                      (bogus (typed-line omp "s-none" "bogus")))
+                  (and (has "%load skill://re-triage/recipes.js" text) (has "%load skill://re-triage/recipes.py" text)
+                       (has "await re.open(\"/path/to/binary\")" text) (has "await re.cmd(\"aflj\")" text)
+                       (has "data, evidence = omp_re.json(\"aflj\")" text)
+                       (has "recorded as evidence (re.slash(\"evidence\"))" text)
+                       (has "re.slash(\"report\") writes the evidence-gated report." text)
+                       (not (has "tool.rizin" text)) (not (has "(re:cmd" text)))))
+         (check "the line help lists the lines; one the engine does not have fails, naming help"
+                (let ((help (run-line omp "s-none" "help"))
+                      (bogus (run-line omp "s-none" "bogus")))
                   (and (has "/re open <path>" (gethash "text" help))
-                       (has "alt+g functions" (gethash "text" help))
-                       (equal "info" (gethash "level" help))
+                       (not (has "alt+" (gethash "text" help)))
+                       (null (gethash "failed" help))
+                       (equal '("text" "failed" "state")
+                              (loop for key being the hash-keys of help collect key))
                        (equal "omp-re: unknown /re subcommand \"bogus\" — try /re help" (gethash "text" bogus))
-                       (equal "error" (gethash "level" bogus)))))
-         (check "/re off refuses a tool call, /re on lifts it, and neither needs a binary"
-                (progn
-                  (typed-line omp "s-none" "off")
-                  (let ((refused (tool-call omp "s-none" "rizin_command" "command" "aflj")))
-                    (typed-line omp "s-none" "on")
-                    (and (equal "omp-re: RE tools are off for this session — the user can re-enable them with /re on"
-                                (gethash "text" refused))
-                         (eq t (gethash "refused" refused))
-                         (has "no binary open" (gethash "text" (tool-call omp "s-none" "rizin_command"
-                                                                          "command" "aflj")))))))
-         (check "what a session holds in no record — /re off — goes to omp with the state, and a session this engine has not met takes it back from omp"
-                (let ((off (typed-line omp "s-memory" "off")))
-                  (and (eq t (omp-re:jget off "state" "memory" "toolsOff"))
-                       (null (omp-re:jget (typed-line omp "s-none" "help") "state" "memory" "toolsOff"))
-                       (has "RE tools are off"
-                            (gethash "text" (omp-ask omp "call"
-                                                     "session" (session-of "s-met-anew"
-                                                                           :memory (omp-re:jget off "state" "memory"))
-                                                     "name" "rizin_help" "arguments" (omp-re:obj "query" "pdf")
-                                                     "callId" "c-memory")))
-                       ;; and only then: what omp holds does not undo a later /re on
-                       (progn (typed-line omp "s-met-anew" "on") t)
-                       (not (has "RE tools are off"
-                                 (gethash "text" (omp-ask omp "call"
-                                                          "session" (session-of "s-met-anew"
-                                                                                :memory (omp-re:jget off "state" "memory"))
-                                                          "name" "rizin_help" "arguments" (omp-re:obj "query" "pdf")
-                                                          "callId" "c-memory-2")))))))
+                       (eq t (gethash "failed" bogus)))))
+         (check "off and on are no lines: nothing switches the tools off for a session"
+                (every (lambda (line)
+                         (has "unknown /re subcommand" (gethash "text" (run-line omp "s-none" line))))
+                       '("off" "on")))
          (check "every call that ran is a line in the audit log under omp's own call id; unsigned, the operator is told once a session"
                 (let ((lines (audit-lines "s-none")))
-                  (and (= 3 (length lines))
+                  (and (= 2 (length lines))
                        (every (lambda (line) (equal "call-s-none-rizin_command" (gethash "toolCallId" line))) lines)
                        (equal "aflj" (omp-re:jstring (first lines) "args" "command"))
                        (= 1 (count-if (lambda (params) (has "OMPRE_AUDIT_HMAC_KEY not configured" (gethash "text" params)))
                                       (omp-heard-of omp "notify" "s-none"))))))
-         (check "what omp's approval gate decided of a call is a line beside it, a denial with its reason"
+         (check "a call omp gives no id is a line under the session's own count of its calls"
                 (progn
-                  (omp-ask omp "approval" "session" (session-of "s-none") "callId" "call-denied"
-                                          "tool" "rename_function" "approved" nil "reason" "not now")
-                  (let ((line (car (last (audit-lines "s-none")))))
-                    (and (equal "call-denied" (gethash "toolCallId" line))
-                         (equal "rename_function" (gethash "tool" line))
-                         (null (gethash "approved" line))
-                         (nth-value 1 (gethash "approved" line))
-                         (equal "not now" (gethash "reason" line))
-                         (not (nth-value 1 (gethash "args" line)))))))
+                  (omp-ask omp "call" "session" (session-of "s-counted") "name" "rizin_help"
+                                      "arguments" (omp-re:obj "query" "pdf"))
+                  (omp-ask omp "call" "session" (session-of "s-counted") "name" "rizin_help"
+                                      "arguments" (omp-re:obj "query" "pdf"))
+                  (equal '("s-counted-1" "s-counted-2")
+                         (mapcar (lambda (line) (gethash "toolCallId" line)) (audit-lines "s-counted")))))
          (check "with OMPRE_AUDIT_HMAC_KEY in omp's environment a line carries an HMAC that verifies over the rest of it"
                 (progn
                   (omp-tell omp "environment" "stateDir" (scratch-path "agent/")
@@ -427,19 +378,6 @@ waits for nothing."
                          (null (omp-heard-of omp "notify" "s-signed"))))))
          (check "a session that never reverse engineered anything has nothing to keep through a compaction"
                 (equalp #() (gethash "lines" (omp-ask omp "preserved" "session" (session-of "s-none")))))
-         (check "the evidence ids sent for completion are the newest 200 of the record, newest first, each as it is shown"
-                (progn
-                  (setf (gethash "s-many" (omp-records omp))
-                        (loop for n from 1 to 205
-                              collect (omp-re:obj "type" "custom" "id" (format nil "many-~d" n)
-                                                  "customType" "re.evidence"
-                                                  "data" (omp-re:obj "id" (format nil "e-~3,'0d-and-the-rest-of-it" n)
-                                                                     "tool" "rizin_command" "summary" "s"))))
-                  (let ((ids (map 'list (lambda (row) (aref row 0))
-                                  (gethash "evidence" (session-state omp "s-many")))))
-                    (and (= (omp-re-stdio::protocol-constant "completedEvidence") (length ids))
-                         (equal (omp-re:shown-id "e-205-and-the-rest-of-it") (first ids))
-                         (equal (omp-re:shown-id "e-006-and-the-rest-of-it") (car (last ids)))))))
          (check "the status band of a session with no binary says so, and starts nothing"
                 (equalp #("no binary" "0 fn · 0 findings · 0 evidence")
                         (gethash "band" (session-state omp "s-none"))))
@@ -511,10 +449,8 @@ waits for nothing."
                                  (gethash "text" read))
                            (equalp #("afij @ main") (omp-re:jget read "details" "commands"))
                            (equal id (omp-re:jstring (car (last (gethash "s1" (omp-records omp)))) "data" "id"))))
-               (check "the evidence ids omp completes after /re cite come with the answer, newest first"
-                      (equal (subseq id 0 8) (aref (aref (omp-re:jget read "state" "evidence") 0) 0)))
-               (check "what the wire carries of a call is its text, whether it failed, its details and the state: nothing twice"
-                      (equal '("details" "failed" "state" "text")
+               (check "what the wire carries of a call is its text, whether it failed, all rizin printed, the evidence it left, its details and the state"
+                      (equal '("details" "evidence" "failed" "raw" "state" "text")
                              (sort (loop for name being the hash-keys of read collect name) #'string<)))
                (check "the engine asked omp only for what it had not seen: after its last entry, by count"
                       (let ((asked (omp-heard-of omp "entries" "s1")))
@@ -542,21 +478,23 @@ waits for nothing."
                                (equal "omp-re: the support audit aborted" (gethash "text" answer))
                                (eq t (gethash "refused" answer))
                                (eql findings (band-count (session-state omp "s1") "findings"))))))
-               (check "/re cite offers the evidence as a draft for the operator's input box"
-                      (let ((cite (typed-line omp "s1" (format nil "cite ~a" (subseq id 0 8)))))
-                        (and (has (format nil "Re: evidence ~a (rizin_command @ " (subseq id 0 8))
-                                  (omp-re:jstring cite "draft" "text"))
-                             (has "is in your draft" (omp-re:jstring cite "draft" "notice"))))))
+               (check "the line cite answers the evidence as the opening of a message about it"
+                      (starts (format nil "Re: evidence ~a (rizin_command @ " (subseq id 0 8))
+                              (gethash "text" (run-line omp "s1" (format nil "cite ~a" (subseq id 0 8)))))))
              (let ((big (tool-call omp "s1" "rizin_command" "command" "aflj")))
                (check "a result too large to send is kept whole by omp and named artifact://<id>"
                       (and (eq t (omp-re:jget big "details" "truncated"))
+                           (not (has "\"name\"" (gethash "text" big)))
                            (has (format nil "Full output: artifact://~a]" (omp-re:jstring big "details" "artifactId"))
                                 (gethash "text" big))
                            (starts "rizin> aflj"
                                    (gethash (omp-re:jstring big "details" "artifactId") (omp-artifacts omp)))))
+               (check "the answer carries all rizin printed beside the cut text, and the id of the evidence as it is shown"
+                      (and (omp-re:json-array-p (omp-re:json-parse (gethash "raw" big)))
+                           (equal (subseq (omp-re:jstring big "details" "evidenceId") 0 8) (gethash "evidence" big))))
                (check "/re evidence <id> names the artifact the same way, not a file of the engine's"
                       (has (format nil "full output: artifact://~a" (omp-re:jstring big "details" "artifactId"))
-                           (gethash "text" (typed-line omp "s1" (format nil "evidence ~a"
+                           (gethash "text" (run-line omp "s1" (format nil "evidence ~a"
                                                                         (subseq (omp-re:jstring big "details" "evidenceId") 0 8)))))))
              (let ((panel (omp-ask omp "view" "session" (session-of "s1") "kind" "functions")))
                (check "the functions view is a panel of rows, each opening that function's code"
@@ -606,7 +544,7 @@ waits for nothing."
                       (let ((cited (tool-call omp "s1" "record_finding"
                                               "claim" "The binary has functions."
                                               "evidence" (vector (omp-re:jstring cut "data" "id")))))
-                        (typed-line omp "s1" "report")
+                        (run-line omp "s1" "report")
                         (and (has "record_finding: recorded" (gethash "text" cited))
                              (find (omp-re:jstring cut "data" "artifactId") (omp-heard-of omp "readArtifact" "s1")
                                    :key (lambda (params) (gethash "id" params)) :test #'equal)
@@ -650,15 +588,19 @@ waits for nothing."
                                             (omp-heard-of omp "state" "s-old")))
                                     20))
                  (check "its status counts the evidence the earlier version recorded"
-                        (has "evidence on this branch: 2" (gethash "text" (typed-line omp "s-old" "status"))))))
+                        (has "evidence on this branch: 2" (gethash "text" (run-line omp "s-old" "status"))))))
 
-             (check "a session started with --binary opens it in the background; a failure to is told, as an error"
+             (check "a session whose binary is gone when it starts is told so, as an error: the restore runs in the background"
                     (progn
-                      (omp-ask omp "event" "session" (session-of "s-flag") "kind" "start"
-                                           "binary" (scratch-path "no-such-binary"))
-                      (wait-until (lambda () (omp-heard-of omp "tell" "s-flag")) 20)
-                      (let ((told (first (omp-heard-of omp "tell" "s-flag"))))
-                        (and (has "omp-re: no such binary" (gethash "text" told))
+                      (setf (gethash "s-gone" (omp-records omp))
+                            (list (omp-re:obj "type" "custom" "id" "g1" "customType" "re.binary"
+                                              "data" (omp-re:obj "path" (scratch-path "no-such-binary")
+                                                                 "sha256" (make-string 64 :initial-element #\a)))))
+                      (omp-ask omp "event" "session" (session-of "s-gone") "kind" "start")
+                      (wait-until (lambda () (omp-heard-of omp "tell" "s-gone")) 20)
+                      (let ((told (first (omp-heard-of omp "tell" "s-gone"))))
+                        (and told
+                             (has "no-such-binary" (gethash "text" told))
                              (equal "error" (gethash "level" told))))))
              (check "a branch carries the session over to its new id, rizin and all: nothing is analyzed again"
                     (progn
@@ -682,13 +624,13 @@ waits for nothing."
                               (omp-request omp "call" "session" (session-of "s-cancel") "name" "rizin_help"
                                                       "arguments" (omp-re:obj "query" "pdf") "callId" "c-queued")))
                     (other (get-internal-real-time))
-                    (elsewhere (typed-line omp "s-old" "status")))
+                    (elsewhere (run-line omp "s-old" "status")))
                (check "a long analysis in one session does not hold up another session's line"
                       (and (has "binary: " (gethash "text" elsewhere))
                            (< (- (get-internal-real-time) other) (* 5 internal-time-units-per-second))))
                (check "/re status of the session being analyzed answers at once, from what the session holds"
                       (let ((began (get-internal-real-time))
-                            (status (typed-line omp "s-cancel" "status")))
+                            (status (run-line omp "s-cancel" "status")))
                         (and (has "rizin: " (gethash "text" status))
                              (< (- (get-internal-real-time) began) (* 5 internal-time-units-per-second)))))
                (check "while omp waits, the engine says at a steady beat which requests it is serving"

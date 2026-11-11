@@ -31,6 +31,8 @@
     "build:image": "bun scripts/build-image.ts",
     "gen:recipes": "bun scripts/gen-recipes.ts",
     "check:recipes": "bun scripts/gen-recipes.ts --check",
+    "gen:api": "bun scripts/gen-api.ts",
+    "check:api": "bun scripts/gen-api.ts --check",
     "gen:protocol": "bun scripts/gen-protocol.ts",
     "check:protocol": "bun scripts/gen-protocol.ts --check",
     "check:versions": "node scripts/release.mjs --check-versions",

@@ -1,7 +1,9 @@
 /**
  * extensions/re as omp's side of the engine: the child process it starts and
  * ends, the wire to it, how long it waits, and what it does with the engine's
- * answers — loaded through omp's real SDK, like extension-sdk.test.ts.
+ * answers — loaded through omp's real SDK, like extension-sdk.test.ts, and
+ * asked the way a model asks: from a cell of omp's own `eval`, through the
+ * library the skill loads there.
  *
  * The first half needs neither SBCL nor rizin: test/stand-in-engine.ts is
  * started where the engine would be. It speaks stdio/protocol.json and holds
@@ -18,19 +20,14 @@ import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Engine, type HostHandlers } from "../extensions/re/engine.ts";
 import { askSideModel, engine, outside } from "../extensions/re/host.ts";
 import { CONSTANTS, KEYS, PROTOCOL } from "../extensions/re/protocol.ts";
-import { boot, canRunRizin, caught, evalJs, logSkip, plainTheme, reTools, ROOT, type SdkHarness, scratchAgentDir, TEST_BINARY, until } from "./helpers.ts";
+import { boot, bootLoaded, canRunRizin, caught, evalJs, logSkip, ownSession, ROOT, runCell, type SdkHarness, scratchAgentDir, TEST_BINARY, until } from "./helpers.ts";
 
 logSkip("shim rizin tests");
 
 const agentDir = scratchAgentDir("shim-test");
 
-const sessions = async () => (await import("@oh-my-pi/pi-coding-agent")).SessionManager;
-const inMemory = async () => (await sessions()).inMemory();
-const onDisk = async () => {
-	const manager = (await sessions()).create(tmpdir(), join(agentDir(), "sessions"));
-	await manager.ensureOnDisk();
-	return manager;
-};
+/** A session with the plugin loaded and the library in its JavaScript kernel. */
+const loaded = (options = {}) => bootLoaded(agentDir(), options);
 
 /** Whether the process `pid` is still running. A child that exited stays in the process table until its parent collects it, so where the system says a process's state, that is read. */
 function alive(pid: number): boolean {
@@ -66,54 +63,74 @@ async function withEngine<T>(command: string[], body: (logged: string[]) => Prom
 	}
 }
 
-const startFailure = (behaviour: string) => withEngine(standIn(behaviour), async () => boot(await inMemory()).then(() => null, (error: Error) => error.message));
+/**
+ * What a session is told when its engine does not start, and what a cell that asks for the engine is. omp's side
+ * starts the engine when a session starts, to bring the session's binary back; a model's first call would start it
+ * as well.
+ */
+async function startFailure(start: () => Promise<SdkHarness>): Promise<{ told: string; cell: string }> {
+	const h = await start();
+	try {
+		expect(await until(() => h.notes.some((note) => note.startsWith("[error] ")), 10_000)).toBe(true);
+		return { told: h.notes.find((note) => note.startsWith("[error] "))!, cell: (await evalJs(h.session, caught("await re.status()"))).text };
+	} finally {
+		await h.shutdown();
+	}
+}
+const standInFailure = (behaviour: string) => withEngine(standIn(behaviour), () => startFailure(loaded));
 
-/** What the stand-in answers `/re <line>` with, when that is JSON. */
+/** What the stand-in answers the line `line` with, when that is JSON. What a cell shows is cut for a model's eyes, so the cell writes the answer to a file. */
 async function standInSays<T>(h: SdkHarness, line: string): Promise<T> {
-	await h.session.prompt(`/re ${line}`);
-	return JSON.parse(h.notes.at(-1)!.replace(/^\[info\] /, "")) as T;
+	const file = join(agentDir(), `said-${crypto.randomUUID()}.json`);
+	const cell = await evalJs(h.session, `require("node:fs").writeFileSync(${JSON.stringify(file)}, await re.slash(${JSON.stringify(line)})); "written"`);
+	expect(cell.text).toBe("written");
+	return JSON.parse(await readFile(file, "utf8")) as T;
 }
 
 interface Heard {
-	heard: { method: string; params: Record<string, unknown> & { session?: { id: string; memory?: unknown } }; request: boolean }[];
+	heard: { method: string; params: Record<string, unknown> & { session?: { id: string; cwd: string } }; request: boolean }[];
 	violations: string[];
 }
 
 describe("starting the engine", () => {
-	test("with no SBCL the session fails to load the extension, and the error says what to install", async () => {
+	test("with no SBCL the session still loads, and both the operator and a cell that asks are told what to install", async () => {
 		const missing = join(agentDir(), "no-such-sbcl");
 		const before = process.env.OMPRE_SBCL_PATH;
 		process.env.OMPRE_SBCL_PATH = missing;
 		try {
-			const failure = await boot(await inMemory()).then(() => null, (error: Error) => error.message);
-			expect(failure).toContain(`omp-re: SBCL was not found (tried ${JSON.stringify(missing)})`);
-			expect(failure).toContain("apt install sbcl cl-ppcre");
-			expect(failure).toContain("OMPRE_SBCL_PATH");
+			const { told, cell } = await startFailure(loaded);
+			for (const said of [told, cell]) {
+				expect(said).toContain(`omp-re: SBCL was not found (tried ${JSON.stringify(missing)})`);
+				expect(said).toContain("apt install sbcl cl-ppcre");
+				expect(said).toContain("OMPRE_SBCL_PATH");
+			}
 		} finally {
 			if (before === undefined) delete process.env.OMPRE_SBCL_PATH;
 			else process.env.OMPRE_SBCL_PATH = before;
 		}
-	});
+	}, 30_000);
 
 	test("an engine that cannot load says why in its own words, and those are the error", async () => {
-		expect(await startFailure("fatal")).toContain("omp-re: the Common Lisp library cl-ppcre was not found. Install it.");
-	});
+		const { told, cell } = await standInFailure("fatal");
+		expect(told).toContain("omp-re: the Common Lisp library cl-ppcre was not found. Install it.");
+		expect(cell).toContain("omp-re: the Common Lisp library cl-ppcre was not found. Install it.");
+	}, 30_000);
 
 	test("an engine that dies without a word is reported with what it wrote to its log", async () => {
-		expect(await startFailure("dying")).toContain("omp-re: the engine process ended (status 7): heap exhausted");
-	});
+		expect((await standInFailure("dying")).told).toContain("omp-re: the engine process ended (status 7): heap exhausted");
+	}, 30_000);
 
 	test("an engine of another protocol version is refused, and the error says to reinstall", async () => {
-		const failure = await startFailure("other-version");
-		expect(failure).toContain(`omp-re: the extension speaks protocol ${PROTOCOL} and its engine protocol ${PROTOCOL + 1}`);
-		expect(failure).toContain("Reinstall or upgrade the omp-re plugin");
-	});
+		const { told } = await standInFailure("other-version");
+		expect(told).toContain(`omp-re: the extension speaks protocol ${PROTOCOL} and its engine protocol ${PROTOCOL + 1}`);
+		expect(told).toContain("Reinstall or upgrade the omp-re plugin");
+	}, 30_000);
 
 	test("an engine that never becomes ready is ended at the start deadline, with what to check and what it had logged", async () => {
 		const logged: string[] = [];
 		const silent = new Engine({ command: standIn("silent"), handlers: {} as HostHandlers, log: (line) => void logged.push(line), deadlines: { startMs: 1000 } });
 		const started = Date.now();
-		const failure = await silent.request("describe", {}).then(() => null, (error: Error) => error.message);
+		const failure = await silent.request("preserved", { session: { id: "s", cwd: tmpdir() } }).then(() => null, (error: Error) => error.message);
 		expect(failure).toContain("omp-re: the engine did not start within 1 s and was ended. Check that");
 		expect(failure).toContain("; compiling file engine.lisp");
 		expect(Date.now() - started).toBeLessThan(5000);
@@ -123,32 +140,23 @@ describe("starting the engine", () => {
 		expect(logged).toEqual(["; compiling file engine.lisp"]);
 	});
 
-	test("the tools registered are the ones the engine describes — read off a wire that splits a character in two, ends lines with CRLF, and carries lines that are not messages, each noted in the log", async () => {
+	test("an answer is read off a wire that splits a character in two, ends lines with CRLF, and carries lines that are not messages, each noted in the log", async () => {
 		await withEngine(standIn("framing"), async (logged) => {
-			const h = await boot(await inMemory());
+			const h = await loaded();
 			try {
-				const registered = reTools(h.session).map((tool) => tool.definition);
-				expect(registered.map((tool) => tool.name)).toEqual(["stand_in_tool"]);
-				expect(registered[0]!.description).toBe("split — here");
-				expect(registered[0]!.parameters).toEqual({ type: "object", properties: { addr: { type: "string" } } });
-				// The approval prompt's sentence is filled from the call's arguments without asking the engine: quoted, cut at the engine's bound.
-				const approval = registered[0]!.approval as (args: unknown) => unknown;
-				expect(approval({ addr: "main" })).toEqual({ tier: "write", reason: 'Touch "main".' });
-				expect(approval({ addr: "0x0123456789" })).toEqual({ tier: "write", reason: 'Touch "0x012...".' });
-				expect(approval({})).toEqual({ tier: "write", reason: 'Touch "?".' });
-				expect(h.session.extensionRunner!.getCommand("re")!.getArgumentCompletions!("h")).toEqual([expect.objectContaining({ value: "help ", label: "help" })]);
+				expect((await evalJs(h.session, 'await re.call("stand_in_tool", { addr: "split — here" })')).text).toBe("header\nbody of split — here\n[evidence 0a1b2c3d — cite it in record_finding]");
 				expect(logged).toEqual(["skipped a line on the wire that is not a message: a line that is not JSON", "skipped a line on the wire that is not a message: [1, 2]"]);
 			} finally {
 				await h.shutdown();
 			}
 		});
-	});
+	}, 30_000);
 });
 
 describe("the wire, method by method, against a stand-in that holds both sides to stdio/protocol.json", () => {
 	test("everything the engine asks of omp is answered as the protocol says, and done", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const h = await boot(await onDisk(), { sideModel: (prompt) => `the side model read: ${prompt}` });
+			const h = await loaded({ sideModel: (prompt: string) => `the side model read: ${prompt}` });
 			try {
 				const id = h.session.sessionManager.getSessionId();
 				const wire = await standInSays<Record<string, unknown> & { appended: { id: string } }>(h, "wire");
@@ -162,35 +170,29 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 				expect(wire.saved).toEqual({ id: expect.any(String) });
 				expect(wire.readBack).toBe(true);
 				expect(wire.readMissing).toEqual({});
-				expect(wire.kept).toEqual({});
 				expect(wire.judged).toEqual({ text: "the side model read: CLAIM 0: the stand-in asks" });
 				expect(wire.unknownSession).toEqual({ error: 'omp-re: omp has no session "no-such-session"' });
 				expect(wire.unknownMethod).toEqual({ error: 'omp-re: omp has no method "noSuchMethod"' });
 
-				expect(h.notes).toEqual(expect.arrayContaining(["[info] notified at info", "[warning] notified at warning", "[error] notified at error", "[warning] told in passing"]));
+				expect(h.notes).toEqual(expect.arrayContaining(["[info] notified at info", "[warning] notified at warning", "[error] notified at error", "[info] told at info", "[warning] told at warning", "[error] told at error"]));
 				expect(h.session.sessionManager.getEntries().filter((one) => (one as { customType?: string }).customType === "re.binary")).toEqual([
 					expect.objectContaining({ content: "[re: opened /stand/in]", details: { sha256: "00" } }),
 				]);
 				expect(h.session.extensionRunner!.getMessageRenderer("re.binary")).toBeDefined();
-				// The state the engine sent outside any answer: the band is drawn as its lines, and its evidence completes an id.
+				// The state the engine sent outside any answer: the band is drawn as its lines.
 				expect(h.widget("re.hud")).toEqual(["stand-in  ELF64 x86/64  entry 0x1000", "3 fn · 0 findings · 1 evidence"]);
 				expect(h.widget("re.hud", 12)).toEqual(["stand-in  E…", "3 fn · 0 fi…"]);
-				const complete = h.session.extensionRunner!.getCommand("re")!.getArgumentCompletions!;
-				expect(complete("cite 0a")).toEqual([{ value: "cite 0a1b2c3d ", label: "0a1b2c3d", description: "rizin_command @ main" }]);
-				expect(complete("cite ff")).toBeNull();
-				expect(complete("help 0a")).toBeNull();
-				// What the engine said it holds in no record is handed back with the next request.
 				const { heard } = await standInSays<Heard>(h, "heard");
-				expect(heard.at(-1)).toMatchObject({ method: "command", params: { line: "heard", session: { id, cwd: tmpdir(), hasUI: true, memory: { toolsOff: true } } } });
+				expect(heard.at(-1)!.params).toEqual({ line: "heard", session: { id, cwd: h.session.sessionManager.getCwd() } });
 			} finally {
 				await h.shutdown();
 			}
 		});
 	}, 30_000);
 
-	test("the session's life, a compaction, the approval gate and an environment change are each said to the engine, as the protocol has them", async () => {
+	test("the session's life, a compaction and an environment change are each said to the engine, as the protocol has them", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const h = await boot(await inMemory(), { flags: { binary: "/stand/in/binary" } });
+			const h = await loaded();
 			try {
 				const id = h.session.sessionManager.getSessionId();
 				const emit = (event: Record<string, unknown>) => h.session.extensionRunner!.emit({ sessionId: id, ...event } as never) as Promise<unknown>;
@@ -199,36 +201,25 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 				await emit({ type: "session_branch" });
 				await emit({ type: "session_tree" });
 				expect(await emit({ type: "session.compacting", messages: [] })).toEqual({ context: ["preserve: the stand-in's binary", "- Open binary: stand-in"] });
-				await emit({ type: "tool_approval_resolved", toolCallId: "call-yes", toolName: "stand_in_tool", approved: true });
-				await emit({ type: "tool_approval_resolved", toolCallId: "call-no", toolName: "stand_in_tool", approved: false, reason: "not now" });
-				await emit({ type: "tool_approval_resolved", toolCallId: "call-other", toolName: "bash", approved: true });
 				process.env.OMPRE_STAND_IN_SETTING = "changed while the engine runs";
 				const { heard, violations } = await standInSays<Heard>(h, "heard");
 				delete process.env.OMPRE_STAND_IN_SETTING;
 				expect(violations).toEqual([]);
 
 				const said = heard.map((one) => [one.method, one.request ? "request" : "notification"]);
-				expect(said).toEqual([
-					["hello", "request"],
-					["describe", "request"],
-					...["event", "event", "event", "event", "event", "preserved", "approval", "approval"].map((method) => [method, "request"]),
-					["environment", "notification"],
-					["command", "request"],
-				]);
-				const session = { id, cwd: process.cwd(), hasUI: true };
+				expect(said).toEqual([["hello", "request"], ...["event", "event", "event", "event", "event", "preserved"].map((method) => [method, "request"]), ["environment", "notification"], ["command", "request"]]);
+				const session = { id, cwd: h.session.sessionManager.getCwd() };
 				expect(heard[0]!.params).toMatchObject({ protocol: PROTOCOL, stateDir: agentDir(), variables: { PATH: process.env.PATH } });
-				expect(heard.slice(2, 7).map((one) => one.params)).toMatchObject([
-					{ session, kind: "start", binary: "/stand/in/binary" },
+				expect(heard.slice(1, 6).map((one) => one.params)).toEqual([
+					{ session, kind: "start" },
 					{ session, kind: "before-switch" },
 					{ session, kind: "switch" },
 					{ session, kind: "branch", previous: id },
 					{ session, kind: "tree" },
 				]);
-				expect(heard[7]!.params).toMatchObject({ session });
-				expect(heard[8]!.params).toMatchObject({ session, callId: "call-yes", tool: "stand_in_tool", approved: true });
-				expect(heard[9]!.params).toMatchObject({ session, callId: "call-no", tool: "stand_in_tool", approved: false, reason: "not now" });
-				expect(heard[10]!.params).toMatchObject({ stateDir: agentDir(), variables: { OMPRE_STAND_IN_SETTING: "changed while the engine runs" } });
-				expect(Object.keys(heard[10]!.params.variables as object).every((name) => name === "PATH" || name.startsWith(CONSTANTS.environmentPrefix))).toBe(true);
+				expect(heard[6]!.params).toEqual({ session });
+				expect(heard[7]!.params).toMatchObject({ stateDir: agentDir(), variables: { OMPRE_STAND_IN_SETTING: "changed while the engine runs" } });
+				expect(Object.keys(heard[7]!.params.variables as object).every((name) => name === "PATH" || name.startsWith(CONSTANTS.environmentPrefix))).toBe(true);
 			} finally {
 				await h.shutdown();
 			}
@@ -237,9 +228,9 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 
 	test("a session that ends says so to the engine, by its own id, while the engine goes on for the others", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const staying = await boot(await inMemory());
+			const staying = await loaded();
 			try {
-				const leaving = await boot(await inMemory());
+				const leaving = await loaded();
 				const left = leaving.session.sessionManager.getSessionId();
 				const pid = engine().pid!;
 				await leaving.shutdown();
@@ -253,25 +244,27 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 		});
 	}, 30_000);
 
-	test("a call's answer is the tool's result: a refusal is thrown, a failure is a result marked as one, and a read carries its details", async () => {
+	test("a call's answer is what the cell gets: a refusal and a failure are thrown with the engine's words, a read is its text, and each is named in the engine's log by the eval call it came from", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const h = await boot(await inMemory());
+			const h = await loaded();
 			try {
-				const tool = h.session.getToolByName("stand_in_tool")!;
-				await expect(tool.execute("c-refuse", { addr: "refuse" })).rejects.toThrow("omp-re: refused by the stand-in");
-				expect(await tool.execute("c-fail", { addr: "fail" })).toMatchObject({ content: [{ type: "text", text: "the stand-in's tool failed" }], isError: true });
-				const read = await tool.execute("c-read", { addr: "main" });
-				expect(read).toMatchObject({ content: [{ type: "text", text: "header\nbody of main\n[evidence 0a1b2c3d — cite it in record_finding]" }], details: { evidenceId: "0a1b2c3d-0000-0000-0000-000000000000" } });
-				expect((read as { isError?: boolean }).isError).toBeUndefined();
-				// Drawn: the header, the body without the line that names the evidence record, and that line beside the header.
-				const drawn = (tool as unknown as { renderResult(result: unknown, options: unknown, theme: unknown, args: unknown): { render(width: number): string[] } }).renderResult(read, { expanded: true, isPartial: false }, plainTheme, { addr: "main" });
-				expect(drawn.render(200).map((line) => line.trimEnd())).toEqual(["<status.success> header (main) [evidence 0a1b2c3d — cite it in record_finding]", "body of main"]);
+				const cell = (code: string, callId: string) => runCell(h.session, "js", code, {}, undefined, callId);
+				expect((await cell(caught('await re.call("stand_in_tool", { addr: "refuse" })'), "eval-1")).text).toBe("omp-re: refused by the stand-in");
+				expect((await cell(caught('await re.call("stand_in_tool", { addr: "fail" })'), "eval-2")).text).toBe("the stand-in's tool failed");
+				// Two calls of one cell, and a third from the next.
+				const read = await cell('const first = await re.call("stand_in_tool", { addr: "main" }); await re.call("stand_in_tool", { addr: "other" }); first', "eval-3");
+				expect(read).toMatchObject({ isError: false, text: "header\nbody of main\n[evidence 0a1b2c3d — cite it in record_finding]" });
+				// What rizin printed comes whole and apart from the text, an integer past 2^53 exact, with the evidence id as it is cited.
+				expect((await cell('const { data, evidence } = await re.json("ij", "main"); `${typeof data.wide} ${data.wide} ${data.addr} ${evidence}`', "eval-4")).text).toBe("bigint 18446744073709551615 main 0a1b2c3d");
 				const { heard, violations } = await standInSays<Heard>(h, "heard");
 				expect(violations).toEqual([]);
-				expect(heard.filter((one) => one.method === "call").map((one) => one.params)).toMatchObject([
-					{ name: "stand_in_tool", arguments: { addr: "refuse" }, callId: "c-refuse" },
-					{ name: "stand_in_tool", arguments: { addr: "fail" }, callId: "c-fail" },
-					{ name: "stand_in_tool", arguments: { addr: "main" }, callId: "c-read" },
+				const session = { id: h.session.sessionManager.getSessionId(), cwd: h.session.sessionManager.getCwd() };
+				expect(heard.filter((one) => one.method === "call").map((one) => one.params)).toEqual([
+					{ session, name: "stand_in_tool", arguments: { addr: "refuse" }, callId: "eval-1#1" },
+					{ session, name: "stand_in_tool", arguments: { addr: "fail" }, callId: "eval-2#1" },
+					{ session, name: "stand_in_tool", arguments: { addr: "main" }, callId: "eval-3#1" },
+					{ session, name: "stand_in_tool", arguments: { addr: "other" }, callId: "eval-3#2" },
+					{ session, name: "rizin_command", arguments: { command: "ij", addr: "main" }, callId: "eval-4#1" },
 				]);
 			} finally {
 				await h.shutdown();
@@ -279,16 +272,12 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 		});
 	}, 30_000);
 
-	test("a /re line's draft goes to the input box with its notice; a list opens as a panel, a row as its code, and the keys the protocol names drive it", async () => {
+	test("a key the protocol names opens its list as a panel, a row as its code, and the code view's keys drive it", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const h = await boot(await inMemory());
+			const h = await loaded();
 			try {
-				await h.session.prompt("/re cite 0a1b2c3d");
-				expect(h.editor()).toBe("Re: evidence 0a1b2c3d");
-				expect(h.notes.at(-1)).toBe("[info] the citation is in your draft");
-
 				expect([...h.session.extensionRunner!.getShortcuts().keys()]).toEqual(expect.arrayContaining(KEYS.views.map((key) => key.key)));
-				const opened = h.session.prompt("/re functions");
+				const opened = h.press(KEYS.views.find((key) => key.view === "functions")!.key);
 				expect(await until(() => h.overlays.length === 1, 5000)).toBe(true);
 				const panel = h.overlays[0]!;
 				expect(panel.render(80)[0]).toBe("omp-re: functions 2");
@@ -329,18 +318,17 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 		});
 	}, 30_000);
 
-	test("headless (omp -p), what a /re line says goes to standard output, an error to standard error with a failing exit status", async () => {
+	test("headless (omp -p), what the engine has to tell goes to standard output, a warning or an error to standard error, an error with a failing exit status", async () => {
 		await withEngine(standIn("serve"), async () => {
-			const h = await boot(await inMemory(), { headless: true });
+			const h = await loaded({ headless: true });
 			const { print, printError, failExit } = outside;
 			const said: string[] = [];
 			outside.print = (text) => void said.push(`out: ${text}`);
 			outside.printError = (text) => void said.push(`err: ${text}`);
 			outside.failExit = () => void said.push("exit status: failing");
 			try {
-				await h.session.prompt("/re status");
-				await h.session.prompt("/re bogus");
-				expect(said).toEqual(["out: stand-in: status", "err: stand-in: bogus", "exit status: failing"]);
+				await standInSays(h, "wire");
+				expect(said).toEqual(["out: told at info", "err: told at warning", "err: told at error", "exit status: failing"]);
 			} finally {
 				Object.assign(outside, { print, printError, failExit });
 				await h.shutdown();
@@ -351,7 +339,7 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 
 describe("how long omp's side waits for the engine", () => {
 	const BEAT_MS = 100;
-	const session = { id: "s", cwd: tmpdir(), hasUI: false };
+	const session = { id: "s", cwd: tmpdir() };
 	const call = { session, name: "stand_in_tool", arguments: {}, callId: "c" };
 	const start = (behaviour: string, deadlines = {}) => {
 		const logged: string[] = [];
@@ -408,14 +396,14 @@ describe("how long omp's side waits for the engine", () => {
 		let started = 0;
 		for (const heeds of ["told-only", "eof-only"]) {
 			const obedient = start(heeds).engine;
-			await obedient.request("describe", {});
+			await obedient.request("preserved", { session });
 			started = Date.now();
 			await obedient.stop();
 			expect(Date.now() - started).toBeLessThan(1000);
 		}
 
 		const deaf = start("deaf").engine;
-		await deaf.request("describe", {});
+		await deaf.request("preserved", { session });
 		started = Date.now();
 		await deaf.stop();
 		// omp gives shutdown handlers 2 s (an outside fact): the kill has to come inside it.
@@ -480,21 +468,19 @@ describe("the side model the engine's claim audit asks", () => {
 
 describe("one engine for the omp process", () => {
 	test("two sessions share one engine process and keep their own state; it ends with the last of them, inside omp's two-second shutdown budget", async () => {
-		const a = await boot(await inMemory());
+		const a = await loaded();
 		const pid = engine().pid!;
-		const b = await boot(await inMemory());
+		const b = await loaded();
 		expect(engine().pid).toBe(pid);
 		expect(alive(pid)).toBe(true);
 
-		await a.session.prompt("/re off");
-		expect((await evalJs(a.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toContain("RE tools are off for this session");
-		expect((await evalJs(b.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toContain("omp-re: no binary open");
+		expect((await evalJs(a.session, caught('await re.cmd("aflj")'))).text).toContain("omp-re: no binary open");
 		// With no binary there is nothing to show but that: the band is the engine's two lines.
 		expect(b.widget("re.hud")).toEqual(["no binary", "0 fn · 0 findings · 0 evidence"]);
 
 		await a.shutdown();
 		expect(alive(pid)).toBe(true);
-		expect((await evalJs(b.session, '(await tool.rizin_command({ command: "" })).text')).text).toContain("omp-re — reverse engineering with rizin");
+		expect((await evalJs(b.session, "await re.help()")).text).toContain("omp-re — reverse engineering with rizin");
 
 		const started = Date.now();
 		await b.shutdown();
@@ -502,46 +488,32 @@ describe("one engine for the omp process", () => {
 		expect(Date.now() - started).toBeLessThan(2000);
 	}, 30_000);
 
-	test("an engine that died is not kept: the session's next call starts another, which is told what the first held in no record — /re off", async () => {
-		const h = await boot(await inMemory());
+	test("an engine that died is not kept: the session's next call starts another", async () => {
+		const h = await loaded();
 		try {
 			const pid = engine().pid!;
-			await h.session.prompt("/re off");
 			process.kill(pid, "SIGKILL");
 			expect(await until(() => !alive(pid), 2000)).toBe(true);
-			expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "" })'))).text).toBe("omp-re: RE tools are off for this session — the user can re-enable them with /re on");
+			expect((await evalJs(h.session, "await re.help()")).text).toContain("omp-re — reverse engineering with rizin");
 			expect(engine().pid).not.toBe(pid);
-			await h.session.prompt("/re on");
-			expect((await evalJs(h.session, '(await tool.rizin_command({ command: "" })).text')).text).toContain("omp-re — reverse engineering with rizin");
 		} finally {
 			await h.shutdown();
 		}
 	}, 30_000);
 
-	test("every call that ran is in the audit log under omp's own tool-call id, and what the approval gate decided is forwarded to it", async () => {
-		const h = await boot(await inMemory());
+	test("every call that ran is in the audit log, named by the eval call it came from and its place in that cell; a line is not a call and leaves none", async () => {
+		const h = await loaded();
 		try {
 			const id = h.session.sessionManager.getSessionId();
-			// Without rizin the call fails, after its line is written: either way it ran.
-			await h.session
-				.getToolByName("rizin_help")!
-				.execute("call-from-omp", { query: "pdf" })
-				.then(
-					() => {},
-					() => {},
-				);
-			const emit = (event: Record<string, unknown>) => h.session.extensionRunner!.emit({ type: "tool_approval_resolved", sessionId: id, ...event } as never);
-			await emit({ toolCallId: "call-denied", toolName: "rename_function", approved: false, reason: "not now" });
-			await emit({ toolCallId: "call-allowed", toolName: "rename_function", approved: true });
-			await emit({ toolCallId: "call-other", toolName: "bash", approved: true });
+			// Without rizin the calls fail, after their lines are written: either way they ran.
+			await runCell(h.session, "js", 'await re.call("rizin_help", { query: "pdf" }).catch(() => {}); await re.status(); await re.call("rizin_help", { query: "px" }).catch(() => {})', {}, undefined, "call-from-omp");
 			const lines = (await readFile(join(agentDir(), "re", "audit", `${id}.log`), "utf8"))
 				.trim()
 				.split("\n")
 				.map((line) => JSON.parse(line) as Record<string, unknown>);
-			expect(lines.map((line) => line.toolCallId)).toEqual(["call-from-omp", "call-denied", "call-allowed"]);
+			expect(lines.map((line) => line.toolCallId)).toEqual(["call-from-omp#1", "call-from-omp#2"]);
 			expect(lines[0]).toMatchObject({ sessionId: id, tool: "rizin_help", args: { query: "pdf" } });
-			expect(lines[1]).toMatchObject({ tool: "rename_function", approved: false, reason: "not now" });
-			expect(lines[2]).toMatchObject({ tool: "rename_function", approved: true });
+			expect(Object.keys(lines[0]!).sort()).toEqual(["args", "sessionId", "tool", "toolCallId", "ts"]);
 		} finally {
 			await h.shutdown();
 		}
@@ -549,47 +521,20 @@ describe("one engine for the omp process", () => {
 });
 
 describe.skipIf(!canRunRizin)("against rizin", () => {
-	test("a call omp aborts is cancelled in the engine: it rejects as aborted, and the session goes on", async () => {
-		const h = await boot(await inMemory());
-		try {
-			const abort = new AbortController();
-			let progress = "";
-			const large = ["/usr/bin/python3", "/usr/bin/perl", "/bin/bash"].find((path) => Bun.file(path).size > 0) ?? TEST_BINARY;
-			const opening = h.session
-				.getToolByName("open_binary")!
-				.execute("call-open", { path: large }, abort.signal, (partial) => {
-					progress = partial.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-				})
-				.then(
-					() => "opened",
-					(error: Error) => error.message,
-				);
-			expect(await until(() => progress.startsWith("rizin: analyzing "), 10_000)).toBe(true);
-			const started = Date.now();
-			abort.abort();
-			expect(await opening).toMatch(/^omp-re: .* aborted$/);
-			expect(Date.now() - started).toBeLessThan(3000);
-			expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "ij" })'))).text).toContain("omp-re: no binary open");
-			expect((await evalJs(h.session, `(await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })).text ?? "opened"`)).isError).toBe(false);
-		} finally {
-			await h.shutdown();
-		}
-	}, 60_000);
+	const open = `await re.open(${JSON.stringify(TEST_BINARY)})`;
 
-	test("an annotation is recorded in omp's own session under the entry id omp gave it, which is what /re undo names", async () => {
-		const h = await boot(await inMemory());
+	test("an annotation is recorded in omp's own session under the entry id omp gave it, which is what the line undo names", async () => {
+		const h = await loaded();
 		try {
-			const done = await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })\nawait tool.set_comment({ addr: "main", text: "shim test" })`);
+			const done = await evalJs(h.session, `${open}\nawait re.call("set_comment", { addr: "main", text: "shim test" })`);
 			expect(done.isError).toBe(false);
-			await h.session.prompt("/re undo");
-			expect(h.notes.at(-1)).toStartWith("[info] ");
+			expect((await evalJs(h.session, 'await re.slash("undo")')).text).toStartWith("omp-re: undid set_comment @ ");
 			const custom = h.session.sessionManager.getEntries().filter((entry) => entry.type === "custom") as { id: string; customType: string; data: Record<string, unknown> }[];
 			const annotation = custom.find((entry) => entry.customType === "re.annotation")!;
 			const undo = custom.find((entry) => entry.customType === "re.undo")!;
 			expect(annotation.data).toMatchObject({ kind: "set_comment", newValue: "shim test" });
 			expect(undo.data.undidEntryId).toBe(annotation.id);
-			await h.session.prompt("/re undo");
-			expect(h.notes.at(-1)).toBe("[error] omp-re: no annotation left to undo");
+			expect((await evalJs(h.session, caught('await re.slash("undo")'))).text).toBe("omp-re: no annotation left to undo");
 		} finally {
 			await h.shutdown();
 		}
@@ -597,19 +542,15 @@ describe.skipIf(!canRunRizin)("against rizin", () => {
 
 	test("the claim audit reaches omp's side model through the real pair: the verdict it gives decides whether a finding is recorded, and a session with no model records it unaudited", async () => {
 		const asked: string[] = [];
-		const audited = await boot(await inMemory(), {
-			sideModel: (prompt) => {
+		const audited = await loaded({
+			sideModel: (prompt: string) => {
 				asked.push(prompt);
 				return '[{"index": 0, "verdict": "overreach", "reason": "the stand-in says the read shows less"}]';
 			},
 		});
-		const unaudited = await boot(await inMemory());
+		const unaudited = await loaded();
 		try {
-			const record = (h: SdkHarness) =>
-				evalJs(
-					h.session,
-					`await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })\nconst read = await tool.rizin_command({ command: "ij" })\n${caught('m = (await tool.record_finding({ claim: "The file is a program.", evidence: [read.details.evidenceId] })).text')}`,
-				);
+			const record = (h: SdkHarness) => evalJs(h.session, `${open}\nconst read = await re.json("ij")\n${caught('m = await re.call("record_finding", { claim: "The file is a program.", evidence: [read.evidence] })')}`);
 			const refused = await record(audited);
 			expect(refused.text).toStartWith("record_finding: NOT recorded — the support auditor judged this claim overreach: the stand-in says the read shows less\n");
 			expect(asked).toHaveLength(1);
@@ -623,16 +564,16 @@ describe.skipIf(!canRunRizin)("against rizin", () => {
 		}
 	}, 90_000);
 
-	test("a real session through the real pair: the band the engine sends is drawn, a list opens as a panel of the binary's own functions, a compaction keeps the binary, and a branch and a tree leave it open", async () => {
-		const h = await boot(await inMemory());
+	test("a real session through the real pair: the band the engine sends is drawn, a key opens a panel of the binary's own functions, a compaction keeps the binary, and a branch and a tree leave it open", async () => {
+		const h = await loaded();
 		try {
 			const id = h.session.sessionManager.getSessionId();
-			expect((await evalJs(h.session, `(await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })).text`)).isError).toBe(false);
+			expect((await evalJs(h.session, open)).isError).toBe(false);
 			const band = h.widget("re.hud")!;
 			expect(band[0]).toStartWith(`${TEST_BINARY.split(/[\\/]/).at(-1)}  `);
 			expect(band[1]).toMatch(/^[1-9]\d* fn · 0 findings · 0 evidence$/);
 
-			const opened = h.session.prompt("/re functions");
+			const opened = h.press("alt+g");
 			expect(await until(() => h.overlays.length === 1, 20_000)).toBe(true);
 			expect(h.overlays[0]!.render(120)[0]).toMatch(/^omp-re: functions [1-9]\d*$/);
 			h.overlays[0]!.handleInput!("\x1b");
@@ -643,59 +584,36 @@ describe.skipIf(!canRunRizin)("against rizin", () => {
 			expect(kept.context.join("\n")).toContain(`- Open binary: ${TEST_BINARY.split(/[\\/]/).at(-1)} (`);
 			await emit({ type: "session_branch" });
 			await emit({ type: "session_tree" });
-			expect((await evalJs(h.session, '(await tool.rizin_command({ command: "afij", addr: "main" })).text')).text).toStartWith("rizin> afij @ main\n");
+			expect((await evalJs(h.session, 'await re.cmd("afij", "main")')).text).toStartWith("rizin> afij @ main\n");
 			expect(h.notes.filter((note) => note.startsWith("[runtime]") || note.startsWith("[error]"))).toEqual([]);
 			// A session omp leaves for another has its rizin ended; coming back restores it from the record.
 			await emit({ type: "session_before_switch", reason: "resume" });
 			await emit({ type: "session_switch", reason: "resume" });
-			expect((await evalJs(h.session, '(await tool.rizin_command({ command: "afij", addr: "main" })).text')).text).toStartWith("rizin> afij @ main\n");
+			expect((await evalJs(h.session, 'await re.cmd("afij", "main")')).text).toStartWith("rizin> afij @ main\n");
 		} finally {
 			await h.shutdown();
 		}
 	}, 90_000);
 
-	// The wording is the engine's and the filling is omp's side's: this is the one place the two are read together, as the operator reads them.
-	test("the approval prompt's sentences are the engine's, filled from each call's arguments", async () => {
-		const previous = process.env.OMPRE_ENABLE_DEBUGGER;
-		process.env.OMPRE_ENABLE_DEBUGGER = "1";
-		const h = await boot(await inMemory());
+	test("a session whose binary is gone when it comes back is told so, once, as an error", async () => {
+		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
+		const copy = join(agentDir(), "gone-binary");
+		await Bun.write(copy, Bun.file(TEST_BINARY));
+		const manager = (await ownSession(agentDir())) as { getCwd(): string; ensureOnDisk(): Promise<void>; getSessionFile(): string };
+		await manager.ensureOnDisk();
+		const first = await boot(manager, { skills: true, cwd: manager.getCwd() });
+		expect((await evalJs(first.session, `%load skill://re-triage/recipes.js`)).isError).toBe(false);
+		expect((await evalJs(first.session, `await re.open(${JSON.stringify(copy)})`)).isError).toBe(false);
+		const file = manager.getSessionFile();
+		await first.shutdown();
+		const { rmSync } = await import("node:fs");
+		rmSync(copy);
+		const second = await boot(await SessionManager.open(file), { cwd: manager.getCwd() });
 		try {
-			const tools = new Map(reTools(h.session).map((tool) => [tool.definition.name, tool.definition.approval]));
-			const reason = (name: string, args: unknown) => {
-				const approval = tools.get(name);
-				return typeof approval === "function" ? (approval(args) as { tier: string; reason: string }) : approval;
-			};
-			expect(reason("rizin_help", { query: "pdf" })).toBe("read");
-			expect(reason("record_finding", {})).toBe("read");
-			expect(reason("rename_function", { addr: "main", new: "start" })).toEqual({ tier: "write", reason: 'Rename function "main" to "start". Reversible with /re undo.' });
-			expect(reason("set_variable_type", { addr: "main", var: "x".repeat(100), type: "int" })).toEqual({
-				tier: "write",
-				reason: `Set the type of ${JSON.stringify(`${"x".repeat(77)}...`)} in "main" to "int". Reversible with /re undo.`,
-			});
-			expect(reason("rizin_command", { command: "pdf", addr: "main" })).toEqual({ tier: "exec", reason: 'Run the rizin command "pdf @ main" on the open binary.' });
-			expect(reason("rizin_command", { command: "p".repeat(200) })).toEqual({ tier: "exec", reason: `Run the rizin command ${JSON.stringify(`${"p".repeat(117)}...`)} on the open binary.` });
-			expect(reason("rizin_cli", { tool: "rz-bin", args: ["-I", "/bin/ls"] })).toEqual({ tier: "exec", reason: 'Run "rz-bin -I /bin/ls".' });
-			expect(reason("map_file", { path: "/tmp/dump", addr: "0x50000" })).toEqual({
-				tier: "exec",
-				reason: 'Map "/tmp/dump" into the session\'s address space at 0x50000 (read-only; re-applied on respawn). The file on disk is not modified.',
-			});
-			expect(reason("map_file", {})).toEqual({ tier: "exec", reason: "Map a file into the session's address space at ? (read-only; re-applied on respawn). The file on disk is not modified." });
-			expect(reason("analyze", { pass: "aaaa" })).toEqual({ tier: "exec", reason: 'Run rizin analysis pass "aaaa" — this changes the analysis (it adds functions, xrefs, names, or types).' });
-			expect(reason("apply_signatures", { source: "file", path: "/tmp/libc.sig" })).toEqual({ tier: "exec", reason: 'Apply the FLIRT signature file "/tmp/libc.sig" — this renames matched functions.' });
-			expect(reason("apply_signatures", { source: "sigdb" })).toEqual({ tier: "exec", reason: "Re-apply rizin's built-in signature database — this renames matched functions." });
-			expect(reason("export_project", {})).toEqual({ tier: "exec", reason: "Write the current analysis to a rizin project file in omp-re's output directory — the sample and the analysis are not modified." });
-			expect(reason("rizin_emulate", { action: "step" })).toEqual({ tier: "exec", reason: "Run the target's code logic inside rizin's RzIL VM (interpreted, no OS process)." });
-			expect(reason("rizin_debug", { action: "start" })).toEqual({ tier: "exec", reason: "Launch the target under a debugger — this EXECUTES it on this machine." });
-			expect(reason("rizin_debug", { action: "start", attach: { pid: 4242 } })).toEqual({ tier: "exec", reason: "Attach the debugger to running PID 4242 — it will control that process." });
-			expect(reason("rizin_debug", { action: "start", attach: { remote: "gdb://127.0.0.1:1234" } })).toEqual({ tier: "exec", reason: 'Connect the debugger to the remote target "gdb://127.0.0.1:1234".' });
-			expect(reason("rizin_debug", { action: "step_back" })).toEqual({ tier: "exec", reason: "Move the debugged process backward through the recorded trace (step_back)." });
-			expect(reason("rizin_debug", { action: "write_memory" })).toEqual({ tier: "exec", reason: "Modify the debugged process (write_memory)." });
-			expect(reason("rizin_debug", { action: "registers" })).toEqual({ tier: "exec", reason: "Inspect the debugged process (registers)." });
-			expect(reason("rizin_debug", {})).toEqual({ tier: "exec", reason: "Drive the debugged process." });
+			expect(await until(() => second.notes.some((note) => note.startsWith("[error] ")), 20_000)).toBe(true);
+			expect(second.notes.filter((note) => note.startsWith("[error] "))).toEqual([expect.stringContaining("gone-binary")]);
 		} finally {
-			await h.shutdown();
-			if (previous === undefined) delete process.env.OMPRE_ENABLE_DEBUGGER;
-			else process.env.OMPRE_ENABLE_DEBUGGER = previous;
+			await second.shutdown();
 		}
-	}, 30_000);
+	}, 60_000);
 });

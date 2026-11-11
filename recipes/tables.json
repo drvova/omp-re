@@ -701,23 +701,23 @@
       "notAString": "omp-re: {recipe}: a function is named by a string, not {given}",
       "optionsNotOneObject": "omp-re: {recipe}: options are one object, e.g. \\{ maxItems: 20 \\}, not {given}",
       "noFunction": "omp-re: {recipe}: no function at {addr} — list them with {listFunctions}, or define one with define_function",
-      "noInstructions": "omp-re: {recipe}: no function at {addr} — list them with {listFunctions}",
-      "cutOutput": "omp-re: {recipe}: the output of rizin_command {label:json} was cut at the size cap and the whole of it could not be read back ({why}). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands.",
-      "cutNoArtifact": "the engine saved no artifact for it",
-      "cutUnreadable": "artifact://{artifact}: {error}",
-      "cutNotText": "artifact://{artifact} did not read as text"
+      "noInstructions": "omp-re: {recipe}: no function at {addr} — list them with {listFunctions}"
     }
   },
   "hosts": {
     "js": {
       "global": "re",
-      "listFunctions": "await tool.rizin_command({ command: \"aflj\" })",
-      "openFirst": "Open a binary first (await tool.open_binary({ path }))."
+      "listFunctions": "await re.json(\"aflj\")",
+      "openFirst": "Open a binary first (await re.open(path)).",
+      "calling": "Every one is async: await it.",
+      "manual": "await re.help()"
     },
     "py": {
       "global": "omp_re",
-      "listFunctions": "await tool.rizin_command({\"command\": \"aflj\"})",
-      "openFirst": "Open a binary first (await tool.open_binary({\"path\": ...})). The recipes themselves need no await."
+      "listFunctions": "omp_re.json(\"aflj\")",
+      "openFirst": "Open a binary first (omp_re.open(path)).",
+      "calling": "Every one is a plain call: nothing is awaited.",
+      "manual": "omp_re.help()"
     },
     "lisp": {
       "listFunctions": "(re:json \"aflj\")"
@@ -726,15 +726,15 @@
   "help": {
     "header": [
       "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own",
-      "rizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.",
+      "rizin_command call (audited, recorded as evidence). Each returns its report as a string; print() it.",
       "{openFirst}"
     ],
     "footer": [
       "Every section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the",
       "reads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one."
     ],
-    "loaded": "omp-re recipes loaded: {calls} — print({global}.help()) says what each answers.",
-    "shown": "<omp-re recipes: {names} — print({global}.help()) says what each answers>"
+    "loaded": "omp-re loaded: {verbs}, and the recipes {calls}. {calling} print({manual}) is the manual; print({global}.recipes()) says what each recipe answers.",
+    "shown": "<omp-re: {verbNames}; recipes {names} — print({manual}) is the manual>"
   },
   "facts": {
     "triage": [

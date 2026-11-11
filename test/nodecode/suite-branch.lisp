@@ -159,24 +159,7 @@
               (in-turn (id "t2")
                 (check "and after a redo it is mapped again"
                        (has "4252414e43484d4150504544" (re:cmd "p8 12" "0x5f0000")))))
-         (forget-tree)))
-
-     ;; A citation, where the caller has an input box.
-     (let ((id (fresh-session)))
-       (in-session (id)
-         (re:open *binary*)
-         (let* ((evidence (tagged-evidence (re:cmd "iIj")))
-                (command (cdr (assoc "re" nle:*commands* :test #'string=))))
-           (check "/re cite from a shell that takes a draft puts the citation in the input box"
-                  (let ((nle:*slash-effects* '(:clipboard :draft)))
-                    (multiple-value-bind (text dialog effects) (funcall command (format nil "cite ~a" evidence) id)
-                      (and (has "is in your draft" text) (null dialog)
-                           (eq :draft (first (first effects)))
-                           (has (format nil "Re: evidence ~a" evidence) (second (first effects)))))))
-           (check "from a caller with no input box the citation is the answer, and no effect is claimed"
-                  (let ((nle:*slash-effects* nil))
-                    (multiple-value-bind (text dialog effects) (funcall command (format nil "cite ~a" evidence) id)
-                      (and (has (format nil "Re: evidence ~a" evidence) text) (null dialog) (null effects)))))))))
+         (forget-tree))))
 
    (suite "branch: what lasts is a notice")
    (with-cell ()

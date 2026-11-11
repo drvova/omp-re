@@ -201,10 +201,6 @@ scratch home => its native path."
 put to, a record store that fails — and the host as it was after."
   `(omp-re:with-host-service (,service ,function) ,@body))
 
-(defun typed (line &optional (session-id nle:*stub-session*))
-  "What the operator's own /re LINE answers, typed in the session SESSION-ID."
-  (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) line session-id))
-
 (defun described-tool (name)
   "The engine's description of the tool NAME, as a host is given it, or NIL."
   (find name (omp-re:engine-tools) :key (lambda (tool) (gethash "name" tool)) :test #'string=))

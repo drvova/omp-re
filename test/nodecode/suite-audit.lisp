@@ -478,12 +478,7 @@ reproducible rizin_command record => its id."
           (check "(re:slash \"report\") from eval is audited by the model too, and strict withholds on its verdict"
                  (and (has "report withheld — "
                            (refusal (lambda () (re:slash "report --audit=strict"))))
-                      (= (1+ before) (length nlk:*stub-submissions*))))
-          (check "a /re line typed as a command does not wait on a model turn: nothing is asked, and the report says why"
-                 (let ((markdown (let ((nle:*stub-session* nil)) (re::run-slash "report --audit=strict" id))))
-                   (and (has "> _Claim–evidence support unaudited — a /re line typed as a command does not wait for the audit's side question; (re:slash \"report\") from eval asks it._"
-                             markdown)
-                        (= (1+ before) (length nlk:*stub-submissions*)))))))
+                      (= (1+ before) (length nlk:*stub-submissions*))))))
 
       ;; A session the store does not hold: there is no parent to hang the question under.
       (let ((id (audit-session)))
