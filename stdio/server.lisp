@@ -440,7 +440,10 @@ bound a request by the clock; it bounds the engine's silence instead, and
 learns here of a request the engine never got or whose answer was lost."
   (loop until *closing*
         do (sleep (protocol-constant "aliveSeconds"))
-           (let ((serving (sort (loop for id being the hash-keys of *requests* collect id) #'<)))
+           (let ((serving (sort (sb-ext:with-locked-hash-table (*requests*)
+                                  (loop for id being the hash-keys of *requests*
+                                        when (integerp id) collect id))
+                                #'<)))
              (when (and serving (not *closing*))
                (ignore-errors (tell-omp "alive" "serving" (coerce serving 'simple-vector)))))))
 

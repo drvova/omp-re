@@ -170,6 +170,7 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 				expect(h.session.sessionManager.getEntries().filter((one) => (one as { customType?: string }).customType === "re.binary")).toEqual([
 					expect.objectContaining({ content: "[re: opened /stand/in]", details: { sha256: "00" } }),
 				]);
+				expect(h.session.extensionRunner!.getMessageRenderer("re.binary")).toBeDefined();
 				// The state the engine sent outside any answer: the band is drawn as its lines, and its evidence completes an id.
 				expect(h.widget("re.hud")).toEqual(["stand-in  ELF64 x86/64  entry 0x1000", "3 fn · 0 findings · 1 evidence"]);
 				expect(h.widget("re.hud", 12)).toEqual(["stand-in  E…", "3 fn · 0 fi…"]);
