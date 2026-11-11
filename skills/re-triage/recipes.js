@@ -37,26 +37,23 @@
  * This file has two twins: recipes.py beside it, the same five for omp's
  * Python kernel (as `omp_re`, since `re` there is the regex module), and
  * nodecode/recipes.lisp, the same five as Lisp verbs for the nodecode host.
- * All three must answer the same text for the same binary, line for line,
- * and test/recipes-eval.test.ts holds them to it; so a change to the wording
- * or the order of reads here is a change in the other two. The tables all
- * three read are generated from recipes/tables.json by
- * scripts/gen-recipes.ts, which rewrites the marked block below — edit the
- * JSON and run the script, never the block.
+ * All three answer the same text for the same binary, reads and all, and
+ * test/recipes-eval.test.ts holds them to it.
  *
- * Where the two differ, because the hosts do:
- *  - find_crypto. The Lisp probes each constant quietly and records only the
- *    searches that hit. Here every search is a tool call, so a search that
- *    finds nothing is a recorded read too, and "Evidence taken" lists it:
- *    an id to cite for "the SHA-1 constants are not in this binary". The
- *    hits listed under "Published constants" are the same.
- *  - triage. Its title names the open binary, and code in eval has no way
- *    to ask the engine which that is; rizin is asked instead (`ij`), which
- *    is one read more than the Lisp takes, listed first.
- *  - A refusal that says how to list functions names this host's call
- *    (`tool.rizin_command`) where the Lisp names its own (`re:json`).
+ * What a recipe reads, in which order, how each section is worded, its
+ * options and their bounds, the tables and every sentence are data: they
+ * live in recipes/tables.json, and scripts/gen-recipes.ts writes them into
+ * the marked block below — edit the JSON and run the script, never the
+ * block. This file keeps what JavaScript forces on it (rizin's JSON with its
+ * integers whole, the bridge for one read, how a number is printed), the
+ * loop that renders a recipe from that data, and under FACTS the few things
+ * a section needs code for. A change to any of those is a change in the
+ * other two files.
+ *
+ * The one place the three hosts' words differ is a refusal that says how to
+ * list functions: each names its own call (the data's `host.listFunctions`).
  */
-globalThis.re = (() => {
+(() => {
 // <generated:tables> — from recipes/tables.json by scripts/gen-recipes.ts; do not edit
 const TABLES = {
   "riskyImports": [
@@ -64,81 +61,42 @@ const TABLES = {
       "category": "memory",
       "severity": "high",
       "why": "copies with no bound at all; any input longer than the buffer overruns it",
-      "names": [
-        "gets"
-      ]
+      "names": ["gets"]
     },
     {
       "category": "memory",
       "severity": "high",
       "why": "copies or formats until a terminator with no destination size; safe only if every caller proves the length",
       "names": [
-        "strcpy",
-        "strcat",
-        "stpcpy",
-        "sprintf",
-        "vsprintf",
-        "wcscpy",
-        "wcscat",
-        "lstrcpyA",
-        "lstrcpyW",
-        "lstrcatA",
-        "lstrcatW",
-        "wsprintfA",
-        "wsprintfW"
+        "strcpy", "strcat", "stpcpy", "sprintf", "vsprintf", "wcscpy", "wcscat", "lstrcpyA",
+        "lstrcpyW", "lstrcatA", "lstrcatW", "wsprintfA", "wsprintfW"
       ]
     },
     {
       "category": "memory",
       "severity": "medium",
       "why": "reads into a buffer; a %s or %[ without a width has no bound",
-      "names": [
-        "scanf",
-        "sscanf",
-        "fscanf",
-        "vscanf",
-        "vsscanf",
-        "vfscanf"
-      ]
+      "names": ["scanf", "sscanf", "fscanf", "vscanf", "vsscanf", "vfscanf"]
     },
     {
       "category": "memory",
       "severity": "medium",
       "why": "the size comes from the caller and is often attacker-influenced",
-      "names": [
-        "alloca",
-        "realpath",
-        "getwd"
-      ]
+      "names": ["alloca", "realpath", "getwd"]
     },
     {
       "category": "memory",
       "severity": "low",
       "why": "bounded, but the bound is the caller's to get right (and strncpy leaves no terminator when it fills)",
-      "names": [
-        "strncpy",
-        "strncat",
-        "memcpy",
-        "memmove",
-        "bcopy",
-        "wcsncpy",
-        "snprintf",
-        "vsnprintf"
-      ]
+      "names": ["strncpy", "strncat", "memcpy", "memmove", "bcopy", "wcsncpy", "snprintf", "vsnprintf"]
     },
     {
       "category": "command",
       "severity": "high",
       "why": "hands a string to a shell; anything in it that came from outside is a command",
       "names": [
-        "system",
-        "popen",
-        "wordexp",
-        "WinExec",
-        "ShellExecuteA",
-        "ShellExecuteW",
-        "ShellExecuteExA",
-        "ShellExecuteExW"
+        "system", "popen", "wordexp", "WinExec", "ShellExecuteA", "ShellExecuteW",
+        "ShellExecuteExA", "ShellExecuteExW"
       ]
     },
     {
@@ -146,17 +104,8 @@ const TABLES = {
       "severity": "medium",
       "why": "starts another program; what it runs and with which arguments is worth tracing",
       "names": [
-        "execl",
-        "execlp",
-        "execle",
-        "execv",
-        "execvp",
-        "execve",
-        "execvpe",
-        "posix_spawn",
-        "posix_spawnp",
-        "CreateProcessA",
-        "CreateProcessW"
+        "execl", "execlp", "execle", "execv", "execvp", "execve", "execvpe", "posix_spawn",
+        "posix_spawnp", "CreateProcessA", "CreateProcessW"
       ]
     },
     {
@@ -164,258 +113,123 @@ const TABLES = {
       "severity": "low",
       "why": "a format string that is not a literal lets its author read and write memory",
       "names": [
-        "printf",
-        "fprintf",
-        "dprintf",
-        "vprintf",
-        "vfprintf",
-        "syslog",
-        "vsyslog",
-        "err",
-        "errx",
-        "warn",
-        "warnx"
+        "printf", "fprintf", "dprintf", "vprintf", "vfprintf", "syslog", "vsyslog", "err", "errx",
+        "warn", "warnx"
       ]
     },
     {
       "category": "race",
       "severity": "high",
       "why": "chooses a file name before the file exists; another process can take it first",
-      "names": [
-        "mktemp",
-        "tmpnam",
-        "tempnam"
-      ]
+      "names": ["mktemp", "tmpnam", "tempnam"]
     },
     {
       "category": "race",
       "severity": "low",
       "why": "checks a path, then uses it; the file can change between the two",
-      "names": [
-        "access",
-        "stat",
-        "lstat"
-      ]
+      "names": ["access", "stat", "lstat"]
     },
     {
       "category": "integer",
       "severity": "low",
       "why": "reports no error and no overflow; a caller cannot tell a bad number from zero",
-      "names": [
-        "atoi",
-        "atol",
-        "atoll",
-        "atof"
-      ]
+      "names": ["atoi", "atol", "atoll", "atof"]
     },
     {
       "category": "randomness",
       "severity": "medium",
       "why": "predictable; unfit for keys, tokens or anything an adversary should not guess",
-      "names": [
-        "rand",
-        "srand",
-        "random",
-        "srandom",
-        "drand48",
-        "lrand48"
-      ]
+      "names": ["rand", "srand", "random", "srandom", "drand48", "lrand48"]
     },
     {
       "category": "privilege",
       "severity": "info",
       "why": "changes the process's identity or root; the order and the error checks matter",
-      "names": [
-        "setuid",
-        "setgid",
-        "seteuid",
-        "setegid",
-        "setreuid",
-        "setregid",
-        "chroot"
-      ]
+      "names": ["setuid", "setgid", "seteuid", "setegid", "setreuid", "setregid", "chroot"]
     },
     {
       "category": "loading",
       "severity": "medium",
       "why": "loads code chosen at run time; from where is worth tracing",
-      "names": [
-        "dlopen",
-        "LoadLibraryA",
-        "LoadLibraryW",
-        "LoadLibraryExA",
-        "LoadLibraryExW"
-      ]
+      "names": ["dlopen", "LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW"]
     }
   ],
   "capabilities": [
     {
       "capability": "network",
       "names": [
-        "socket",
-        "connect",
-        "bind",
-        "listen",
-        "accept",
-        "send",
-        "sendto",
-        "recv",
-        "recvfrom",
-        "getaddrinfo",
-        "gethostbyname",
-        "WSAStartup",
-        "InternetOpenA",
-        "InternetOpenW",
-        "InternetOpenUrlA",
-        "InternetOpenUrlW",
-        "InternetConnectA",
-        "InternetConnectW",
-        "HttpSendRequestA",
-        "HttpSendRequestW",
-        "WinHttpOpen",
-        "WinHttpConnect",
-        "WinHttpSendRequest",
-        "URLDownloadToFileA",
-        "URLDownloadToFileW",
-        "curl_easy_perform",
+        "socket", "connect", "bind", "listen", "accept", "send", "sendto", "recv", "recvfrom",
+        "getaddrinfo", "gethostbyname", "WSAStartup", "InternetOpenA", "InternetOpenW",
+        "InternetOpenUrlA", "InternetOpenUrlW", "InternetConnectA", "InternetConnectW",
+        "HttpSendRequestA", "HttpSendRequestW", "WinHttpOpen", "WinHttpConnect",
+        "WinHttpSendRequest", "URLDownloadToFileA", "URLDownloadToFileW", "curl_easy_perform",
         "SSL_connect"
       ]
     },
     {
       "capability": "process control",
       "names": [
-        "fork",
-        "vfork",
-        "clone",
-        "kill",
-        "ptrace",
-        "prctl",
-        "OpenProcess",
-        "TerminateProcess",
-        "CreateRemoteThread",
-        "CreateToolhelp32Snapshot",
-        "Process32First",
-        "Process32Next"
+        "fork", "vfork", "clone", "kill", "ptrace", "prctl", "OpenProcess", "TerminateProcess",
+        "CreateRemoteThread", "CreateToolhelp32Snapshot", "Process32First", "Process32Next"
       ]
     },
     {
       "capability": "code injection",
       "names": [
-        "VirtualAllocEx",
-        "WriteProcessMemory",
-        "ReadProcessMemory",
-        "CreateRemoteThread",
-        "NtUnmapViewOfSection",
-        "ZwUnmapViewOfSection",
-        "QueueUserAPC",
-        "SetThreadContext",
-        "SetWindowsHookExA",
-        "SetWindowsHookExW",
-        "process_vm_writev"
+        "VirtualAllocEx", "WriteProcessMemory", "ReadProcessMemory", "CreateRemoteThread",
+        "NtUnmapViewOfSection", "ZwUnmapViewOfSection", "QueueUserAPC", "SetThreadContext",
+        "SetWindowsHookExA", "SetWindowsHookExW", "process_vm_writev"
       ]
     },
     {
       "capability": "memory protection",
-      "names": [
-        "mprotect",
-        "mmap",
-        "memfd_create",
-        "VirtualProtect",
-        "VirtualProtectEx",
-        "VirtualAlloc"
-      ]
+      "names": ["mprotect", "mmap", "memfd_create", "VirtualProtect", "VirtualProtectEx", "VirtualAlloc"]
     },
     {
       "capability": "anti-analysis",
       "names": [
-        "ptrace",
-        "IsDebuggerPresent",
-        "CheckRemoteDebuggerPresent",
-        "NtQueryInformationProcess",
-        "OutputDebugStringA",
-        "OutputDebugStringW",
-        "NtSetInformationThread",
-        "GetTickCount",
+        "ptrace", "IsDebuggerPresent", "CheckRemoteDebuggerPresent", "NtQueryInformationProcess",
+        "OutputDebugStringA", "OutputDebugStringW", "NtSetInformationThread", "GetTickCount",
         "QueryPerformanceCounter"
       ]
     },
     {
       "capability": "persistence",
       "names": [
-        "RegSetValueExA",
-        "RegSetValueExW",
-        "RegCreateKeyExA",
-        "RegCreateKeyExW",
-        "CreateServiceA",
-        "CreateServiceW",
-        "StartServiceA",
-        "StartServiceW",
-        "SetFileAttributesA",
+        "RegSetValueExA", "RegSetValueExW", "RegCreateKeyExA", "RegCreateKeyExW", "CreateServiceA",
+        "CreateServiceW", "StartServiceA", "StartServiceW", "SetFileAttributesA",
         "SetFileAttributesW"
       ]
     },
     {
       "capability": "cryptography",
       "names": [
-        "CryptAcquireContextA",
-        "CryptAcquireContextW",
-        "CryptEncrypt",
-        "CryptDecrypt",
-        "CryptGenKey",
-        "CryptHashData",
-        "BCryptEncrypt",
-        "BCryptDecrypt",
-        "BCryptGenRandom",
-        "EVP_EncryptInit_ex",
-        "EVP_DecryptInit_ex",
-        "EVP_DigestInit_ex",
-        "AES_set_encrypt_key",
-        "AES_encrypt",
-        "MD5_Init",
-        "SHA1_Init",
-        "SHA256_Init",
-        "RC4",
-        "DES_ecb_encrypt",
-        "getrandom",
-        "RAND_bytes"
+        "CryptAcquireContextA", "CryptAcquireContextW", "CryptEncrypt", "CryptDecrypt",
+        "CryptGenKey", "CryptHashData", "BCryptEncrypt", "BCryptDecrypt", "BCryptGenRandom",
+        "EVP_EncryptInit_ex", "EVP_DecryptInit_ex", "EVP_DigestInit_ex", "AES_set_encrypt_key",
+        "AES_encrypt", "MD5_Init", "SHA1_Init", "SHA256_Init", "RC4", "DES_ecb_encrypt",
+        "getrandom", "RAND_bytes"
       ]
     },
     {
       "capability": "filesystem",
       "names": [
-        "unlink",
-        "remove",
-        "rename",
-        "chmod",
-        "chown",
-        "opendir",
-        "readdir",
-        "ftw",
-        "nftw",
-        "DeleteFileA",
-        "DeleteFileW",
-        "MoveFileA",
-        "MoveFileW",
-        "FindFirstFileA",
-        "FindFirstFileW",
-        "CopyFileA",
-        "CopyFileW"
+        "unlink", "remove", "rename", "chmod", "chown", "opendir", "readdir", "ftw", "nftw",
+        "DeleteFileA", "DeleteFileW", "MoveFileA", "MoveFileW", "FindFirstFileA", "FindFirstFileW",
+        "CopyFileA", "CopyFileW"
       ]
     },
     {
       "capability": "dynamic resolution",
-      "names": [
-        "dlsym",
-        "GetProcAddress",
-        "LdrGetProcedureAddress"
-      ]
+      "names": ["dlsym", "GetProcAddress", "LdrGetProcedureAddress"]
     }
   ],
-  "severityOrder": [
-    "high",
-    "medium",
-    "low",
-    "info"
+  "severityOrder": ["high", "medium", "low", "info"],
+  "importNameRules": [
+    { "rule": "dropThrough", "text": "imp." },
+    { "rule": "dropPrefix", "text": "__isoc99_" },
+    { "rule": "dropLeading", "text": "_" },
+    { "rule": "dropSuffix", "text": "_chk" }
   ],
   "stringInterest": [
     {
@@ -442,16 +256,8 @@ const TABLES = {
   "packerSectionNames": "upx|aspack|themida|vmp|mpress|petite|\\.packed|\\.enigma",
   "comparingCalls": "\\b(?:str|strn|strcase|strncase|wcs|wcsn|mem|b)cmp\\b|\\bstrstr\\b|\\bstrchr\\b|lstrcmp|CompareString|RtlCompareMemory|\\bcrc|\\bhash|md5|sha\\d|verify|check|valid",
   "cryptoConstants": [
-    {
-      "algorithm": "AES",
-      "what": "S-box",
-      "hex": "637c777bf26b6fc53001672bfed7ab76"
-    },
-    {
-      "algorithm": "AES",
-      "what": "inverse S-box",
-      "hex": "52096ad53036a538bf40a39e81f3d7fb"
-    },
+    { "algorithm": "AES", "what": "S-box", "hex": "637c777bf26b6fc53001672bfed7ab76" },
+    { "algorithm": "AES", "what": "inverse S-box", "hex": "52096ad53036a538bf40a39e81f3d7fb" },
     {
       "algorithm": "AES",
       "what": "T-table Te0 (big-endian words)",
@@ -487,11 +293,7 @@ const TABLES = {
       "what": "initial state (little-endian words)",
       "hex": "0123456789abcdeffedcba9876543210"
     },
-    {
-      "algorithm": "SHA-1",
-      "what": "round constant K1 (little-endian)",
-      "hex": "9979825a"
-    },
+    { "algorithm": "SHA-1", "what": "round constant K1 (little-endian)", "hex": "9979825a" },
     {
       "algorithm": "MD5",
       "what": "sine table (little-endian words)",
@@ -527,26 +329,14 @@ const TABLES = {
       "what": "P-array (little-endian words)",
       "hex": "886a3f24d308a3852e8a191344737003"
     },
-    {
-      "algorithm": "TEA / XTEA",
-      "what": "delta (little-endian)",
-      "hex": "b979379e"
-    },
-    {
-      "algorithm": "TEA / XTEA",
-      "what": "delta (big-endian)",
-      "hex": "9e3779b9"
-    },
+    { "algorithm": "TEA / XTEA", "what": "delta (little-endian)", "hex": "b979379e" },
+    { "algorithm": "TEA / XTEA", "what": "delta (big-endian)", "hex": "9e3779b9" },
     {
       "algorithm": "DES",
       "what": "initial permutation table",
       "hex": "3a322a221a120a023c342c241c140c04"
     },
-    {
-      "algorithm": "RC6 / RC5",
-      "what": "P32 and Q32 (little-endian)",
-      "hex": "6351e1b7b979379e"
-    },
+    { "algorithm": "RC6 / RC5", "what": "P32 and Q32 (little-endian)", "hex": "6351e1b7b979379e" },
     {
       "algorithm": "Base64",
       "what": "standard alphabet",
@@ -557,20 +347,766 @@ const TABLES = {
       "what": "URL-safe alphabet tail",
       "hex": "7778797a303132333435363738392d5f"
     }
+  ],
+  "opTypes": {
+    "call": ["call", "ucall", "rcall", "icall", "ccall"],
+    "decidingCall": ["call", "ucall", "rcall", "icall"],
+    "compare": ["cmp", "acmp"],
+    "branch": ["cjmp"]
+  },
+  "calleeAfter": "call",
+  "branchMeanings": [
+    { "mnemonics": ["je", "jz"], "meaning": "taken when equal / zero" },
+    { "mnemonics": ["jne", "jnz"], "meaning": "taken when not equal / not zero" },
+    { "mnemonics": ["ja", "jnbe"], "meaning": "taken when above (unsigned >)" },
+    { "mnemonics": ["jae", "jnb", "jnc"], "meaning": "taken when above or equal (unsigned >=)" },
+    { "mnemonics": ["jb", "jc", "jnae"], "meaning": "taken when below (unsigned <)" },
+    { "mnemonics": ["jbe", "jna"], "meaning": "taken when below or equal (unsigned <=)" },
+    { "mnemonics": ["jg", "jnle"], "meaning": "taken when greater (signed >)" },
+    { "mnemonics": ["jge", "jnl"], "meaning": "taken when greater or equal (signed >=)" },
+    { "mnemonics": ["jl", "jnge"], "meaning": "taken when less (signed <)" },
+    { "mnemonics": ["jle", "jng"], "meaning": "taken when less or equal (signed <=)" },
+    { "mnemonics": ["js"], "meaning": "taken when negative" },
+    { "mnemonics": ["jns"], "meaning": "taken when not negative" }
+  ],
+  "otherBranch": "conditional",
+  "sectionNotes": {
+    "writableExecutable": "writable+executable",
+    "veryHighEntropy": "very high entropy (compressed or encrypted data)",
+    "highEntropyForCode": "high entropy for code",
+    "packerName": "a name packers use"
+  },
+  "thresholds": {
+    "veryHighEntropy": 7.2,
+    "highEntropyForCode": 6.8,
+    "fewImports": 8,
+    "shortConstantHexDigits": 8
+  },
+  "limits": {
+    "lineWidth": 100,
+    "triageRiskyImports": 20,
+    "cryptoMaterial": 40,
+    "cryptoHits": 60,
+    "cryptoReferences": 8
+  },
+  "whitespace": [
+    9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201,
+    8202, 8232, 8233, 8239, 8287, 12288, 65279
+  ],
+  "text": {
+    "more": [
+      "  … ",
+      { "get": [["$", "hidden"]], "as": "d" },
+      " more ",
+      { "get": [["$", "what"]], "as": "text" },
+      " not shown"
+    ],
+    "evidenceTaken": "Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",
+    "evidenceRow": ["  ", { "get": [[".", "id"]], "as": "text" }, "  ", { "get": [[".", "label"]], "as": "text" }],
+    "nameless": "?",
+    "refusals": {
+      "notAString": [
+        "omp-re: ",
+        { "get": [["$", "recipe"]], "as": "text" },
+        ": a function is named by a string, not ",
+        { "get": [["$", "given"]], "as": "text" }
+      ],
+      "optionsNotOneObject": [
+        "omp-re: ",
+        { "get": [["$", "recipe"]], "as": "text" },
+        ": options are one object, e.g. { maxItems: 20 }, not ",
+        { "get": [["$", "given"]], "as": "text" }
+      ],
+      "noFunction": [
+        "omp-re: ",
+        { "get": [["$", "recipe"]], "as": "text" },
+        ": no function at ",
+        { "get": [["$", "addr"]], "as": "text" },
+        " — list them with ",
+        { "get": [["$", "listFunctions"]], "as": "text" },
+        ", or define one with define_function"
+      ],
+      "noInstructions": [
+        "omp-re: ",
+        { "get": [["$", "recipe"]], "as": "text" },
+        ": no function at ",
+        { "get": [["$", "addr"]], "as": "text" },
+        " — list them with ",
+        { "get": [["$", "listFunctions"]], "as": "text" }
+      ],
+      "cutOutput": [
+        "omp-re: ",
+        { "get": [["$", "recipe"]], "as": "text" },
+        ": the output of rizin_command ",
+        { "get": [["$", "label"]], "as": "json" },
+        " was cut at the size cap and the whole of it could not be read back (",
+        { "get": [["$", "why"]], "as": "text" },
+        "). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands."
+      ],
+      "cutNoArtifact": ["the engine saved no artifact for it"],
+      "cutUnreadable": [
+        "artifact://",
+        { "get": [["$", "artifact"]], "as": "text" },
+        ": ",
+        { "get": [["$", "error"]], "as": "text" }
+      ],
+      "cutNotText": ["artifact://", { "get": [["$", "artifact"]], "as": "text" }, " did not read as text"]
+    }
+  },
+  "host": {
+    "listFunctions": "await tool.rizin_command({ command: \"aflj\" })",
+    "help": "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own\nrizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.\nOpen a binary first (await tool.open_binary({ path })).\n\n  await re.triage({ maxStrings = 25, maxFunctions = 15 })\n      what the binary is, build protections, sections with entropy, imports and what they reach,\n      notable strings, the largest functions, entry points.\n  await re.scanImports({ callers = true, maxCallers = 12 })\n      the imports a reviewer stops at, why, and who calls each; what the program can reach.\n  await re.inspectFunction(\"main\", { maxItems = 30 })\n      one function's shape, variables, callers, callees and the strings it refers to.\n  await re.findComparisons(\"main\", { maxItems = 80 })\n      every compare with the branch that follows, calls that compare or validate, strings on the way.\n  await re.findCrypto({ references = true })\n      rizin's key and certificate search, and where published constants of common algorithms lie.\n\nEvery section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the\nreads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",
+    "loaded": "omp-re recipes loaded: re.triage, re.scanImports, re.inspectFunction, re.findComparisons, re.findCrypto — print(re.help()) says what each answers."
+  },
+  "recipes": [
+    {
+      "name": "triage",
+      "call": "triage",
+      "takes": false,
+      "options": [
+        { "name": "maxStrings", "default": 25, "least": 1, "most": 200 },
+        { "name": "maxFunctions", "default": 15, "least": 1, "most": 100 }
+      ],
+      "steps": [
+        { "read": "path", "command": "ij" },
+        { "read": "info", "command": "iIj" },
+        { "read": "sectionData", "command": "iSj entropy" },
+        { "read": "imports", "command": "iij" },
+        { "read": "strings", "command": "izj" },
+        { "read": "functionData", "command": "aflj" },
+        { "read": "entries", "command": "iej" },
+        { "derive": "triage" }
+      ],
+      "title": ["triage: ", { "get": [["$", "path", "core", "file"]], "as": "text", "or": "?" }],
+      "sections": [
+        {
+          "title": ["Identity ", { "cite": ["$", "@info"] }],
+          "lines": [
+            [
+              "  ",
+              {
+                "get": [["$", "info", "class"], ["$", "info", "bintype"]],
+                "as": "text",
+                "or": "unknown format"
+              },
+              ", ",
+              { "get": [["$", "info", "arch"]], "as": "text", "or": "?" },
+              " ",
+              { "get": [["$", "info", "bits"]], "as": "d", "or": "?" },
+              "-bit ",
+              { "get": [["$", "info", "endian"]], "as": "text", "or": "" },
+              ", ",
+              { "get": [["$", "info", "os"]], "as": "text", "or": "?" },
+              { "group": [", language ", { "get": [["$", "info", "lang"]], "as": "text" }] },
+              { "group": [", interpreter ", { "get": [["$", "info", "intrp"]], "as": "text" }] }
+            ]
+          ],
+          "under": [],
+          "after": []
+        },
+        {
+          "title": ["Build protections ", { "cite": ["$", "@info"] }],
+          "lines": [
+            [
+              "  stack canary: ",
+              {
+                "choose": ["$", "info", "canary"],
+                "yes": "yes",
+                "no": "NO — a stack overflow reaches the return address unchecked"
+              }
+            ],
+            [
+              "  NX: ",
+              {
+                "choose": ["$", "info", "nx"],
+                "yes": "yes",
+                "no": "NO — data pages are executable"
+              }
+            ],
+            [
+              "  PIE: ",
+              {
+                "choose": ["$", "info", "pie"],
+                "yes": "yes",
+                "no": "NO — the image loads at a fixed address"
+              }
+            ],
+            [
+              "  RELRO: ",
+              { "get": [["$", "info", "relro"]], "as": "text", "or": "none" },
+              {
+                "group": [{ "if": ["$", "info", "relro"], "is": "partial" }, " — the GOT stays writable"]
+              },
+              {
+                "group": [
+                  { "unless": ["$", "info", "relro"], "is": "partial" },
+                  { "unless": ["$", "info", "relro"], "is": "full" },
+                  " — the GOT and other relocated data stay writable"
+                ]
+              }
+            ],
+            [
+              "  fortified libc calls: ",
+              { "choose": ["$", "info", "fortify_source"], "yes": "yes", "no": "no" }
+            ],
+            [
+              "  stripped: ",
+              { "choose": ["$", "info", "stripped"], "yes": "yes", "no": "no" },
+              "   static: ",
+              { "choose": ["$", "info", "static"], "yes": "yes", "no": "no" }
+            ]
+          ],
+          "under": [],
+          "after": []
+        },
+        {
+          "title": ["Sections: ", { "count": ["$", "sections"] }, " ", { "cite": ["$", "@sectionData"] }],
+          "lines": [],
+          "rows": ["$", "sections"],
+          "row": [
+            "  ",
+            { "get": [[".", "section", "name"]], "as": "text", "padRight": 18 },
+            " ",
+            { "get": [[".", "section", "perm"]], "as": "text", "padRight": 4, "or": "" },
+            " ",
+            { "get": [[".", "section", "size"]], "as": "d", "padLeft": 9, "or": "0" },
+            " bytes  entropy ",
+            { "get": [[".", "entropy"]], "as": "f2", "padLeft": 4, "or": "?" },
+            {
+              "group": [{ "if": [".", "notes"] }, "  <- ", { "join": [".", "notes"], "with": "; " }]
+            }
+          ],
+          "under": [],
+          "after": [
+            [
+              {
+                "group": [
+                  { "if": ["$", "flagged"] },
+                  "  ",
+                  { "count": ["$", "flagged"] },
+                  " section",
+                  { "plural": ["$", "flagged"], "one": "", "many": "s" },
+                  " stand",
+                  { "plural": ["$", "flagged"], "one": "s", "many": "" },
+                  " out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list."
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "title": ["Imports: ", { "count": ["$", "imports"] }, " ", { "cite": ["$", "@imports"] }],
+          "lines": [
+            [
+              {
+                "group": [
+                  { "if": ["$", "reach"] },
+                  "  reach, by what it links: ",
+                  { "join": ["$", "reach"], "with": ", " }
+                ]
+              },
+              {
+                "group": [
+                  { "unless": ["$", "reach"] },
+                  "  none of the capability groups (network, process control, injection, …) is linked"
+                ]
+              }
+            ],
+            [
+              {
+                "group": [
+                  { "if": ["$", "riskyShown"] },
+                  "  worth a reviewer's look: ",
+                  { "join": ["$", "riskyShown"], "with": ", " },
+                  " — scan_imports says why and who calls them"
+                ]
+              }
+            ],
+            [
+              {
+                "choose": ["$", "fewImports"],
+                "yes": "  very few imports for a dynamic binary: resolved at run time, or packed",
+                "no": ""
+              }
+            ]
+          ],
+          "under": [],
+          "after": []
+        },
+        {
+          "title": [
+            "Strings: ",
+            { "count": ["$", "strings"] },
+            "; notable ",
+            { "count": ["$", "notable"] },
+            " ",
+            { "cite": ["$", "@strings"] }
+          ],
+          "lines": [],
+          "rows": ["$", "notable"],
+          "limit": "maxStrings",
+          "row": [
+            "  ",
+            { "get": [[".", "kind"]], "as": "text", "padRight": 11 },
+            " ",
+            { "get": [[".", "entry", "vaddr"]], "as": "x", "or": "?" },
+            "  ",
+            { "get": [[".", "entry", "string"]], "as": "line", "or": "" }
+          ],
+          "under": [],
+          "more": "notable strings",
+          "after": []
+        },
+        {
+          "title": [
+            "Functions: ",
+            { "count": ["$", "functions"] },
+            "; largest by code size ",
+            { "cite": ["$", "@functionData"] }
+          ],
+          "lines": [],
+          "rows": ["$", "functions"],
+          "limit": "maxFunctions",
+          "row": [
+            "  ",
+            { "get": [[".", "offset"], [".", "addr"]], "as": "x", "or": "0x0" },
+            "  ",
+            { "get": [[".", "realsz"], [".", "size"]], "as": "d", "padLeft": 7, "or": "0" },
+            " bytes  ",
+            { "group": [{ "get": [[".", "nbbs"]], "as": "d" }, " blocks  "] },
+            { "get": [[".", "name"]], "as": "text", "or": "?" }
+          ],
+          "under": [],
+          "more": "functions",
+          "after": []
+        },
+        {
+          "title": ["Entry points ", { "cite": ["$", "@entries"] }],
+          "lines": [],
+          "rows": ["$", "entries"],
+          "row": [
+            "  ",
+            { "get": [[".", "vaddr"]], "as": "x" },
+            "  ",
+            { "get": [[".", "type"]], "as": "text", "or": "" }
+          ],
+          "under": [],
+          "empty": ["  none reported"],
+          "after": []
+        }
+      ]
+    },
+    {
+      "name": "scan_imports",
+      "call": "scanImports",
+      "takes": false,
+      "options": [
+        { "name": "callers", "flag": true },
+        { "name": "maxCallers", "default": 12, "least": 1, "most": 100 }
+      ],
+      "steps": [{ "read": "imports", "command": "iij" }, { "derive": "scanImports" }],
+      "title": [
+        "scan_imports: ",
+        { "count": ["$", "imports"] },
+        " imports, ",
+        { "count": ["$", "risky"] },
+        " worth a look"
+      ],
+      "sections": [
+        {
+          "title": ["Reach, by what it links ", { "cite": ["$", "@imports"] }],
+          "lines": [],
+          "rows": ["$", "reach"],
+          "row": [
+            "  ",
+            { "get": [[".", "capability"]], "as": "text", "padRight": 18 },
+            " ",
+            { "join": [".", "names"], "with": ", " }
+          ],
+          "under": [],
+          "empty": ["  none of the capability groups is linked"],
+          "after": []
+        },
+        {
+          "title": ["Imports worth a reviewer's look ", { "cite": ["$", "@imports"] }],
+          "lines": [],
+          "rows": ["$", "risky"],
+          "row": [
+            "  [",
+            { "get": [[".", "severity"]], "as": "text" },
+            "] ",
+            { "get": [[".", "bare"]], "as": "text" },
+            { "group": [" (linked as ", { "get": [[".", "linkedAs"]], "as": "text" }, ")"] },
+            " (",
+            { "get": [[".", "category"]], "as": "text" },
+            ")",
+            { "group": [" @ ", { "get": [[".", "plt"]], "as": "x" }] },
+            " — ",
+            { "get": [[".", "why"]], "as": "text" }
+          ],
+          "under": [
+            {
+              "when": [".", "traced"],
+              "lines": [],
+              "rows": [".", "places"],
+              "limit": "maxCallers",
+              "line": [
+                "      called from ",
+                { "count": [".", "places"] },
+                " place",
+                { "plural": [".", "places"], "one": "", "many": "s" },
+                " ",
+                { "cite": [".", "@places"] },
+                ": ",
+                { "join": ["$", "shown"], "with": ", " }
+              ],
+              "under": [],
+              "empty": ["      no caller found by analysis ", { "cite": [".", "@places"] }],
+              "more": "callers",
+              "after": []
+            }
+          ],
+          "empty": ["  none of the imports in the table is linked"],
+          "after": []
+        },
+        {
+          "lines": [
+            [
+              "An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."
+            ]
+          ],
+          "under": [],
+          "after": []
+        }
+      ]
+    },
+    {
+      "name": "inspect_function",
+      "call": "inspectFunction",
+      "takes": true,
+      "options": [{ "name": "maxItems", "default": 30, "least": 1, "most": 300 }],
+      "steps": [
+        { "read": "infoData", "command": "afij", "at": true },
+        { "derive": "theFunction" },
+        { "read": "body", "command": "pdfj", "at": true },
+        { "read": "variables", "command": "afvlj", "at": true },
+        { "read": "strings", "command": "izj" },
+        { "derive": "inspectFunction" }
+      ],
+      "title": ["inspect_function: ", { "get": [["$", "info", "name"], ["$", "addr"]], "as": "text" }],
+      "sections": [
+        {
+          "title": ["Shape ", { "cite": ["$", "@infoData"] }],
+          "lines": [
+            [
+              "  ",
+              {
+                "get": [["$", "info", "signature"], ["$", "info", "name"], ["$", "addr"]],
+                "as": "text"
+              },
+              " at ",
+              { "get": [["$", "info", "offset"], ["$", "info", "addr"]], "as": "x", "or": "0x0" }
+            ],
+            [
+              "  ",
+              { "get": [["$", "info", "realsz"], ["$", "info", "size"]], "as": "d", "or": "0" },
+              " bytes of code, ",
+              { "get": [["$", "info", "nbbs"]], "as": "d", "or": "0" },
+              " basic blocks, ",
+              { "get": [["$", "info", "edges"]], "as": "d", "or": "0" },
+              " edges, cyclomatic complexity ",
+              { "get": [["$", "info", "cc"]], "as": "d", "or": "0" },
+              ", ",
+              { "get": [["$", "info", "loops"]], "as": "d", "or": "0" },
+              " loop",
+              { "plural": ["$", "info", "loops"], "one": "", "many": "s" }
+            ],
+            [
+              "  calling convention ",
+              { "get": [["$", "info", "calltype"]], "as": "text", "or": "?" },
+              ", stack frame ",
+              { "get": [["$", "info", "stackframe"]], "as": "d", "or": "0" },
+              " bytes",
+              { "choose": ["$", "info", "noreturn"], "yes": ", does not return", "no": "" }
+            ]
+          ],
+          "under": [],
+          "after": []
+        },
+        {
+          "title": ["Body ", { "cite": ["$", "@body"] }],
+          "lines": [
+            [
+              "  ",
+              { "count": ["$", "ops"] },
+              " instructions, ",
+              { "get": [["$", "compares"]], "as": "d" },
+              " compare",
+              { "plural": ["$", "compares"], "one": "", "many": "s" },
+              ", ",
+              { "get": [["$", "branches"]], "as": "d" },
+              " conditional branch",
+              { "plural": ["$", "branches"], "one": "", "many": "es" },
+              " — find_comparisons lists them"
+            ]
+          ],
+          "under": [],
+          "after": []
+        },
+        {
+          "title": [
+            "Variables: ",
+            { "get": [["$", "variableCount"]], "as": "d" },
+            " ",
+            { "cite": ["$", "@variables"] }
+          ],
+          "lines": [],
+          "under": [],
+          "after": []
+        },
+        {
+          "title": [
+            "Called from ",
+            { "count": ["$", "callers"] },
+            " place",
+            { "plural": ["$", "callers"], "one": "", "many": "s" },
+            " ",
+            { "cite": ["$", "@callers"] }
+          ],
+          "lines": [],
+          "rows": ["$", "callers"],
+          "limit": "maxItems",
+          "row": ["  ", { "get": [["."]], "as": "text" }],
+          "under": [],
+          "more": "callers",
+          "after": []
+        },
+        {
+          "title": [
+            "Calls ",
+            { "count": ["$", "calls"] },
+            " distinct target",
+            { "plural": ["$", "calls"], "one": "", "many": "s" },
+            " ",
+            { "cite": ["$", "@body"] }
+          ],
+          "lines": [],
+          "rows": ["$", "calls"],
+          "limit": "maxItems",
+          "row": ["  ", { "get": [["."]], "as": "text" }],
+          "under": [],
+          "more": "callees",
+          "after": []
+        },
+        {
+          "title": [
+            "Refers to ",
+            { "count": ["$", "referenced"] },
+            " string",
+            { "plural": ["$", "referenced"], "one": "", "many": "s" },
+            " ",
+            { "cite": ["$", "@body"] },
+            " ",
+            { "cite": ["$", "@strings"] }
+          ],
+          "lines": [],
+          "rows": ["$", "referenced"],
+          "limit": "maxItems",
+          "row": [
+            "  ",
+            { "get": [[".", "address"]], "as": "x" },
+            "  ",
+            { "get": [[".", "text"]], "as": "line" }
+          ],
+          "under": [],
+          "more": "strings",
+          "after": []
+        }
+      ]
+    },
+    {
+      "name": "find_comparisons",
+      "call": "findComparisons",
+      "takes": true,
+      "options": [{ "name": "maxItems", "default": 80, "least": 1, "most": 1000 }],
+      "steps": [
+        { "read": "body", "command": "pdfj", "at": true },
+        { "derive": "functionBody" },
+        { "read": "strings", "command": "izj" },
+        { "derive": "findComparisons" }
+      ],
+      "title": ["find_comparisons: ", { "get": [["$", "body", "name"], ["$", "addr"]], "as": "text" }],
+      "sections": [
+        {
+          "title": [
+            "Compares and the branches that follow: ",
+            { "count": ["$", "decisions"] },
+            " ",
+            { "cite": ["$", "@body"] }
+          ],
+          "lines": [],
+          "rows": ["$", "decisions"],
+          "limit": "maxItems",
+          "row": [
+            "  ",
+            { "get": [[".", "op", "offset"]], "as": "x", "or": "0x0" },
+            "  ",
+            { "get": [[".", "op", "disasm"]], "as": "text", "or": "" },
+            { "group": [" ; \"", { "get": [[".", "printable"]], "as": "text" }, "\""] },
+            {
+              "group": [
+                "  ->  ",
+                { "get": [[".", "next", "disasm"]], "as": "text", "or": "" },
+                ": ",
+                { "get": [[".", "meaning"]], "as": "text" },
+                { "group": [", to ", { "get": [[".", "next", "jump"]], "as": "x" }] },
+                { "group": [", else ", { "get": [[".", "next", "fail"]], "as": "x" }] }
+              ]
+            }
+          ],
+          "under": [],
+          "more": "comparisons",
+          "after": []
+        },
+        {
+          "title": [
+            "Calls that compare or validate: ",
+            { "count": ["$", "decidingCalls"] },
+            " ",
+            { "cite": ["$", "@body"] }
+          ],
+          "lines": [],
+          "rows": ["$", "decidingCalls"],
+          "limit": "maxItems",
+          "row": [
+            "  ",
+            { "get": [[".", "offset"]], "as": "x", "or": "0x0" },
+            "  ",
+            { "get": [[".", "disasm"]], "as": "text", "or": "" }
+          ],
+          "under": [],
+          "empty": ["  none by name"],
+          "after": []
+        },
+        {
+          "title": [
+            "Strings on the way: ",
+            { "count": ["$", "onTheWay"] },
+            " ",
+            { "cite": ["$", "@body"] },
+            " ",
+            { "cite": ["$", "@strings"] }
+          ],
+          "lines": [],
+          "rows": ["$", "onTheWay"],
+          "limit": "maxItems",
+          "row": [
+            "  ",
+            { "get": [[".", "offset"]], "as": "x" },
+            "  refers to ",
+            { "get": [[".", "target"]], "as": "x" },
+            "  ",
+            { "get": [[".", "text"]], "as": "line" }
+          ],
+          "under": [],
+          "empty": ["  none"],
+          "after": []
+        },
+        {
+          "lines": [
+            [
+              "This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."
+            ]
+          ],
+          "under": [],
+          "after": []
+        }
+      ]
+    },
+    {
+      "name": "find_crypto",
+      "call": "findCrypto",
+      "takes": false,
+      "options": [{ "name": "references", "flag": true }],
+      "steps": [{ "read": "material", "command": "/cmj" }, { "derive": "findCrypto" }],
+      "title": [
+        "find_crypto: ",
+        { "count": ["$", "hits"] },
+        " constant hit",
+        { "plural": ["$", "hits"], "one": "", "many": "s" }
+      ],
+      "sections": [
+        {
+          "title": ["rizin's search for keys and certificates ", { "cite": ["$", "@material"] }],
+          "lines": [],
+          "rows": ["$", "material"],
+          "limit": "cryptoMaterial",
+          "row": ["  ", { "get": [["."]], "as": "json" }],
+          "under": [],
+          "empty": ["  nothing found"],
+          "after": []
+        },
+        {
+          "title": ["Published constants"],
+          "lines": [],
+          "rows": ["$", "hits"],
+          "limit": "cryptoHits",
+          "row": [
+            "  ",
+            { "get": [[".", "address"]], "as": "x" },
+            "  ",
+            { "get": [[".", "algorithm"]], "as": "text" },
+            " — ",
+            { "get": [[".", "what"]], "as": "text" },
+            " ",
+            { "cite": [".", "@hit"] },
+            { "choose": [".", "weak"], "yes": " (weak: four bytes can occur by chance)", "no": "" }
+          ],
+          "under": [
+            {
+              "when": [".", "traced"],
+              "lines": [],
+              "rows": [".", "places"],
+              "limit": "cryptoReferences",
+              "line": [
+                "      referred to from ",
+                { "join": ["$", "shown"], "with": ", " },
+                " ",
+                { "cite": [".", "@places"] }
+              ],
+              "under": [],
+              "empty": [
+                "      no reference found by analysis ",
+                { "cite": [".", "@places"] },
+                " — reached by computed address, or unused"
+              ],
+              "after": []
+            }
+          ],
+          "empty": ["  none of the constants in the table was found"],
+          "after": []
+        },
+        {
+          "lines": [
+            [
+              "A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."
+            ]
+          ],
+          "under": [],
+          "after": []
+        }
+      ]
+    }
   ]
 };
 // </generated:tables>
 
-	const RISKY = TABLES.riskyImports;
-	const CAPABILITIES = TABLES.capabilities;
-	const SEVERITY_ORDER = TABLES.severityOrder;
-	// The JSON's patterns are written once for both hosts and matched without regard to case on both.
-	const STRING_INTEREST = TABLES.stringInterest.map((row) => ({ kind: row.kind, pattern: new RegExp(row.pattern, "i") }));
-	const PACKER_SECTION_NAMES = new RegExp(TABLES.packerSectionNames, "i");
-	const COMPARING_CALLS = new RegExp(TABLES.comparingCalls, "i");
-	const CRYPTO_CONSTANTS = TABLES.cryptoConstants;
-	/** A constant this many hex digits or fewer is four bytes: common enough by chance that a hit means little on its own. */
-	const SHORT_CONSTANT = 8;
+	const { text: TEXT, host: HOST, limits: LIMITS, thresholds: THRESHOLDS, opTypes: OP_TYPES, sectionNotes: NOTES } = TABLES;
+	// The JSON's patterns are written once for every host and matched without regard to case on each.
+	const pattern = (source) => new RegExp(source, "i");
+	const STRING_INTEREST = TABLES.stringInterest.map((row) => ({ kind: row.kind, pattern: pattern(row.pattern) }));
+	const PACKER_SECTION_NAMES = pattern(TABLES.packerSectionNames);
+	const COMPARING_CALLS = pattern(TABLES.comparingCalls);
 
 	// --- rizin's JSON, with its addresses whole ------------------------------------------
 
@@ -602,10 +1138,11 @@ const TABLES = {
 	}
 
 	const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+	const isNumber = (value) => typeof value === "number" || typeof value === "bigint";
 	/** A member with null read as absent; absent as soon as `object` is not an object. */
 	const get = (object, key) => (isObject(object) ? (object[key] ?? undefined) : undefined);
 	const str = (object, key) => (typeof get(object, key) === "string" ? get(object, key) : undefined);
-	const num = (object, key) => (typeof get(object, key) === "number" || typeof get(object, key) === "bigint" ? get(object, key) : undefined);
+	const num = (object, key) => (isNumber(get(object, key)) ? get(object, key) : undefined);
 	const rows = (data) => (Array.isArray(data) ? data : []);
 
 	// Arithmetic that holds when either side is a BigInt; comparisons already do.
@@ -626,18 +1163,50 @@ const TABLES = {
 		return JSON.stringify(value) ?? "null";
 	}
 
+	/** The number a string of digits spells — rizin writes a section's entropy as one — or nothing. */
+	const numberFromText = (text) => (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) ? Number(text) : undefined);
+
 	// --- text ------------------------------------------------------------------------------
 
-	// Widths and cuts count characters, as the Lisp twin's do, not UTF-16 units.
+	// White space is the data's list on every host, not each language's own idea of it.
+	const SPACE = new Set(TABLES.whitespace.map((point) => String.fromCharCode(point)));
+
+	function trim(text) {
+		let from = 0;
+		let to = text.length;
+		while (from < to && SPACE.has(text[from])) from += 1;
+		while (to > from && SPACE.has(text[to - 1])) to -= 1;
+		return text.slice(from, to);
+	}
+
+	function words(text) {
+		const found = [];
+		let word = "";
+		for (const character of `${text} `) {
+			if (!SPACE.has(character)) word += character;
+			else if (word !== "") {
+				found.push(word);
+				word = "";
+			}
+		}
+		return found;
+	}
+
+	/** `text` without a leading `word` and the white space after it; as it stands when it does not open that way. */
+	function afterWord(text, word) {
+		if (!text.startsWith(word) || !SPACE.has(text[word.length])) return text;
+		let at = word.length;
+		while (SPACE.has(text[at])) at += 1;
+		return text.slice(at);
+	}
+
+	// Widths and cuts count characters, as the twins' do, not UTF-16 units.
 	const count = (text) => Array.from(text).length;
 	const padRight = (text, width) => text + " ".repeat(Math.max(0, width - count(text)));
 	const padLeft = (text, width) => " ".repeat(Math.max(0, width - count(text))) + text;
 	const cut = (text, most) => (text.length <= most ? text : Array.from(text).slice(0, most).join(""));
-	/** A string as one line of at most a hundred characters. */
-	const oneLine = (text) => cut(text.replaceAll("\n", " "), 100);
-	const plural = (n, one = "", many = "s") => (n === 1 ? one : many);
+	const oneLine = (text) => cut(text.replaceAll("\n", " "), LIMITS.lineWidth);
 	const take = (most, list) => list.slice(0, most);
-	const words = (text) => text.split(/[ \t\n\r]+/).filter((word) => word !== "");
 
 	/** Without duplicates, keeping each value where it first stood. */
 	function uniqueFirst(list, key = (item) => item) {
@@ -650,11 +1219,98 @@ const TABLES = {
 	/** `value` when it is an integer within least..most, the nearer bound when it is outside, `fallback` when it was not given. */
 	const bounded = (value, fallback, least, most) => (Number.isInteger(value) ? Math.max(least, Math.min(most, value)) : fallback);
 
-	/** How a line names the read it rests on; nothing when the read left no record. */
-	const cite = (id) => (id ? `[evidence ${id}]` : "");
+	// --- a template, filled --------------------------------------------------------------------
 
-	/** The line that says a list was cut, so a short list is never read as a whole one. */
-	const moreLine = (shown, total, what) => (total > shown ? [`  … ${total - shown} more ${what} not shown`] : []);
+	// scripts/gen-recipes.ts says what a template may hold; what it writes into the tables is walked here.
+	const MISSING = Symbol("missing");
+
+	/** What a path names: a fact, or (when it opens with ".") the row, and then members of it. */
+	const lookup = (path, facts, row) => path.slice(1).reduce(get, path[0] === "." ? row : facts);
+	const there = (value) => value === true || (Array.isArray(value) && value.length > 0);
+	const size = (value) => (Array.isArray(value) ? value.length : isNumber(value) ? Number(value) : 0);
+
+	const AS = {
+		text: (value) => (typeof value === "string" ? value : MISSING),
+		d: (value) => (isNumber(value) ? String(value) : MISSING),
+		x: (value) => (isNumber(value) ? hex(value) : MISSING),
+		f2: (value) => (isNumber(value) ? Number(value).toFixed(2) : MISSING),
+		line: (value) => (typeof value === "string" ? oneLine(value) : MISSING),
+		json: encode,
+	};
+
+	function piece(node, facts, row) {
+		if (typeof node === "string") return node;
+		if (node.group) {
+			const inner = fill(node.group, facts, row);
+			return inner === MISSING ? "" : inner;
+		}
+		if (node.if || node.unless) {
+			const value = lookup(node.if ?? node.unless, facts, row);
+			const holds = node.is === undefined ? there(value) : value === node.is;
+			return holds === (node.if !== undefined) ? "" : MISSING;
+		}
+		if (node.choose) return there(lookup(node.choose, facts, row)) ? node.yes : node.no;
+		if (node.cite) {
+			// How a line names the read it rests on; nothing when the read left no record.
+			const id = lookup(node.cite, facts, row);
+			return typeof id === "string" ? `[evidence ${id}]` : "";
+		}
+		if (node.count) return String(rows(lookup(node.count, facts, row)).length);
+		if (node.join) return rows(lookup(node.join, facts, row)).join(node.with);
+		if (node.plural) return size(lookup(node.plural, facts, row)) === 1 ? node.one : node.many;
+		let text = MISSING;
+		for (const path of node.get) {
+			text = AS[node.as](lookup(path, facts, row));
+			if (text !== MISSING) break;
+		}
+		if (text === MISSING) {
+			if (node.or === undefined) return MISSING;
+			text = node.or;
+		}
+		return node.padLeft ? padLeft(text, node.padLeft) : node.padRight ? padRight(text, node.padRight) : text;
+	}
+
+	/** A template's text, or MISSING when something it needs is not there. */
+	function fill(nodes, facts, row) {
+		let text = "";
+		for (const node of nodes) {
+			const part = piece(node, facts, row);
+			if (part === MISSING) return MISSING;
+			text += part;
+		}
+		return text;
+	}
+
+	/** A template as the lines it adds: one, or none when it cannot be written or comes out empty. */
+	function written(nodes, facts, row) {
+		const text = fill(nodes, facts, row);
+		return text === MISSING || text === "" ? [] : [text];
+	}
+
+	/** The lines of one section. */
+	function sectionLines(section, facts, row) {
+		if (section.when && !there(lookup(section.when, facts, row))) return [];
+		const lines = [...(section.title ? written(section.title, facts, row) : []), ...section.lines.flatMap((line) => written(line, facts, row))];
+		if (section.rows) {
+			const all = rows(lookup(section.rows, facts, row));
+			const most = section.limit === undefined ? Infinity : facts[section.limit];
+			let total = all.length;
+			if (section.line) {
+				facts.shown = take(most, all);
+				if (total > 0) lines.push(...written(section.line, facts, row));
+			} else {
+				const listed = all.flatMap((item) => written(section.row, facts, item).map((text) => ({ item, text })));
+				total = listed.length;
+				for (const { item, text } of take(most, listed)) lines.push(text, ...section.under.flatMap((inner) => sectionLines(inner, facts, item)));
+			}
+			if (total === 0 && section.empty) lines.push(...written(section.empty, facts, row));
+			// So a short list is never read as a whole one.
+			if (section.more && total > most) lines.push(...written(TEXT.more, { hidden: total - most, what: section.more }));
+		}
+		return [...lines, ...section.after.flatMap((line) => written(line, facts, row))];
+	}
+
+	const refusal = (name, facts) => new Error(fill(TEXT.refusals[name], facts));
 
 	// --- one observation -----------------------------------------------------------------------
 
@@ -671,18 +1327,16 @@ const TABLES = {
 	async function wholeOutput(run, label, text, details) {
 		const afterHeader = (full) => (full.includes("\n") ? full.slice(full.indexOf("\n") + 1) : "");
 		if (details.truncated !== true) return afterHeader(text.replace(EVIDENCE_TAG, ""));
-		const lost = (why) =>
-			new Error(
-				`omp-re: ${run.name}: the output of rizin_command ${JSON.stringify(label)} was cut at the size cap and the whole of it could not be read back (${why}). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands.`,
-			);
-		if (typeof details.artifactId !== "string") throw lost("the engine saved no artifact for it");
+		const lost = (why, more) => refusal("cutOutput", { recipe: run.name, label, why: fill(TEXT.refusals[why], more) });
+		const artifact = details.artifactId;
+		if (typeof artifact !== "string") throw lost("cutNoArtifact");
 		let full;
 		try {
-			full = await read(`artifact://${details.artifactId}`);
+			full = await read(`artifact://${artifact}`);
 		} catch (error) {
-			throw lost(`artifact://${details.artifactId}: ${error instanceof Error ? error.message : String(error)}`);
+			throw lost("cutUnreadable", { artifact, error: error instanceof Error ? error.message : String(error) });
 		}
-		if (typeof full !== "string") throw lost(`artifact://${details.artifactId} did not read as text`);
+		if (typeof full !== "string") throw lost("cutNotText", { artifact });
 		return afterHeader(full);
 	}
 
@@ -707,50 +1361,65 @@ const TABLES = {
 	/** observe() for a `*j` command: its data, absent when the output was empty or not JSON. */
 	async function observeJson(run, command, addr) {
 		const { raw, id } = await observe(run, command, addr);
-		return { data: parseJson(raw.trim()), id };
+		return { data: parseJson(trim(raw)), id };
 	}
 
-	/** `title` over `sections` — lists of lines — and the reads the recipe took, so every line can be traced and cited. */
-	function recipeText(run, title, sections) {
+	// --- one recipe, from the data ---------------------------------------------------------------
+
+	/**
+	 * A recipe run as the data spells it: its options settled, its steps taken in order — a read,
+	 * or a fact worked out below — and its title and sections filled from what those left, over
+	 * the list of the reads it took, so every line can be traced and cited.
+	 */
+	async function runRecipe(recipe, addr, given) {
+		// What one call keeps: the reads it took, the function list once a caller had to be named, and the facts its templates name.
+		const facts = { ...LIMITS, recipe: recipe.name, listFunctions: HOST.listFunctions };
+		const run = { name: recipe.name, evidence: [], functions: undefined, facts };
+		if (given !== undefined && given !== null && !isObject(given)) throw refusal("optionsNotOneObject", { ...facts, given: JSON.stringify(given) ?? String(given) });
+		if (recipe.takes) {
+			// The engine judges what may follow `@` on every read, so only what it cannot be asked is refused here.
+			if (typeof addr !== "string") throw refusal("notAString", { ...facts, given: encode(addr) });
+			facts.addr = addr;
+		}
+		for (const option of recipe.options) {
+			const value = get(given, option.name);
+			facts[option.name] = option.flag ? value !== false : bounded(value, option.default, option.least, option.most);
+		}
+		for (const step of recipe.steps) {
+			if (step.derive) await FACTS[step.derive](run, facts);
+			else {
+				const { data, id } = await observeJson(run, step.command, step.at ? facts.addr : undefined);
+				facts[step.read] = data;
+				facts[`@${step.read}`] = id;
+			}
+		}
 		return [
-			title,
-			...sections.flatMap((section) => ["", ...section]),
+			...written(recipe.title, facts),
+			...recipe.sections.flatMap((section) => ["", ...sectionLines(section, facts)]),
 			"",
-			"Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",
-			...run.evidence.map(({ label, id }) => `  ${id}  ${label}`),
+			TEXT.evidenceTaken,
+			...run.evidence.flatMap((read) => written(TEXT.evidenceRow, facts, read)),
 		].join("\n");
-	}
-
-	/** What one call of a recipe keeps: the reads it took, and the function list once a caller had to be named. */
-	const start = (name) => ({ name, evidence: [], functions: undefined });
-
-	function options(name, given) {
-		if (given === undefined || given === null) return {};
-		if (!isObject(given)) throw new Error(`omp-re: ${name}: options are one object, e.g. { maxItems: 20 }, not ${JSON.stringify(given) ?? String(given)}`);
-		return given;
-	}
-
-	/** The address or name a function was asked for by. The engine judges what may follow `@` on every read, so that rule is not kept twice. */
-	function functionName(recipe, addr) {
-		if (typeof addr !== "string") throw new Error(`omp-re: ${recipe}: a function is named by a string, not ${encode(addr) ?? String(addr)}`);
-		return addr;
 	}
 
 	// --- what an import is called ----------------------------------------------------------------
 
-	/** An import's name as the tables spell it: decorations a linker or a fortified libc adds are taken off, so __strcpy_chk, _strcpy and __isoc99_scanf read as strcpy, strcpy and scanf. */
-	function bareImportName(given) {
-		let name = given ?? "";
-		const at = name.indexOf("imp.");
-		if (at !== -1) name = name.slice(at + 4);
-		if (name.startsWith("__isoc99_")) name = name.slice(9);
-		name = name.replace(/^_+/, "");
-		if (name.endsWith("_chk")) name = name.slice(0, -4);
-		return name;
-	}
+	const IMPORT_NAME_RULES = {
+		dropThrough: (name, text) => (name.includes(text) ? name.slice(name.indexOf(text) + text.length) : name),
+		dropPrefix: (name, text) => (name.startsWith(text) ? name.slice(text.length) : name),
+		dropLeading: (name, text) => {
+			let at = 0;
+			while (name.startsWith(text, at)) at += text.length;
+			return name.slice(at);
+		},
+		dropSuffix: (name, text) => (name.endsWith(text) ? name.slice(0, -text.length) : name),
+	};
 
-	const riskyImport = (bare) => RISKY.find((row) => row.names.includes(bare));
-	const importCapabilities = (bare) => CAPABILITIES.filter((row) => row.names.includes(bare)).map((row) => row.capability);
+	/** An import's name as the tables spell it: the decorations a linker or a fortified libc adds are taken off, by the data's rules in their order. */
+	const bareImportName = (given) => TABLES.importNameRules.reduce((name, { rule, text }) => IMPORT_NAME_RULES[rule](name, text), given ?? "");
+
+	const riskyImport = (bare) => TABLES.riskyImports.find((row) => row.names.includes(bare));
+	const importCapabilities = (bare) => TABLES.capabilities.filter((row) => row.names.includes(bare)).map((row) => row.capability);
 
 	/** `address` as "function+0xoffset" when it lies in a function rizin found, else as the bare address. The function list is one more read, taken the first time a name is wanted. */
 	async function functionContaining(run, address) {
@@ -759,7 +1428,7 @@ const TABLES = {
 			for (const fn of rows((await observeJson(run, "aflj")).data)) {
 				const low = num(fn, "offset") ?? num(fn, "addr");
 				const high = num(fn, "maxbound") ?? (low === undefined ? undefined : plus(low, num(fn, "size") ?? 0));
-				if (low !== undefined && high !== undefined) run.functions.push({ low, high, name: str(fn, "name") ?? "?" });
+				if (low !== undefined && high !== undefined) run.functions.push({ low, high, name: str(fn, "name") ?? TEXT.nameless });
 			}
 		}
 		const fn = run.functions.find((row) => row.low <= address && address < row.high);
@@ -767,199 +1436,21 @@ const TABLES = {
 		return address == fn.low ? fn.name : `${fn.name}+${hex(minus(address, fn.low))}`;
 	}
 
-	/** Where `address` is referenced from, each as "function+0xoffset", with the evidence id of the read. */
-	async function callersOf(run, address) {
+	/** Where `address` is referenced from, each as "function+0xoffset", with the evidence id of the read: what a row is traced with. */
+	async function tracedTo(run, address) {
 		const { data, id } = await observeJson(run, "axtj", hex(address));
 		const places = [];
 		for (const row of rows(data)) {
 			const from = num(row, "from");
 			if (from !== undefined) places.push(await functionContaining(run, from));
 		}
-		return { places: uniqueFirst(places), id };
+		return { traced: true, places: uniqueFirst(places), "@places": id };
 	}
 
-	// --- triage ----------------------------------------------------------------------------------
+	// --- what a pdfj reply holds -------------------------------------------------------------------
 
-	/** The build's protections, read from rizin's own fields rather than scraped from text, each with what its absence would mean. */
-	function mitigationLines(info) {
-		const yes = (key) => get(info, key) === true;
-		const relro = str(info, "relro") ?? "none";
-		const relroMeans = relro === "full" ? "" : relro === "partial" ? " — the GOT stays writable" : " — the GOT and other relocated data stay writable";
-		return [
-			`  stack canary: ${yes("canary") ? "yes" : "NO — a stack overflow reaches the return address unchecked"}`,
-			`  NX: ${yes("nx") ? "yes" : "NO — data pages are executable"}`,
-			`  PIE: ${yes("pie") ? "yes" : "NO — the image loads at a fixed address"}`,
-			`  RELRO: ${relro}${relroMeans}`,
-			`  fortified libc calls: ${yes("fortify_source") ? "yes" : "no"}`,
-			`  stripped: ${yes("stripped") ? "yes" : "no"}   static: ${yes("static") ? "yes" : "no"}`,
-		];
-	}
-
-	function sectionEntropy(section) {
-		const value = get(section, "entropy");
-		if (typeof value === "number") return value;
-		// rizin writes it as a string of digits.
-		return typeof value === "string" && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim()) ? Number(value) : undefined;
-	}
-
-	/** What stands out about a section: writable and executable at once, or data that looks compressed or encrypted where code should be. */
-	function sectionNotes(section) {
-		const perm = str(section, "perm") ?? "";
-		const entropy = sectionEntropy(section);
-		const notes = [];
-		if (perm.includes("w") && perm.includes("x")) notes.push("writable+executable");
-		if (entropy !== undefined && entropy >= 7.2) notes.push("very high entropy (compressed or encrypted data)");
-		if (entropy !== undefined && entropy >= 6.8 && entropy < 7.2 && perm.includes("x")) notes.push("high entropy for code");
-		if (PACKER_SECTION_NAMES.test((str(section, "name") ?? "").toLowerCase())) notes.push("a name packers use");
-		return notes;
-	}
-
-	const codeSize = (fn) => num(fn, "realsz") ?? num(fn, "size") ?? 0;
-
-	/**
-	 * A first look at the open binary, composed from rizin's own reads: what it is, which
-	 * protections the build has, its sections with entropy, the imports that give it reach, the
-	 * strings worth a first look, its largest functions and its entry points. Nothing here is a
-	 * finding until one is recorded citing the ids.
-	 */
-	async function triage(given) {
-		const { maxStrings, maxFunctions } = options("triage", given);
-		const run = start("triage");
-		const mostStrings = bounded(maxStrings, 25, 1, 200);
-		const mostFunctions = bounded(maxFunctions, 15, 1, 100);
-		// Which file is open is the engine's to know and nothing tells eval; rizin does.
-		const path = str(get((await observeJson(run, "ij")).data, "core"), "file") ?? "?";
-		const { data: info, id: infoId } = await observeJson(run, "iIj");
-		const { data: sectionData, id: sectionsId } = await observeJson(run, "iSj entropy");
-		const { data: importData, id: importsId } = await observeJson(run, "iij");
-		const { data: stringData, id: stringsId } = await observeJson(run, "izj");
-		const { data: functionData, id: functionsId } = await observeJson(run, "aflj");
-		const { data: entryData, id: entriesId } = await observeJson(run, "iej");
-
-		const sections = rows(sectionData).filter((section) => (str(section, "name") ?? "").trim() !== "");
-		const flagged = sections.filter((section) => sectionNotes(section).length > 0);
-		const imports = rows(importData);
-		const bare = imports.map((entry) => bareImportName(str(entry, "name")));
-		const risky = uniqueLast(bare.filter((name) => riskyImport(name)));
-		const capabilities = uniqueFirst(bare.flatMap(importCapabilities));
-		const strings = rows(stringData);
-		const notable = STRING_INTEREST.flatMap(({ kind, pattern }) => strings.filter((entry) => pattern.test(str(entry, "string") ?? "")).map((entry) => ({ kind, entry })));
-		const functions = [...rows(functionData)].sort((a, b) => (codeSize(b) > codeSize(a) ? 1 : codeSize(b) < codeSize(a) ? -1 : 0));
-
-		const language = str(info, "lang");
-		const interpreter = str(info, "intrp");
-		return recipeText(run, `triage: ${path}`, [
-			[
-				`Identity ${cite(infoId)}`,
-				`  ${str(info, "class") ?? str(info, "bintype") ?? "unknown format"}, ${str(info, "arch") ?? "?"} ${num(info, "bits") ?? "?"}-bit ${str(info, "endian") ?? ""}, ${str(info, "os") ?? "?"}` +
-					(language === undefined ? "" : `, language ${language}`) +
-					(interpreter === undefined ? "" : `, interpreter ${interpreter}`),
-			],
-			[`Build protections ${cite(infoId)}`, ...mitigationLines(info)],
-			[
-				`Sections: ${sections.length} ${cite(sectionsId)}`,
-				...sections.map((section) => {
-					const entropy = sectionEntropy(section);
-					const notes = sectionNotes(section);
-					return (
-						`  ${padRight(str(section, "name"), 18)} ${padRight(str(section, "perm") ?? "", 4)} ${padLeft(String(num(section, "size") ?? 0), 9)} bytes` +
-						`  entropy ${entropy === undefined ? "   ?" : padLeft(entropy.toFixed(2), 4)}` +
-						(notes.length > 0 ? `  <- ${notes.join("; ")}` : "")
-					);
-				}),
-				...(flagged.length > 0
-					? [
-							`  ${flagged.length} section${plural(flagged.length)} stand${plural(flagged.length, "s", "")} out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list.`,
-						]
-					: []),
-			],
-			[
-				`Imports: ${imports.length} ${cite(importsId)}`,
-				capabilities.length > 0 ? `  reach, by what it links: ${capabilities.join(", ")}` : "  none of the capability groups (network, process control, injection, …) is linked",
-				...(risky.length > 0 ? [`  worth a reviewer's look: ${take(20, risky).join(", ")} — scan_imports says why and who calls them`] : []),
-				...(imports.length < 8 && get(info, "static") !== true ? ["  very few imports for a dynamic binary: resolved at run time, or packed"] : []),
-			],
-			[
-				`Strings: ${strings.length}; notable ${notable.length} ${cite(stringsId)}`,
-				...take(mostStrings, notable).map(({ kind, entry }) => `  ${padRight(kind, 11)} ${num(entry, "vaddr") === undefined ? "?" : hex(num(entry, "vaddr"))}  ${oneLine(str(entry, "string") ?? "")}`),
-				...moreLine(Math.min(mostStrings, notable.length), notable.length, "notable strings"),
-			],
-			[
-				`Functions: ${functions.length}; largest by code size ${cite(functionsId)}`,
-				...take(mostFunctions, functions).map((fn) => {
-					const blocks = num(fn, "nbbs");
-					return `  ${hex(num(fn, "offset") ?? num(fn, "addr") ?? 0)}  ${padLeft(String(codeSize(fn)), 7)} bytes  ${blocks === undefined ? "" : `${blocks} blocks  `}${str(fn, "name") ?? "?"}`;
-				}),
-				...moreLine(Math.min(mostFunctions, functions.length), functions.length, "functions"),
-			],
-			[
-				`Entry points ${cite(entriesId)}`,
-				...(() => {
-					const lines = rows(entryData)
-						.filter((entry) => num(entry, "vaddr") !== undefined)
-						.map((entry) => `  ${hex(num(entry, "vaddr"))}  ${str(entry, "type") ?? ""}`);
-					return lines.length > 0 ? lines : ["  none reported"];
-				})(),
-			],
-		]);
-	}
-
-	// --- scan_imports ------------------------------------------------------------------------------
-
-	/**
-	 * The imports a reviewer would stop at, each with why it matters and who calls it; plus what
-	 * the program can reach, read off what it links. An import is a lead, not a bug: whether a
-	 * call is safe is decided at its call site, which is what the callers are listed for.
-	 */
-	async function scanImports(given) {
-		const { callers, maxCallers } = options("scan_imports", given);
-		const run = start("scan_imports");
-		const withCallers = (callers ?? true) !== false;
-		const mostCallers = bounded(maxCallers, 12, 1, 100);
-		const { data, id: importsId } = await observeJson(run, "iij");
-		const imports = rows(data);
-		const severityRank = (severity) => (SEVERITY_ORDER.includes(severity) ? SEVERITY_ORDER.indexOf(severity) : 9);
-		const risky = imports
-			.map((entry) => ({ entry, bare: bareImportName(str(entry, "name")) }))
-			.map(({ entry, bare }) => ({ entry, bare, verdict: riskyImport(bare) }))
-			.filter(({ verdict }) => verdict)
-			.sort((a, b) => severityRank(a.verdict.severity) - severityRank(b.verdict.severity));
-		const reach = CAPABILITIES.map(({ capability }) => ({
-			capability,
-			names: uniqueLast(imports.map((entry) => bareImportName(str(entry, "name"))).filter((bare) => importCapabilities(bare).includes(capability))),
-		})).filter(({ names }) => names.length > 0);
-
-		const riskyLines = [];
-		for (const { entry, bare, verdict } of risky) {
-			const address = num(entry, "plt");
-			// An import rizin gives no name is its own bare name: nothing to say it was linked as.
-			const linked = str(entry, "name") ?? bare;
-			riskyLines.push(
-				`  [${verdict.severity}] ${bare}${bare === linked ? "" : ` (linked as ${linked})`} (${verdict.category})${address === undefined ? "" : ` @ ${hex(address)}`} — ${verdict.why}`,
-			);
-			if (!withCallers || address === undefined) continue;
-			const { places, id } = await callersOf(run, address);
-			riskyLines.push(
-				places.length > 0
-					? `      called from ${places.length} place${plural(places.length)} ${cite(id)}: ${take(mostCallers, places).join(", ")}`
-					: `      no caller found by analysis ${cite(id)}`,
-				...moreLine(Math.min(mostCallers, places.length), places.length, "callers"),
-			);
-		}
-		return recipeText(run, `scan_imports: ${imports.length} imports, ${risky.length} worth a look`, [
-			[
-				`Reach, by what it links ${cite(importsId)}`,
-				...(reach.length > 0 ? reach.map(({ capability, names }) => `  ${padRight(capability, 18)} ${names.join(", ")}`) : ["  none of the capability groups is linked"]),
-			],
-			[`Imports worth a reviewer's look ${cite(importsId)}`, ...(riskyLines.length > 0 ? riskyLines : ["  none of the imports in the table is linked"])],
-			["An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."],
-		]);
-	}
-
-	// --- inspect_function --------------------------------------------------------------------------
-
-	/** The instruction objects of a pdfj reply. */
 	const functionOps = (body) => rows(get(body, "ops"));
+	const opIs = (op, kind) => OP_TYPES[kind].includes(str(op, "type"));
 
 	/** Every address an instruction refers to. */
 	function opTargets(op) {
@@ -974,204 +1465,129 @@ const TABLES = {
 		return table;
 	}
 
-	/**
-	 * One function, read from every side at once: its size, complexity and signature, its
-	 * variables, who calls it and what it calls, and the strings it refers to — the context to
-	 * read before its code. Follow it with rizin_command pdg at the same address for the code.
-	 */
-	async function inspectFunction(addr, given) {
-		const { maxItems } = options("inspect_function", given);
-		const run = start("inspect_function");
-		const at = functionName("inspect_function", addr);
-		const limit = bounded(maxItems, 30, 1, 300);
-		const { data: infoData, id: infoId } = await observeJson(run, "afij", at);
-		const info = rows(infoData)[0];
-		if (!info) {
-			throw new Error(`omp-re: inspect_function: no function at ${at} — list them with await tool.rizin_command({ command: "aflj" }), or define one with define_function`);
-		}
-		const { data: body, id: bodyId } = await observeJson(run, "pdfj", at);
-		const { data: variables, id: variablesId } = await observeJson(run, "afvlj", at);
-		const { data: stringData, id: stringsId } = await observeJson(run, "izj");
-		const entry = num(info, "offset") ?? num(info, "addr") ?? 0;
-		const { places: callers, id: callersId } = await callersOf(run, entry);
-
-		const ops = functionOps(body);
+	/** Each string an instruction of `ops` refers to, as { op, target, text }. */
+	function stringReferences(ops, stringData) {
 		const stringAt = stringsByAddress(stringData);
-		const referenced = uniqueLast(
-			ops.flatMap((op) => opTargets(op).flatMap((target) => (stringAt.get(target) === undefined ? [] : [{ address: target, text: stringAt.get(target) }]))),
-			(reference) => reference.address,
-		);
-		const calls = uniqueFirst(ops.filter((op) => ["call", "ucall", "rcall", "icall", "ccall"].includes(str(op, "type"))).map((op) => (str(op, "disasm") ?? "").replace(/^call\s+/, "")));
-		const compares = ops.filter((op) => ["cmp", "acmp"].includes(str(op, "type"))).length;
-		const branches = ops.filter((op) => str(op, "type") === "cjmp").length;
-		const variableCount = isObject(variables) ? Object.values(variables).reduce((sum, kind) => sum + (Array.isArray(kind) ? kind.length : 0), 0) : 0;
-		const loops = num(info, "loops") ?? 0;
-
-		return recipeText(run, `inspect_function: ${str(info, "name") ?? at}`, [
-			[
-				`Shape ${cite(infoId)}`,
-				`  ${str(info, "signature") ?? str(info, "name") ?? at} at ${hex(entry)}`,
-				`  ${num(info, "realsz") ?? num(info, "size") ?? 0} bytes of code, ${num(info, "nbbs") ?? 0} basic blocks, ${num(info, "edges") ?? 0} edges, cyclomatic complexity ${num(info, "cc") ?? 0}, ${loops} loop${plural(Number(loops))}`,
-				`  calling convention ${str(info, "calltype") ?? "?"}, stack frame ${num(info, "stackframe") ?? 0} bytes${get(info, "noreturn") === true ? ", does not return" : ""}`,
-			],
-			[`Body ${cite(bodyId)}`, `  ${ops.length} instructions, ${compares} compare${plural(compares)}, ${branches} conditional branch${plural(branches, "", "es")} — find_comparisons lists them`],
-			[`Variables: ${variableCount} ${cite(variablesId)}`],
-			[`Called from ${callers.length} place${plural(callers.length)} ${cite(callersId)}`, ...take(limit, callers).map((caller) => `  ${caller}`), ...moreLine(Math.min(limit, callers.length), callers.length, "callers")],
-			[`Calls ${calls.length} distinct target${plural(calls.length)} ${cite(bodyId)}`, ...take(limit, calls).map((call) => `  ${call}`), ...moreLine(Math.min(limit, calls.length), calls.length, "callees")],
-			[
-				`Refers to ${referenced.length} string${plural(referenced.length)} ${cite(bodyId)} ${cite(stringsId)}`,
-				...take(limit, referenced).map(({ address, text }) => `  ${hex(address)}  ${oneLine(text)}`),
-				...moreLine(Math.min(limit, referenced.length), referenced.length, "strings"),
-			],
-		]);
+		return ops.flatMap((op) => opTargets(op).flatMap((target) => (stringAt.get(target) === undefined ? [] : [{ op, target, text: stringAt.get(target) }])));
 	}
 
-	// --- find_comparisons --------------------------------------------------------------------------
+	// --- the facts a section needs code for ----------------------------------------------------------
 
-	const BRANCH_MEANINGS = [
-		[["je", "jz"], "taken when equal / zero"],
-		[["jne", "jnz"], "taken when not equal / not zero"],
-		[["ja", "jnbe"], "taken when above (unsigned >)"],
-		[["jae", "jnb", "jnc"], "taken when above or equal (unsigned >=)"],
-		[["jb", "jc", "jnae"], "taken when below (unsigned <)"],
-		[["jbe", "jna"], "taken when below or equal (unsigned <=)"],
-		[["jg", "jnle"], "taken when greater (signed >)"],
-		[["jge", "jnl"], "taken when greater or equal (signed >=)"],
-		[["jl", "jnge"], "taken when less (signed <)"],
-		[["jle", "jng"], "taken when less or equal (signed <=)"],
-		[["js"], "taken when negative"],
-		[["jns"], "taken when not negative"],
-	];
+	// Each is a step some recipe names in the data; it leaves the facts the data's `facts` lists for it.
+	const FACTS = {
+		triage(_run, facts) {
+			const sections = rows(facts.sectionData)
+				.filter((section) => trim(str(section, "name") ?? "") !== "")
+				.map((section) => {
+					const perm = str(section, "perm") ?? "";
+					const given = get(section, "entropy");
+					const entropy = typeof given === "number" ? given : typeof given === "string" ? numberFromText(trim(given)) : undefined;
+					// What stands out: writable and executable at once, or data that looks compressed or encrypted where code should be.
+					const notes = [];
+					if (perm.includes("w") && perm.includes("x")) notes.push(NOTES.writableExecutable);
+					if (entropy !== undefined && entropy >= THRESHOLDS.veryHighEntropy) notes.push(NOTES.veryHighEntropy);
+					else if (entropy !== undefined && entropy >= THRESHOLDS.highEntropyForCode && perm.includes("x")) notes.push(NOTES.highEntropyForCode);
+					if (PACKER_SECTION_NAMES.test(str(section, "name"))) notes.push(NOTES.packerName);
+					return { section, entropy, notes };
+				});
+			const imports = rows(facts.imports);
+			const bare = imports.map((entry) => bareImportName(str(entry, "name")));
+			const codeSize = (fn) => num(fn, "realsz") ?? num(fn, "size") ?? 0;
+			facts.sections = sections;
+			facts.flagged = sections.filter(({ notes }) => notes.length > 0);
+			facts.reach = uniqueFirst(bare.flatMap(importCapabilities));
+			facts.riskyShown = take(LIMITS.triageRiskyImports, uniqueLast(bare.filter(riskyImport)));
+			facts.fewImports = imports.length < THRESHOLDS.fewImports && get(facts.info, "static") !== true;
+			facts.notable = STRING_INTEREST.flatMap(({ kind, pattern }) => rows(facts.strings).flatMap((entry) => (pattern.test(str(entry, "string") ?? "") ? [{ kind, entry }] : [])));
+			// Largest first; functions of one size stay in rizin's order.
+			facts.functions = [...rows(facts.functionData)].sort((a, b) => (codeSize(b) > codeSize(a) ? 1 : codeSize(b) < codeSize(a) ? -1 : 0));
+		},
 
-	/** What a conditional jump tests, in words. */
-	const branchMeaning = (mnemonic) => BRANCH_MEANINGS.find(([names]) => names.includes((mnemonic ?? "").toLowerCase()))?.[1] ?? "conditional";
-
-	/** When an instruction compares against a constant that is a printable character, say which: a run of these is a string compared a byte at a time. */
-	function printableNote(op) {
-		const value = num(op, "val") ?? num(op, "ptr");
-		if (value === undefined || typeof value !== "number" || !Number.isInteger(value) || value < 32 || value > 126) return "";
-		return ` ; "${String.fromCharCode(value).replace(/["\\]/g, "\\$&")}"`;
-	}
-
-	/**
-	 * What a function decides on: every compare or test with the conditional branch that follows
-	 * it (which way it goes, and where to), every call to something that compares or validates,
-	 * and the strings on the way — the static skeleton of validation logic, with no emulation and
-	 * nothing run. It lists what is compared, not what the comparison means.
-	 */
-	async function findComparisons(addr, given) {
-		const { maxItems } = options("find_comparisons", given);
-		const run = start("find_comparisons");
-		const at = functionName("find_comparisons", addr);
-		const limit = bounded(maxItems, 80, 1, 1000);
-		const { data: body, id: bodyId } = await observeJson(run, "pdfj", at);
-		const ops = functionOps(body);
-		if (ops.length === 0) throw new Error(`omp-re: find_comparisons: no function at ${at} — list them with await tool.rizin_command({ command: "aflj" })`);
-		const { data: stringData, id: stringsId } = await observeJson(run, "izj");
-		const stringAt = stringsByAddress(stringData);
-		const where = (op) => hex(num(op, "offset") ?? 0);
-
-		const decisions = [];
-		ops.forEach((op, index) => {
-			if (!["cmp", "acmp"].includes(str(op, "type"))) return;
-			const next = ops[index + 1];
-			let branch = "";
-			if (next && str(next, "type") === "cjmp") {
-				const disasm = str(next, "disasm") ?? "";
-				const taken = num(next, "jump");
-				const otherwise = num(next, "fail");
-				branch = `  ->  ${disasm}: ${branchMeaning(words(disasm)[0])}${taken === undefined ? "" : `, to ${hex(taken)}`}${otherwise === undefined ? "" : `, else ${hex(otherwise)}`}`;
+		async scanImports(run, facts) {
+			const named = rows(facts.imports).map((entry) => ({ entry, bare: bareImportName(str(entry, "name")) }));
+			const rank = ({ verdict }) => TABLES.severityOrder.indexOf(verdict.severity);
+			const risky = named.flatMap(({ entry, bare }) => (riskyImport(bare) ? [{ entry, bare, verdict: riskyImport(bare) }] : [])).sort((a, b) => rank(a) - rank(b));
+			facts.reach = TABLES.capabilities.flatMap(({ capability, names }) => {
+				const linked = uniqueLast(named.map(({ bare }) => bare).filter((bare) => names.includes(bare)));
+				return linked.length > 0 ? [{ capability, names: linked }] : [];
+			});
+			facts.risky = [];
+			for (const { entry, bare, verdict } of risky) {
+				const plt = num(entry, "plt");
+				// An import rizin gives no name is its own bare name: nothing to say it was linked as.
+				const linked = str(entry, "name") ?? bare;
+				const traced = facts.callers && plt !== undefined ? await tracedTo(run, plt) : {};
+				facts.risky.push({ severity: verdict.severity, category: verdict.category, why: verdict.why, bare, linkedAs: linked === bare ? undefined : linked, plt, ...traced });
 			}
-			decisions.push(`  ${where(op)}  ${str(op, "disasm") ?? ""}${printableNote(op)}${branch}`);
-		});
-		const decidingCalls = ops
-			.filter((op) => ["call", "ucall", "rcall", "icall"].includes(str(op, "type")) && COMPARING_CALLS.test(str(op, "disasm") ?? ""))
-			.map((op) => `  ${where(op)}  ${str(op, "disasm") ?? ""}`);
-		const referenced = uniqueLast(
-			ops.flatMap((op) => opTargets(op).flatMap((target) => (stringAt.get(target) === undefined ? [] : [`  ${where(op)}  refers to ${hex(target)}  ${oneLine(stringAt.get(target))}`]))),
-		);
+		},
 
-		return recipeText(run, `find_comparisons: ${str(body, "name") ?? at}`, [
-			[`Compares and the branches that follow: ${decisions.length} ${cite(bodyId)}`, ...take(limit, decisions), ...moreLine(Math.min(limit, decisions.length), decisions.length, "comparisons")],
-			[`Calls that compare or validate: ${decidingCalls.length} ${cite(bodyId)}`, ...(decidingCalls.length > 0 ? take(limit, decidingCalls) : ["  none by name"])],
-			[`Strings on the way: ${referenced.length} ${cite(bodyId)} ${cite(stringsId)}`, ...(referenced.length > 0 ? take(limit, referenced) : ["  none"])],
-			["This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."],
-		]);
-	}
+		theFunction(_run, facts) {
+			facts.info = rows(facts.infoData)[0];
+			if (!isObject(facts.info)) throw refusal("noFunction", facts);
+		},
 
-	// --- find_crypto -------------------------------------------------------------------------------
-
-	/**
-	 * Where cryptographic material lies in the open binary: rizin's own search for keys and
-	 * certificates, and a search for the published constants of common algorithms, each hit with
-	 * its address and what refers to it. A constant's presence says the tables are linked in, not
-	 * that they are used, nor on what; a four-byte constant can occur by chance and is marked weak.
-	 */
-	async function findCrypto(given) {
-		const { references } = options("find_crypto", given);
-		const run = start("find_crypto");
-		const withReferences = (references ?? true) !== false;
-		const { data: material, id: materialId } = await observeJson(run, "/cmj");
-		const hits = [];
-		for (const { algorithm, what, hex: bytes } of CRYPTO_CONSTANTS) {
-			// Each search is a read on the record whether or not it finds anything; only a hit is reported below.
-			const { data, id } = await observeJson(run, `/xj ${bytes}`);
-			for (const row of rows(data)) {
-				const address = num(row, "address") ?? num(row, "offset") ?? num(row, "addr");
-				if (address !== undefined) hits.push({ algorithm, what, address, id, weak: bytes.length <= SHORT_CONSTANT });
-			}
-		}
-		const constantLines = [];
-		for (const { algorithm, what, address, id, weak } of take(60, hits)) {
-			constantLines.push(`  ${hex(address)}  ${algorithm} — ${what} ${cite(id)}${weak ? " (weak: four bytes can occur by chance)" : ""}`);
-			if (!withReferences) continue;
-			const { places, id: placesId } = await callersOf(run, address);
-			constantLines.push(
-				places.length > 0
-					? `      referred to from ${take(8, places).join(", ")} ${cite(placesId)}`
-					: `      no reference found by analysis ${cite(placesId)} — reached by computed address, or unused`,
+		async inspectFunction(run, facts) {
+			const ops = functionOps(facts.body);
+			const { places, "@places": id } = await tracedTo(run, num(facts.info, "offset") ?? num(facts.info, "addr") ?? 0);
+			facts.callers = places;
+			facts["@callers"] = id;
+			facts.ops = ops;
+			facts.calls = uniqueFirst(ops.filter((op) => opIs(op, "call")).map((op) => afterWord(str(op, "disasm") ?? "", TABLES.calleeAfter)));
+			facts.compares = ops.filter((op) => opIs(op, "compare")).length;
+			facts.branches = ops.filter((op) => opIs(op, "branch")).length;
+			facts.variableCount = isObject(facts.variables) ? Object.values(facts.variables).reduce((sum, kind) => sum + rows(kind).length, 0) : 0;
+			facts.referenced = uniqueLast(
+				stringReferences(ops, facts.strings).map(({ target, text }) => ({ address: target, text })),
+				(reference) => reference.address,
 			);
-		}
-		const materialLines = take(40, rows(material)).map((row) => `  ${encode(row)}`);
-		return recipeText(run, `find_crypto: ${hits.length} constant hit${plural(hits.length)}`, [
-			[`rizin's search for keys and certificates ${cite(materialId)}`, ...(materialLines.length > 0 ? materialLines : ["  nothing found"])],
-			["Published constants", ...(constantLines.length > 0 ? constantLines : ["  none of the constants in the table was found"])],
-			["A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."],
-		]);
-	}
+		},
+
+		functionBody(_run, facts) {
+			facts.ops = functionOps(facts.body);
+			if (facts.ops.length === 0) throw refusal("noInstructions", facts);
+		},
+
+		findComparisons(_run, facts) {
+			const { ops } = facts;
+			facts.decisions = ops.flatMap((op, index) => {
+				if (!opIs(op, "compare")) return [];
+				// The branch that follows it, when one does: which way it goes is the mnemonic's to say.
+				const next = isObject(ops[index + 1]) && opIs(ops[index + 1], "branch") ? ops[index + 1] : undefined;
+				const mnemonic = (words(str(next, "disasm") ?? "")[0] ?? "").toLowerCase();
+				const meaning = next && (TABLES.branchMeanings.find((row) => row.mnemonics.includes(mnemonic))?.meaning ?? TABLES.otherBranch);
+				// A compare against a printable character says which: a run of these is a string compared a byte at a time.
+				const value = num(op, "val") ?? num(op, "ptr");
+				const printable = Number.isInteger(value) && value >= 32 && value <= 126 ? String.fromCharCode(value).replace(/["\\]/g, "\\$&") : undefined;
+				return [{ op, printable, next, meaning }];
+			});
+			facts.decidingCalls = ops.filter((op) => opIs(op, "decidingCall") && COMPARING_CALLS.test(str(op, "disasm") ?? ""));
+			facts.onTheWay = uniqueLast(
+				stringReferences(ops, facts.strings).map(({ op, target, text }) => ({ offset: num(op, "offset") ?? 0, target, text })),
+				(reference) => `${reference.offset} ${reference.target}`,
+			);
+		},
+
+		async findCrypto(run, facts) {
+			facts.hits = [];
+			for (const { algorithm, what, hex: bytes } of TABLES.cryptoConstants) {
+				// Each search is a read on the record whether or not it finds anything; only a hit is reported.
+				const { data, id } = await observeJson(run, `/xj ${bytes}`);
+				for (const row of rows(data)) {
+					const address = num(row, "address") ?? num(row, "offset") ?? num(row, "addr");
+					// So few bytes occur by chance: a hit means little on its own.
+					if (address !== undefined) facts.hits.push({ algorithm, what, address, "@hit": id, weak: bytes.length <= THRESHOLDS.shortConstantHexDigits });
+				}
+			}
+			if (facts.references) for (const hit of take(LIMITS.cryptoHits, facts.hits)) Object.assign(hit, await tracedTo(run, hit.address));
+		},
+	};
 
 	// --- what is handed to eval ----------------------------------------------------------------------
 
-	const HELP = [
-		"omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own",
-		"rizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.",
-		"Open a binary first (await tool.open_binary({ path })).",
-		"",
-		"  await re.triage({ maxStrings = 25, maxFunctions = 15 })",
-		"      what the binary is, build protections, sections with entropy, imports and what they reach,",
-		"      notable strings, the largest functions, entry points.",
-		"  await re.scanImports({ callers = true, maxCallers = 12 })",
-		"      the imports a reviewer stops at, why, and who calls each; what the program can reach.",
-		'  await re.inspectFunction("main", { maxItems = 30 })',
-		"      one function's shape, variables, callers, callees and the strings it refers to.",
-		'  await re.findComparisons("main", { maxItems = 80 })',
-		"      every compare with the branch that follows, calls that compare or validate, strings on the way.",
-		"  await re.findCrypto({ references = true })",
-		"      rizin's key and certificate search, and where published constants of common algorithms lie.",
-		"",
-		"Every section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the",
-		"reads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",
-	].join("\n");
-
-	return {
-		triage,
-		scanImports,
-		inspectFunction,
-		findComparisons,
-		findCrypto,
-		help: () => HELP,
+	globalThis.re = {
+		...Object.fromEntries(TABLES.recipes.map((recipe) => [recipe.call, recipe.takes ? async (addr, given) => runRecipe(recipe, addr, given) : async (given) => runRecipe(recipe, undefined, given)])),
+		help: () => HOST.help,
 	};
+	// A %load cell shows the value of the script's last expression, and the source is not echoed: say what now exists.
+	return HOST.loaded;
 })();
-
-// A %load cell shows the value of the script's last expression, and the source is not echoed: say what now exists.
-"omp-re recipes loaded: re.triage, re.scanImports, re.inspectFunction, re.findComparisons, re.findCrypto — print(re.help()) says what each answers.";

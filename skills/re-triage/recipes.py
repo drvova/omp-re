@@ -51,12 +51,18 @@
 # judgement, worded as "worth a look", never as a verdict.
 #
 # recipes.js (the JavaScript kernel) and nodecode/recipes.lisp (the nodecode
-# host) are this file's twins. All three must answer the same text for the
-# same binary, line for line, and test/recipes-eval.test.ts holds them to it;
-# so a change to the wording or the order of reads here is a change there.
-# The tables all three read are generated from recipes/tables.json by
-# scripts/gen-recipes.ts, which rewrites the marked block below — edit the
-# JSON and run the script, never the block.
+# host) are this file's twins. All three answer the same text for the same
+# binary, reads and all, and test/recipes-eval.test.ts holds them to it.
+#
+# What a recipe reads, in which order, how each section is worded, its options
+# and their bounds, the tables and every sentence are data: they live in
+# recipes/tables.json, and scripts/gen-recipes.ts writes them into the marked
+# block below — with each recipe's Python signature — so edit the JSON and run
+# the script, never the block. This file keeps what Python forces on it
+# (rizin's JSON read as JavaScript would print it, the bridge for one read,
+# how a number is printed), the loop that renders a recipe from that data, and
+# under FACTS the few things a section needs code for. A change to any of
+# those is a change in the other two files.
 #
 # Where this file and recipes.js differ, because the kernels do:
 #  - The global is `omp_re` (above); recipes and options are spelled in
@@ -70,10 +76,6 @@
 #  - A report is a `str` whose repr is its own text, so a report left as a
 #    cell's last expression is shown as written — as the JavaScript kernel
 #    shows a string — instead of as one quoted line.
-# Where both differ from the Lisp, for the reasons recipes.js gives:
-#  - find_crypto records every constant search as a read, misses included,
-#    and "Evidence taken" lists them.
-#  - triage takes one read more (`ij`), listed first, to name the open file.
 #
 # A note for whoever edits this: omp rewrites a line that begins with `%` or `!`
 # as a magic or a shell escape, even inside an expression, so no line here may
@@ -102,81 +104,42 @@ def _omp_re_recipes():
           "category": "memory",
           "severity": "high",
           "why": "copies with no bound at all; any input longer than the buffer overruns it",
-          "names": [
-            "gets"
-          ]
+          "names": ["gets"]
         },
         {
           "category": "memory",
           "severity": "high",
           "why": "copies or formats until a terminator with no destination size; safe only if every caller proves the length",
           "names": [
-            "strcpy",
-            "strcat",
-            "stpcpy",
-            "sprintf",
-            "vsprintf",
-            "wcscpy",
-            "wcscat",
-            "lstrcpyA",
-            "lstrcpyW",
-            "lstrcatA",
-            "lstrcatW",
-            "wsprintfA",
-            "wsprintfW"
+            "strcpy", "strcat", "stpcpy", "sprintf", "vsprintf", "wcscpy", "wcscat", "lstrcpyA",
+            "lstrcpyW", "lstrcatA", "lstrcatW", "wsprintfA", "wsprintfW"
           ]
         },
         {
           "category": "memory",
           "severity": "medium",
           "why": "reads into a buffer; a %s or %[ without a width has no bound",
-          "names": [
-            "scanf",
-            "sscanf",
-            "fscanf",
-            "vscanf",
-            "vsscanf",
-            "vfscanf"
-          ]
+          "names": ["scanf", "sscanf", "fscanf", "vscanf", "vsscanf", "vfscanf"]
         },
         {
           "category": "memory",
           "severity": "medium",
           "why": "the size comes from the caller and is often attacker-influenced",
-          "names": [
-            "alloca",
-            "realpath",
-            "getwd"
-          ]
+          "names": ["alloca", "realpath", "getwd"]
         },
         {
           "category": "memory",
           "severity": "low",
           "why": "bounded, but the bound is the caller's to get right (and strncpy leaves no terminator when it fills)",
-          "names": [
-            "strncpy",
-            "strncat",
-            "memcpy",
-            "memmove",
-            "bcopy",
-            "wcsncpy",
-            "snprintf",
-            "vsnprintf"
-          ]
+          "names": ["strncpy", "strncat", "memcpy", "memmove", "bcopy", "wcsncpy", "snprintf", "vsnprintf"]
         },
         {
           "category": "command",
           "severity": "high",
           "why": "hands a string to a shell; anything in it that came from outside is a command",
           "names": [
-            "system",
-            "popen",
-            "wordexp",
-            "WinExec",
-            "ShellExecuteA",
-            "ShellExecuteW",
-            "ShellExecuteExA",
-            "ShellExecuteExW"
+            "system", "popen", "wordexp", "WinExec", "ShellExecuteA", "ShellExecuteW",
+            "ShellExecuteExA", "ShellExecuteExW"
           ]
         },
         {
@@ -184,17 +147,8 @@ def _omp_re_recipes():
           "severity": "medium",
           "why": "starts another program; what it runs and with which arguments is worth tracing",
           "names": [
-            "execl",
-            "execlp",
-            "execle",
-            "execv",
-            "execvp",
-            "execve",
-            "execvpe",
-            "posix_spawn",
-            "posix_spawnp",
-            "CreateProcessA",
-            "CreateProcessW"
+            "execl", "execlp", "execle", "execv", "execvp", "execve", "execvpe", "posix_spawn",
+            "posix_spawnp", "CreateProcessA", "CreateProcessW"
           ]
         },
         {
@@ -202,258 +156,123 @@ def _omp_re_recipes():
           "severity": "low",
           "why": "a format string that is not a literal lets its author read and write memory",
           "names": [
-            "printf",
-            "fprintf",
-            "dprintf",
-            "vprintf",
-            "vfprintf",
-            "syslog",
-            "vsyslog",
-            "err",
-            "errx",
-            "warn",
-            "warnx"
+            "printf", "fprintf", "dprintf", "vprintf", "vfprintf", "syslog", "vsyslog", "err",
+            "errx", "warn", "warnx"
           ]
         },
         {
           "category": "race",
           "severity": "high",
           "why": "chooses a file name before the file exists; another process can take it first",
-          "names": [
-            "mktemp",
-            "tmpnam",
-            "tempnam"
-          ]
+          "names": ["mktemp", "tmpnam", "tempnam"]
         },
         {
           "category": "race",
           "severity": "low",
           "why": "checks a path, then uses it; the file can change between the two",
-          "names": [
-            "access",
-            "stat",
-            "lstat"
-          ]
+          "names": ["access", "stat", "lstat"]
         },
         {
           "category": "integer",
           "severity": "low",
           "why": "reports no error and no overflow; a caller cannot tell a bad number from zero",
-          "names": [
-            "atoi",
-            "atol",
-            "atoll",
-            "atof"
-          ]
+          "names": ["atoi", "atol", "atoll", "atof"]
         },
         {
           "category": "randomness",
           "severity": "medium",
           "why": "predictable; unfit for keys, tokens or anything an adversary should not guess",
-          "names": [
-            "rand",
-            "srand",
-            "random",
-            "srandom",
-            "drand48",
-            "lrand48"
-          ]
+          "names": ["rand", "srand", "random", "srandom", "drand48", "lrand48"]
         },
         {
           "category": "privilege",
           "severity": "info",
           "why": "changes the process's identity or root; the order and the error checks matter",
-          "names": [
-            "setuid",
-            "setgid",
-            "seteuid",
-            "setegid",
-            "setreuid",
-            "setregid",
-            "chroot"
-          ]
+          "names": ["setuid", "setgid", "seteuid", "setegid", "setreuid", "setregid", "chroot"]
         },
         {
           "category": "loading",
           "severity": "medium",
           "why": "loads code chosen at run time; from where is worth tracing",
-          "names": [
-            "dlopen",
-            "LoadLibraryA",
-            "LoadLibraryW",
-            "LoadLibraryExA",
-            "LoadLibraryExW"
-          ]
+          "names": ["dlopen", "LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW"]
         }
       ],
       "capabilities": [
         {
           "capability": "network",
           "names": [
-            "socket",
-            "connect",
-            "bind",
-            "listen",
-            "accept",
-            "send",
-            "sendto",
-            "recv",
-            "recvfrom",
-            "getaddrinfo",
-            "gethostbyname",
-            "WSAStartup",
-            "InternetOpenA",
-            "InternetOpenW",
-            "InternetOpenUrlA",
-            "InternetOpenUrlW",
-            "InternetConnectA",
-            "InternetConnectW",
-            "HttpSendRequestA",
-            "HttpSendRequestW",
-            "WinHttpOpen",
-            "WinHttpConnect",
-            "WinHttpSendRequest",
-            "URLDownloadToFileA",
-            "URLDownloadToFileW",
-            "curl_easy_perform",
+            "socket", "connect", "bind", "listen", "accept", "send", "sendto", "recv", "recvfrom",
+            "getaddrinfo", "gethostbyname", "WSAStartup", "InternetOpenA", "InternetOpenW",
+            "InternetOpenUrlA", "InternetOpenUrlW", "InternetConnectA", "InternetConnectW",
+            "HttpSendRequestA", "HttpSendRequestW", "WinHttpOpen", "WinHttpConnect",
+            "WinHttpSendRequest", "URLDownloadToFileA", "URLDownloadToFileW", "curl_easy_perform",
             "SSL_connect"
           ]
         },
         {
           "capability": "process control",
           "names": [
-            "fork",
-            "vfork",
-            "clone",
-            "kill",
-            "ptrace",
-            "prctl",
-            "OpenProcess",
-            "TerminateProcess",
-            "CreateRemoteThread",
-            "CreateToolhelp32Snapshot",
-            "Process32First",
-            "Process32Next"
+            "fork", "vfork", "clone", "kill", "ptrace", "prctl", "OpenProcess", "TerminateProcess",
+            "CreateRemoteThread", "CreateToolhelp32Snapshot", "Process32First", "Process32Next"
           ]
         },
         {
           "capability": "code injection",
           "names": [
-            "VirtualAllocEx",
-            "WriteProcessMemory",
-            "ReadProcessMemory",
-            "CreateRemoteThread",
-            "NtUnmapViewOfSection",
-            "ZwUnmapViewOfSection",
-            "QueueUserAPC",
-            "SetThreadContext",
-            "SetWindowsHookExA",
-            "SetWindowsHookExW",
-            "process_vm_writev"
+            "VirtualAllocEx", "WriteProcessMemory", "ReadProcessMemory", "CreateRemoteThread",
+            "NtUnmapViewOfSection", "ZwUnmapViewOfSection", "QueueUserAPC", "SetThreadContext",
+            "SetWindowsHookExA", "SetWindowsHookExW", "process_vm_writev"
           ]
         },
         {
           "capability": "memory protection",
-          "names": [
-            "mprotect",
-            "mmap",
-            "memfd_create",
-            "VirtualProtect",
-            "VirtualProtectEx",
-            "VirtualAlloc"
-          ]
+          "names": ["mprotect", "mmap", "memfd_create", "VirtualProtect", "VirtualProtectEx", "VirtualAlloc"]
         },
         {
           "capability": "anti-analysis",
           "names": [
-            "ptrace",
-            "IsDebuggerPresent",
-            "CheckRemoteDebuggerPresent",
-            "NtQueryInformationProcess",
-            "OutputDebugStringA",
-            "OutputDebugStringW",
-            "NtSetInformationThread",
-            "GetTickCount",
-            "QueryPerformanceCounter"
+            "ptrace", "IsDebuggerPresent", "CheckRemoteDebuggerPresent",
+            "NtQueryInformationProcess", "OutputDebugStringA", "OutputDebugStringW",
+            "NtSetInformationThread", "GetTickCount", "QueryPerformanceCounter"
           ]
         },
         {
           "capability": "persistence",
           "names": [
-            "RegSetValueExA",
-            "RegSetValueExW",
-            "RegCreateKeyExA",
-            "RegCreateKeyExW",
-            "CreateServiceA",
-            "CreateServiceW",
-            "StartServiceA",
-            "StartServiceW",
-            "SetFileAttributesA",
-            "SetFileAttributesW"
+            "RegSetValueExA", "RegSetValueExW", "RegCreateKeyExA", "RegCreateKeyExW",
+            "CreateServiceA", "CreateServiceW", "StartServiceA", "StartServiceW",
+            "SetFileAttributesA", "SetFileAttributesW"
           ]
         },
         {
           "capability": "cryptography",
           "names": [
-            "CryptAcquireContextA",
-            "CryptAcquireContextW",
-            "CryptEncrypt",
-            "CryptDecrypt",
-            "CryptGenKey",
-            "CryptHashData",
-            "BCryptEncrypt",
-            "BCryptDecrypt",
-            "BCryptGenRandom",
-            "EVP_EncryptInit_ex",
-            "EVP_DecryptInit_ex",
-            "EVP_DigestInit_ex",
-            "AES_set_encrypt_key",
-            "AES_encrypt",
-            "MD5_Init",
-            "SHA1_Init",
-            "SHA256_Init",
-            "RC4",
-            "DES_ecb_encrypt",
-            "getrandom",
-            "RAND_bytes"
+            "CryptAcquireContextA", "CryptAcquireContextW", "CryptEncrypt", "CryptDecrypt",
+            "CryptGenKey", "CryptHashData", "BCryptEncrypt", "BCryptDecrypt", "BCryptGenRandom",
+            "EVP_EncryptInit_ex", "EVP_DecryptInit_ex", "EVP_DigestInit_ex", "AES_set_encrypt_key",
+            "AES_encrypt", "MD5_Init", "SHA1_Init", "SHA256_Init", "RC4", "DES_ecb_encrypt",
+            "getrandom", "RAND_bytes"
           ]
         },
         {
           "capability": "filesystem",
           "names": [
-            "unlink",
-            "remove",
-            "rename",
-            "chmod",
-            "chown",
-            "opendir",
-            "readdir",
-            "ftw",
-            "nftw",
-            "DeleteFileA",
-            "DeleteFileW",
-            "MoveFileA",
-            "MoveFileW",
-            "FindFirstFileA",
-            "FindFirstFileW",
-            "CopyFileA",
-            "CopyFileW"
+            "unlink", "remove", "rename", "chmod", "chown", "opendir", "readdir", "ftw", "nftw",
+            "DeleteFileA", "DeleteFileW", "MoveFileA", "MoveFileW", "FindFirstFileA",
+            "FindFirstFileW", "CopyFileA", "CopyFileW"
           ]
         },
         {
           "capability": "dynamic resolution",
-          "names": [
-            "dlsym",
-            "GetProcAddress",
-            "LdrGetProcedureAddress"
-          ]
+          "names": ["dlsym", "GetProcAddress", "LdrGetProcedureAddress"]
         }
       ],
-      "severityOrder": [
-        "high",
-        "medium",
-        "low",
-        "info"
+      "severityOrder": ["high", "medium", "low", "info"],
+      "importNameRules": [
+        {"rule": "dropThrough", "text": "imp."},
+        {"rule": "dropPrefix", "text": "__isoc99_"},
+        {"rule": "dropLeading", "text": "_"},
+        {"rule": "dropSuffix", "text": "_chk"}
       ],
       "stringInterest": [
         {
@@ -480,16 +299,8 @@ def _omp_re_recipes():
       "packerSectionNames": "upx|aspack|themida|vmp|mpress|petite|\\.packed|\\.enigma",
       "comparingCalls": "\\b(?:str|strn|strcase|strncase|wcs|wcsn|mem|b)cmp\\b|\\bstrstr\\b|\\bstrchr\\b|lstrcmp|CompareString|RtlCompareMemory|\\bcrc|\\bhash|md5|sha\\d|verify|check|valid",
       "cryptoConstants": [
-        {
-          "algorithm": "AES",
-          "what": "S-box",
-          "hex": "637c777bf26b6fc53001672bfed7ab76"
-        },
-        {
-          "algorithm": "AES",
-          "what": "inverse S-box",
-          "hex": "52096ad53036a538bf40a39e81f3d7fb"
-        },
+        {"algorithm": "AES", "what": "S-box", "hex": "637c777bf26b6fc53001672bfed7ab76"},
+        {"algorithm": "AES", "what": "inverse S-box", "hex": "52096ad53036a538bf40a39e81f3d7fb"},
         {
           "algorithm": "AES",
           "what": "T-table Te0 (big-endian words)",
@@ -525,11 +336,7 @@ def _omp_re_recipes():
           "what": "initial state (little-endian words)",
           "hex": "0123456789abcdeffedcba9876543210"
         },
-        {
-          "algorithm": "SHA-1",
-          "what": "round constant K1 (little-endian)",
-          "hex": "9979825a"
-        },
+        {"algorithm": "SHA-1", "what": "round constant K1 (little-endian)", "hex": "9979825a"},
         {
           "algorithm": "MD5",
           "what": "sine table (little-endian words)",
@@ -565,26 +372,14 @@ def _omp_re_recipes():
           "what": "P-array (little-endian words)",
           "hex": "886a3f24d308a3852e8a191344737003"
         },
-        {
-          "algorithm": "TEA / XTEA",
-          "what": "delta (little-endian)",
-          "hex": "b979379e"
-        },
-        {
-          "algorithm": "TEA / XTEA",
-          "what": "delta (big-endian)",
-          "hex": "9e3779b9"
-        },
+        {"algorithm": "TEA / XTEA", "what": "delta (little-endian)", "hex": "b979379e"},
+        {"algorithm": "TEA / XTEA", "what": "delta (big-endian)", "hex": "9e3779b9"},
         {
           "algorithm": "DES",
           "what": "initial permutation table",
           "hex": "3a322a221a120a023c342c241c140c04"
         },
-        {
-          "algorithm": "RC6 / RC5",
-          "what": "P32 and Q32 (little-endian)",
-          "hex": "6351e1b7b979379e"
-        },
+        {"algorithm": "RC6 / RC5", "what": "P32 and Q32 (little-endian)", "hex": "6351e1b7b979379e"},
         {
           "algorithm": "Base64",
           "what": "standard alphabet",
@@ -595,13 +390,792 @@ def _omp_re_recipes():
           "what": "URL-safe alphabet tail",
           "hex": "7778797a303132333435363738392d5f"
         }
+      ],
+      "opTypes": {
+        "call": ["call", "ucall", "rcall", "icall", "ccall"],
+        "decidingCall": ["call", "ucall", "rcall", "icall"],
+        "compare": ["cmp", "acmp"],
+        "branch": ["cjmp"]
+      },
+      "calleeAfter": "call",
+      "branchMeanings": [
+        {"mnemonics": ["je", "jz"], "meaning": "taken when equal / zero"},
+        {"mnemonics": ["jne", "jnz"], "meaning": "taken when not equal / not zero"},
+        {"mnemonics": ["ja", "jnbe"], "meaning": "taken when above (unsigned >)"},
+        {"mnemonics": ["jae", "jnb", "jnc"], "meaning": "taken when above or equal (unsigned >=)"},
+        {"mnemonics": ["jb", "jc", "jnae"], "meaning": "taken when below (unsigned <)"},
+        {"mnemonics": ["jbe", "jna"], "meaning": "taken when below or equal (unsigned <=)"},
+        {"mnemonics": ["jg", "jnle"], "meaning": "taken when greater (signed >)"},
+        {"mnemonics": ["jge", "jnl"], "meaning": "taken when greater or equal (signed >=)"},
+        {"mnemonics": ["jl", "jnge"], "meaning": "taken when less (signed <)"},
+        {"mnemonics": ["jle", "jng"], "meaning": "taken when less or equal (signed <=)"},
+        {"mnemonics": ["js"], "meaning": "taken when negative"},
+        {"mnemonics": ["jns"], "meaning": "taken when not negative"}
+      ],
+      "otherBranch": "conditional",
+      "sectionNotes": {
+        "writableExecutable": "writable+executable",
+        "veryHighEntropy": "very high entropy (compressed or encrypted data)",
+        "highEntropyForCode": "high entropy for code",
+        "packerName": "a name packers use"
+      },
+      "thresholds": {
+        "veryHighEntropy": 7.2,
+        "highEntropyForCode": 6.8,
+        "fewImports": 8,
+        "shortConstantHexDigits": 8
+      },
+      "limits": {
+        "lineWidth": 100,
+        "triageRiskyImports": 20,
+        "cryptoMaterial": 40,
+        "cryptoHits": 60,
+        "cryptoReferences": 8
+      },
+      "whitespace": [
+        9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200,
+        8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279
+      ],
+      "text": {
+        "more": [
+          "  … ",
+          {"get": [["$", "hidden"]], "as": "d"},
+          " more ",
+          {"get": [["$", "what"]], "as": "text"},
+          " not shown"
+        ],
+        "evidenceTaken": "Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",
+        "evidenceRow": ["  ", {"get": [[".", "id"]], "as": "text"}, "  ", {"get": [[".", "label"]], "as": "text"}],
+        "nameless": "?",
+        "refusals": {
+          "notAString": [
+            "omp-re: ",
+            {"get": [["$", "recipe"]], "as": "text"},
+            ": a function is named by a string, not ",
+            {"get": [["$", "given"]], "as": "text"}
+          ],
+          "optionsNotOneObject": [
+            "omp-re: ",
+            {"get": [["$", "recipe"]], "as": "text"},
+            ": options are one object, e.g. { maxItems: 20 }, not ",
+            {"get": [["$", "given"]], "as": "text"}
+          ],
+          "noFunction": [
+            "omp-re: ",
+            {"get": [["$", "recipe"]], "as": "text"},
+            ": no function at ",
+            {"get": [["$", "addr"]], "as": "text"},
+            " — list them with ",
+            {"get": [["$", "listFunctions"]], "as": "text"},
+            ", or define one with define_function"
+          ],
+          "noInstructions": [
+            "omp-re: ",
+            {"get": [["$", "recipe"]], "as": "text"},
+            ": no function at ",
+            {"get": [["$", "addr"]], "as": "text"},
+            " — list them with ",
+            {"get": [["$", "listFunctions"]], "as": "text"}
+          ],
+          "cutOutput": [
+            "omp-re: ",
+            {"get": [["$", "recipe"]], "as": "text"},
+            ": the output of rizin_command ",
+            {"get": [["$", "label"]], "as": "json"},
+            " was cut at the size cap and the whole of it could not be read back (",
+            {"get": [["$", "why"]], "as": "text"},
+            "). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands."
+          ],
+          "cutNoArtifact": ["the engine saved no artifact for it"],
+          "cutUnreadable": [
+            "artifact://",
+            {"get": [["$", "artifact"]], "as": "text"},
+            ": ",
+            {"get": [["$", "error"]], "as": "text"}
+          ],
+          "cutNotText": ["artifact://", {"get": [["$", "artifact"]], "as": "text"}, " did not read as text"]
+        }
+      },
+      "host": {
+        "listFunctions": "await tool.rizin_command({\"command\": \"aflj\"})",
+        "help": "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own\nrizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.\nOpen a binary first (await tool.open_binary({\"path\": ...})). The recipes themselves need no await.\n\n  omp_re.triage(max_strings=25, max_functions=15)\n      what the binary is, build protections, sections with entropy, imports and what they reach,\n      notable strings, the largest functions, entry points.\n  omp_re.scan_imports(callers=True, max_callers=12)\n      the imports a reviewer stops at, why, and who calls each; what the program can reach.\n  omp_re.inspect_function(\"main\", max_items=30)\n      one function's shape, variables, callers, callees and the strings it refers to.\n  omp_re.find_comparisons(\"main\", max_items=80)\n      every compare with the branch that follows, calls that compare or validate, strings on the way.\n  omp_re.find_crypto(references=True)\n      rizin's key and certificate search, and where published constants of common algorithms lie.\n\nEvery section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the\nreads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",
+        "loaded": "omp-re recipes loaded: omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto — print(omp_re.help()) says what each answers.",
+        "shown": "<omp-re recipes: triage, scan_imports, inspect_function, find_comparisons, find_crypto — print(omp_re.help()) says what each answers>"
+      },
+      "recipes": [
+        {
+          "name": "triage",
+          "call": "triage",
+          "takes": False,
+          "doc": "A first look at the open binary, composed from rizin's own reads: what it is, which protections the\nbuild has, its sections with entropy, the imports that give it reach, the strings worth a first\nlook, its largest functions and its entry points. Nothing here is a finding until one is recorded\nciting the ids.\n\nmax_strings (default 25, 1..200): at most this many notable strings are listed.\nmax_functions (default 15, 1..100): at most this many functions are listed.",
+          "options": [
+            {"name": "maxStrings", "key": "max_strings", "default": 25, "least": 1, "most": 200},
+            {"name": "maxFunctions", "key": "max_functions", "default": 15, "least": 1, "most": 100}
+          ],
+          "steps": [
+            {"read": "path", "command": "ij"},
+            {"read": "info", "command": "iIj"},
+            {"read": "sectionData", "command": "iSj entropy"},
+            {"read": "imports", "command": "iij"},
+            {"read": "strings", "command": "izj"},
+            {"read": "functionData", "command": "aflj"},
+            {"read": "entries", "command": "iej"},
+            {"derive": "triage"}
+          ],
+          "title": ["triage: ", {"get": [["$", "path", "core", "file"]], "as": "text", "or": "?"}],
+          "sections": [
+            {
+              "title": ["Identity ", {"cite": ["$", "@info"]}],
+              "lines": [
+                [
+                  "  ",
+                  {
+                    "get": [["$", "info", "class"], ["$", "info", "bintype"]],
+                    "as": "text",
+                    "or": "unknown format"
+                  },
+                  ", ",
+                  {"get": [["$", "info", "arch"]], "as": "text", "or": "?"},
+                  " ",
+                  {"get": [["$", "info", "bits"]], "as": "d", "or": "?"},
+                  "-bit ",
+                  {"get": [["$", "info", "endian"]], "as": "text", "or": ""},
+                  ", ",
+                  {"get": [["$", "info", "os"]], "as": "text", "or": "?"},
+                  {"group": [", language ", {"get": [["$", "info", "lang"]], "as": "text"}]},
+                  {"group": [", interpreter ", {"get": [["$", "info", "intrp"]], "as": "text"}]}
+                ]
+              ],
+              "under": [],
+              "after": []
+            },
+            {
+              "title": ["Build protections ", {"cite": ["$", "@info"]}],
+              "lines": [
+                [
+                  "  stack canary: ",
+                  {
+                    "choose": ["$", "info", "canary"],
+                    "yes": "yes",
+                    "no": "NO — a stack overflow reaches the return address unchecked"
+                  }
+                ],
+                [
+                  "  NX: ",
+                  {
+                    "choose": ["$", "info", "nx"],
+                    "yes": "yes",
+                    "no": "NO — data pages are executable"
+                  }
+                ],
+                [
+                  "  PIE: ",
+                  {
+                    "choose": ["$", "info", "pie"],
+                    "yes": "yes",
+                    "no": "NO — the image loads at a fixed address"
+                  }
+                ],
+                [
+                  "  RELRO: ",
+                  {"get": [["$", "info", "relro"]], "as": "text", "or": "none"},
+                  {
+                    "group": [{"if": ["$", "info", "relro"], "is": "partial"}, " — the GOT stays writable"]
+                  },
+                  {
+                    "group": [
+                      {"unless": ["$", "info", "relro"], "is": "partial"},
+                      {"unless": ["$", "info", "relro"], "is": "full"},
+                      " — the GOT and other relocated data stay writable"
+                    ]
+                  }
+                ],
+                [
+                  "  fortified libc calls: ",
+                  {"choose": ["$", "info", "fortify_source"], "yes": "yes", "no": "no"}
+                ],
+                [
+                  "  stripped: ",
+                  {"choose": ["$", "info", "stripped"], "yes": "yes", "no": "no"},
+                  "   static: ",
+                  {"choose": ["$", "info", "static"], "yes": "yes", "no": "no"}
+                ]
+              ],
+              "under": [],
+              "after": []
+            },
+            {
+              "title": ["Sections: ", {"count": ["$", "sections"]}, " ", {"cite": ["$", "@sectionData"]}],
+              "lines": [],
+              "rows": ["$", "sections"],
+              "row": [
+                "  ",
+                {"get": [[".", "section", "name"]], "as": "text", "padRight": 18},
+                " ",
+                {"get": [[".", "section", "perm"]], "as": "text", "padRight": 4, "or": ""},
+                " ",
+                {"get": [[".", "section", "size"]], "as": "d", "padLeft": 9, "or": "0"},
+                " bytes  entropy ",
+                {"get": [[".", "entropy"]], "as": "f2", "padLeft": 4, "or": "?"},
+                {"group": [{"if": [".", "notes"]}, "  <- ", {"join": [".", "notes"], "with": "; "}]}
+              ],
+              "under": [],
+              "after": [
+                [
+                  {
+                    "group": [
+                      {"if": ["$", "flagged"]},
+                      "  ",
+                      {"count": ["$", "flagged"]},
+                      " section",
+                      {"plural": ["$", "flagged"], "one": "", "many": "s"},
+                      " stand",
+                      {"plural": ["$", "flagged"], "one": "s", "many": ""},
+                      " out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list."
+                    ]
+                  }
+                ]
+              ]
+            },
+            {
+              "title": ["Imports: ", {"count": ["$", "imports"]}, " ", {"cite": ["$", "@imports"]}],
+              "lines": [
+                [
+                  {
+                    "group": [
+                      {"if": ["$", "reach"]},
+                      "  reach, by what it links: ",
+                      {"join": ["$", "reach"], "with": ", "}
+                    ]
+                  },
+                  {
+                    "group": [
+                      {"unless": ["$", "reach"]},
+                      "  none of the capability groups (network, process control, injection, …) is linked"
+                    ]
+                  }
+                ],
+                [
+                  {
+                    "group": [
+                      {"if": ["$", "riskyShown"]},
+                      "  worth a reviewer's look: ",
+                      {"join": ["$", "riskyShown"], "with": ", "},
+                      " — scan_imports says why and who calls them"
+                    ]
+                  }
+                ],
+                [
+                  {
+                    "choose": ["$", "fewImports"],
+                    "yes": "  very few imports for a dynamic binary: resolved at run time, or packed",
+                    "no": ""
+                  }
+                ]
+              ],
+              "under": [],
+              "after": []
+            },
+            {
+              "title": [
+                "Strings: ",
+                {"count": ["$", "strings"]},
+                "; notable ",
+                {"count": ["$", "notable"]},
+                " ",
+                {"cite": ["$", "@strings"]}
+              ],
+              "lines": [],
+              "rows": ["$", "notable"],
+              "limit": "maxStrings",
+              "row": [
+                "  ",
+                {"get": [[".", "kind"]], "as": "text", "padRight": 11},
+                " ",
+                {"get": [[".", "entry", "vaddr"]], "as": "x", "or": "?"},
+                "  ",
+                {"get": [[".", "entry", "string"]], "as": "line", "or": ""}
+              ],
+              "under": [],
+              "more": "notable strings",
+              "after": []
+            },
+            {
+              "title": [
+                "Functions: ",
+                {"count": ["$", "functions"]},
+                "; largest by code size ",
+                {"cite": ["$", "@functionData"]}
+              ],
+              "lines": [],
+              "rows": ["$", "functions"],
+              "limit": "maxFunctions",
+              "row": [
+                "  ",
+                {"get": [[".", "offset"], [".", "addr"]], "as": "x", "or": "0x0"},
+                "  ",
+                {"get": [[".", "realsz"], [".", "size"]], "as": "d", "padLeft": 7, "or": "0"},
+                " bytes  ",
+                {"group": [{"get": [[".", "nbbs"]], "as": "d"}, " blocks  "]},
+                {"get": [[".", "name"]], "as": "text", "or": "?"}
+              ],
+              "under": [],
+              "more": "functions",
+              "after": []
+            },
+            {
+              "title": ["Entry points ", {"cite": ["$", "@entries"]}],
+              "lines": [],
+              "rows": ["$", "entries"],
+              "row": [
+                "  ",
+                {"get": [[".", "vaddr"]], "as": "x"},
+                "  ",
+                {"get": [[".", "type"]], "as": "text", "or": ""}
+              ],
+              "under": [],
+              "empty": ["  none reported"],
+              "after": []
+            }
+          ]
+        },
+        {
+          "name": "scan_imports",
+          "call": "scan_imports",
+          "takes": False,
+          "doc": "The imports a reviewer would stop at, each with why it matters and who calls it; plus what the\nprogram can reach, read off what it links. An import is a lead, not a bug: whether a call is safe is\ndecided at its call site, which is what the callers are listed for.\n\ncallers (default True): list who calls each import.\nmax_callers (default 12, 1..100): at most this many callers are listed for each.",
+          "options": [
+            {"name": "callers", "key": "callers", "flag": True},
+            {"name": "maxCallers", "key": "max_callers", "default": 12, "least": 1, "most": 100}
+          ],
+          "steps": [{"read": "imports", "command": "iij"}, {"derive": "scanImports"}],
+          "title": [
+            "scan_imports: ",
+            {"count": ["$", "imports"]},
+            " imports, ",
+            {"count": ["$", "risky"]},
+            " worth a look"
+          ],
+          "sections": [
+            {
+              "title": ["Reach, by what it links ", {"cite": ["$", "@imports"]}],
+              "lines": [],
+              "rows": ["$", "reach"],
+              "row": [
+                "  ",
+                {"get": [[".", "capability"]], "as": "text", "padRight": 18},
+                " ",
+                {"join": [".", "names"], "with": ", "}
+              ],
+              "under": [],
+              "empty": ["  none of the capability groups is linked"],
+              "after": []
+            },
+            {
+              "title": ["Imports worth a reviewer's look ", {"cite": ["$", "@imports"]}],
+              "lines": [],
+              "rows": ["$", "risky"],
+              "row": [
+                "  [",
+                {"get": [[".", "severity"]], "as": "text"},
+                "] ",
+                {"get": [[".", "bare"]], "as": "text"},
+                {"group": [" (linked as ", {"get": [[".", "linkedAs"]], "as": "text"}, ")"]},
+                " (",
+                {"get": [[".", "category"]], "as": "text"},
+                ")",
+                {"group": [" @ ", {"get": [[".", "plt"]], "as": "x"}]},
+                " — ",
+                {"get": [[".", "why"]], "as": "text"}
+              ],
+              "under": [
+                {
+                  "when": [".", "traced"],
+                  "lines": [],
+                  "rows": [".", "places"],
+                  "limit": "maxCallers",
+                  "line": [
+                    "      called from ",
+                    {"count": [".", "places"]},
+                    " place",
+                    {"plural": [".", "places"], "one": "", "many": "s"},
+                    " ",
+                    {"cite": [".", "@places"]},
+                    ": ",
+                    {"join": ["$", "shown"], "with": ", "}
+                  ],
+                  "under": [],
+                  "empty": ["      no caller found by analysis ", {"cite": [".", "@places"]}],
+                  "more": "callers",
+                  "after": []
+                }
+              ],
+              "empty": ["  none of the imports in the table is linked"],
+              "after": []
+            },
+            {
+              "lines": [
+                [
+                  "An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."
+                ]
+              ],
+              "under": [],
+              "after": []
+            }
+          ]
+        },
+        {
+          "name": "inspect_function",
+          "call": "inspect_function",
+          "takes": True,
+          "doc": "One function, read from every side at once: its size, complexity and signature, its variables, who\ncalls it and what it calls, and the strings it refers to — the context to read before its code.\nFollow it with rizin_command pdg at the same address for the code.\n\naddr: the function's name or address, a string.\nmax_items (default 30, 1..300): at most this many of each list are shown.",
+          "options": [{"name": "maxItems", "key": "max_items", "default": 30, "least": 1, "most": 300}],
+          "steps": [
+            {"read": "infoData", "command": "afij", "at": True},
+            {"derive": "theFunction"},
+            {"read": "body", "command": "pdfj", "at": True},
+            {"read": "variables", "command": "afvlj", "at": True},
+            {"read": "strings", "command": "izj"},
+            {"derive": "inspectFunction"}
+          ],
+          "title": ["inspect_function: ", {"get": [["$", "info", "name"], ["$", "addr"]], "as": "text"}],
+          "sections": [
+            {
+              "title": ["Shape ", {"cite": ["$", "@infoData"]}],
+              "lines": [
+                [
+                  "  ",
+                  {
+                    "get": [["$", "info", "signature"], ["$", "info", "name"], ["$", "addr"]],
+                    "as": "text"
+                  },
+                  " at ",
+                  {"get": [["$", "info", "offset"], ["$", "info", "addr"]], "as": "x", "or": "0x0"}
+                ],
+                [
+                  "  ",
+                  {"get": [["$", "info", "realsz"], ["$", "info", "size"]], "as": "d", "or": "0"},
+                  " bytes of code, ",
+                  {"get": [["$", "info", "nbbs"]], "as": "d", "or": "0"},
+                  " basic blocks, ",
+                  {"get": [["$", "info", "edges"]], "as": "d", "or": "0"},
+                  " edges, cyclomatic complexity ",
+                  {"get": [["$", "info", "cc"]], "as": "d", "or": "0"},
+                  ", ",
+                  {"get": [["$", "info", "loops"]], "as": "d", "or": "0"},
+                  " loop",
+                  {"plural": ["$", "info", "loops"], "one": "", "many": "s"}
+                ],
+                [
+                  "  calling convention ",
+                  {"get": [["$", "info", "calltype"]], "as": "text", "or": "?"},
+                  ", stack frame ",
+                  {"get": [["$", "info", "stackframe"]], "as": "d", "or": "0"},
+                  " bytes",
+                  {"choose": ["$", "info", "noreturn"], "yes": ", does not return", "no": ""}
+                ]
+              ],
+              "under": [],
+              "after": []
+            },
+            {
+              "title": ["Body ", {"cite": ["$", "@body"]}],
+              "lines": [
+                [
+                  "  ",
+                  {"count": ["$", "ops"]},
+                  " instructions, ",
+                  {"get": [["$", "compares"]], "as": "d"},
+                  " compare",
+                  {"plural": ["$", "compares"], "one": "", "many": "s"},
+                  ", ",
+                  {"get": [["$", "branches"]], "as": "d"},
+                  " conditional branch",
+                  {"plural": ["$", "branches"], "one": "", "many": "es"},
+                  " — find_comparisons lists them"
+                ]
+              ],
+              "under": [],
+              "after": []
+            },
+            {
+              "title": [
+                "Variables: ",
+                {"get": [["$", "variableCount"]], "as": "d"},
+                " ",
+                {"cite": ["$", "@variables"]}
+              ],
+              "lines": [],
+              "under": [],
+              "after": []
+            },
+            {
+              "title": [
+                "Called from ",
+                {"count": ["$", "callers"]},
+                " place",
+                {"plural": ["$", "callers"], "one": "", "many": "s"},
+                " ",
+                {"cite": ["$", "@callers"]}
+              ],
+              "lines": [],
+              "rows": ["$", "callers"],
+              "limit": "maxItems",
+              "row": ["  ", {"get": [["."]], "as": "text"}],
+              "under": [],
+              "more": "callers",
+              "after": []
+            },
+            {
+              "title": [
+                "Calls ",
+                {"count": ["$", "calls"]},
+                " distinct target",
+                {"plural": ["$", "calls"], "one": "", "many": "s"},
+                " ",
+                {"cite": ["$", "@body"]}
+              ],
+              "lines": [],
+              "rows": ["$", "calls"],
+              "limit": "maxItems",
+              "row": ["  ", {"get": [["."]], "as": "text"}],
+              "under": [],
+              "more": "callees",
+              "after": []
+            },
+            {
+              "title": [
+                "Refers to ",
+                {"count": ["$", "referenced"]},
+                " string",
+                {"plural": ["$", "referenced"], "one": "", "many": "s"},
+                " ",
+                {"cite": ["$", "@body"]},
+                " ",
+                {"cite": ["$", "@strings"]}
+              ],
+              "lines": [],
+              "rows": ["$", "referenced"],
+              "limit": "maxItems",
+              "row": [
+                "  ",
+                {"get": [[".", "address"]], "as": "x"},
+                "  ",
+                {"get": [[".", "text"]], "as": "line"}
+              ],
+              "under": [],
+              "more": "strings",
+              "after": []
+            }
+          ]
+        },
+        {
+          "name": "find_comparisons",
+          "call": "find_comparisons",
+          "takes": True,
+          "doc": "What a function decides on: every compare or test with the conditional branch that follows it (which\nway it goes, and where to), every call to something that compares or validates, and the strings on\nthe way — the static skeleton of validation logic, with no emulation and nothing run. It lists what\nis compared, not what the comparison means.\n\naddr: the function's name or address, a string.\nmax_items (default 80, 1..1000): at most this many of each list are shown.",
+          "options": [{"name": "maxItems", "key": "max_items", "default": 80, "least": 1, "most": 1000}],
+          "steps": [
+            {"read": "body", "command": "pdfj", "at": True},
+            {"derive": "functionBody"},
+            {"read": "strings", "command": "izj"},
+            {"derive": "findComparisons"}
+          ],
+          "title": ["find_comparisons: ", {"get": [["$", "body", "name"], ["$", "addr"]], "as": "text"}],
+          "sections": [
+            {
+              "title": [
+                "Compares and the branches that follow: ",
+                {"count": ["$", "decisions"]},
+                " ",
+                {"cite": ["$", "@body"]}
+              ],
+              "lines": [],
+              "rows": ["$", "decisions"],
+              "limit": "maxItems",
+              "row": [
+                "  ",
+                {"get": [[".", "op", "offset"]], "as": "x", "or": "0x0"},
+                "  ",
+                {"get": [[".", "op", "disasm"]], "as": "text", "or": ""},
+                {"group": [" ; \"", {"get": [[".", "printable"]], "as": "text"}, "\""]},
+                {
+                  "group": [
+                    "  ->  ",
+                    {"get": [[".", "next", "disasm"]], "as": "text", "or": ""},
+                    ": ",
+                    {"get": [[".", "meaning"]], "as": "text"},
+                    {"group": [", to ", {"get": [[".", "next", "jump"]], "as": "x"}]},
+                    {"group": [", else ", {"get": [[".", "next", "fail"]], "as": "x"}]}
+                  ]
+                }
+              ],
+              "under": [],
+              "more": "comparisons",
+              "after": []
+            },
+            {
+              "title": [
+                "Calls that compare or validate: ",
+                {"count": ["$", "decidingCalls"]},
+                " ",
+                {"cite": ["$", "@body"]}
+              ],
+              "lines": [],
+              "rows": ["$", "decidingCalls"],
+              "limit": "maxItems",
+              "row": [
+                "  ",
+                {"get": [[".", "offset"]], "as": "x", "or": "0x0"},
+                "  ",
+                {"get": [[".", "disasm"]], "as": "text", "or": ""}
+              ],
+              "under": [],
+              "empty": ["  none by name"],
+              "after": []
+            },
+            {
+              "title": [
+                "Strings on the way: ",
+                {"count": ["$", "onTheWay"]},
+                " ",
+                {"cite": ["$", "@body"]},
+                " ",
+                {"cite": ["$", "@strings"]}
+              ],
+              "lines": [],
+              "rows": ["$", "onTheWay"],
+              "limit": "maxItems",
+              "row": [
+                "  ",
+                {"get": [[".", "offset"]], "as": "x"},
+                "  refers to ",
+                {"get": [[".", "target"]], "as": "x"},
+                "  ",
+                {"get": [[".", "text"]], "as": "line"}
+              ],
+              "under": [],
+              "empty": ["  none"],
+              "after": []
+            },
+            {
+              "lines": [
+                [
+                  "This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."
+                ]
+              ],
+              "under": [],
+              "after": []
+            }
+          ]
+        },
+        {
+          "name": "find_crypto",
+          "call": "find_crypto",
+          "takes": False,
+          "doc": "Where cryptographic material lies in the open binary: rizin's own search for keys and certificates,\nand a search for the published constants of common algorithms, each hit with its address and what\nrefers to it. A constant's presence says the tables are linked in, not that they are used, nor on\nwhat; a four-byte constant can occur by chance and is marked weak.\n\nreferences (default True): say what refers to each hit.",
+          "options": [{"name": "references", "key": "references", "flag": True}],
+          "steps": [{"read": "material", "command": "/cmj"}, {"derive": "findCrypto"}],
+          "title": [
+            "find_crypto: ",
+            {"count": ["$", "hits"]},
+            " constant hit",
+            {"plural": ["$", "hits"], "one": "", "many": "s"}
+          ],
+          "sections": [
+            {
+              "title": ["rizin's search for keys and certificates ", {"cite": ["$", "@material"]}],
+              "lines": [],
+              "rows": ["$", "material"],
+              "limit": "cryptoMaterial",
+              "row": ["  ", {"get": [["."]], "as": "json"}],
+              "under": [],
+              "empty": ["  nothing found"],
+              "after": []
+            },
+            {
+              "title": ["Published constants"],
+              "lines": [],
+              "rows": ["$", "hits"],
+              "limit": "cryptoHits",
+              "row": [
+                "  ",
+                {"get": [[".", "address"]], "as": "x"},
+                "  ",
+                {"get": [[".", "algorithm"]], "as": "text"},
+                " — ",
+                {"get": [[".", "what"]], "as": "text"},
+                " ",
+                {"cite": [".", "@hit"]},
+                {
+                  "choose": [".", "weak"],
+                  "yes": " (weak: four bytes can occur by chance)",
+                  "no": ""
+                }
+              ],
+              "under": [
+                {
+                  "when": [".", "traced"],
+                  "lines": [],
+                  "rows": [".", "places"],
+                  "limit": "cryptoReferences",
+                  "line": [
+                    "      referred to from ",
+                    {"join": ["$", "shown"], "with": ", "},
+                    " ",
+                    {"cite": [".", "@places"]}
+                  ],
+                  "under": [],
+                  "empty": [
+                    "      no reference found by analysis ",
+                    {"cite": [".", "@places"]},
+                    " — reached by computed address, or unused"
+                  ],
+                  "after": []
+                }
+              ],
+              "empty": ["  none of the constants in the table was found"],
+              "after": []
+            },
+            {
+              "lines": [
+                [
+                  "A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."
+                ]
+              ],
+              "under": [],
+              "after": []
+            }
+          ]
+        }
       ]
     }
-# </generated:tables>
 
-    RISKY = TABLES["riskyImports"]
-    CAPABILITIES = TABLES["capabilities"]
-    SEVERITY_ORDER = TABLES["severityOrder"]
+    def recipe_functions(run_recipe):
+        def triage(*, max_strings=None, max_functions=None):
+            return run_recipe("triage", None, {"maxStrings": max_strings, "maxFunctions": max_functions})
+
+        def scan_imports(*, callers=None, max_callers=None):
+            return run_recipe("scan_imports", None, {"callers": callers, "maxCallers": max_callers})
+
+        def inspect_function(addr=None, *, max_items=None):
+            return run_recipe("inspect_function", addr, {"maxItems": max_items})
+
+        def find_comparisons(addr=None, *, max_items=None):
+            return run_recipe("find_comparisons", addr, {"maxItems": max_items})
+
+        def find_crypto(*, references=None):
+            return run_recipe("find_crypto", None, {"references": references})
+
+        return [triage, scan_imports, inspect_function, find_comparisons, find_crypto]
+# </generated:tables>
+    TEXT = TABLES["text"]
+    HOST = TABLES["host"]
+    LIMITS = TABLES["limits"]
+    THRESHOLDS = TABLES["thresholds"]
+    OP_TYPES = TABLES["opTypes"]
+    NOTES = TABLES["sectionNotes"]
+    RECIPES = {recipe["name"]: recipe for recipe in TABLES["recipes"]}
     # The JSON's patterns are written once for every host and matched without regard to case on
     # each. JavaScript's /i without /u folds case for ASCII letters only when the pattern is
     # ASCII, and its \b and \d are ASCII; re.ASCII is what makes Python read them the same way.
@@ -609,15 +1183,8 @@ def _omp_re_recipes():
     STRING_INTEREST = [(row["kind"], re.compile(row["pattern"], FLAGS)) for row in TABLES["stringInterest"]]
     PACKER_SECTION_NAMES = re.compile(TABLES["packerSectionNames"], FLAGS)
     COMPARING_CALLS = re.compile(TABLES["comparingCalls"], FLAGS)
-    CRYPTO_CONSTANTS = TABLES["cryptoConstants"]
-    # A constant this many hex digits or fewer is four bytes: common enough by chance that a hit means little on its own.
-    SHORT_CONSTANT = 8
 
     # --- rizin's JSON, with its numbers as rizin wrote them ---------------------------------
-
-    # What JavaScript calls white space, for the places recipes.js trims or splits: Python's own
-    # idea of it differs at the edges (U+FEFF, U+001C..U+001F).
-    JS_SPACE = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
     def json_number(digits):
         # A number written with a fraction or an exponent. JavaScript has one number type, so
@@ -637,6 +1204,9 @@ def _omp_re_recipes():
             # Not JSON reads as no data, never as an error: an empty reply is how rizin says "nothing here".
             return None
 
+    def is_number(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
     def get(thing, key):
         """A member with null read as absent; absent as soon as `thing` is not an object."""
         return thing.get(key) if isinstance(thing, dict) else None
@@ -647,7 +1217,7 @@ def _omp_re_recipes():
 
     def num(thing, key):
         value = get(thing, key)
-        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        return value if is_number(value) else None
 
     def rows(data):
         return data if isinstance(data, list) else []
@@ -713,7 +1283,28 @@ def _omp_re_recipes():
             return "{" + ",".join(json_string(str(key)) + ":" + encode(member) for key, member in value.items()) + "}"
         return repr(value)
 
+    NUMERIC = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\Z", re.ASCII)
+
+    def number_from_text(text):
+        """The number a string of digits spells — rizin writes a section's entropy as one — or nothing."""
+        return float(text) if NUMERIC.match(text) else None
+
     # --- text ---------------------------------------------------------------------------------
+
+    # White space is the data's list on every host, not each language's own idea of it.
+    SPACE = "".join(chr(point) for point in TABLES["whitespace"])
+    SPACES = re.compile("[" + re.escape(SPACE) + "]+")
+
+    def trim(text):
+        return text.strip(SPACE)
+
+    def words(text):
+        return [word for word in SPACES.split(text) if word != ""]
+
+    def after_word(text, word):
+        """`text` without a leading `word` and the white space after it; as it stands when it does not open that way."""
+        rest = text[len(word) :]
+        return rest.lstrip(SPACE) if text.startswith(word) and rest[:1] != "" and rest[0] in SPACE else text
 
     def pad_right(text, width):
         return text + " " * max(0, width - len(text))
@@ -722,14 +1313,7 @@ def _omp_re_recipes():
         return " " * max(0, width - len(text)) + text
 
     def one_line(text):
-        """A string as one line of at most a hundred characters."""
-        return text.replace("\n", " ")[:100]
-
-    def plural(n, one="", many="s"):
-        return one if n == 1 else many
-
-    def words(text):
-        return [word for word in re.split("[ \t\n\r]+", text) if word != ""]
+        return text.replace("\n", " ")[: LIMITS["lineWidth"]]
 
     def unique_first(items, key=lambda item: item):
         """Without duplicates, keeping each value where it first stood."""
@@ -747,7 +1331,7 @@ def _omp_re_recipes():
 
     def bounded(value, fallback, least, most):
         """`value` when it is a whole number within least..most, the nearer bound when it is outside, `fallback` when it was not given."""
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if not is_number(value):
             return fallback
         if isinstance(value, float):
             if not math.isfinite(value) or value != math.floor(value):
@@ -755,13 +1339,114 @@ def _omp_re_recipes():
             value = int(value)
         return max(least, min(most, value))
 
-    def cite(evidence_id):
-        """How a line names the read it rests on; nothing when the read left no record."""
-        return "[evidence %s]" % evidence_id if evidence_id else ""
+    # --- a template, filled -------------------------------------------------------------------
 
-    def more_line(shown, total, what):
-        """The line that says a list was cut, so a short list is never read as a whole one."""
-        return ["  … %d more %s not shown" % (total - shown, what)] if total > shown else []
+    # scripts/gen-recipes.ts says what a template may hold; what it writes into the tables is walked here.
+    MISSING = object()
+
+    def lookup(path, facts, row):
+        """What a path names: a fact, or (when it opens with ".") the row, and then members of it."""
+        value = row if path[0] == "." else facts
+        for key in path[1:]:
+            value = get(value, key)
+        return value
+
+    def there(value):
+        return value is True or (isinstance(value, list) and len(value) > 0)
+
+    def size(value):
+        return len(value) if isinstance(value, list) else value if is_number(value) else 0
+
+    AS = {
+        "text": lambda value: value if isinstance(value, str) else MISSING,
+        "d": lambda value: number_text(value) if is_number(value) else MISSING,
+        "x": lambda value: hexa(value) if is_number(value) else MISSING,
+        "f2": lambda value: fixed2(value) if is_number(value) else MISSING,
+        "line": lambda value: one_line(value) if isinstance(value, str) else MISSING,
+        "json": encode,
+    }
+
+    def piece(node, facts, row):
+        if isinstance(node, str):
+            return node
+        if "group" in node:
+            inner = fill(node["group"], facts, row)
+            return "" if inner is MISSING else inner
+        if "if" in node or "unless" in node:
+            value = lookup(node["if"] if "if" in node else node["unless"], facts, row)
+            holds = (isinstance(value, str) and value == node["is"]) if "is" in node else there(value)
+            return "" if holds == ("if" in node) else MISSING
+        if "choose" in node:
+            return node["yes"] if there(lookup(node["choose"], facts, row)) else node["no"]
+        if "cite" in node:
+            # How a line names the read it rests on; nothing when the read left no record.
+            evidence_id = lookup(node["cite"], facts, row)
+            return "[evidence " + evidence_id + "]" if isinstance(evidence_id, str) else ""
+        if "count" in node:
+            return str(len(rows(lookup(node["count"], facts, row))))
+        if "join" in node:
+            return node["with"].join(rows(lookup(node["join"], facts, row)))
+        if "plural" in node:
+            return node["one"] if size(lookup(node["plural"], facts, row)) == 1 else node["many"]
+        text = MISSING
+        for path in node["get"]:
+            text = AS[node["as"]](lookup(path, facts, row))
+            if text is not MISSING:
+                break
+        if text is MISSING:
+            if "or" not in node:
+                return MISSING
+            text = node["or"]
+        return pad_left(text, node["padLeft"]) if "padLeft" in node else pad_right(text, node["padRight"]) if "padRight" in node else text
+
+    def fill(nodes, facts, row=None):
+        """A template's text, or MISSING when something it needs is not there."""
+        text = ""
+        for node in nodes:
+            part = piece(node, facts, row)
+            if part is MISSING:
+                return MISSING
+            text += part
+        return text
+
+    def written(nodes, facts, row=None):
+        """A template as the lines it adds: one, or none when it cannot be written or comes out empty."""
+        text = fill(nodes, facts, row)
+        return [] if text is MISSING or text == "" else [text]
+
+    def section_lines(section, facts, row=None):
+        """The lines of one section."""
+        if "when" in section and not there(lookup(section["when"], facts, row)):
+            return []
+        lines = written(section["title"], facts, row) if "title" in section else []
+        for line in section["lines"]:
+            lines += written(line, facts, row)
+        if "rows" in section:
+            everything = rows(lookup(section["rows"], facts, row))
+            most = facts[section["limit"]] if "limit" in section else None
+            total = len(everything)
+            if "line" in section:
+                facts["shown"] = everything[:most]
+                if total > 0:
+                    lines += written(section["line"], facts, row)
+            else:
+                listed = [(item, text) for item in everything for text in written(section["row"], facts, item)]
+                total = len(listed)
+                for item, text in listed[:most]:
+                    lines.append(text)
+                    for inner in section["under"]:
+                        lines += section_lines(inner, facts, item)
+            if total == 0 and "empty" in section:
+                lines += written(section["empty"], facts, row)
+            # So a short list is never read as a whole one.
+            if "more" in section and most is not None and total > most:
+                lines += written(TEXT["more"], {"hidden": total - most, "what": section["more"]})
+        for line in section["after"]:
+            lines += written(line, facts, row)
+        return lines
+
+    def refusal(name, facts, kind=RuntimeError):
+        return kind(fill(TEXT["refusals"][name], facts))
 
     class Report(str):
         """A recipe's report: its text, shown as written when it is a cell's value, and awaitable for a cell that awaits it."""
@@ -823,22 +1508,19 @@ def _omp_re_recipes():
         if details.get("truncated") is not True:
             return after_header(EVIDENCE_TAG.sub("", text, count=1))
 
-        def lost(why):
-            return RuntimeError(
-                "omp-re: %s: the output of rizin_command %s was cut at the size cap and the whole of it could not be read back (%s). "
-                "The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands." % (run["name"], json_string(label), why)
-            )
+        def lost(why, more=None):
+            return refusal("cutOutput", {"recipe": run["name"], "label": label, "why": fill(TEXT["refusals"][why], more)})
 
         artifact = details.get("artifactId")
         if not isinstance(artifact, str):
-            raise lost("the engine saved no artifact for it")
+            raise lost("cutNoArtifact")
         try:
             # `read` is omp's helper, a global of the cell namespace; for a bare artifact:// id it returns the file raw and whole.
             full = settled(read("artifact://" + artifact))  # noqa: F821
         except Exception as error:
-            raise lost("artifact://%s: %s" % (artifact, error)) from None
+            raise lost("cutUnreadable", {"artifact": artifact, "error": str(error)}) from None
         if not isinstance(full, str):
-            raise lost("artifact://%s did not read as text" % artifact)
+            raise lost("cutNotText", {"artifact": artifact})
         return after_header(full)
 
     def observe(run, command, addr=None):
@@ -863,7 +1545,7 @@ def _omp_re_recipes():
         tag = EVIDENCE_TAG.search(text)
         evidence_id = tag.group(1) if tag else None
         if evidence_id:
-            run["evidence"].append((label, evidence_id))
+            run["evidence"].append({"label": label, "id": evidence_id})
         # Only a call that printed something carries the command it ran; "(no output)" is the engine's words, not rizin's.
         raw = whole_output(run, label, text, details) if isinstance(details.get("commands"), list) else ""
         return raw, evidence_id
@@ -871,52 +1553,71 @@ def _omp_re_recipes():
     def observe_json(run, command, addr=None):
         """observe() for a `*j` command: its data, absent when the output was empty or not JSON."""
         raw, evidence_id = observe(run, command, addr)
-        return parse_json(raw.strip(JS_SPACE)), evidence_id
+        return parse_json(trim(raw)), evidence_id
 
-    def recipe_text(run, title, sections):
-        """`title` over `sections` — lists of lines — and the reads the recipe took, so every line can be traced and cited."""
-        lines = [title]
-        for section in sections:
+    # --- one recipe, from the data ------------------------------------------------------------
+
+    def run_recipe(name, addr, given):
+        """
+        A recipe run as the data spells it: its options settled, its steps taken in order — a read,
+        or a fact worked out below — and its title and sections filled from what those left, over
+        the list of the reads it took, so every line can be traced and cited.
+        """
+        recipe = RECIPES[name]
+        # What one call keeps: the reads it took, the function list once a caller had to be named, and the facts its templates name.
+        facts = dict(LIMITS, recipe=name, listFunctions=HOST["listFunctions"])
+        run = {"name": name, "evidence": [], "functions": None}
+        if recipe["takes"]:
+            # The engine judges what may follow `@` on every read, so only what it cannot be asked is refused here.
+            if not isinstance(addr, str):
+                raise refusal("notAString", dict(facts, given=encode(addr)), TypeError)
+            facts["addr"] = addr
+        for option in recipe["options"]:
+            value = given[option["name"]]
+            facts[option["name"]] = value is not False if "flag" in option else bounded(value, option["default"], option["least"], option["most"])
+        for step in recipe["steps"]:
+            if "derive" in step:
+                FACTS[step["derive"]](run, facts)
+            else:
+                facts[step["read"]], facts["@" + step["read"]] = observe_json(run, step["command"], facts["addr"] if step.get("at") else None)
+        lines = written(recipe["title"], facts)
+        for section in recipe["sections"]:
             lines.append("")
-            lines.extend(section)
-        lines.append("")
-        lines.append("Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):")
-        lines.extend("  %s  %s" % (evidence_id, label) for label, evidence_id in run["evidence"])
+            lines += section_lines(section, facts)
+        lines += ["", TEXT["evidenceTaken"]]
+        for taken in run["evidence"]:
+            lines += written(TEXT["evidenceRow"], facts, taken)
         return Report("\n".join(lines))
-
-    def start(name):
-        """What one call of a recipe keeps: the reads it took, and the function list once a caller had to be named."""
-        return {"name": name, "evidence": [], "functions": None}
-
-    def function_name(recipe, addr):
-        """The address or name a function was asked for by. The engine judges what may follow `@` on every read, so that rule is not kept twice."""
-        if not isinstance(addr, str):
-            raise TypeError("omp-re: %s: a function is named by a string, not %s" % (recipe, encode(addr)))
-        return addr
 
     # --- what an import is called -------------------------------------------------------------
 
+    def drop_leading(name, text):
+        while name.startswith(text):
+            name = name[len(text) :]
+        return name
+
+    IMPORT_NAME_RULES = {
+        "dropThrough": lambda name, text: name[name.index(text) + len(text) :] if text in name else name,
+        "dropPrefix": lambda name, text: name[len(text) :] if name.startswith(text) else name,
+        "dropLeading": drop_leading,
+        "dropSuffix": lambda name, text: name[: -len(text)] if name.endswith(text) else name,
+    }
+
     def bare_import_name(given):
-        """An import's name as the tables spell it: decorations a linker or a fortified libc adds are taken off, so __strcpy_chk, _strcpy and __isoc99_scanf read as strcpy, strcpy and scanf."""
+        """An import's name as the tables spell it: the decorations a linker or a fortified libc adds are taken off, by the data's rules in their order."""
         name = given or ""
-        at = name.find("imp.")
-        if at != -1:
-            name = name[at + 4 :]
-        if name.startswith("__isoc99_"):
-            name = name[9:]
-        name = name.lstrip("_")
-        if name.endswith("_chk"):
-            name = name[:-4]
+        for rule in TABLES["importNameRules"]:
+            name = IMPORT_NAME_RULES[rule["rule"]](name, rule["text"])
         return name
 
     def risky_import(bare):
-        for row in RISKY:
+        for row in TABLES["riskyImports"]:
             if bare in row["names"]:
                 return row
         return None
 
     def import_capabilities(bare):
-        return [row["capability"] for row in CAPABILITIES if bare in row["names"]]
+        return [row["capability"] for row in TABLES["capabilities"] if bare in row["names"]]
 
     def function_containing(run, address):
         """`address` as "function+0xoffset" when it lies in a function rizin found, else as the bare address. The function list is one more read, taken the first time a name is wanted."""
@@ -926,229 +1627,29 @@ def _omp_re_recipes():
                 low = first(num(fn, "offset"), num(fn, "addr"))
                 high = first(num(fn, "maxbound"), None if low is None else low + first(num(fn, "size"), 0))
                 if low is not None and high is not None:
-                    run["functions"].append((low, high, first(string(fn, "name"), "?")))
+                    run["functions"].append((low, high, first(string(fn, "name"), TEXT["nameless"])))
         for low, high, name in run["functions"]:
             if low <= address < high:
                 return name if address == low else "%s+%s" % (name, hexa(address - low))
         return hexa(address)
 
-    def callers_of(run, address):
-        """Where `address` is referenced from, each as "function+0xoffset", with the evidence id of the read."""
+    def traced_to(run, address):
+        """Where `address` is referenced from, each as "function+0xoffset", with the evidence id of the read: what a row is traced with."""
         data, evidence_id = observe_json(run, "axtj", hexa(address))
         places = []
         for row in rows(data):
             origin = num(row, "from")
             if origin is not None:
                 places.append(function_containing(run, origin))
-        return unique_first(places), evidence_id
+        return {"traced": True, "places": unique_first(places), "@places": evidence_id}
 
-    # --- triage ---------------------------------------------------------------------------------
-
-    def mitigation_lines(info):
-        """The build's protections, read from rizin's own fields rather than scraped from text, each with what its absence would mean."""
-
-        def yes(key):
-            return get(info, key) is True
-
-        relro = first(string(info, "relro"), "none")
-        relro_means = "" if relro == "full" else " — the GOT stays writable" if relro == "partial" else " — the GOT and other relocated data stay writable"
-        return [
-            "  stack canary: " + ("yes" if yes("canary") else "NO — a stack overflow reaches the return address unchecked"),
-            "  NX: " + ("yes" if yes("nx") else "NO — data pages are executable"),
-            "  PIE: " + ("yes" if yes("pie") else "NO — the image loads at a fixed address"),
-            "  RELRO: " + relro + relro_means,
-            "  fortified libc calls: " + ("yes" if yes("fortify_source") else "no"),
-            "  stripped: %s   static: %s" % ("yes" if yes("stripped") else "no", "yes" if yes("static") else "no"),
-        ]
-
-    NUMERIC = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\Z", re.ASCII)
-
-    def section_entropy(section):
-        value = get(section, "entropy")
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return value
-        # rizin writes it as a string of digits.
-        if isinstance(value, str) and NUMERIC.match(value.strip(JS_SPACE)):
-            return float(value.strip(JS_SPACE))
-        return None
-
-    def section_notes(section):
-        """What stands out about a section: writable and executable at once, or data that looks compressed or encrypted where code should be."""
-        perm = first(string(section, "perm"), "")
-        entropy = section_entropy(section)
-        notes = []
-        if "w" in perm and "x" in perm:
-            notes.append("writable+executable")
-        if entropy is not None and entropy >= 7.2:
-            notes.append("very high entropy (compressed or encrypted data)")
-        if entropy is not None and 6.8 <= entropy < 7.2 and "x" in perm:
-            notes.append("high entropy for code")
-        if PACKER_SECTION_NAMES.search(first(string(section, "name"), "").lower()):
-            notes.append("a name packers use")
-        return notes
-
-    def code_size(fn):
-        return first(num(fn, "realsz"), num(fn, "size"), 0)
-
-    def triage(*, max_strings=None, max_functions=None):
-        """
-        A first look at the open binary, composed from rizin's own reads: what it is, which
-        protections the build has, its sections with entropy, the imports that give it reach, the
-        strings worth a first look, its largest functions and its entry points. Nothing here is a
-        finding until one is recorded citing the ids.
-
-        max_strings (default 25, 1..200) and max_functions (default 15, 1..100) bound the two lists.
-        """
-        run = start("triage")
-        most_strings = bounded(max_strings, 25, 1, 200)
-        most_functions = bounded(max_functions, 15, 1, 100)
-        # Which file is open is the engine's to know and nothing tells eval; rizin does.
-        path = first(string(get(observe_json(run, "ij")[0], "core"), "file"), "?")
-        info, info_id = observe_json(run, "iIj")
-        section_data, sections_id = observe_json(run, "iSj entropy")
-        import_data, imports_id = observe_json(run, "iij")
-        string_data, strings_id = observe_json(run, "izj")
-        function_data, functions_id = observe_json(run, "aflj")
-        entry_data, entries_id = observe_json(run, "iej")
-
-        sections = [section for section in rows(section_data) if first(string(section, "name"), "").strip(JS_SPACE) != ""]
-        flagged = [section for section in sections if section_notes(section)]
-        imports = rows(import_data)
-        bare = [bare_import_name(string(entry, "name")) for entry in imports]
-        risky = unique_last([name for name in bare if risky_import(name)])
-        capabilities = unique_first([capability for name in bare for capability in import_capabilities(name)])
-        strings = rows(string_data)
-        notable = [(kind, entry) for kind, pattern in STRING_INTEREST for entry in strings if pattern.search(first(string(entry, "string"), ""))]
-        # Largest first; functions of one size stay in rizin's order.
-        functions = sorted(rows(function_data), key=code_size, reverse=True)
-
-        language = string(info, "lang")
-        interpreter = string(info, "intrp")
-        bits = num(info, "bits")
-
-        def section_line(section):
-            entropy = section_entropy(section)
-            notes = section_notes(section)
-            return (
-                "  %s %s %s bytes" % (pad_right(string(section, "name"), 18), pad_right(first(string(section, "perm"), ""), 4), pad_left(number_text(first(num(section, "size"), 0)), 9))
-                + "  entropy "
-                + ("   ?" if entropy is None else pad_left(fixed2(entropy), 4))
-                + ("  <- " + "; ".join(notes) if notes else "")
-            )
-
-        def function_line(fn):
-            blocks = num(fn, "nbbs")
-            return "  %s  %s bytes  %s%s" % (
-                hexa(first(num(fn, "offset"), num(fn, "addr"), 0)),
-                pad_left(number_text(code_size(fn)), 7),
-                "" if blocks is None else number_text(blocks) + " blocks  ",
-                first(string(fn, "name"), "?"),
-            )
-
-        identity = "  %s, %s %s-bit %s, %s" % (
-            first(string(info, "class"), string(info, "bintype"), "unknown format"),
-            first(string(info, "arch"), "?"),
-            "?" if bits is None else number_text(bits),
-            first(string(info, "endian"), ""),
-            first(string(info, "os"), "?"),
-        )
-        stand_out = "  %d section%s stand%s out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list." % (
-            len(flagged),
-            plural(len(flagged)),
-            plural(len(flagged), "s", ""),
-        )
-        entry_lines = ["  %s  %s" % (hexa(num(entry, "vaddr")), first(string(entry, "type"), "")) for entry in rows(entry_data) if num(entry, "vaddr") is not None]
-        return recipe_text(
-            run,
-            "triage: " + path,
-            [
-                [
-                    "Identity " + cite(info_id),
-                    identity + ("" if language is None else ", language " + language) + ("" if interpreter is None else ", interpreter " + interpreter),
-                ],
-                ["Build protections " + cite(info_id)] + mitigation_lines(info),
-                ["Sections: %d %s" % (len(sections), cite(sections_id))]
-                + [section_line(section) for section in sections]
-                + ([stand_out] if flagged else []),
-                ["Imports: %d %s" % (len(imports), cite(imports_id))]
-                + ["  reach, by what it links: " + ", ".join(capabilities) if capabilities else "  none of the capability groups (network, process control, injection, …) is linked"]
-                + (["  worth a reviewer's look: %s — scan_imports says why and who calls them" % ", ".join(risky[:20])] if risky else [])
-                + (["  very few imports for a dynamic binary: resolved at run time, or packed"] if len(imports) < 8 and get(info, "static") is not True else []),
-                ["Strings: %d; notable %d %s" % (len(strings), len(notable), cite(strings_id))]
-                + [
-                    "  %s %s  %s" % (pad_right(kind, 11), "?" if num(entry, "vaddr") is None else hexa(num(entry, "vaddr")), one_line(first(string(entry, "string"), "")))
-                    for kind, entry in notable[:most_strings]
-                ]
-                + more_line(min(most_strings, len(notable)), len(notable), "notable strings"),
-                ["Functions: %d; largest by code size %s" % (len(functions), cite(functions_id))]
-                + [function_line(fn) for fn in functions[:most_functions]]
-                + more_line(min(most_functions, len(functions)), len(functions), "functions"),
-                ["Entry points " + cite(entries_id)] + (entry_lines or ["  none reported"]),
-            ],
-        )
-
-    # --- scan_imports ---------------------------------------------------------------------------
-
-    def scan_imports(*, callers=None, max_callers=None):
-        """
-        The imports a reviewer would stop at, each with why it matters and who calls it; plus what
-        the program can reach, read off what it links. An import is a lead, not a bug: whether a
-        call is safe is decided at its call site, which is what the callers are listed for.
-
-        callers (default True): list who calls each; max_callers (default 12, 1..100) bounds each list.
-        """
-        run = start("scan_imports")
-        with_callers = callers is not False
-        most_callers = bounded(max_callers, 12, 1, 100)
-        data, imports_id = observe_json(run, "iij")
-        imports = rows(data)
-
-        def severity_rank(severity):
-            return SEVERITY_ORDER.index(severity) if severity in SEVERITY_ORDER else 9
-
-        named = [(entry, bare_import_name(string(entry, "name"))) for entry in imports]
-        risky = [(entry, bare, risky_import(bare)) for entry, bare in named if risky_import(bare)]
-        risky.sort(key=lambda item: severity_rank(item[2]["severity"]))
-        reach = []
-        for row in CAPABILITIES:
-            names = unique_last([bare for _, bare in named if row["capability"] in import_capabilities(bare)])
-            if names:
-                reach.append((row["capability"], names))
-
-        risky_lines = []
-        for entry, bare, verdict in risky:
-            address = num(entry, "plt")
-            # An import rizin gives no name is its own bare name: nothing to say it was linked as.
-            linked = string(entry, "name")
-            if linked is None:
-                linked = bare
-            risky_lines.append(
-                "  [%s] %s%s (%s)%s — %s" % (verdict["severity"], bare, "" if bare == linked else " (linked as %s)" % linked, verdict["category"], "" if address is None else " @ " + hexa(address), verdict["why"])
-            )
-            if not with_callers or address is None:
-                continue
-            places, evidence_id = callers_of(run, address)
-            risky_lines.append(
-                "      called from %d place%s %s: %s" % (len(places), plural(len(places)), cite(evidence_id), ", ".join(places[:most_callers]))
-                if places
-                else "      no caller found by analysis " + cite(evidence_id)
-            )
-            risky_lines.extend(more_line(min(most_callers, len(places)), len(places), "callers"))
-        return recipe_text(
-            run,
-            "scan_imports: %d imports, %d worth a look" % (len(imports), len(risky)),
-            [
-                ["Reach, by what it links " + cite(imports_id)] + (["  %s %s" % (pad_right(capability, 18), ", ".join(names)) for capability, names in reach] or ["  none of the capability groups is linked"]),
-                ["Imports worth a reviewer's look " + cite(imports_id)] + (risky_lines or ["  none of the imports in the table is linked"]),
-                ["An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."],
-            ],
-        )
-
-    # --- inspect_function -----------------------------------------------------------------------
+    # --- what a pdfj reply holds --------------------------------------------------------------
 
     def function_ops(body):
-        """The instruction objects of a pdfj reply."""
         return rows(get(body, "ops"))
+
+    def op_is(op, kind):
+        return string(op, "type") in OP_TYPES[kind]
 
     def op_targets(op):
         """Every address an instruction refers to."""
@@ -1163,219 +1664,137 @@ def _omp_re_recipes():
                 table[num(entry, "vaddr")] = string(entry, "string")
         return table
 
-    CALL_PREFIX = re.compile("^call[" + JS_SPACE + "]+")
-
-    def inspect_function(addr=None, *, max_items=None):
-        """
-        One function, read from every side at once: its size, complexity and signature, its
-        variables, who calls it and what it calls, and the strings it refers to — the context to
-        read before its code. Follow it with rizin_command pdg at the same address for the code.
-
-        addr: the function's name or address, a string; max_items (default 30, 1..300) bounds each list.
-        """
-        run = start("inspect_function")
-        at = function_name("inspect_function", addr)
-        limit = bounded(max_items, 30, 1, 300)
-        info_data, info_id = observe_json(run, "afij", at)
-        info = rows(info_data)[0] if rows(info_data) else None
-        if info is None or info is False or info == 0 or info == "":
-            raise RuntimeError('omp-re: inspect_function: no function at %s — list them with await tool.rizin_command({"command": "aflj"}), or define one with define_function' % at)
-        body, body_id = observe_json(run, "pdfj", at)
-        variables, variables_id = observe_json(run, "afvlj", at)
-        string_data, strings_id = observe_json(run, "izj")
-        entry = first(num(info, "offset"), num(info, "addr"), 0)
-        callers, callers_id = callers_of(run, entry)
-
-        ops = function_ops(body)
+    def string_references(ops, string_data):
+        """Each string an instruction of `ops` refers to, as (op, target, text)."""
         string_at = strings_by_address(string_data)
-        referenced = unique_last([(target, string_at[target]) for op in ops for target in op_targets(op) if string_at.get(target) is not None], key=lambda reference: reference[0])
-        calls = unique_first([CALL_PREFIX.sub("", first(string(op, "disasm"), ""), count=1) for op in ops if string(op, "type") in ("call", "ucall", "rcall", "icall", "ccall")])
-        compares = sum(1 for op in ops if string(op, "type") in ("cmp", "acmp"))
-        branches = sum(1 for op in ops if string(op, "type") == "cjmp")
-        variable_count = sum(len(kind) for kind in variables.values() if isinstance(kind, list)) if isinstance(variables, dict) else 0
-        loops = first(num(info, "loops"), 0)
+        return [(op, target, string_at[target]) for op in ops for target in op_targets(op) if string_at.get(target) is not None]
 
-        def count(key):
-            return number_text(first(num(info, key), 0))
+    # --- the facts a section needs code for -----------------------------------------------------
 
-        size_line = "  %s bytes of code, %s basic blocks, %s edges, cyclomatic complexity %s, %s loop%s" % (
-            number_text(first(num(info, "realsz"), num(info, "size"), 0)),
-            count("nbbs"),
-            count("edges"),
-            count("cc"),
-            number_text(loops),
-            plural(loops),
-        )
-        return recipe_text(
-            run,
-            "inspect_function: " + first(string(info, "name"), at),
-            [
-                [
-                    "Shape " + cite(info_id),
-                    "  %s at %s" % (first(string(info, "signature"), string(info, "name"), at), hexa(entry)),
-                    size_line,
-                    "  calling convention %s, stack frame %s bytes%s" % (first(string(info, "calltype"), "?"), count("stackframe"), ", does not return" if get(info, "noreturn") is True else ""),
-                ],
-                [
-                    "Body " + cite(body_id),
-                    "  %d instructions, %d compare%s, %d conditional branch%s — find_comparisons lists them" % (len(ops), compares, plural(compares), branches, plural(branches, "", "es")),
-                ],
-                ["Variables: %d %s" % (variable_count, cite(variables_id))],
-                ["Called from %d place%s %s" % (len(callers), plural(len(callers)), cite(callers_id))] + ["  " + caller for caller in callers[:limit]] + more_line(min(limit, len(callers)), len(callers), "callers"),
-                ["Calls %d distinct target%s %s" % (len(calls), plural(len(calls)), cite(body_id))] + ["  " + call for call in calls[:limit]] + more_line(min(limit, len(calls)), len(calls), "callees"),
-                ["Refers to %d string%s %s %s" % (len(referenced), plural(len(referenced)), cite(body_id), cite(strings_id))]
-                + ["  %s  %s" % (hexa(address), one_line(text)) for address, text in referenced[:limit]]
-                + more_line(min(limit, len(referenced)), len(referenced), "strings"),
-            ],
-        )
+    # Each is a step some recipe names in the data; it leaves the facts the data's `facts` lists for it.
 
-    # --- find_comparisons -----------------------------------------------------------------------
+    def triage_facts(run, facts):
+        sections = []
+        for section in rows(facts["sectionData"]):
+            if trim(first(string(section, "name"), "")) == "":
+                continue
+            perm = first(string(section, "perm"), "")
+            given = get(section, "entropy")
+            entropy = given if is_number(given) else number_from_text(trim(given)) if isinstance(given, str) else None
+            # What stands out: writable and executable at once, or data that looks compressed or encrypted where code should be.
+            notes = []
+            if "w" in perm and "x" in perm:
+                notes.append(NOTES["writableExecutable"])
+            if entropy is not None and entropy >= THRESHOLDS["veryHighEntropy"]:
+                notes.append(NOTES["veryHighEntropy"])
+            elif entropy is not None and entropy >= THRESHOLDS["highEntropyForCode"] and "x" in perm:
+                notes.append(NOTES["highEntropyForCode"])
+            if PACKER_SECTION_NAMES.search(string(section, "name")):
+                notes.append(NOTES["packerName"])
+            sections.append({"section": section, "entropy": entropy, "notes": notes})
+        imports = rows(facts["imports"])
+        bare = [bare_import_name(string(entry, "name")) for entry in imports]
+        facts["sections"] = sections
+        facts["flagged"] = [section for section in sections if section["notes"]]
+        facts["reach"] = unique_first([capability for name in bare for capability in import_capabilities(name)])
+        facts["riskyShown"] = unique_last([name for name in bare if risky_import(name)])[: LIMITS["triageRiskyImports"]]
+        facts["fewImports"] = len(imports) < THRESHOLDS["fewImports"] and get(facts["info"], "static") is not True
+        facts["notable"] = [{"kind": kind, "entry": entry} for kind, pattern in STRING_INTEREST for entry in rows(facts["strings"]) if pattern.search(first(string(entry, "string"), ""))]
+        # Largest first; functions of one size stay in rizin's order.
+        facts["functions"] = sorted(rows(facts["functionData"]), key=lambda fn: first(num(fn, "realsz"), num(fn, "size"), 0), reverse=True)
 
-    BRANCH_MEANINGS = [
-        (("je", "jz"), "taken when equal / zero"),
-        (("jne", "jnz"), "taken when not equal / not zero"),
-        (("ja", "jnbe"), "taken when above (unsigned >)"),
-        (("jae", "jnb", "jnc"), "taken when above or equal (unsigned >=)"),
-        (("jb", "jc", "jnae"), "taken when below (unsigned <)"),
-        (("jbe", "jna"), "taken when below or equal (unsigned <=)"),
-        (("jg", "jnle"), "taken when greater (signed >)"),
-        (("jge", "jnl"), "taken when greater or equal (signed >=)"),
-        (("jl", "jnge"), "taken when less (signed <)"),
-        (("jle", "jng"), "taken when less or equal (signed <=)"),
-        (("js",), "taken when negative"),
-        (("jns",), "taken when not negative"),
-    ]
+    def scan_imports_facts(run, facts):
+        named = [(entry, bare_import_name(string(entry, "name"))) for entry in rows(facts["imports"])]
+        risky = [(entry, bare, risky_import(bare)) for entry, bare in named if risky_import(bare)]
+        risky.sort(key=lambda item: TABLES["severityOrder"].index(item[2]["severity"]))
+        facts["reach"] = []
+        for row in TABLES["capabilities"]:
+            linked = unique_last([bare for _, bare in named if bare in row["names"]])
+            if linked:
+                facts["reach"].append({"capability": row["capability"], "names": linked})
+        facts["risky"] = []
+        for entry, bare, verdict in risky:
+            plt = num(entry, "plt")
+            # An import rizin gives no name is its own bare name: nothing to say it was linked as.
+            linked = first(string(entry, "name"), bare)
+            traced = traced_to(run, plt) if facts["callers"] and plt is not None else {}
+            facts["risky"].append(dict(traced, severity=verdict["severity"], category=verdict["category"], why=verdict["why"], bare=bare, linkedAs=None if linked == bare else linked, plt=plt))
+
+    def the_function(run, facts):
+        found = rows(facts["infoData"])
+        facts["info"] = found[0] if found else None
+        if not isinstance(facts["info"], dict):
+            raise refusal("noFunction", facts)
+
+    def inspect_function_facts(run, facts):
+        ops = function_ops(facts["body"])
+        traced = traced_to(run, first(num(facts["info"], "offset"), num(facts["info"], "addr"), 0))
+        variables = facts["variables"]
+        facts["callers"] = traced["places"]
+        facts["@callers"] = traced["@places"]
+        facts["ops"] = ops
+        facts["calls"] = unique_first([after_word(first(string(op, "disasm"), ""), TABLES["calleeAfter"]) for op in ops if op_is(op, "call")])
+        facts["compares"] = sum(1 for op in ops if op_is(op, "compare"))
+        facts["branches"] = sum(1 for op in ops if op_is(op, "branch"))
+        facts["variableCount"] = sum(len(rows(kind)) for kind in variables.values()) if isinstance(variables, dict) else 0
+        facts["referenced"] = unique_last([{"address": target, "text": text} for _, target, text in string_references(ops, facts["strings"])], key=lambda reference: reference["address"])
+
+    def function_body(run, facts):
+        facts["ops"] = function_ops(facts["body"])
+        if not facts["ops"]:
+            raise refusal("noInstructions", facts)
 
     def branch_meaning(mnemonic):
-        """What a conditional jump tests, in words."""
-        for names, meaning in BRANCH_MEANINGS:
-            if (mnemonic or "").lower() in names:
-                return meaning
-        return "conditional"
+        for row in TABLES["branchMeanings"]:
+            if mnemonic in row["mnemonics"]:
+                return row["meaning"]
+        return TABLES["otherBranch"]
 
-    def printable_note(op):
-        """When an instruction compares against a constant that is a printable character, say which: a run of these is a string compared a byte at a time."""
-        value = first(num(op, "val"), num(op, "ptr"))
-        if not isinstance(value, int) or value < 32 or value > 126:
-            return ""
-        return ' ; "%s"' % re.sub(r'(["\\])', r"\\\1", chr(value))
-
-    def find_comparisons(addr=None, *, max_items=None):
-        """
-        What a function decides on: every compare or test with the conditional branch that follows
-        it (which way it goes, and where to), every call to something that compares or validates,
-        and the strings on the way — the static skeleton of validation logic, with no emulation and
-        nothing run. It lists what is compared, not what the comparison means.
-
-        addr: the function's name or address, a string; max_items (default 80, 1..1000) bounds each list.
-        """
-        run = start("find_comparisons")
-        at = function_name("find_comparisons", addr)
-        limit = bounded(max_items, 80, 1, 1000)
-        body, body_id = observe_json(run, "pdfj", at)
-        ops = function_ops(body)
-        if not ops:
-            raise RuntimeError('omp-re: find_comparisons: no function at %s — list them with await tool.rizin_command({"command": "aflj"})' % at)
-        string_data, strings_id = observe_json(run, "izj")
-        string_at = strings_by_address(string_data)
-
-        def where(op):
-            return hexa(first(num(op, "offset"), 0))
-
-        decisions = []
+    def find_comparisons_facts(run, facts):
+        ops = facts["ops"]
+        facts["decisions"] = []
         for index, op in enumerate(ops):
-            if string(op, "type") not in ("cmp", "acmp"):
+            if not op_is(op, "compare"):
                 continue
-            following = ops[index + 1] if index + 1 < len(ops) else None
-            branch = ""
-            if string(following, "type") == "cjmp":
-                disasm = first(string(following, "disasm"), "")
-                taken = num(following, "jump")
-                otherwise = num(following, "fail")
-                branch = "  ->  %s: %s%s%s" % (disasm, branch_meaning((words(disasm) or [None])[0]), "" if taken is None else ", to " + hexa(taken), "" if otherwise is None else ", else " + hexa(otherwise))
-            decisions.append("  %s  %s%s%s" % (where(op), first(string(op, "disasm"), ""), printable_note(op), branch))
-        deciding_calls = [
-            "  %s  %s" % (where(op), first(string(op, "disasm"), "")) for op in ops if string(op, "type") in ("call", "ucall", "rcall", "icall") and COMPARING_CALLS.search(first(string(op, "disasm"), ""))
-        ]
-        referenced = unique_last(["  %s  refers to %s  %s" % (where(op), hexa(target), one_line(string_at[target])) for op in ops for target in op_targets(op) if string_at.get(target) is not None])
-
-        return recipe_text(
-            run,
-            "find_comparisons: " + first(string(body, "name"), at),
-            [
-                ["Compares and the branches that follow: %d %s" % (len(decisions), cite(body_id))] + decisions[:limit] + more_line(min(limit, len(decisions)), len(decisions), "comparisons"),
-                ["Calls that compare or validate: %d %s" % (len(deciding_calls), cite(body_id))] + (deciding_calls[:limit] or ["  none by name"]),
-                ["Strings on the way: %d %s %s" % (len(referenced), cite(body_id), cite(strings_id))] + (referenced[:limit] or ["  none"]),
-                ["This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."],
-            ],
+            # The branch that follows it, when one does: which way it goes is the mnemonic's to say.
+            following = ops[index + 1] if index + 1 < len(ops) and op_is(ops[index + 1], "branch") else None
+            mnemonic = (words(first(string(following, "disasm"), "")) or [""])[0].lower()
+            # A compare against a printable character says which: a run of these is a string compared a byte at a time.
+            value = first(num(op, "val"), num(op, "ptr"))
+            printable = re.sub(r'(["\\])', r"\\\1", chr(value)) if isinstance(value, int) and 32 <= value <= 126 else None
+            facts["decisions"].append({"op": op, "printable": printable, "next": following, "meaning": branch_meaning(mnemonic) if following is not None else None})
+        facts["decidingCalls"] = [op for op in ops if op_is(op, "decidingCall") and COMPARING_CALLS.search(first(string(op, "disasm"), ""))]
+        facts["onTheWay"] = unique_last(
+            [{"offset": first(num(op, "offset"), 0), "target": target, "text": text} for op, target, text in string_references(ops, facts["strings"])],
+            key=lambda reference: (reference["offset"], reference["target"]),
         )
 
-    # --- find_crypto ----------------------------------------------------------------------------
-
-    def find_crypto(*, references=None):
-        """
-        Where cryptographic material lies in the open binary: rizin's own search for keys and
-        certificates, and a search for the published constants of common algorithms, each hit with
-        its address and what refers to it. A constant's presence says the tables are linked in, not
-        that they are used, nor on what; a four-byte constant can occur by chance and is marked weak.
-
-        references (default True): say what refers to each hit.
-        """
-        run = start("find_crypto")
-        with_references = references is not False
-        material, material_id = observe_json(run, "/cmj")
-        hits = []
-        for constant in CRYPTO_CONSTANTS:
-            # Each search is a read on the record whether or not it finds anything; only a hit is reported below.
+    def find_crypto_facts(run, facts):
+        facts["hits"] = []
+        for constant in TABLES["cryptoConstants"]:
+            # Each search is a read on the record whether or not it finds anything; only a hit is reported.
             data, evidence_id = observe_json(run, "/xj " + constant["hex"])
             for row in rows(data):
                 address = first(num(row, "address"), num(row, "offset"), num(row, "addr"))
                 if address is not None:
-                    hits.append((constant["algorithm"], constant["what"], address, evidence_id, len(constant["hex"]) <= SHORT_CONSTANT))
-        constant_lines = []
-        for algorithm, what, address, evidence_id, weak in hits[:60]:
-            constant_lines.append("  %s  %s — %s %s%s" % (hexa(address), algorithm, what, cite(evidence_id), " (weak: four bytes can occur by chance)" if weak else ""))
-            if not with_references:
-                continue
-            places, places_id = callers_of(run, address)
-            constant_lines.append(
-                "      referred to from %s %s" % (", ".join(places[:8]), cite(places_id)) if places else "      no reference found by analysis %s — reached by computed address, or unused" % cite(places_id)
-            )
-        material_lines = ["  " + encode(row) for row in rows(material)[:40]]
-        return recipe_text(
-            run,
-            "find_crypto: %d constant hit%s" % (len(hits), plural(len(hits))),
-            [
-                ["rizin's search for keys and certificates " + cite(material_id)] + (material_lines or ["  nothing found"]),
-                ["Published constants"] + (constant_lines or ["  none of the constants in the table was found"]),
-                ["A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."],
-            ],
-        )
+                    # So few bytes occur by chance: a hit means little on its own.
+                    weak = len(constant["hex"]) <= THRESHOLDS["shortConstantHexDigits"]
+                    facts["hits"].append({"algorithm": constant["algorithm"], "what": constant["what"], "address": address, "@hit": evidence_id, "weak": weak})
+        if facts["references"]:
+            for hit in facts["hits"][: LIMITS["cryptoHits"]]:
+                hit.update(traced_to(run, hit["address"]))
+
+    FACTS = {
+        "triage": triage_facts,
+        "scanImports": scan_imports_facts,
+        "theFunction": the_function,
+        "inspectFunction": inspect_function_facts,
+        "functionBody": function_body,
+        "findComparisons": find_comparisons_facts,
+        "findCrypto": find_crypto_facts,
+    }
 
     # --- what is handed to eval -----------------------------------------------------------------
-
-    HELP = "\n".join(
-        [
-            "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own",
-            "rizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.",
-            'Open a binary first (await tool.open_binary({"path": ...})). The recipes themselves need no await.',
-            "",
-            "  omp_re.triage(max_strings=25, max_functions=15)",
-            "      what the binary is, build protections, sections with entropy, imports and what they reach,",
-            "      notable strings, the largest functions, entry points.",
-            "  omp_re.scan_imports(callers=True, max_callers=12)",
-            "      the imports a reviewer stops at, why, and who calls each; what the program can reach.",
-            '  omp_re.inspect_function("main", max_items=30)',
-            "      one function's shape, variables, callers, callees and the strings it refers to.",
-            '  omp_re.find_comparisons("main", max_items=80)',
-            "      every compare with the branch that follows, calls that compare or validate, strings on the way.",
-            "  omp_re.find_crypto(references=True)",
-            "      rizin's key and certificate search, and where published constants of common algorithms lie.",
-            "",
-            "Every section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the",
-            "reads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one.",
-        ]
-    )
 
     class Recipes:
         """omp-re's recipes for omp's Python kernel; help() says what each answers."""
@@ -1383,16 +1802,20 @@ def _omp_re_recipes():
         __slots__ = ()
 
         def __repr__(self):
-            return "<omp-re recipes: triage, scan_imports, inspect_function, find_comparisons, find_crypto — print(omp_re.help()) says what each answers>"
+            return HOST["shown"]
 
     def help():  # noqa: A001 - the name the JavaScript twin gives it; it shadows nothing outside this function
         """What each recipe answers, and how each is called."""
-        return Report(HELP)
+        return Report(HOST["help"])
 
-    for recipe in (triage, scan_imports, inspect_function, find_comparisons, find_crypto, help):
+    for recipe in recipe_functions(run_recipe) + [help]:
+        if recipe.__name__ in RECIPES:
+            recipe.__doc__ = RECIPES[recipe.__name__]["doc"]
         # So that Python's own complaint about a call names what was called: "omp_re.triage() got an unexpected keyword argument …".
         recipe.__qualname__ = "omp_re." + recipe.__name__
         setattr(Recipes, recipe.__name__, staticmethod(recipe))
+    # A %load cell shows what the script printed, and the source is not echoed: say what now exists.
+    print(HOST["loaded"])
     return Recipes()
 
 
@@ -1400,6 +1823,3 @@ try:
     omp_re = _omp_re_recipes()
 finally:
     del _omp_re_recipes
-
-# A %load cell shows what the script printed, and the source is not echoed: say what now exists.
-print("omp-re recipes loaded: omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto — print(omp_re.help()) says what each answers.")
