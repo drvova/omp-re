@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "constants": {
     "entryPrefix": "re.",
     "environmentPrefix": "OMPRE_",
@@ -125,7 +125,7 @@
       "kind": "request",
       "ordered": true,
       "params": { "protocol": "integer", "variables": { "map": "string" }, "stateDir": "string" },
-      "result": { "members": { "protocol": "integer", "version": "string" } }
+      "result": { "members": { "protocol": "integer", "version": "string", "started": { "enum": ["source", "image"] } } }
     },
     "environment": {
       "kind": "notification",

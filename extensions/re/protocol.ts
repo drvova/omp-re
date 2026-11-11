@@ -5,7 +5,7 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 export type JsonObject = { [key: string]: Json | undefined };
 
 /** The version of the wire. An engine that speaks another is refused, and refuses. */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 export const CONSTANTS = {
 	"entryPrefix": "re.",
@@ -79,7 +79,7 @@ export type View = { type: "notice"; text: string; level: Level } | { type: "pan
 
 /** What omp asks the engine: each method's params, and the result of one that is a request. */
 export interface ToEngine {
-	hello: { params: { protocol: number; variables: { [name: string]: string }; stateDir: string }; result: { protocol: number; version: string } };
+	hello: { params: { protocol: number; variables: { [name: string]: string }; stateDir: string }; result: { protocol: number; version: string; started: "source" | "image" } };
 	environment: { params: { variables: { [name: string]: string }; stateDir: string } };
 	describe: { params: {}; result: { tools: Tool[]; commands: Command[] } };
 	call: { params: { session: Session; name: string; arguments: JsonObject; callId: string }; result: { text: string; failed: boolean; refused?: boolean; details?: Details; state: State } };

@@ -25,7 +25,7 @@
 
 (defpackage #:omp-re-stdio
   (:use #:cl #:omp-re)
-  (:export #:serve #:+protocol+))
+  (:export #:serve #:main #:image-main #:*identity* #:+protocol+))
 
 (in-package #:omp-re-stdio)
 

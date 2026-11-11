@@ -10,6 +10,14 @@ The wire is described once, as data, in `stdio/protocol.json`: every method each
 sbcl --noinform --no-sysinit --no-userinit --disable-debugger --load stdio/serve.lisp
 ```
 
+or a saved image of the engine, an executable that is the same program with
+the loading already done: `<image> --identity <hash of the source>`, which
+exits with status 4 and a line on standard error, before it says anything on
+the wire, when it was built from other source; or `<image>` alone, which
+serves whatever it is. Which of these omp's side runs is
+`extensions/re/image.ts`'s to say ([`install.md`](install.md#the-engine-image)).
+From the first line on the wire they do not differ.
+
 One engine process serves one omp process: every session in it, task subagents included, is a session id on the same pipe. It is started when a session first needs it.
 
 Standard output carries the protocol and nothing else. Whatever the engine prints (compiler notes on a first load, warnings, a backtrace) goes to standard error, which omp writes to its own log, line by line as it arrives, and quotes when the engine ends unasked.
@@ -19,13 +27,13 @@ The first line the engine writes is one of
 <!-- protocol:ready -->
 | Line | Meaning |
 |---|---|
-| `{"ready": 2}` | loaded; the number is the protocol version |
+| `{"ready": 3}` | loaded; the number is the protocol version |
 | `{"fatal": "…"}` | it could not load; the text says what to install. The process exits with status 3 |
 <!-- /protocol:ready -->
 
 omp then says `hello` with the version it speaks. Each side compares: omp fails the start when `ready` carries another number, and the engine refuses a `hello` with another. Either way the error says the two halves of omp-re are of different versions and to reinstall or upgrade the plugin. The two ship in one package, so this is what a half-finished upgrade looks like.
 
-The first start after an install or an upgrade compiles the engine (a few seconds); later starts load the compiled files ASDF keeps in the user's cache (well under a second). omp gives a start two minutes. One that takes longer is ended and reported with what to check: that SBCL runs, that `~/quicklisp/setup.lisp` asks nothing, that the compiled-file cache can be written.
+The first start after an install or an upgrade compiles the engine and saves its image (a few seconds); later starts run the image (a few milliseconds), or where there is none load the compiled files ASDF keeps in the user's cache (a quarter of a second). omp gives a start two minutes, whatever it has to do in them. One that takes longer is ended and reported with what to check: that SBCL runs, that `~/quicklisp/setup.lisp` asks nothing, that the compiled-file cache can be written.
 
 ## Messages
 
@@ -60,7 +68,7 @@ Most of omp's requests are about a session and carry
 <!-- protocol:toEngine -->
 | Method | Params | Result |
 |---|---|---|
-| `hello` | `protocol: integer`, `variables: {name: string, …}`, `stateDir: string` | `{protocol: integer, version: string}` |
+| `hello` | `protocol: integer`, `variables: {name: string, …}`, `stateDir: string` | `{protocol: integer, version: string, started: "source" \| "image"}` |
 | `environment` (notification) | `variables: {name: string, …}`, `stateDir: string` |  |
 | `describe` |  | `{tools: [tool…], commands: [command…]}` |
 | `call` | `session: session`, `name: string`, `arguments: object`, `callId: string` | `{text: string, failed: boolean, refused?: boolean, details?: details, state: state}` |
@@ -75,7 +83,7 @@ Most of omp's requests are about a session and carry
 
 A member whose name ends in `?` may be absent. A type named by a bare word is in **Types** below.
 
-**hello / environment.** The engine process is started once, so it cannot see omp's environment change. `variables` is omp's environment as the engine reads it: every variable whose name begins with the constant `environmentPrefix`, and `PATH`. `stateDir` is omp's agent directory; the engine keeps its blobs and audit log under `<stateDir>/re/`. omp sends `environment` again whenever either changed, before the request that follows.
+**hello / environment.** `hello`'s answer says the engine's `version` and how this process `started`: `"source"` when it loaded the engine's source, `"image"` when it is a saved image. Nothing on the wire depends on which. The engine process is started once, so it cannot see omp's environment change. `variables` is omp's environment as the engine reads it: every variable whose name begins with the constant `environmentPrefix`, and `PATH`. `stateDir` is omp's agent directory; the engine keeps its blobs and audit log under `<stateDir>/re/`. omp sends `environment` again whenever either changed, before the request that follows.
 
 **describe.** `tools` is each tool offered now: `name`, `label`, `description`, `parameters` (JSON Schema, handed to omp's `registerTool` as it is), `approval`, `approvalReason?` and `render?`. Which tools are offered depends on the environment (`rizin_debug` needs `OMPRE_ENABLE_DEBUGGER`; the triage tools need their programs on `PATH`), so omp asks once for each session it starts.
 

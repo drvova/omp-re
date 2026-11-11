@@ -1,30 +1,23 @@
-;;;; serve.lisp --- start the engine for omp.
+;;;; serve.lisp --- start the engine for omp from its source.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;;   sbcl --noinform --no-sysinit --no-userinit --disable-debugger --load stdio/serve.lisp
 ;;;;
-;;;; omp's side (extensions/re/engine.ts) runs this, once for the omp
-;;;; process. Standard output is the wire and belongs to the protocol alone:
-;;;; before anything is loaded it is put aside for the server, and everything
-;;;; that prints — a compiler note on a first load, a warning, a backtrace —
-;;;; goes to standard error, which omp writes to its log. The first line on the
-;;;; wire is {"ready": PROTOCOL}, or {"fatal": TEXT} when the engine could
-;;;; not be loaded, TEXT saying what to install.
+;;;; omp's side (extensions/re/image.ts) runs this, once for the omp process,
+;;;; when it has no saved image of the engine to run instead. It loads the
+;;;; system (stdio/load.lisp) and hands over to the server's MAIN
+;;;; (stdio/server.lisp), which is also what an image starts with: from the
+;;;; first line on the wire, {"ready": PROTOCOL}, the two are one program.
+;;;;
+;;;; What is here is what only a load from source needs. Standard output is
+;;;; the wire, so before anything is loaded everything that prints — a
+;;;; compiler note on a first load, a warning — is sent to standard error,
+;;;; which omp writes to its log. And an engine that cannot be loaded says
+;;;; so on the wire as {"fatal": TEXT}, TEXT saying what to install, and
+;;;; exits with status 3.
 
 (in-package #:cl-user)
-
-(defvar *wire*
-  ;; The descriptor SBCL itself holds for standard output, whatever a
-  ;; descriptor is on this platform (a HANDLE on Windows).
-  (sb-sys:make-fd-stream (sb-sys:fd-stream-fd sb-sys:*stdout*)
-                         :output t :buffering :full
-                         :external-format '(:utf-8 :replacement #\?)))
-
-(defvar *wire-in*
-  (sb-sys:make-fd-stream (sb-sys:fd-stream-fd sb-sys:*stdin*)
-                         :input t :buffering :full
-                         :external-format '(:utf-8 :replacement #\?)))
 
 (let ((log (sb-sys:make-fd-stream (sb-sys:fd-stream-fd sb-sys:*stderr*)
                                   :output t :buffering :line
@@ -34,43 +27,25 @@
         *trace-output* log
         *terminal-io* (make-two-way-stream (make-concatenated-stream) log)))
 
-(defun fatal (control &rest arguments)
-  ;; No JSON library is loaded yet: the text is escaped by hand.
-  (let ((text (apply #'format nil control arguments)))
-    (write-string "{\"fatal\":\"" *wire*)
+(defun fatal (text)
+  ;; No JSON library may be loaded: the text is escaped by hand.
+  (let ((wire (sb-sys:make-fd-stream (sb-sys:fd-stream-fd sb-sys:*stdout*)
+                                     :output t :buffering :full
+                                     :external-format '(:utf-8 :replacement #\?))))
+    (write-string "{\"fatal\":\"" wire)
     (loop for char across text
-          do (cond ((char= char #\") (write-string "\\\"" *wire*))
-                   ((char= char #\\) (write-string "\\\\" *wire*))
-                   ((char= char #\Newline) (write-string "\\n" *wire*))
-                   ((< (char-code char) 32) (write-char #\Space *wire*))
-                   (t (write-char char *wire*))))
-    (write-string "\"}" *wire*)
-    (terpri *wire*)
-    (finish-output *wire*)
+          do (cond ((char= char #\") (write-string "\\\"" wire))
+                   ((char= char #\\) (write-string "\\\\" wire))
+                   ((char= char #\Newline) (write-string "\\n" wire))
+                   ((< (char-code char) 32) (write-char #\Space wire))
+                   (t (write-char char wire))))
+    (write-string "\"}" wire)
+    (terpri wire)
+    (finish-output wire)
     (sb-ext:exit :code 3 :abort t)))
 
-(require :asdf)
+(handler-case (load (merge-pathnames "load.lisp" (or *load-truename* *default-pathname-defaults*)))
+  (error (condition) (fatal (princ-to-string condition))))
 
-;; Where Quicklisp is installed, cl-ppcre may only be there.
-(let ((quicklisp (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
-  (when (and (not (find-package '#:quicklisp)) (probe-file quicklisp))
-    (ignore-errors (load quicklisp))))
-
-(let ((root (uiop:pathname-parent-directory-pathname
-             (uiop:pathname-directory-pathname (or *load-truename* *default-pathname-defaults*)))))
-  (push root asdf:*central-registry*)
-  (unless (ignore-errors (asdf:find-system "cl-ppcre"))
-    (fatal "omp-re: the Common Lisp library cl-ppcre was not found. Install it — Debian/Ubuntu: apt install cl-ppcre; with Quicklisp: (ql:quickload \"cl-ppcre\"); otherwise put it where ASDF looks (~~/common-lisp/cl-ppcre/) — and start omp again."))
-  (handler-case
-      (handler-bind ((warning #'muffle-warning))
-        (let ((*compile-verbose* nil) (*compile-print* nil) (*load-verbose* nil))
-          (asdf:load-system "omp-re-stdio" :verbose nil)))
-    (error (condition)
-      (fatal "omp-re: the engine could not be loaded by ~a ~a: ~a"
-             (lisp-implementation-type) (lisp-implementation-version) condition))))
-
-(format *wire* "{\"ready\":~d}~%" (symbol-value (find-symbol "+PROTOCOL+" '#:omp-re-stdio)))
-(finish-output *wire*)
-
-(uiop:symbol-call '#:omp-re-stdio '#:serve *wire-in* *wire*)
+(uiop:symbol-call '#:omp-re-stdio '#:main)
 (sb-ext:exit :code 0 :abort t)

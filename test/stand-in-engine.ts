@@ -118,7 +118,7 @@ async function result(method: string, params: Record<string, unknown>, id: numbe
 	const session = (params.session as { id: string } | undefined)?.id ?? "";
 	switch (method) {
 		case "hello":
-			return { protocol: protocol.version, version: "0.0.0-stand-in" };
+			return { protocol: protocol.version, version: "0.0.0-stand-in", started: "source" };
 		case "describe":
 			return {
 				tools: [

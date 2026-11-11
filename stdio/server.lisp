@@ -301,6 +301,14 @@ is done in the order it came or on a thread of its own."
            (declare (ignorable ,params ,request))
            ,@body)))
 
+(defparameter +version+ (asdf:component-version (asdf:find-system "omp-re"))
+  "The engine's version, read while the system is loaded: a saved image has
+no omp-re.asd beside it to ask.")
+
+(defvar *started* "source"
+  "How this process came by the engine, as `hello' says it: \"source\" when
+it loaded the system, \"image\" when it is a saved image of it.")
+
 (defun set-environment (params)
   (clrhash *environment*)
   (maphash (lambda (name value) (setf (gethash name *environment*) value))
@@ -312,8 +320,7 @@ is done in the order it came or on a thread of its own."
     (error "omp-re: the extension speaks protocol ~a and its engine protocol ~a: the two halves of omp-re are of different versions. Reinstall or upgrade the omp-re plugin, then start omp again."
            (jget params "protocol") +protocol+))
   (set-environment params)
-  (obj "protocol" +protocol+
-       "version" (asdf:component-version (asdf:find-system "omp-re"))))
+  (obj "protocol" +protocol+ "version" +version+ "started" *started*))
 
 (define-method "environment" (params request)
   (set-environment params))
@@ -511,3 +518,52 @@ happens to one message, the next is still read."
   (sb-ext:with-locked-hash-table (*requests*)
     (loop for request being the hash-values of *requests* do (wake request)))
   (shutdown-sessions))
+
+;;; --- the process -----------------------------------------------------------------------------
+
+(defun main ()
+  "What the engine's process does once this system is in it: stdio/serve.lisp
+ends with this, and a saved image (IMAGE-MAIN) starts with it. Standard
+output becomes the wire and the protocol's alone, so everything that prints
+— a warning, a backtrace — goes to standard error, which omp writes to its
+log; the debugger is off, since nobody is there to answer it; the first line
+on the wire is {\"ready\": PROTOCOL}; then omp is served until it leaves."
+  (sb-ext:disable-debugger)
+  (flet ((stream-on (standard &rest keys)
+           ;; The descriptor SBCL itself holds for the standard stream,
+           ;; whatever a descriptor is on this platform (a HANDLE on Windows).
+           (apply #'sb-sys:make-fd-stream (sb-sys:fd-stream-fd standard)
+                  :external-format '(:utf-8 :replacement #\?) keys)))
+    (let ((in (stream-on sb-sys:*stdin* :input t :buffering :full))
+          (out (stream-on sb-sys:*stdout* :output t :buffering :full))
+          (log (stream-on sb-sys:*stderr* :output t :buffering :line)))
+      (setf *standard-output* log
+            *error-output* log
+            *trace-output* log
+            *terminal-io* (make-two-way-stream (make-concatenated-stream) log))
+      (format out "{\"ready\":~d}~%" +protocol+)
+      (finish-output out)
+      (serve in out))))
+
+(defvar *identity* nil
+  "What a saved image was built from, in the builder's own words
+(scripts/build-image.lisp): whoever starts the image may name what it
+expects, and an image built from something else says so and leaves.")
+
+(defun image-main ()
+  "The whole life of a saved image of this system. An image keeps what the
+process that saved it had worked out about its machine — where temporary
+files go, where ASDF looks — so that is worked out again here first. Run as
+`IMAGE --identity TEXT', it serves only when it was built from TEXT; any
+other argument is ignored, and with none it serves whatever it is."
+  (sb-ext:disable-debugger)
+  (uiop:call-image-restore-hook)
+  (let ((expected (second (member "--identity" sb-ext:*posix-argv* :test #'string=))))
+    (when (and expected (not (equal expected *identity*)))
+      (format *error-output* "omp-re: this engine image was built from ~a, not from ~a~%"
+              (or *identity* "sources it does not name") expected)
+      (finish-output *error-output*)
+      (sb-ext:exit :code 4 :abort t)))
+  (setf *started* "image")
+  (main)
+  (sb-ext:exit :code 0 :abort t))

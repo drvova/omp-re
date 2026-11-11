@@ -7,7 +7,8 @@
 import { readFile } from "node:fs/promises";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { logger } from "@oh-my-pi/pi-utils";
-import { Engine, type EngineRequest, type HostHandlers, type Json, sbclCommand } from "./engine.ts";
+import { Engine, type EngineRequest, type HostHandlers, type Json, type Start } from "./engine.ts";
+import { launcher } from "./image.ts";
 import { CONSTANTS, type Entry, type Level, PROTOCOL, type Session as SessionRef, type State, type ToEngine, type ToHost } from "./protocol.ts";
 
 interface Session {
@@ -22,7 +23,7 @@ interface Session {
 /**
  * What this module touches of the omp process itself, outside omp's extension
  * API: a headless run's standard output and error and its exit status, the
- * process's log, and the command that starts the engine. They are here so a
+ * process's log, and how the engine is started. They are here so a
  * test can put its own in their place instead of reaching for the process's.
  */
 export interface Outside {
@@ -33,7 +34,8 @@ export interface Outside {
 	failExit(): void;
 	/** A line for omp's log file: what the engine wrote to its standard error, as it arrives. */
 	log(line: string): void;
-	engineCommand(): readonly string[];
+	/** How an engine is started: for each one, the ways of image.ts from the first. */
+	engineCommand(): Start;
 }
 
 interface Shared {
@@ -68,7 +70,7 @@ const shared: Shared = ((globalThis as Record<symbol, unknown>)[Symbol.for(`omp-
 			process.exitCode = 1;
 		},
 		log: (line) => logger.warn(`omp-re engine: ${line}`),
-		engineCommand: sbclCommand,
+		engineCommand: () => launcher((line) => shared.outside.log(line)),
 	},
 } satisfies Shared) as Shared;
 const { sessions, instances, updates, tickers } = shared;

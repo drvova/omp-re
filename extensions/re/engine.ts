@@ -1,17 +1,16 @@
 /**
  * The engine process and the wire to it.
  *
- * omp-re's engine is Common Lisp (`engine/`). Under omp it runs as one SBCL
- * child for the whole omp process, started by `stdio/serve.lisp`, and the two
- * sides exchange JSON lines on the child's standard input and output:
- * docs/engine-protocol.md is the contract and stdio/protocol.json its
- * description, from which protocol.ts is generated. This module starts the
- * child, frames and routes messages, bounds how long it waits, and ends the
- * child; it knows nothing of what the messages mean.
+ * omp-re's engine is Common Lisp (`engine/`). Under omp it runs as one child
+ * for the whole omp process — a saved image of the engine, or SBCL loading
+ * `stdio/serve.lisp`; image.ts says which — and the two sides exchange JSON
+ * lines on the child's standard input and output: docs/engine-protocol.md is
+ * the contract and stdio/protocol.json its description, from which
+ * protocol.ts is generated. This module starts the child, frames and routes
+ * messages, bounds how long it waits, and ends the child; it knows nothing of
+ * what the messages mean.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 import { CONSTANTS, type Json, type JsonObject, PROTOCOL, TO_HOST, type ToEngine, type ToHost } from "./protocol.ts";
 
@@ -32,13 +31,12 @@ export type EngineNotification = Exclude<keyof ToEngine, EngineRequest>;
  */
 export type HostHandlers = { [M in Exclude<keyof ToHost, "alive">]: (params: ToHost[M]["params"]) => ResultOf<ToHost, M> | Promise<ResultOf<ToHost, M>> };
 
-const SERVE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "stdio", "serve.lisp");
 /** How much of the engine's standard error is kept to explain an exit. */
 const LOG_TAIL_CHARS = 4096;
 
 /** How long the engine is waited for. A test starts an engine with shorter ones. */
 export interface Deadlines {
-	/** From starting the child to its answer to `hello`. A first start compiles the engine, seconds on most machines; a start that takes this long is not coming. */
+	/** From wanting an engine to its answer to `hello`. A first start compiles the engine and saves an image of it, seconds on most machines; a start that takes this long is not coming. */
 	startMs: number;
 	/** omp gives a session's shutdown handlers 2 s; the engine gets most of it to close its rizin processes, then is killed. */
 	stopGraceMs: number;
@@ -52,14 +50,17 @@ const SILENT_BEATS = 6;
 /** A request this many beats in a row do not name is not being served. */
 const UNSERVED_BEATS = 2;
 
-/** The command that starts the engine: SBCL, from OMPRE_SBCL_PATH or the PATH, loading the serve script. */
-export function sbclCommand(): string[] {
-	return [process.env.OMPRE_SBCL_PATH?.trim() || "sbcl", "--noinform", "--no-sysinit", "--no-userinit", "--disable-debugger", "--load", SERVE_SCRIPT];
-}
+/**
+ * How an engine is started: the program and its arguments; or, where there is more than one way, a function that
+ * gives them one at a time. It is called for the first, and again, with the reason, each time what it gave did not
+ * come to say `ready`. When it has nothing left it rejects, and that is the start's error.
+ */
+export type Start = readonly string[] | ((failed?: Error) => Promise<readonly string[]>);
 
-function notStarted(program: string): Error {
+function notStarted(program: string, cause: Error): Error {
 	return new Error(
 		`omp-re: SBCL was not found (tried ${JSON.stringify(program)}). omp-re's engine is Common Lisp and needs SBCL with the cl-ppcre library: install them (Debian/Ubuntu: apt install sbcl cl-ppcre; macOS: brew install sbcl, then cl-ppcre through Quicklisp; Windows: the installer from https://www.sbcl.org, and cl-ppcre unpacked under %USERPROFILE%\\common-lisp\\), or set OMPRE_SBCL_PATH to the sbcl executable itself (not a .cmd or .bat wrapper: the engine is started without a shell).`,
+		{ cause },
 	);
 }
 
@@ -89,8 +90,7 @@ interface Pending {
 }
 
 export interface EngineOptions {
-	/** The program and arguments that start the engine. */
-	command: readonly string[];
+	command: Start;
 	handlers: HostHandlers;
 	/** Where a line the engine wrote to its standard error goes, as it arrives, and what this side has to note of the wire. */
 	log: (line: string) => void;
@@ -98,7 +98,16 @@ export interface EngineOptions {
 }
 
 export class Engine {
-	#child: ChildProcessWithoutNullStreams;
+	/** The engine process; none while a way to start one is still being found. */
+	#child: ChildProcessWithoutNullStreams | undefined;
+	/** What ends the child now running as a start that did not come to `ready`. */
+	#attemptFailed: (error: Error) => void = () => {};
+	#program = "";
+	#hello: JsonObject = {};
+	#heardReady = false;
+	#stopped = false;
+	#didExit: () => void;
+	#startedAs: ToEngine["hello"]["result"]["started"] | undefined;
 	#pending = new Map<number, Pending>();
 	#nextId = 1;
 	#buffered = "";
@@ -117,42 +126,27 @@ export class Engine {
 	constructor(options: EngineOptions) {
 		this.#options = options;
 		this.#deadlines = { ...DEADLINES, ...options.deadlines };
-		const [program, ...args] = options.command as [string, ...string[]];
-		// No shell: the arguments reach SBCL as they are on every platform.
-		this.#child = spawn(program, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
 		const { promise: exited, resolve: didExit } = Promise.withResolvers<void>();
 		this.exited = exited;
-
-		this.#child.on("error", (error: NodeJS.ErrnoException) => {
-			// Node reports a program it cannot run as ENOENT, and on Windows a .cmd or .bat named without a shell as EINVAL.
-			this.#fail(error.code === "ENOENT" || error.code === "EINVAL" ? notStarted(program) : new Error(`omp-re: the engine could not be started: ${error.message}`));
-			didExit();
-		});
-		this.#child.on("exit", (code, signal) => {
-			this.#fail(new Error(`omp-re: the engine process ended (${signal ?? `status ${code}`})${this.#said()}`));
-			didExit();
-		});
-		// A write to a child that is already gone is reported through "exit", not thrown here.
-		this.#child.stdin.on("error", () => {});
-		this.#child.stderr.setEncoding("utf8");
-		this.#child.stderr.on("data", (chunk: string) => this.#logged(chunk));
-		this.#child.stdout.setEncoding("utf8");
-		this.#child.stdout.on("data", (chunk: string) => this.#read(chunk));
+		this.#didExit = didExit;
 
 		const start = setTimeout(() => {
 			this.#fail(
 				new Error(
-					`omp-re: the engine did not start within ${Math.round(this.#deadlines.startMs / 1000)} s and was ended. Check that ${JSON.stringify(program)} --version answers, that ~/quicklisp/setup.lisp asks nothing, and that ASDF's compiled-file cache (~/.cache/common-lisp) can be written.${this.#said()}`,
+					`omp-re: the engine did not start within ${Math.round(this.#deadlines.startMs / 1000)} s and was ended. Check that ${JSON.stringify(this.#program || "sbcl")} --version answers, that ~/quicklisp/setup.lisp asks nothing, and that ASDF's compiled-file cache (~/.cache/common-lisp) can be written.${this.#said()}`,
 				),
 			);
 			this.kill();
 		}, this.#deadlines.startMs);
 		start.unref?.();
 		// The engine is ready when it has answered hello: it loaded, and speaks this protocol.
-		this.#ready = this.#send("hello", { protocol: PROTOCOL, ...this.#takeEnvironment() }).then(
-			() => {
+		this.#ready = this.#send("hello", { protocol: PROTOCOL, ...this.#takeEnvironment() }, undefined, (message) => {
+			this.#hello = message;
+		}).then(
+			(answer) => {
 				clearTimeout(start);
 				this.#started = true;
+				this.#startedAs = (answer as ToEngine["hello"]["result"]).started;
 			},
 			(error: Error) => {
 				clearTimeout(start);
@@ -161,6 +155,70 @@ export class Engine {
 		);
 		// A failed start is reported by the request that needed the engine, not as an unhandled rejection.
 		this.#ready.catch(() => {});
+		void this.#launch();
+	}
+
+	/** Start the engine the next way there is, `failed` being why the last way did not start; with none left, the start has failed. */
+	async #launch(failed?: Error): Promise<void> {
+		const { command } = this.#options;
+		let next: readonly string[] | undefined;
+		try {
+			if (typeof command === "function") next = await command(failed);
+			else if (failed) throw failed;
+			else next = command;
+		} catch (error) {
+			this.#fail(error instanceof Error ? error : new Error(String(error)));
+		}
+		// The start deadline passed, or the engine was stopped, while a way was being found.
+		if (!next || this.#failed || this.#stopped) {
+			this.#didExit();
+			return;
+		}
+		const [program, ...args] = next as [string, ...string[]];
+		this.#program = program;
+		this.#buffered = "";
+		this.#logTail = "";
+		// Node reports a program it cannot run as ENOENT, and on Windows a .cmd or .bat named without a shell as EINVAL.
+		const unstartable = (error: NodeJS.ErrnoException) =>
+			error.code === "ENOENT" || error.code === "EINVAL" ? notStarted(program, error) : new Error(`omp-re: the engine could not be started: ${error.message}`, { cause: error });
+		let child: ChildProcessWithoutNullStreams;
+		try {
+			// No shell: the arguments reach the program as they are on every platform.
+			child = spawn(program, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+		} catch (error) {
+			// bun throws here for a file that is no program, where Node reports it on the child.
+			void this.#launch(unstartable(error as NodeJS.ErrnoException));
+			return;
+		}
+		this.#child = child;
+		let over = false;
+		const ended = (error: Error) => {
+			if (over) return;
+			over = true;
+			if (!this.#heardReady && !this.#failed && !this.#stopped) {
+				this.#child = undefined;
+				void this.#launch(error);
+				return;
+			}
+			this.#fail(error);
+			this.#didExit();
+		};
+		this.#attemptFailed = (error) => {
+			if (over) return;
+			ended(error);
+			child.kill("SIGKILL");
+		};
+		child.on("error", (error: NodeJS.ErrnoException) => ended(unstartable(error)));
+		child.on("exit", (code, signal) => ended(new Error(`omp-re: the engine process ended (${signal ?? `status ${code}`})${this.#said()}`)));
+		// A write to a child that is already gone is reported through "exit", not thrown here.
+		child.stdin.on("error", () => {});
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk: string) => this.#logged(chunk));
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => {
+			if (this.#child === child) this.#read(chunk);
+		});
+		this.#write(this.#hello);
 	}
 
 	/** The engine's last words on its standard error, to end an error with. */
@@ -202,17 +260,15 @@ export class Engine {
 			if (message === null) {
 				if (line.trim() !== "") this.#options.log(`skipped a line on the wire that is not a message: ${line.slice(0, 200)}`);
 			} else if (message.ready !== undefined) {
-				if (message.ready !== PROTOCOL) {
-					this.#fail(otherVersion(message.ready));
-					this.kill();
-				}
-			} else if (typeof message.fatal === "string") this.#fail(new Error(message.fatal));
+				if (message.ready === PROTOCOL) this.#heardReady = true;
+				else this.#attemptFailed(otherVersion(message.ready));
+			} else if (typeof message.fatal === "string") this.#attemptFailed(new Error(message.fatal));
 			else this.#receive(message);
 		}
 	}
 
 	#write(message: JsonObject): void {
-		if (this.#child.stdin.writable) this.#child.stdin.write(`${JSON.stringify(message)}\n`);
+		if (this.#child?.stdin.writable) this.#child.stdin.write(`${JSON.stringify(message)}\n`);
 	}
 
 	#takeEnvironment(): ToEngine["environment"]["params"] {
@@ -294,13 +350,16 @@ export class Engine {
 		this.#watching();
 	}
 
-	#send(method: string, params: object, onId?: (id: number) => void): Promise<Json> {
+	/** Ask `method` and answer its result. `keep`, for `hello`, takes the message in place of the wire: it is written to each child as it is started. */
+	#send(method: string, params: object, onId?: (id: number) => void, keep?: (message: JsonObject) => void): Promise<Json> {
 		const id = this.#nextId++;
 		onId?.(id);
 		const { promise, resolve, reject } = Promise.withResolvers<Json>();
 		this.#pending.set(id, { method, sentAt: Date.now(), unserved: 0, resolve, reject });
 		this.#watching();
-		this.#write({ id, method, params: params as JsonObject });
+		const message = { id, method, params: params as JsonObject };
+		if (keep) keep(message);
+		else this.#write(message);
 		return promise;
 	}
 
@@ -334,6 +393,12 @@ export class Engine {
 	 * processes in order and exit; it is killed only if it is still there at the end of the grace period.
 	 */
 	async stop(): Promise<void> {
+		this.#stopped = true;
+		if (!this.#child) {
+			// No process yet: whatever was on its way to starting one finds the engine stopped.
+			this.#fail(new Error("omp-re: the engine was stopped before it had started"));
+			return;
+		}
 		this.notify("shutdown", {});
 		this.#child.stdin.end();
 		const timer = setTimeout(() => this.kill(), this.#deadlines.stopGraceMs);
@@ -342,10 +407,15 @@ export class Engine {
 	}
 
 	kill(): void {
-		this.#child.kill("SIGKILL");
+		this.#child?.kill("SIGKILL");
 	}
 
 	get pid(): number | undefined {
-		return this.#child.pid;
+		return this.#child?.pid;
+	}
+
+	/** How the engine that answered `hello` came to be: loaded from source, or a saved image. Undefined until it has answered. */
+	get startedAs(): ToEngine["hello"]["result"]["started"] | undefined {
+		return this.#startedAs;
 	}
 }
