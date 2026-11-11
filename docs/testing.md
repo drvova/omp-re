@@ -60,6 +60,12 @@ Two of the suites are about a host:
   The stand-in checks every message that crosses the pipe, either way, against
   `stdio/protocol.json`, so it cannot speak a protocol of its own.
 
+One group of the carry suite compiles `test/fixtures/sample.c` twice, the
+second time with a function renamed and a constant changed, writes a report
+on the first build and carries it onto the second: the engine's half of what
+`test/tui-carry.sh` drives through omp. It needs a C compiler (`cc`, `gcc` or
+`clang`) and says `SKIPPED` without one.
+
 The debugger checks run rizin's command lines against a stand-in program. One
 group launches a real process under `rizin -d`, and only when the test binary
 is `/bin/ls` or `/bin/true`; where `ptrace` is not permitted it checks that the
@@ -187,9 +193,10 @@ Stated plainly, so a green badge is not read as more than it is.
   `extension-sdk.test.ts`.
 - **Decompiler output in CI.** CI's rizin has no decompiler plugin, so CI sees
   only the labeled-disassembly fallback.
-- **What the terminal shows.** The overlays, the status band and the tool
-  cards are type-checked; only the tmux tiers look at them, and those are run
-  by hand.
+- **What the terminal shows.** `shim.test.ts` draws the status band, the
+  overlays and a tool card without colours on a screen of its own and drives
+  them by key. How omp's real terminal lays them out is seen only by the tmux
+  tiers, and those are run by hand.
 - **nodecode itself.** The cell is tested over a stand-in for nodecode's
   kernel.
 - **A newer omp.** The suites run against the pinned 18.11.1.

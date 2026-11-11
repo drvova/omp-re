@@ -438,6 +438,10 @@ target's bits, or NIL when they match or either side is unknown."
                  parsed)
         catalog))))
 
+(defparameter +decompilers+ '(("pdg" . "rz-ghidra") ("pdd" . "jsdec"))
+  "The decompiler commands the engine knows by name, in the order it prefers
+them, each with the plugin that provides it.")
+
 (defun decompiler-commands ()
   "The decompiler commands to look for, the operator's choice first."
   (remove-duplicates
@@ -445,13 +449,12 @@ target's bits, or NIL when they match or either side is unknown."
                           (mapcar #'trimmed
                                   (uiop:split-string (or (setting-value :decompiler) "")
                                                      :separator '(#\,))))
-           (list "pdg" "pdd"))
+           (mapcar #'car +decompilers+))
    :test #'string= :from-end t))
 
 (defun available-decompilers (catalog)
   "The decompiler commands this rizin has, in the order to try them. rizin
-ships none: rz-ghidra (pdg) and jsdec (pdd) are plugins, and a plugin that
-is loaded is in the catalog. /re status and a code view both ask here."
+ships none: each is a plugin, and a plugin that is loaded is in the catalog. /re status and a code view both ask here."
   (remove-if-not (lambda (command) (nth-value 1 (gethash command catalog)))
                  (decompiler-commands)))
 

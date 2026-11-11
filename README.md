@@ -269,7 +269,8 @@ interactive view are refused.
 The code view and `pdg`/`pdd` via `rizin_command` use the best decompiler plugin
 installed — rz-ghidra (`pdg`) then jsdec (`pdd`) by default. `OMPRE_DECOMPILER`
 reorders that, or names another plugin's command entirely (any `pdX`-style
-decompiler is probed the same way); the built-ins stay as a fallback. Without
+decompiler is looked up in rizin's catalog the same way); the built-ins stay
+as a fallback. Without
 any plugin, output is labeled annotated disassembly, never passed off as
 decompiled code.
 
@@ -546,7 +547,9 @@ run.
 ## Configuration
 
 Environment variables, all optional. omp passes its `OMPRE_*` variables and
-`PATH` to the engine, and again whenever they change.
+`PATH` to the engine, and again whenever they change. One thing is not a
+setting under omp: a session nothing has called for 30 minutes has its rizin
+closed, and its next call restores it from the record.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -560,7 +563,7 @@ Environment variables, all optional. omp passes its `OMPRE_*` variables and
 | `OMPRE_DECOMPILER` | `pdg,pdd` | Comma-separated decompiler command priority; names a plugin's command. Built-ins stay as a fallback. |
 | `OMPRE_ENABLE_DEBUGGER` | unset | Set (`1`/`true`) to register `rizin_debug`, which **executes** the sample under rizin's debugger. Off by default. |
 | `OMPRE_DEBUG_TIMEOUT_MS` | `60000` | Budget for one debugger continue/step before the stuck debuggee is killed. |
-| `OMPRE_AUDIT_HMAC_KEY` | unset | HMAC-SHA256 key for signing audit log lines. Unset → lines are written unsigned plus a one-time warning. |
+| `OMPRE_AUDIT_HMAC_KEY` | unset | HMAC-SHA256 key for signing audit log lines. Unset → lines are written unsigned, and a notice says so once a session. |
 
 ## Docs
 

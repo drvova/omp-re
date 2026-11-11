@@ -166,8 +166,10 @@ set, else the default. So a `rizin_path` in the section wins over the
 variable, and `"debugger": false` — the default — does not switch off a
 debugger that `OMPRE_ENABLE_DEBUGGER` switched on.
 
-The settings are declared once, in `engine/host.lisp`; the section's fields
-and `nodecode/config.example.jsonc` are written from that declaration.
+Each setting is declared once: the engine's in `engine/host.lisp`, and
+`audit_seconds`, which only this host reads, in `nodecode/cell.lisp`. The
+section's fields and `nodecode/config.example.jsonc` are written from those
+declarations.
 
 ## What is the same as under omp, and what is not
 
@@ -248,9 +250,10 @@ The cell is three files of host and the recipes:
 - `recipes.lisp` and the generated `recipe-data.lisp` are the recipes, which
   are verbs.
 
-Those are the only files in which a name of nodecode's (`nlk:`, `nle:`)
-appears. The cell closes the rizin process of a session unused for
-`idle_minutes`; the omp host does not.
+A name of nodecode's (`nlk:`, `nle:`) appears in two of them only,
+`nodecode-host.lisp` and `cell.lisp`. The engine closes the rizin process of
+a session unused for `idle_minutes` under either host; only here is that a
+setting, and under omp it is the default, 30.
 
 ## Tests, and what they prove
 

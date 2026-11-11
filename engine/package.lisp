@@ -22,7 +22,7 @@
    #:engine-name #:shown-id #:re-error
    ;; the port
    #:install-host #:clear-host #:with-host-service #:notify #:check-cancelled
-   #:+settings+ #:setting-value #:+voice+ #:+default-session+ #:turn-session-id
+   #:+settings+ #:setting-value #:+default-session+ #:turn-session-id
    ;; the record's own file, for a host that keeps a branch view over it
    #:find-session #:session-id #:session-held #:session-file-entries #:file-append-entry
    ;; JSON as the surface answers it

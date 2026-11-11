@@ -718,3 +718,46 @@ as further values; a refusal is signalled."
                                 (equal "relocated" (gethash "carryStatus" (gethash "inherited" moved)))))
                     (check "the status line counts them"
                            (has "findings on this branch: 2 (2 inherited)" (re:status))))))))))))
+
+;;; --- on two builds of one program ---------------------------------------------------------------------
+;;; What test/tui-carry.sh drives through omp's terminal, without omp: the
+;;; fixture compiled twice, the second build with one function renamed and
+;;; one constant changed, as a next release would be.
+
+(suite "carry: a report written on one build of a program, carried onto the next")
+(let ((compiler (find-if (lambda (name) (ignore-errors (uiop:run-program (list name "--version")) t))
+                         '("cc" "gcc" "clang"))))
+  (if (not (and *rizin* compiler))
+      (format t "  SKIPPED (no rizin or no C compiler)~%")
+      (with-cell ()
+        (let* ((source (omp-re::read-text-file (merge-pathnames "test/fixtures/sample.c" *root*)))
+               (next (ppcre:regex-replace-all "\\bfib\\b" (ppcre:regex-replace-all "h \\* 33u" source "h * 31u")
+                                              "fibonacci"))
+               (v1 (scratch-path "build-v1"))
+               (v2 (scratch-path "build-v2"))
+               (report (scratch-path "build-v1.md")))
+          (loop for (text binary) in (list (list source v1) (list next v2))
+                do (uiop:run-program (list compiler "-O0" "-o" binary (write-scratch (format nil "~a.c" (pathname-name binary)) text))))
+          (in-session ((fresh-session))
+            (re:open v1)
+            (loop for (function claim) in '(("sym.fib" "fib computes Fibonacci numbers iteratively.")
+                                            ("sym.clamp" "clamp bounds its input to [lo, hi].")
+                                            ("sym.checksum" "checksum is a djb2 hash (h * 33 + c)."))
+                  do (re:call "record_finding" :claim claim :addr function :confidence "confirmed"
+                                               :evidence (list (tagged-evidence (re:cmd "pdf" function)))))
+            (re:slash (format nil "report ~a --no-audit" report)))
+          (let ((id (fresh-session)))
+           (in-session (id)
+            (let ((text (re:slash (format nil "carry ~a.manifest.json --against ~a --inherit" report v2))))
+              (check "the unchanged function holds, the renamed one is found again, and the one whose constant changed drifted, with the changed lines"
+                     (and (has (format nil "1 hold, 1 relocated, 1 drifted, 0 BROKEN, 0 unchecked (of 3 claim(s))~%  DRIFTED   checksum is a djb2 hash (h * 33 + c).~%  RELOCATED fib computes Fibonacci numbers iteratively.~%  HOLDS     clamp bounds its input to [lo, hi].~%")
+                               text)
+                          (has (format nil "~%1. [drifted] checksum is a djb2 hash (h * 33 + c).~%") text)
+                          (has "```diff" text)))
+              (check "--inherit records the two that survive on the new build, the renamed one under its new name"
+                     (and (has (format nil "~%inherit: 2 finding(s) re-proven on this build and recorded, 1 need another look~%") text)
+                          (has "findings on this branch: 2 (2 inherited)" (re:status))
+                          (equal '("sym.clamp" "sym.fibonacci")
+                                 (sort (mapcar (lambda (finding) (gethash "addr" finding))
+                                               (omp-re::entries-of "re.finding" (omp-re:find-session id)))
+                                       #'string<)))))))))))

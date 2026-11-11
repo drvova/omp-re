@@ -33,10 +33,11 @@
 ;;; --- /re status --------------------------------------------------------------------------------
 
 (defun decompiler-label (kind)
-  (cond ((equal kind "pdg") "rz-ghidra (pdg)")
-        ((equal kind "pdd") "jsdec (pdd)")
-        (kind (format nil "~a (plugin)" kind))
-        (t "none — pdg and pdd need a decompiler plugin (rz-ghidra, jsdec)")))
+  (let ((plugin (cdr (assoc kind +decompilers+ :test #'equal))))
+    (cond (plugin (format nil "~a (~a)" plugin kind))
+          (kind (format nil "~a (plugin)" kind))
+          (t (format nil "none — ~{~a~^ and ~} need a decompiler plugin (~{~a~^, ~})"
+                     (mapcar #'car +decompilers+) (mapcar #'cdr +decompilers+))))))
 
 (defun rizin-status-lines ()
   (let ((version (rizin-version))

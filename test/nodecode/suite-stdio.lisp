@@ -682,6 +682,8 @@ waits for nothing."
 
              ;; A status band is drawn beside whatever call holds the session.
              (let ((large (find-if #'probe-file '("/bin/bash" "/usr/bin/perl"))))
+               (unless large
+                 (format t "  SKIPPED (the status band beside a long command: no /bin/bash or /usr/bin/perl to analyze)~%"))
                (when large
                  (tool-call omp "s-busy" "open_binary" "path" large)
                  (let* ((known (band-count (session-state omp "s-busy") "fn"))

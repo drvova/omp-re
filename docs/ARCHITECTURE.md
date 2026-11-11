@@ -69,8 +69,10 @@ host is installed, so the engine also runs alone — which is how the Lisp suite
 tests it and what CI's "the engine loads alone" step holds.
 
 Settings are declared once, in `+settings+`: the member of nodecode's `re`
-section, the environment variable, or both. `nodecode/config.example.jsonc` is
-written from that table and the suite checks the two agree.
+section, the environment variable, or both. A setting only one host reads is
+declared by that host the same way (`audit_seconds`, in `nodecode/cell.lisp`).
+`nodecode/config.example.jsonc` is written from those tables and the suite
+checks they agree.
 
 The wording a host needs its own way (how to open a binary, how to switch the
 debugger on, the manual `rizin_command ""` answers) is a table of phrases
@@ -78,10 +80,11 @@ debugger on, the manual `rizin_command ""` answers) is a table of phrases
 
 ## The nodecode host (`nodecode/`, system `nodecode-re`)
 
-The engine is loaded into the nodecode organism's own image. Three files are
-the only places a nodecode name (`nlk:`, `nle:`) appears:
+The engine is loaded into the nodecode organism's own image. The host is
+three files, and a nodecode name (`nlk:`, `nle:`) appears only in the first
+and the last:
 
-- `nodecode-host.lisp` answers the record services: entries are stamped with
+- `nodecode-host.lisp` makes the host's package and answers the record services: entries are stamped with
   the turn they were written in, and a call reads those on the session's
   branch.
 - `verbs.lisp` is the model's surface: functions in the `RE` package called

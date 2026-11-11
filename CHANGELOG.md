@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   <path> first`.
 - **Progress** reads `rizin: analyzing <name>… Ns`, the same text in the
   footer and in the tool's partial result.
+- **A call waiting for omp's own answer** (the session's record, an artifact,
+  the side model) is woken by its cancel or by omp ending; it looked every
+  tenth of a second. A program a tool runs is bounded by a timed wait, not a
+  twentieth-of-a-second poll.
 - **Aborting a call** is answered by the engine at its next wait: `omp-re:
   rizin command "<line>" aborted`, or `omp-re: the call aborted` for one still
   queued. The session goes on, and rizin keeps its analysis.
@@ -83,8 +87,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   restore, so a misspelt `shutdown` re-opened the session it was meant to
   close.
 - **What the wire carries.** A call's answer is `text`, `failed`, `refused?`,
-  `details?` and `state`: `refused` says a call never came to a result, where
-  that was read off a missing `details`; `raw` and the second copies of
+  `details?` and `state`: `refused` says a call never came to a result — the
+  engine says so where the refusal happens — where omp's side read that off a
+  missing `details`; `raw` and the second copies of
   `evidenceId` and `artifactPath` are gone (both are in `details`). `state`
   is the status band as its lines, the evidence ids as they are shown, and
   `memory`. A described tool has no `evidence` member. `hello` takes no
@@ -239,6 +244,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   stand in for them.
 - **A cancel sent for a call omp had already given up on** reached the engine
   before the call it was for, and was ignored.
+- **A finding or report aborted while its support audit was being asked** was
+  recorded all the same, marked `unaudited — the audit side turn returned no
+  usable verdict`. The call now ends as `omp-re: the support audit aborted`
+  and nothing is recorded.
+- **The bun suites could call a model.** On a machine where omp had provider
+  credentials, every test that recorded a finding put the claim audit to the
+  configured model. The one harness the suites boot a session through now
+  gives the session no model, or a test's own stand-in for one.
 - **The manual tiers.** `test/tui-qa.sh` drove `hash_binary`, a tool that no
   longer exists, and skipped the steps when it timed out; it now asks for a
   `rizin_command` read, checks the evidence record it leaves, and fails a

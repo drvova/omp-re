@@ -62,12 +62,10 @@ read cannot wedge; a watchdog thread enforces the bound."
                                       :output :stream :error errors :if-error-exists :supersede
                                       :external-format '(:utf-8 :replacement #\?)))
          (timed-out nil)
+         (ended (sb-thread:make-semaphore))
          (watchdog (sb-thread:make-thread
                     (lambda ()
-                      (loop repeat (ceiling (* seconds 20))
-                            while (sb-ext:process-alive-p process)
-                            do (sleep 0.05))
-                      (when (sb-ext:process-alive-p process)
+                      (unless (sb-thread:wait-on-semaphore ended :timeout seconds)
                         (setf timed-out t)
                         (kill-process-tree process)))
                     :name "omp-re run bound")))
@@ -75,6 +73,7 @@ read cannot wedge; a watchdog thread enforces the bound."
                  (loop for char = (read-char (sb-ext:process-output process) nil nil)
                        while char do (write-char char collected)))))
       (sb-ext:process-wait process)
+      (sb-thread:signal-semaphore ended)
       (sb-thread:join-thread watchdog :default nil)
       (close (sb-ext:process-output process))
       (let ((err (or (read-text-file errors) "")))

@@ -496,6 +496,7 @@ happens to one message, the next is still read."
                           (method-described "toEngine" method))
                          ((method-ordered-p method) (serve-in-order id method params))
                          (id (serve-request id method params))
+                         ;; A request sent with no id: holding it to the protocol is what says so.
                          (t (conform-params "toEngine" method params)))
                      (error (condition)
                        (if id

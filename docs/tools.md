@@ -113,8 +113,9 @@ The model's own conclusions, recorded as report claims (`re.finding` entries).
 A finding is gated when it is recorded, while the model can still act on the
 result, and again at `/re report`. It lands in the report's **Findings**
 section and in the verification manifest, and `/re carry --inherit` re-proves
-it on the next build. Neither tool reads the binary, and neither records
-evidence.
+it on the next build. `record_finding` and `retract_finding` read nothing of
+the binary and record no evidence; `adopt_finding` re-runs the commands it is
+given, and those reads are evidence like any other.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
