@@ -5,9 +5,13 @@
 ;;;; Starts stdio/serve.lisp as omp starts it — a child SBCL, JSON lines on
 ;;;; its standard input and output — and plays omp's side of
 ;;;; docs/engine-protocol.md: it keeps each session's record, answers what
-;;;; the engine asks, and notes what it is told.
+;;;; the engine asks, and notes what it is told. Everything that crosses the
+;;;; pipe, either way, is held to stdio/protocol.json by the server's own
+;;;; reading of it, so this stand-in cannot speak a protocol of its own.
 
 (in-package #:omp-re-test)
+
+(asdf:load-system "omp-re-stdio")
 
 (defstruct (omp (:copier nil))
   process
@@ -18,7 +22,16 @@
   (records (make-hash-table :test #'equal)) ; session id => list of entries, oldest first
   (artifacts (make-hash-table :test #'equal))
   (judge nil)                           ; (lambda (prompt)) => reply text, or NIL for nobody to ask
+  (asked (make-hash-table))             ; request id => its method
+  (violations '())                      ; what was said that the protocol does not have
   first-line)
+
+(defmacro conforming ((omp what) &body body)
+  "BODY, a check against the protocol; a violation is noted, not signalled."
+  `(handler-case (progn ,@body)
+     (omp-re-stdio::wire-violation (condition)
+       (sb-thread:with-mutex ((omp-lock ,omp))
+         (push (format nil "~a: ~a" ,what condition) (omp-violations ,omp))))))
 
 (defun omp-write (omp object)
   (let ((stream (sb-ext:process-input (omp-process omp))))
@@ -32,7 +45,10 @@
   (let ((session (gethash "session" params)))
     (cond
       ((string= method "entries")
-       (let ((held (gethash session (omp-records omp)))
+       (let ((held (mapcar (lambda (entry)
+                             (omp-re:obj "id" (gethash "id" entry) "customType" (gethash "customType" entry)
+                                         "data" (gethash "data" entry)))
+                           (gethash session (omp-records omp))))
              (count (gethash "count" params)))
          (if (and (<= count (length held))
                   (or (zerop count)
@@ -57,11 +73,25 @@
        (omp-re:obj "text" (or (gethash (gethash "id" params) (omp-artifacts omp)) :absent)))
       (t (omp-re:obj)))))
 
+(defvar *off-protocol* nil
+  "True while a check says on purpose what the protocol does not have.")
+
 (defun omp-request (omp method &rest members)
   "Send the request METHOD without waiting => its id."
-  (let ((id (sb-thread:with-mutex ((omp-lock omp)) (incf (omp-next omp)))))
-    (omp-write omp (omp-re:obj "id" id "method" method "params" (apply #'omp-re:obj members)))
+  (let ((id (sb-thread:with-mutex ((omp-lock omp)) (incf (omp-next omp))))
+        (params (apply #'omp-re:obj members)))
+    (unless *off-protocol*
+      (omp-re-stdio::conform-params "toEngine" method params :request t)
+      (sb-thread:with-mutex ((omp-lock omp)) (setf (gethash id (omp-asked omp)) method)))
+    (omp-write omp (omp-re:obj "id" id "method" method "params" params))
     id))
+
+(defun omp-tell (omp method &rest members)
+  "Send the notification METHOD."
+  (let ((params (apply #'omp-re:obj members)))
+    (unless *off-protocol*
+      (omp-re-stdio::conform-params "toEngine" method params))
+    (omp-write omp (omp-re:obj "method" method "params" params))))
 
 (defun omp-await (omp id &optional (seconds 120))
   "The engine's answer to the request ID => its result, or (values NIL
@@ -96,17 +126,27 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                        (method (and (hash-table-p message) (gethash "method" message))))
                   (cond ((null method)
                          (when (hash-table-p message)
+                           (let ((asked (sb-thread:with-mutex ((omp-lock omp))
+                                          (gethash (gethash "id" message) (omp-asked omp)))))
+                             (when (and asked (not (gethash "error" message)))
+                               (conforming (omp "the engine's answer")
+                                 (omp-re-stdio::conform-result "toEngine" asked (gethash "result" message)))))
                            (sb-thread:with-mutex ((omp-lock omp))
                              (setf (gethash (gethash "id" message) (omp-answers omp)) message))))
                         (t
-                         (let ((params (gethash "params" message)))
+                         (let ((params (gethash "params" message))
+                               (id (gethash "id" message)))
+                           (conforming (omp "the engine said")
+                             (omp-re-stdio::conform-params "toHost" method params :request (and id t)))
                            (sb-thread:with-mutex ((omp-lock omp))
                              (push (cons method params) (omp-heard omp)))
-                           (when (gethash "id" message)
-                             (omp-write omp (omp-re:obj "id" (gethash "id" message)
-                                                     "result" (omp-answer omp method params))))))))))
+                           (when id
+                             (let ((result (omp-answer omp method params)))
+                               (conforming (omp "the stand-in answered")
+                                 (omp-re-stdio::conform-result "toHost" method result))
+                               (omp-write omp (omp-re:obj "id" id "result" result))))))))))
      :name "omp stand-in reader")
-    (omp-ask omp "hello" "protocol" 1 "stateDir" state
+    (omp-ask omp "hello" "protocol" omp-re-stdio:+protocol+ "stateDir" state
                          "variables" (apply #'omp-re:obj "PATH" (uiop:getenv "PATH") variables))
     omp))
 
@@ -129,8 +169,13 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
   (prog1 (sb-ext:process-exit-code (omp-process omp))
     (ignore-errors (sb-ext:process-kill (omp-process omp) 9))))
 
-(defun session-of (id &key (ui t))
-  (omp-re:obj "id" id "cwd" (uiop:native-namestring *scratch*) "hasUI" ui))
+(defun print-violations (omp)
+  (let ((violations (reverse (omp-violations omp))))
+    (dolist (violation violations violations)
+      (format t "    ~a~%" violation))))
+
+(defun session-of (id &key (ui t) memory)
+  (omp-re:obj "id" id "cwd" (uiop:native-namestring *scratch*) "hasUI" ui "memory" (or memory :absent)))
 
 (defun tool-call (omp session name &rest arguments)
   (omp-ask omp "call" "session" (session-of session) "name" name
@@ -139,6 +184,19 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
 
 (defun typed-line (omp session line &key (ui t))
   (omp-ask omp "command" "session" (session-of session :ui ui) "line" line))
+
+(defun session-state (omp session)
+  "The state the engine sends with an answer in SESSION, had by a line that
+waits for nothing."
+  (gethash "state" (typed-line omp session "help")))
+
+(defun band-count (state what)
+  "The number the status band's second line gives for WHAT: \"fn\",
+\"findings\" or \"evidence\"."
+  (let* ((line (aref (gethash "band" state) 1))
+         (end (search (format nil " ~a" what) line)))
+    (and end
+         (parse-integer line :start (1+ (or (position #\Space line :end end :from-end t) -1)) :end end))))
 
 (defun described (omp name)
   (find name (coerce (gethash "tools" (omp-ask omp "describe")) 'list)
@@ -158,10 +216,11 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
   (unwind-protect
        (progn
          (check "the first line says the engine is ready, and hello answers the protocol and the version"
-                (and (equal "{\"ready\":1}" (omp-first-line omp))
-                     (let ((hello (omp-ask omp "hello" "protocol" 1 "stateDir" (scratch-path "agent/")
+                (and (equal (format nil "{\"ready\":~d}" omp-re-stdio:+protocol+) (omp-first-line omp))
+                     (let ((hello (omp-ask omp "hello" "protocol" omp-re-stdio:+protocol+
+                                                       "stateDir" (scratch-path "agent/")
                                                        "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")))))
-                       (and (eql 1 (gethash "protocol" hello))
+                       (and (eql omp-re-stdio:+protocol+ (gethash "protocol" hello))
                             (equal (asdf:component-version (asdf:find-system "omp-re"))
                                    (gethash "version" hello))))))
          (check "a line that is not JSON, an empty line and a CRLF line ending do not stop the next request"
@@ -170,11 +229,53 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                   (omp-write omp "")
                   (omp-write omp (format nil "{\"id\":9001,\"method\":\"describe\",\"params\":{}}~c" #\Return))
                   (hash-table-p (omp-await omp 9001 20))))
+         (check "an omp of another protocol version is refused at hello, told to reinstall"
+                (multiple-value-bind (result message)
+                    (let ((*off-protocol* t))
+                      (omp-ask omp "hello" "protocol" (1+ omp-re-stdio:+protocol+)
+                                           "stateDir" (scratch-path "agent/")
+                                           "variables" (omp-re:obj "PATH" (uiop:getenv "PATH"))))
+                  (and (null result)
+                       (has (format nil "protocol ~d and its engine protocol ~d"
+                                    (1+ omp-re-stdio:+protocol+) omp-re-stdio:+protocol+)
+                            message)
+                       (has "Reinstall or upgrade the omp-re plugin" message))))
          (check "a method the engine does not have is an error answer naming it, and the pipe goes on"
-                (multiple-value-bind (result message) (omp-ask omp "no_such_method")
+                (multiple-value-bind (result message) (let ((*off-protocol* t)) (omp-ask omp "no_such_method"))
                   (and (null result) (has "no_such_method" message)
                        (hash-table-p (omp-ask omp "describe")))))
-         (check "the tools are described with JSON Schema, approval class, and whether they record evidence"
+         (check "a member the protocol does not have, or one it requires and is not there, is an error naming it"
+                (let ((*off-protocol* t))
+                  (and (has "has no member lineX"
+                            (nth-value 1 (omp-ask omp "command" "session" (session-of "s-none") "line" "help" "lineX" "help")))
+                       (has "lacks callId"
+                            (nth-value 1 (omp-ask omp "call" "session" (session-of "s-none")
+                                                         "name" "rizin_help" "arguments" (omp-re:obj))))
+                       (has "session lacks hasUI"
+                            (nth-value 1 (omp-ask omp "preserved"
+                                                  "session" (omp-re:obj "id" "s-none" "cwd" "/")))))))
+         (check "a session event of a kind the protocol does not have is an error: it neither restores nor closes"
+                (let ((*off-protocol* t))
+                  (multiple-value-bind (result message)
+                      (omp-ask omp "event" "session" (session-of "s-none") "kind" "before-switchX")
+                    (and (null result) (has "before-switchX" message)
+                         (null (omp-heard-of omp "state" "s-none"))))))
+         (check "a notification is not answered, a request sent as one is refused, and the pipe goes on"
+                (let ((*off-protocol* t))
+                  (omp-write omp (omp-re:obj "method" "describe" "params" (omp-re:obj)))
+                  (and (has "environment is a notification"
+                            (nth-value 1 (omp-ask omp "environment" "stateDir" (scratch-path "agent/")
+                                                  "variables" (omp-re:obj))))
+                       (hash-table-p (let ((*off-protocol* nil)) (omp-ask omp "describe"))))))
+         (check "the keys the help names are views the engine has"
+                (let ((commands (coerce (gethash "commands" (omp-ask omp "describe")) 'list)))
+                  (every (lambda (key)
+                           (find-if (lambda (command)
+                                      (and (equal (gethash "view" key) (gethash "name" command))
+                                           (eq t (gethash "view" command))))
+                                    commands))
+                         (coerce (omp-re:jget omp-re-stdio::*protocol* "keys" "views") 'list))))
+         (check "the tools are described with JSON Schema and approval class"
                 (let* ((tools (coerce (gethash "tools" (omp-ask omp "describe")) 'list))
                        (names (mapcar (lambda (tool) (gethash "name" tool)) tools)))
                   (and (subsetp '("open_binary" "map_file" "export_project" "analyze" "apply_signatures"
@@ -185,9 +286,6 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                                   "set_calling_convention" "set_flag" "set_arch_hint" "set_hint" "set_data"
                                   "set_string" "set_format")
                                 names :test #'string=)
-                       (equal '("rizin_command")
-                              (loop for tool in tools when (eq t (gethash "evidence" tool))
-                                    collect (gethash "name" tool)))
                        (= 15 (count "write" tools :key (lambda (tool) (gethash "approval" tool)) :test #'equal))
                        (every (lambda (tool) (equal "object" (omp-re:jstring tool "parameters" "type"))) tools))))
          (check "adopt_finding's commands are an array of {command, addr} objects in the schema"
@@ -227,9 +325,11 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                          (null (gethash "view" (command "status")))))))
          (check "the debugger is offered only once omp's environment switches it on: the engine reads omp's variables, not its own"
                 (and (null (described omp "rizin_debug"))
-                     (omp-ask omp "environment" "stateDir" (scratch-path "agent/")
-                                                "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")
-                                                                     "OMPRE_ENABLE_DEBUGGER" "1"))
+                     (progn
+                       (omp-tell omp "environment" "stateDir" (scratch-path "agent/")
+                                                   "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")
+                                                                        "OMPRE_ENABLE_DEBUGGER" "1"))
+                       t)
                      (let ((debug (described omp "rizin_debug")))
                        (and debug
                             (equal "object" (omp-re:jstring debug "parameters" "properties" "attach" "type"))
@@ -237,8 +337,10 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                                                                "properties" "pid" "type"))
                             (equal "string" (omp-re:jstring debug "parameters" "properties" "run" "properties"
                                                                "env" "additionalProperties" "type"))))
-                     (omp-ask omp "environment" "stateDir" (scratch-path "agent/")
-                                                "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")))
+                     (progn
+                       (omp-tell omp "environment" "stateDir" (scratch-path "agent/")
+                                                   "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")))
+                       t)
                      (null (described omp "rizin_debug"))))
          (check "a call with no binary open fails in omp's words"
                 (let ((answer (tool-call omp "s-none" "rizin_command" "command" "aflj")))
@@ -260,12 +362,31 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
          (check "/re off refuses a tool call, /re on lifts it, and neither needs a binary"
                 (progn
                   (typed-line omp "s-none" "off")
-                  (let ((refused (gethash "text" (tool-call omp "s-none" "rizin_command" "command" "aflj"))))
+                  (let ((refused (tool-call omp "s-none" "rizin_command" "command" "aflj")))
                     (typed-line omp "s-none" "on")
                     (and (equal "omp-re: RE tools are off for this session — the user can re-enable them with /re on"
-                                refused)
+                                (gethash "text" refused))
+                         (eq t (gethash "refused" refused))
                          (has "no binary open" (gethash "text" (tool-call omp "s-none" "rizin_command"
                                                                           "command" "aflj")))))))
+         (check "what a session holds in no record — /re off — goes to omp with the state, and a session this engine has not met takes it back from omp"
+                (let ((off (typed-line omp "s-memory" "off")))
+                  (and (eq t (omp-re:jget off "state" "memory" "toolsOff"))
+                       (null (omp-re:jget (typed-line omp "s-none" "help") "state" "memory" "toolsOff"))
+                       (has "RE tools are off"
+                            (gethash "text" (omp-ask omp "call"
+                                                     "session" (session-of "s-met-anew"
+                                                                           :memory (omp-re:jget off "state" "memory"))
+                                                     "name" "rizin_help" "arguments" (omp-re:obj "query" "pdf")
+                                                     "callId" "c-memory")))
+                       ;; and only then: what omp holds does not undo a later /re on
+                       (progn (typed-line omp "s-met-anew" "on") t)
+                       (not (has "RE tools are off"
+                                 (gethash "text" (omp-ask omp "call"
+                                                          "session" (session-of "s-met-anew"
+                                                                                :memory (omp-re:jget off "state" "memory"))
+                                                          "name" "rizin_help" "arguments" (omp-re:obj "query" "pdf")
+                                                          "callId" "c-memory-2")))))))
          (check "every call that ran is a line in the audit log under omp's own call id; unsigned, the operator is told once a session"
                 (let ((lines (audit-lines "s-none")))
                   (and (= 3 (length lines))
@@ -286,9 +407,9 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                          (not (nth-value 1 (gethash "args" line)))))))
          (check "with OMPRE_AUDIT_HMAC_KEY in omp's environment a line carries an HMAC that verifies over the rest of it"
                 (progn
-                  (omp-ask omp "environment" "stateDir" (scratch-path "agent/")
-                                             "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")
-                                                                  "OMPRE_AUDIT_HMAC_KEY" " key with spaces "))
+                  (omp-tell omp "environment" "stateDir" (scratch-path "agent/")
+                                              "variables" (omp-re:obj "PATH" (uiop:getenv "PATH")
+                                                                   "OMPRE_AUDIT_HMAC_KEY" " key with spaces "))
                   (tool-call omp "s-signed" "rizin_help" "query" "pdf")
                   (let* ((line (first (audit-lines "s-signed")))
                          (unsigned (let ((copy (omp-re:obj)))
@@ -303,24 +424,31 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                          (null (omp-heard-of omp "notify" "s-signed"))))))
          (check "a session that never reverse engineered anything has nothing to keep through a compaction"
                 (equalp #() (gethash "lines" (omp-ask omp "preserved" "session" (session-of "s-none")))))
-         (check "the evidence ids sent for completion are the newest 200 of the record, newest first"
+         (check "the evidence ids sent for completion are the newest 200 of the record, newest first, each as it is shown"
                 (progn
                   (setf (gethash "s-many" (omp-records omp))
                         (loop for n from 1 to 205
                               collect (omp-re:obj "type" "custom" "id" (format nil "many-~d" n)
                                                   "customType" "re.evidence"
-                                                  "data" (omp-re:obj "id" (format nil "e-~3,'0d" n)
+                                                  "data" (omp-re:obj "id" (format nil "e-~3,'0d-and-the-rest-of-it" n)
                                                                      "tool" "rizin_command" "summary" "s"))))
                   (let ((ids (map 'list (lambda (row) (aref row 0))
-                                  (gethash "evidence" (omp-ask omp "facts" "session" (session-of "s-many"))))))
-                    (and (= 200 (length ids))
-                         (equal "e-205" (first ids))
-                         (equal "e-006" (car (last ids)))))))
+                                  (gethash "evidence" (session-state omp "s-many")))))
+                    (and (= (omp-re-stdio::protocol-constant "completedEvidence") (length ids))
+                         (equal (omp-re:shown-id "e-205-and-the-rest-of-it") (first ids))
+                         (equal (omp-re:shown-id "e-006-and-the-rest-of-it") (car (last ids)))))))
          (check "the status band of a session with no binary says so, and starts nothing"
-                (let ((facts (gethash "facts" (omp-ask omp "facts" "session" (session-of "s-none")))))
-                  (and (equal "no binary" (gethash "name" facts)) (eql 0 (gethash "fnCount" facts))))))
+                (equalp #("no binary" "0 fn · 0 findings · 0 evidence")
+                        (gethash "band" (session-state omp "s-none"))))
+         (check "the band says a size in at most four figures and a unit"
+                (equal '("0B" "1023B" "1K" "1.5K" "142K" "1024K" "1M" "2.4G" "1024T")
+                       (mapcar #'omp-re-stdio::band-size
+                               (list 0 1023 1024 1536 145408 (1- (* 1024 1024)) (* 1024 1024)
+                                     (* 24 1024 1024 1024 1/10) (expt 1024 5))))))
     (check "when omp closes the pipe the engine exits cleanly"
-           (eql 0 (stop-omp omp)))))
+           (eql 0 (stop-omp omp)))
+    (check "everything that crossed the pipe, either way, is what stdio/protocol.json describes"
+           (null (print-violations omp)))))
 
 ;;; --- against rizin -----------------------------------------------------------------------------
 
@@ -353,22 +481,25 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                         (and (has "rizin: analyzing " (gethash "text" (first progress)))
                              (integerp (gethash "request" (first progress)))
                              (eq :null (gethash "text" (car (last progress)))))))
-               (check "the answer carries the status band's facts, so drawing it asks nothing more"
-                      (let ((facts (omp-re:jget opened "state" "facts")))
-                        (and (equal (file-namestring *binary*) (gethash "name" facts))
-                             (plusp (gethash "fnCount" facts))
-                             (stringp (gethash "arch" facts))
-                             (uiop:string-prefix-p "0x" (gethash "entry" facts))))))
+               (check "the answer carries the status band's two lines, so drawing it asks nothing more"
+                      (let ((band (omp-re:jget opened "state" "band")))
+                        (and (starts (format nil "~a  " (file-namestring *binary*)) (aref band 0))
+                             (has "  entry 0x" (aref band 0))
+                             (plusp (band-count (gethash "state" opened) "fn"))
+                             (eql 0 (band-count (gethash "state" opened) "evidence"))))))
              (let* ((read (tool-call omp "s1" "rizin_command" "command" "afij" "addr" "main"))
-                    (id (omp-re:jstring read "evidenceId")))
-               (check "a read answers its text with the evidence tag, the details a recipe reads, and the record gains the evidence"
+                    (id (omp-re:jstring read "details" "evidenceId")))
+               (check "a read answers its text with the evidence tag, the id of the record it left in its details, and the record gains the evidence"
                       (and (starts (format nil "rizin> afij @ main~%") (gethash "text" read))
                            (ends (format nil "[evidence ~a — cite it in record_finding]" (subseq id 0 8))
                                  (gethash "text" read))
                            (equalp #("afij @ main") (omp-re:jget read "details" "commands"))
                            (equal id (omp-re:jstring (car (last (gethash "s1" (omp-records omp)))) "data" "id"))))
                (check "the evidence ids omp completes after /re cite come with the answer, newest first"
-                      (equal id (aref (aref (omp-re:jget read "state" "evidence") 0) 0)))
+                      (equal (subseq id 0 8) (aref (aref (omp-re:jget read "state" "evidence") 0) 0)))
+               (check "what the wire carries of a call is its text, whether it failed, its details and the state: nothing twice"
+                      (equal '("details" "failed" "state" "text")
+                             (sort (loop for name being the hash-keys of read collect name) #'string<)))
                (check "the engine asked omp only for what it had not seen: after its last entry, by count"
                       (let ((asked (omp-heard-of omp "entries" "s1")))
                         (and (eql 0 (gethash "count" (first asked)))
@@ -397,7 +528,7 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                (check "/re evidence <id> names the artifact the same way, not a file of the engine's"
                       (has (format nil "full output: artifact://~a" (omp-re:jstring big "details" "artifactId"))
                            (gethash "text" (typed-line omp "s1" (format nil "evidence ~a"
-                                                                        (subseq (omp-re:jstring big "evidenceId") 0 8)))))))
+                                                                        (subseq (omp-re:jstring big "details" "evidenceId") 0 8)))))))
              (let ((panel (omp-ask omp "view" "session" (session-of "s1") "kind" "functions")))
                (check "the functions view is a panel of rows, each opening that function's code"
                       (let ((row (find "main" (coerce (gethash "rows" panel) 'list)
@@ -466,7 +597,7 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                                (has "ts_written_main" (gethash "text" read)))))
                  (check "when the restore is done the engine sends the session's state, the band's facts in it"
                         (wait-until (lambda ()
-                                      (some (lambda (params) (plusp (omp-re:jget params "state" "facts" "fnCount")))
+                                      (some (lambda (params) (plusp (band-count (gethash "state" params) "fn")))
                                             (omp-heard-of omp "state" "s-old")))
                                     20))
                  (check "its status counts the evidence the earlier version recorded"
@@ -511,11 +642,18 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                             (status (typed-line omp "s-cancel" "status")))
                         (and (has "rizin: " (gethash "text" status))
                              (< (- (get-internal-real-time) began) (* 5 internal-time-units-per-second)))))
-               (omp-write omp (omp-re:obj "method" "cancel" "params" (omp-re:obj "id" queued)))
+               (check "while omp waits, the engine says at a steady beat which requests it is serving"
+                      (wait-until (lambda ()
+                                    (some (lambda (params)
+                                            (and (find opening (gethash "serving" params))
+                                                 (find queued (gethash "serving" params))))
+                                          (omp-heard-of omp "alive")))
+                                  (* 3 (omp-re-stdio::protocol-constant "aliveSeconds"))))
+               (omp-tell omp "cancel" "id" queued)
                (check "a call cancelled while it waits its turn leaves the queue, saying it was aborted"
                       (let ((answer (omp-await omp queued 10)))
                         (and (eq t (gethash "failed" answer)) (has "aborted" (gethash "text" answer)))))
-               (omp-write omp (omp-re:obj "method" "cancel" "params" (omp-re:obj "id" opening)))
+               (omp-tell omp "cancel" "id" opening)
                (check "a cancelled analysis answers promptly, as aborted"
                       (let ((answer (omp-await omp opening 10)))
                         (and (eq t (gethash "failed" answer)) (has "aborted" (gethash "text" answer)))))
@@ -528,33 +666,35 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
              (let ((large (find-if #'probe-file '("/bin/bash" "/usr/bin/perl"))))
                (when large
                  (tool-call omp "s-busy" "open_binary" "path" large)
-                 (let* ((known (omp-re:jget (omp-ask omp "facts" "session" (session-of "s-busy")) "facts" "fnCount"))
+                 (let* ((known (band-count (session-state omp "s-busy") "fn"))
                         (busy (omp-request omp "call" "session" (session-of "s-busy") "name" "analyze"
                                                 "arguments" (omp-re:obj "pass" "emulate_functions")
                                                 "callId" "c-busy"))
                         (began (progn (sleep 1) (get-internal-real-time)))
-                        (facts (omp-await omp (omp-request omp "facts" "session" (session-of "s-busy")) 4)))
+                        (line (omp-await omp (omp-request omp "command" "session" (session-of "s-busy")
+                                                                         "line" "help")
+                                         4)))
                    (check "while a long rizin command runs in a session its status band answers at once, from what the session knows"
-                          (and (hash-table-p facts)
+                          (and (hash-table-p line)
                                (plusp known)
-                               (eql known (omp-re:jget facts "facts" "fnCount"))
+                               (eql known (band-count (gethash "state" line) "fn"))
                                (< (- (get-internal-real-time) began) (* 3 internal-time-units-per-second))
                                ;; and the command was still running when it answered
                                (null (sb-thread:with-mutex ((omp-lock omp)) (gethash busy (omp-answers omp))))))
-                   (omp-write omp (omp-re:obj "method" "cancel" "params" (omp-re:obj "id" busy)))
+                   (omp-tell omp "cancel" "id" busy)
                    (omp-await omp busy 20)
                    (omp-ask omp "event" "session" (session-of "s-busy") "kind" "shutdown"))))
 
              (check "a session's end closes its rizin; the others keep theirs"
                     (progn
                       (omp-ask omp "event" "session" (session-of "s-cancel") "kind" "shutdown")
-                      (and (eql 0 (omp-re:jget (omp-ask omp "facts" "session" (session-of "s-cancel"))
-                                            "facts" "fnCount"))
-                           (plusp (omp-re:jget (omp-ask omp "facts" "session" (session-of "s-old"))
-                                            "facts" "fnCount")))))
+                      (and (eql 0 (band-count (session-state omp "s-cancel") "fn"))
+                           (plusp (band-count (session-state omp "s-old") "fn")))))
              #-win32
              (setf children (omp-re::process-descendants (sb-ext:process-pid (omp-process omp)))))
         (let ((code (stop-omp omp)))
+          (check "everything that crossed the pipe, either way, is what stdio/protocol.json describes"
+                 (null (print-violations omp)))
           (check "the pipe closing ends the engine and every rizin it started"
                  (and (eql 0 code)
                       #-win32 (and children

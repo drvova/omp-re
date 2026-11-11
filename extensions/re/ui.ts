@@ -7,69 +7,19 @@
  */
 import { getSymbolTheme, highlightCode, type ExtensionContext, type Theme } from "@oh-my-pi/pi-coding-agent";
 import { fuzzyFilter, matchesKey, SelectList, truncateToWidth, type Component, type KeybindingsManager, type SelectItem, type SelectListTheme, type TUI } from "@oh-my-pi/pi-tui";
-import type { JsonObject } from "./engine.ts";
-import type { SessionState } from "./host.ts";
+import { KEYS, type Row, type State, type View, type ViewRequest } from "./protocol.ts";
 
-type Level = "info" | "warning" | "error";
-
-/** A view as the engine answers one. */
-type View =
-	| { type: "notice"; text: string; level: Level }
-	| { type: "panel"; title: string; hint: string; rows: Row[] }
-	| {
-			type: "code";
-			title: string;
-			disasm: string[];
-			decompile?: { label: string; note: string; tone: "dim" | "warning"; code: string; language?: string };
-			noDecompile: string;
-			ask: string;
-			xrefs: ViewRequest;
-	  };
-
-interface ViewRequest {
-	kind: string;
-	arg?: JsonObject;
-}
-
-interface Row {
-	value: string;
-	label: string;
-	description?: string;
-	enter: { draft: string } | { view: ViewRequest };
-}
-
-/** Asks the engine for a view of the session `ctx` is in. */
 export type ViewSource = (ctx: ExtensionContext, request: ViewRequest) => Promise<View>;
 
-function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes}B`;
-	const units = ["K", "M", "G", "T"];
-	let value = bytes;
-	let unit = -1;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit++;
-	}
-	return `${value.toFixed(1).replace(/\.0$/, "")}${units[unit]}`;
-}
-
-function bandLines(facts: JsonObject, theme: Theme, width: number): string[] {
-	const info = [facts.format, facts.arch, facts.os].filter(Boolean).join(" ");
-	const prot = Array.isArray(facts.prot) ? facts.prot.join(",") : "";
-	const groups = [facts.name, info, facts.entry ? `entry ${facts.entry}` : null, typeof facts.size === "number" ? formatSize(facts.size) : null, prot || null].filter(Boolean);
-	const counts = [`${facts.fnCount ?? 0} fn`, `${facts.findings ?? 0} findings`, `${facts.evidence ?? 0} evidence`].join(" · ");
-	return [truncateToWidth(theme.fg("accent", groups.join("  ")), width), truncateToWidth(theme.fg("muted", counts), width)];
-}
-
-/** Mount the status band for the state the engine last sent. The widget closes over that snapshot, so drawing it asks nothing. */
-export function drawStatusBand(ctx: ExtensionContext, state: SessionState): void {
-	if (!ctx.hasUI || !state.facts) return;
-	const facts = state.facts;
+/** Mount the status band the engine last sent: its first line stands out, the rest are quiet. The widget closes over that snapshot, so drawing it asks nothing. */
+export function drawStatusBand(ctx: ExtensionContext, state: State): void {
+	const band = state.band;
+	if (!ctx.hasUI || !band) return;
 	try {
 		ctx.ui.setWidget(
 			"re.hud",
 			(_tui: TUI, theme: Theme) => ({
-				render: (width: number) => bandLines(facts, theme, width),
+				render: (width: number) => band.map((line, index) => truncateToWidth(theme.fg(index === 0 ? "accent" : "muted", line), width)),
 				invalidate() {},
 			}),
 			{ placement: "aboveEditor" },
@@ -145,9 +95,8 @@ function codeView(options: {
 	decompileLabel: string;
 	theme: Theme;
 	keybindings: KeybindingsManager;
-	onNoDecompile: () => void;
-	onXrefs: () => void;
-	onAsk: () => void;
+	/** What each key of a code view does (the protocol's `keys.code`, by action). */
+	on: Record<(typeof KEYS.code)[number]["action"], () => void>;
 	done: (result: undefined) => void;
 }): Component {
 	const { theme, decompiled } = options;
@@ -164,20 +113,17 @@ function codeView(options: {
 			return [
 				theme.fg("accent", `${options.title} · ${showDecompiled ? options.decompileLabel : "disasm"}`),
 				...(window.length > 0 ? window : [theme.fg("dim", "(nothing to show)")]),
-				theme.fg("dim", `d decomp · x xrefs · a ask · esc back${position}`),
+				theme.fg("dim", `${KEYS.code.map((key) => `${key.key} ${key.short}`).join(" · ")} · esc back${position}`),
 			].map((line) => truncateToWidth(line, width));
 		},
 		handleInput(data: string) {
 			const keys = options.keybindings;
+			const bound = KEYS.code.find((key) => key.key === data);
 			if (matchesKey(data, "escape")) options.done(undefined);
-			else if (data === "d") {
-				if (!decompiled) options.onNoDecompile();
-				else {
-					showDecompiled = !showDecompiled;
-					offset = 0;
-				}
-			} else if (data === "x") options.onXrefs();
-			else if (data === "a") options.onAsk();
+			else if (bound?.action === "decompile" && decompiled) {
+				showDecompiled = !showDecompiled;
+				offset = 0;
+			} else if (bound) options.on[bound.action]();
 			else {
 				if (keys.matches(data, "tui.select.up")) offset -= 1;
 				else if (keys.matches(data, "tui.select.down")) offset += 1;
@@ -196,7 +142,7 @@ function highlighted(code: string, language: string | undefined, theme: Theme): 
 		try {
 			return highlightCode(code, language, theme);
 		} catch {
-			// plain lines below
+			// Fall through.
 		}
 	}
 	return code.split("\n").map((line) => theme.fg("text", line));
@@ -242,11 +188,14 @@ export async function openView(ctx: ExtensionContext, source: ViewSource, reques
 				decompileLabel: view.decompile?.label ?? "decompile",
 				theme,
 				keybindings,
-				onNoDecompile: () => ctx.ui.notify(view.noDecompile, "info"),
-				onXrefs: () => void openView(ctx, source, view.xrefs),
-				onAsk: () => {
-					ctx.ui.setEditorText(view.ask);
-					done(undefined);
+				on: {
+					// Reached only when there is no decompiled side to toggle to.
+					decompile: () => ctx.ui.notify(view.noDecompile, "info"),
+					xrefs: () => void openView(ctx, source, view.xrefs),
+					ask: () => {
+						ctx.ui.setEditorText(view.ask);
+						done(undefined);
+					},
 				},
 				done,
 			}),

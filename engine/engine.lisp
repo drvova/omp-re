@@ -18,6 +18,8 @@
 ;;;;   (engine-facts SESSION)                the open binary, for a status band
 ;;;;   (engine-evidence SESSION LIMIT)       the newest evidence, to complete an id from
 ;;;;   (engine-preserved SESSION)            lines to keep through a compaction
+;;;;   (engine-memory SESSION)               what no record holds: `/re off'
+;;;;   (engine-remember SESSION MEMORY)      give it back under a new engine
 ;;;;   (engine-approval SESSION CALL-ID TOOL APPROVED REASON)
 ;;;;                                         what the host's gate decided of a call
 ;;;;   (engine-restore SESSION &key open)    bring rizin up when a session starts
@@ -64,8 +66,10 @@ asks again rather than keeping the answer."
 
 (defun engine-call (session name arguments &key call-id)
   "Call the tool NAME with the JSON object ARGUMENTS in SESSION =>
-  {text, failed, raw?, evidenceId?, artifactPath?, details?}
-TEXT is what the model reads. RAW is the whole of what rizin printed, for a
+  {text, failed, refused?, raw?, evidenceId?, artifactPath?, details?}
+TEXT is what the model reads. REFUSED is true when the call never came to a
+result — the tool is off, unknown or mis-called, the session could not be
+had, or its body signalled — as against a result that says it failed. RAW is the whole of what rizin printed, for a
 tool that reads the binary, where TEXT may be cut; EVIDENCE-ID the id of the
 evidence record the call left; ARTIFACT-PATH where all of a TEXT that was
 cut is kept. DETAILS is the result's own, for a host that renders more than
@@ -76,6 +80,8 @@ CALL-ID is the host's own id for the call, written to the audit log."
       (call-tool session name arguments :call-id call-id)
     (obj "text" text
          "failed" (and failed t)
+         ;; CALL-TOOL answers a result's details, and IN-SESSION none.
+         "refused" (if (and failed (null details)) t :absent)
          "raw" (if (stringp raw) raw :absent)
          "evidenceId" (or evidence-id :absent)
          "artifactPath" (or artifact-path :absent)
@@ -162,6 +168,25 @@ read."
              (lambda (record) (vector (jstring record "id") (evidence-place record)))
              (reverse (last (evidence-records) limit))))
     (if failed (vector) answer)))
+
+(defun engine-memory (session)
+  "What SESSION holds that is in no record, and so would be gone with this
+process => a JSON object, {toolsOff?}. A host that outlives the engine keeps
+the latest and hands it to ENGINE-REMEMBER when the session meets another
+engine. As the session stands, like ENGINE-FACTS."
+  (multiple-value-bind (answer failed)
+      (in-session (session "the session's memory" :wait nil)
+        (obj "toolsOff" (if (session-tools-off *session*) t :absent)))
+    (if failed (obj) answer)))
+
+(defun engine-remember (session memory)
+  "Give SESSION back what ENGINE-MEMORY answered of it under an engine that
+is gone."
+  (in-session (session "the session's memory" :wait nil)
+    (when (eq t (jget memory "toolsOff"))
+      (setf (session-tools-off *session*) t))
+    nil)
+  t)
 
 (defun engine-preserved (session)
   "The lines to fold into a summary of SESSION's conversation when the host

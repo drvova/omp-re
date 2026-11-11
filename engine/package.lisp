@@ -17,6 +17,7 @@
    ;; the surface
    #:engine-tools #:engine-call #:engine-commands #:engine-command
    #:engine-view #:engine-facts #:engine-evidence #:engine-preserved #:engine-approval
+   #:engine-memory #:engine-remember
    #:engine-restore #:engine-rekey #:engine-close #:engine-hold #:shutdown-sessions
    #:engine-name #:shown-id #:re-error
    ;; the port

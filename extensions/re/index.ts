@@ -17,48 +17,12 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { drawStatusBand, openView, type ViewSource } from "./ui.ts";
 import type { JsonObject } from "./engine.ts";
-import { ask, engine, leaveSession, sessionOf, stateOf, tell } from "./host.ts";
-import { RE_LOAD_MODE, reRenderers, type RenderSpec } from "./render.ts";
+import { ask, engine, enter, leaveSession, sessionOf, stateOf, tell } from "./host.ts";
+import { KEYS, type ReasonCase, type ToEngine, type ToHost } from "./protocol.ts";
+import { RE_LOAD_MODE, reRenderers } from "./render.ts";
 
-type Tier = "read" | "write" | "exec";
-
-/** One case of an approval prompt's sentence, as the engine describes it (docs/engine-protocol.md, `approvalReason`). */
-interface ReasonCase {
-	when?: { arg: string; equals?: unknown; type?: string }[];
-	parts: (string | { pieces: { arg: string; prefix?: string; missing?: string }[]; quote?: boolean; clip?: number })[];
-}
-
-interface DescribedTool {
-	name: string;
-	label?: string;
-	description: string;
-	parameters: Record<string, unknown>;
-	approval: Tier;
-	approvalReason?: ReasonCase[];
-	render?: RenderSpec;
-}
-
-interface DescribedCommand {
-	name: string;
-	usage?: string;
-	description: string;
-	view?: boolean;
-	completes?: "evidence";
-}
-
-interface CallAnswer extends JsonObject {
-	text: string;
-	failed: boolean;
-	details?: JsonObject;
-}
-
-interface CommandAnswer extends JsonObject {
-	text: string;
-	failed: boolean;
-	level: "info" | "warning" | "error";
-	draft?: { text: string; notice: string };
-	userMessage?: string;
-}
+/** How many evidence ids a completion offers at once. */
+const COMPLETIONS_SHOWN = 50;
 
 function argumentAt(args: unknown, path: string): unknown {
 	let value = args;
@@ -94,7 +58,8 @@ function approvalSentence(cases: ReasonCase[], args: unknown): string | undefine
 export default async function (pi: ExtensionAPI): Promise<void> {
 	// The engine is asked here, once per session, because omp takes tool registrations only while the factory runs,
 	// and which tools there are depends on the environment the session starts in.
-	const { tools, commands } = await engine().request<{ tools: DescribedTool[]; commands: DescribedCommand[] }>("describe");
+	const { tools, commands } = await engine().request("describe", {});
+	enter(pi);
 	const toolNames = new Set(tools.map((tool) => tool.name));
 	/** Session id this instance last saw, to tell a branch into a new session file apart from navigation within one. */
 	let lastSessionId: string | undefined;
@@ -106,7 +71,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		lastSessionId = ctx.sessionManager.getSessionId();
 		return sessionOf(pi, ctx, drawStatusBand);
 	};
-	const viewSource: ViewSource = (ctx, request) => ask(pi, ctx, "view", { kind: request.kind, arg: request.arg }) as never;
+	const viewSource: ViewSource = (ctx, request) => ask(pi, ctx, "view", { kind: request.kind, arg: request.arg });
 
 	for (const tool of tools) {
 		const reasons = tool.approvalReason;
@@ -120,46 +85,46 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			...(tool.render ? reRenderers(tool.render) : {}),
 			execute: async (toolCallId, params, signal, onUpdate, ctx) => {
 				seen(ctx);
-				const answer = await ask<CallAnswer>(pi, ctx, "call", { name: tool.name, arguments: params as JsonObject, callId: toolCallId }, { signal, onUpdate });
-				// A refusal has no details and is thrown, so eval sees a rejection it can catch; a tool's own failed result is returned as one.
-				if (answer.failed && !answer.details) throw new Error(answer.text);
+				const answer = await ask(pi, ctx, "call", { name: tool.name, arguments: params as JsonObject, callId: toolCallId }, { signal, onUpdate });
+				// A refusal is thrown, so eval sees a rejection it can catch; a tool's own failed result is returned as one.
+				if (answer.refused) throw new Error(answer.text);
 				return { content: [{ type: "text", text: answer.text }], details: answer.details, ...(answer.failed ? { isError: true } : {}) };
 			},
 		});
 	}
 
 	// The line the engine asks to have shown when a binary is opened (the protocol's `transcript`).
-	pi.registerMessageRenderer("re.binary", (message, _options, theme) => new Text(theme.fg("accent", typeof message.content === "string" ? message.content : ""), 0, 0));
+	const openedLine: ToHost["transcript"]["params"]["type"] = "re.binary";
+	pi.registerMessageRenderer(openedLine, (message, _options, theme) => new Text(theme.fg("accent", typeof message.content === "string" ? message.content : ""), 0, 0));
 
 	pi.registerFlag("binary", {
 		description: "Path to a binary to open with rizin at startup",
 		type: "string",
 	});
 
-	const event = (ctx: ExtensionContext, kind: string, more: JsonObject = {}) => {
-		const previous = lastSessionId;
+	/** omp entered a session, or moved within one. */
+	const arrive = (ctx: ExtensionContext, event: Omit<ToEngine["event"]["params"], "session">) => {
 		seen(ctx);
-		return ask(pi, ctx, "event", { kind, ...(kind === "branch" && previous ? { previous } : {}), ...more }).catch((error) =>
-			tell(ctx, error instanceof Error ? error.message : String(error), "error"),
-		);
+		return ask(pi, ctx, "event", event).catch((error) => tell(ctx, error instanceof Error ? error.message : String(error), "error"));
 	};
 	pi.on("session_start", async (_event, ctx) => {
 		const flag = pi.getFlag("binary");
-		await event(ctx, "start", typeof flag === "string" && flag.length > 0 ? { binary: flag } : {});
+		await arrive(ctx, { kind: "start", ...(typeof flag === "string" && flag.length > 0 ? { binary: flag } : {}) });
 	});
 	// A switch (/new, /resume, fork, handoff) leaves this session for another: its rizin is freed first.
 	pi.on("session_before_switch", async (_event, ctx) => {
 		await leaveSession(pi, ctx, false);
 	});
 	pi.on("session_switch", async (_event, ctx) => {
-		await event(ctx, "switch");
+		await arrive(ctx, { kind: "switch" });
 	});
 	// A branch writes a new session file with the same history up to the branch point: the engine carries its rizin over.
 	pi.on("session_branch", async (_event, ctx) => {
-		await event(ctx, "branch");
+		const previous = lastSessionId;
+		await arrive(ctx, { kind: "branch", ...(previous ? { previous } : {}) });
 	});
 	pi.on("session_tree", async (_event, ctx) => {
-		await event(ctx, "tree");
+		await arrive(ctx, { kind: "tree" });
 	});
 	pi.on("session_shutdown", async (_event, ctx) => {
 		await leaveSession(pi, ctx, true);
@@ -168,24 +133,23 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// A call omp's approval gate denied never reaches the engine; what the gate decided is forwarded so the audit log has it.
 	pi.on("tool_approval_resolved", async (decided, ctx) => {
 		if (!toolNames.has(decided.toolName)) return;
-		await ask(pi, ctx, "approval", { callId: decided.toolCallId, tool: decided.toolName, approved: decided.approved, ...(decided.reason ? { reason: decided.reason } : {}) }).catch(() => {});
+		await ask(pi, ctx, "approval", { callId: decided.toolCallId, tool: decided.toolName, approved: decided.approved, ...(decided.reason ? { reason: decided.reason } : {}) }).catch((error) =>
+			// The audit log is the operator's record of what was approved: a line that could not be written is said.
+			pi.logger.warn(`omp-re: the approval of ${decided.toolName} was not written to the audit log: ${error instanceof Error ? error.message : String(error)}`),
+		);
 	});
 
 	pi.on("session.compacting", async (_event, ctx) => {
-		const { lines } = await ask<{ lines: string[] }>(pi, ctx, "preserved");
+		const { lines } = await ask(pi, ctx, "preserved", {});
 		return lines.length > 0 ? { context: lines } : undefined;
 	});
 
-	for (const [key, kind] of [
-		["alt+g", "functions"],
-		["alt+s", "strings"],
-		["alt+i", "imports"],
-	] as const) {
+	for (const { key, view } of KEYS.views) {
 		pi.registerShortcut(key, {
-			description: `omp-re: ${kind}`,
+			description: `omp-re: ${view}`,
 			handler: async (ctx) => {
 				seen(ctx);
-				await openView(ctx, viewSource, { kind });
+				await openView(ctx, viewSource, { kind: view });
 			},
 		});
 	}
@@ -204,8 +168,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		const idPrefix = prefix.slice(space + 1).trim();
 		const matches = (stateOf(latestCtx.sessionManager.getSessionId())?.evidence ?? [])
 			.filter(([id]) => id.startsWith(idPrefix))
-			.slice(0, 50)
-			.map(([id, description]) => ({ value: `${sub} ${id.slice(0, 8)} `, label: id.slice(0, 8), description }));
+			.slice(0, COMPLETIONS_SHOWN)
+			.map(([id, description]) => ({ value: `${sub} ${id} `, label: id, description }));
 		return matches.length > 0 ? matches : null;
 	}
 
@@ -221,7 +185,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 					await openView(ctx, viewSource, { kind: words[0]! });
 					return;
 				}
-				const answer = await ask<CommandAnswer>(pi, ctx, "command", { line: args });
+				const answer = await ask(pi, ctx, "command", { line: args });
 				if (answer.userMessage) pi.sendUserMessage(answer.userMessage);
 				if (answer.draft && ctx.hasUI) {
 					ctx.ui.setEditorText(answer.draft.text);

@@ -18,6 +18,7 @@ import { highlightCode, type Theme, type ToolRenderResultOptions } from "@oh-my-
 import { Text, type Component } from "@oh-my-pi/pi-tui";
 import { code, span, text } from "@oh-my-pi/pi-tui/native/describe";
 import type { NativeToolHead, NativeToolView } from "@oh-my-pi/pi-tui/tools";
+import type { Details, Render } from "./protocol.ts";
 
 /**
  * How every RE tool is presented: `discoverable`, never `essential`. omp mounts
@@ -32,28 +33,23 @@ import type { NativeToolHead, NativeToolView } from "@oh-my-pi/pi-tui/tools";
  */
 export const RE_LOAD_MODE = "discoverable" as const;
 
-/** How a result body is shown: "json" highlights JSON and stays collapsed, "text" shows plain lines, "none" shows only the header. */
-export type BodyStyle = "json" | "text" | "none";
-
-export interface RenderSpec {
-	/** Short title shown in the transcript. */
-	title: string;
-	/** Which argument names the call's subject (address, query, path), shown after the title. */
-	subject?: string;
-	body: BodyStyle;
-}
+/**
+ * How the engine says one tool is shown (the protocol's `render`): its title, the argument that names the call's
+ * subject (address, query, path), shown after the title, and its body — "json" highlights JSON and stays collapsed,
+ * "text" shows plain lines, "none" shows only the header.
+ */
+type RenderSpec = Render;
+type BodyStyle = Render["body"];
 
 const COLLAPSED_LINES = 6;
 const EXPANDED_LINES = 400;
 /** Error gist length in a native head; the full message goes in the body. */
 const ERROR_GIST_CHARS = 120;
 
-/** A call's arguments as omp hands them to a renderer: whatever the model sent. */
-type RenderArgs = unknown;
 
 interface RenderableResult {
 	content: { type: string; text?: string }[];
-	details?: { truncated?: boolean; artifactId?: string };
+	details?: Details;
 	isError?: boolean;
 }
 
@@ -62,22 +58,29 @@ function firstText(result: RenderableResult): string {
 	return block?.text ?? "";
 }
 
-function subjectOf(spec: RenderSpec, args: RenderArgs): string | undefined {
+function subjectOf(spec: RenderSpec, args: unknown): string | undefined {
 	const subject = spec.subject && args !== null && typeof args === "object" ? (args as Record<string, unknown>)[spec.subject] : undefined;
 	return typeof subject === "string" && subject.length > 0 ? subject : undefined;
 }
 
-function callLine(spec: RenderSpec, args: RenderArgs, theme: Theme): string {
+function callLine(spec: RenderSpec, args: unknown, theme: Theme): string {
 	const parts = [theme.fg("toolTitle", theme.bold(spec.title))];
 	const subject = subjectOf(spec, args);
 	if (subject) parts.push(theme.fg("accent", subject));
 	return parts.join(" ");
 }
 
-/** The result's first line is its header; the rest is the body. */
-function splitBody(text: string): { header: string; body: string } {
-	const nl = text.indexOf("\n");
-	return nl === -1 ? { header: text, body: "" } : { header: text.slice(0, nl), body: text.slice(nl + 1) };
+/**
+ * A result's text as it is drawn: its first line is its header and the rest the body. A result that left an evidence
+ * record (`details.evidenceId`) ends with one line of its own that names the record; that line is not the tool's
+ * output and is shown beside the header, so a JSON body is JSON.
+ */
+function splitBody(text: string, details: Details | undefined): { header: string; body: string; tag?: string } {
+	const first = text.indexOf("\n");
+	if (first === -1) return { header: text, body: "" };
+	const last = text.lastIndexOf("\n");
+	if (details?.evidenceId === undefined) return { header: text.slice(0, first), body: text.slice(first + 1) };
+	return { header: text.slice(0, first), body: last > first ? text.slice(first + 1, last) : "", tag: text.slice(last + 1) };
 }
 
 /** omp's highlighter, degrading to plain lines: a renderer must never be the thing that breaks the transcript. */
@@ -95,7 +98,7 @@ function bodyLines(style: BodyStyle, body: string, theme: Theme): string[] {
 	return body.split("\n").map((line) => theme.fg("toolOutput", line));
 }
 
-function nativeHead(spec: RenderSpec, args: RenderArgs, meta: NativeToolHead["meta"] = []): NativeToolHead {
+function nativeHead(spec: RenderSpec, args: unknown, meta: NativeToolHead["meta"] = []): NativeToolHead {
 	const subject = subjectOf(spec, args);
 	return { title: spec.title, ...(subject ? { target: subject } : {}), meta };
 }
@@ -109,11 +112,11 @@ function nativeBody(style: BodyStyle, body: string) {
 /** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */
 export function reRenderers(spec: RenderSpec) {
 	return {
-		renderCall(args: RenderArgs, _options: ToolRenderResultOptions, theme: Theme): Component {
+		renderCall(args: unknown, _options: ToolRenderResultOptions, theme: Theme): Component {
 			return new Text(callLine(spec, args, theme), 0, 0);
 		},
 
-		renderResult(result: RenderableResult, options: ToolRenderResultOptions, theme: Theme, args?: RenderArgs): Component {
+		renderResult(result: RenderableResult, options: ToolRenderResultOptions, theme: Theme, args?: unknown): Component {
 			const shown = firstText(result);
 			if (options.isPartial) {
 				const frames = theme.spinnerFrames;
@@ -126,10 +129,11 @@ export function reRenderers(spec: RenderSpec) {
 			}
 
 			const details = result.details;
-			const { header, body } = splitBody(shown);
+			const { header, body, tag } = splitBody(shown, details);
 			const meta: string[] = [];
 			if (details?.truncated) meta.push(theme.fg("warning", "truncated"));
 			if (details?.artifactId) meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
+			if (tag) meta.push(theme.fg("dim", tag));
 			const subject = subjectOf(spec, args);
 			const headLine = [theme.styledSymbol("status.success", "success"), theme.fg("toolTitle", header), ...(subject && !header.includes(subject) ? [theme.fg("dim", `(${subject})`)] : []), ...meta].join(" ");
 
@@ -142,11 +146,11 @@ export function reRenderers(spec: RenderSpec) {
 			return new Text(out.join("\n"), 0, 0);
 		},
 
-		describeCall(args: RenderArgs): NativeToolView {
+		describeCall(args: unknown): NativeToolView {
 			return { tool: nativeHead(spec, args), inline: true };
 		},
 
-		describeResult(result: RenderableResult, options: ToolRenderResultOptions, args?: RenderArgs): NativeToolView {
+		describeResult(result: RenderableResult, options: ToolRenderResultOptions, args?: unknown): NativeToolView {
 			const shown = firstText(result);
 			if (options.isPartial) {
 				return { tool: nativeHead(spec, args, [[span(shown || `${spec.title}…`, "muted", { fx: "shimmer" })]]), inline: true };
@@ -163,8 +167,13 @@ export function reRenderers(spec: RenderSpec) {
 				};
 			}
 			const details = result.details;
-			const { header, body } = splitBody(shown);
-			const meta = [header, ...(details?.truncated ? [[span("truncated", "warning")]] : []), ...(details?.artifactId ? [[span(`artifact://${details.artifactId}`, "muted")]] : [])];
+			const { header, body, tag } = splitBody(shown, details);
+			const meta = [
+				header,
+				...(details?.truncated ? [[span("truncated", "warning")]] : []),
+				...(details?.artifactId ? [[span(`artifact://${details.artifactId}`, "muted")]] : []),
+				...(tag ? [[span(tag, "muted")]] : []),
+			];
 			const node = nativeBody(spec.body, body);
 			return node ? { tool: nativeHead(spec, args, meta), body: [node] } : { tool: nativeHead(spec, args, meta), inline: true };
 		},

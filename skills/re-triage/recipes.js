@@ -298,19 +298,23 @@ const TABLES = {
 
 	// --- one observation -----------------------------------------------------------------------
 
-	// The id is read off the last line only: the body is the binary's own text and may hold anything.
-	const EVIDENCE_TAG = /\n\[evidence ([0-9a-f]{8})\b[^\n]*\]$/;
+	// How much of an evidence record's id the engine shows, in a tag and in a report, and takes in record_finding.
+	const SHOWN_ID = 8;
+
+	/** The id of the evidence record a call left, as it is cited. The engine says it as data: the text is the binary's own and may hold anything. */
+	const evidenceId = (details) => (typeof details.evidenceId === "string" ? details.evidenceId.slice(0, SHOWN_ID) : undefined);
 
 	/**
 	 * The whole of what rizin printed for a call. A result's text is the header line, the output,
-	 * and the evidence tag; past the size cap the output in the text is cut — for a `*j` command,
+	 * and, when the call left an evidence record, one last line that names it; past the size cap the output in the text is cut — for a `*j` command,
 	 * whose JSON is one line, cut to nothing — and the engine keeps all of it as a session
 	 * artifact, which eval's own read() returns raw. A recipe that parsed cut JSON would report a
 	 * binary with no functions, so when the whole output cannot be had it stops and says so.
 	 */
 	async function wholeOutput(run, label, text, details) {
 		const afterHeader = (full) => (full.includes("\n") ? full.slice(full.indexOf("\n") + 1) : "");
-		if (details.truncated !== true) return afterHeader(text.replace(EVIDENCE_TAG, ""));
+		const recorded = evidenceId(details) !== undefined && text.includes("\n");
+		if (details.truncated !== true) return afterHeader(recorded ? text.slice(0, text.lastIndexOf("\n")) : text);
 		const lost = (why, more) => refusal("cutOutput", { recipe: run.name, label, why: fill(TEXT.refusals[why], more) });
 		const artifact = details.artifactId;
 		if (typeof artifact !== "string") throw lost("cutNoArtifact");
@@ -335,7 +339,7 @@ const TABLES = {
 		const text = typeof result === "string" ? result : String(result?.text ?? "");
 		const details = isObject(result) && isObject(result.details) ? result.details : {};
 		if (isObject(result) && result.hasError === true) throw new Error(text);
-		const id = EVIDENCE_TAG.exec(text)?.[1];
+		const id = evidenceId(details);
 		if (id) run.evidence.push({ label, id });
 		// Only a call that printed something carries the command it ran; "(no output)" is the engine's words, not rizin's.
 		const raw = Array.isArray(details.commands) ? await wholeOutput(run, label, text, details) : "";

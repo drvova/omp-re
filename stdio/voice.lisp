@@ -6,20 +6,24 @@
 ;;;; how the engine says them itself — a binary can be named on the command
 ;;;; line (--binary), and the model reaches a tool from omp's eval as `await
 ;;;; tool.<name>({...})'. The keys are the engine's (engine/host.lisp,
-;;;; +VOICE+); only what omp says differently is here. This file also makes
-;;;; the host's package.
-
-(defpackage #:omp-re-stdio
-  (:use #:cl #:omp-re)
-  (:export #:serve #:+protocol+))
+;;;; +VOICE+); only what omp says differently is here.
 
 (in-package #:omp-re-stdio)
 
+(defun help-keys ()
+  "The line of /re help that names omp's keys, from the list omp's side
+binds them from (the protocol's `keys')."
+  (format nil "keys: ~{~a~^ · ~}; in a code view: ~{~a~^ · ~}"
+          (map 'list (lambda (key) (format nil "~a ~a" (jstring key "key") (jstring key "view")))
+               (jget *protocol* "keys" "views"))
+          (map 'list (lambda (key) (format nil "~a ~a" (jstring key "key") (jstring key "long")))
+               (jget *protocol* "keys" "code"))))
+
 (defparameter +omp-voice+
-  '((:open-first . "use /re open <path>, open_binary, or --binary <path> first")
+  `((:open-first . "use /re open <path>, open_binary, or --binary <path> first")
     (:launcher . "A desktop launch of omp")
     (:open-binary-note . ", especially in a task subagent, which starts with no binary open")
-    (:help-keys . "keys: alt+g functions · alt+s strings · alt+i imports; in a code view: d toggle decompile · x follow xrefs · a ask the model")
+    (:help-keys . ,(help-keys))
     (:list-hint . "enter ~a · type to filter · esc close")
     (:references-hint . "enter open · esc back")
     (:next-prompt . "(e.g. omp -c -p \"<agenda>\")")

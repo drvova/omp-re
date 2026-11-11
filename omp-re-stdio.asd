@@ -15,5 +15,9 @@
   :depends-on ("omp-re")
   :pathname "stdio/"
   :serial t
-  :components ((:file "voice")
+;; protocol.json is read when the system is loaded, not compiled in: a
+  ;; change to it needs no recompile.
+  :components ((:static-file "protocol.json")
+               (:file "protocol")
+               (:file "voice")
                (:file "server")))

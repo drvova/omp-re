@@ -1356,8 +1356,13 @@ def _omp_re_recipes():
 
     # --- one observation ----------------------------------------------------------------------
 
-    # The id is read off the last line only: the body is the binary's own text and may hold anything.
-    EVIDENCE_TAG = re.compile(r"\n\[evidence ([0-9a-f]{8})\b[^\n]*\]\Z", re.ASCII)
+    # How much of an evidence record's id the engine shows, in a tag and in a report, and takes in record_finding.
+    SHOWN_ID = 8
+
+    def evidence_id_of(details):
+        """The id of the evidence record a call left, as it is cited. The engine says it as data: the text is the binary's own and may hold anything."""
+        full = details.get("evidenceId")
+        return full[:SHOWN_ID] if isinstance(full, str) else None
 
     def settled(value):
         """
@@ -1394,13 +1399,14 @@ def _omp_re_recipes():
     def whole_output(run, label, text, details):
         """
         The whole of what rizin printed for a call. A result's text is the header line, the output,
-        and the evidence tag; past the size cap the output in the text is cut — for a `*j` command,
+        and, when the call left an evidence record, one last line that names it; past the size cap the output in the text is cut — for a `*j` command,
         whose JSON is one line, cut to nothing — and the engine keeps all of it as a session
         artifact, which eval's own read() returns raw. A recipe that parsed cut JSON would report a
         binary with no functions, so when the whole output cannot be had it stops and says so.
         """
         if details.get("truncated") is not True:
-            return after_header(EVIDENCE_TAG.sub("", text, count=1))
+            recorded = evidence_id_of(details) is not None and "\n" in text
+            return after_header(text[: text.rindex("\n")] if recorded else text)
 
         def lost(why, more=None):
             return refusal("cutOutput", {"recipe": run["name"], "label": label, "why": fill(TEXT["refusals"][why], more)})
@@ -1436,8 +1442,7 @@ def _omp_re_recipes():
             details = {}
         if get(result, "hasError") is True:
             raise RuntimeError(text)
-        tag = EVIDENCE_TAG.search(text)
-        evidence_id = tag.group(1) if tag else None
+        evidence_id = evidence_id_of(details)
         if evidence_id:
             run["evidence"].append({"label": label, "id": evidence_id})
         # Only a call that printed something carries the command it ran; "(no output)" is the engine's words, not rizin's.

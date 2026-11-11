@@ -6,29 +6,44 @@
  */
 import { readFile } from "node:fs/promises";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { Engine, type HostHandler, type Json, type JsonObject } from "./engine.ts";
-
-/** What omp draws between calls: the status band's facts and the evidence ids `/re cite` completes. Sent by the engine with every answer that may have changed them. */
-export interface SessionState {
-	facts: JsonObject | null;
-	evidence: [id: string, description: string][];
-}
+import { logger } from "@oh-my-pi/pi-utils";
+import { Engine, type EngineRequest, type HostHandlers, type Json, sbclCommand } from "./engine.ts";
+import { CONSTANTS, type Entry, type Level, PROTOCOL, type Session as SessionRef, type State, type ToEngine, type ToHost } from "./protocol.ts";
 
 interface Session {
 	pi: ExtensionAPI;
 	/** The latest context omp handed this session: what an engine request made outside any call is answered with. */
 	ctx: ExtensionContext;
-	state: SessionState;
-	onState?: (ctx: ExtensionContext, state: SessionState) => void;
+	/** What the engine last said of the session (the protocol's `state`): what omp draws between calls, and the memory it hands back. */
+	state: State;
+	onState?: (ctx: ExtensionContext, state: State) => void;
 }
 
-type Level = "info" | "warning" | "error";
+/**
+ * What this module touches of the omp process itself, outside omp's extension
+ * API: a headless run's standard output and error and its exit status, the
+ * process's log, and the command that starts the engine. They are here so a
+ * test can put its own in their place instead of reaching for the process's.
+ */
+export interface Outside {
+	/** A headless run's standard output: what a pipeline reads. */
+	print(text: string): void;
+	printError(text: string): void;
+	/** Mark this omp process as having failed, for whoever reads its exit status. */
+	failExit(): void;
+	/** A line for omp's log file: what the engine wrote to its standard error, as it arrives. */
+	log(line: string): void;
+	engineCommand(): readonly string[];
+}
 
 interface Shared {
 	sessions: Map<string, Session>;
+	/** The extension instances omp has loaded and not shut down: the engine ends with the last of them. */
+	instances: Set<ExtensionAPI>;
 	/** Tool calls under way, by the engine request that serves each: where its progress is shown. */
 	updates: Map<number, (partial: AgentToolResult) => void>;
 	tickers: Map<string, ReturnType<typeof setInterval>>;
+	outside: Outside;
 	running?: Engine;
 }
 
@@ -36,40 +51,54 @@ interface Shared {
  * What all of this omp process's sessions share. omp imports an extension
  * afresh for every session it loads it into, so a module-level variable
  * would be one per session; the engine is one per process, and so this is
- * kept on the process's global object.
+ * kept on the process's global object. The key carries the protocol
+ * version: two copies of the plugin that speak different protocols, loaded
+ * into one omp, each get their own engine instead of one talking to the
+ * other's.
  */
-const shared: Shared = ((globalThis as Record<symbol, unknown>)[Symbol.for("omp-re.host")] ??= (() => {
-	const made: Shared = { sessions: new Map(), updates: new Map(), tickers: new Map() };
-	// omp ending any other way than by its sessions' shutdown: the child must not outlive it.
-	process.on("exit", () => made.running?.kill());
-	return made;
-})()) as Shared;
-const { sessions, updates, tickers } = shared;
+const shared: Shared = ((globalThis as Record<symbol, unknown>)[Symbol.for(`omp-re.host/${PROTOCOL}`)] ??= {
+	sessions: new Map(),
+	instances: new Set(),
+	updates: new Map(),
+	tickers: new Map(),
+	outside: {
+		print: (text) => console.log(text),
+		printError: (text) => console.error(text),
+		failExit: () => {
+			process.exitCode = 1;
+		},
+		log: (line) => logger.warn(`omp-re engine: ${line}`),
+		engineCommand: sbclCommand,
+	},
+} satisfies Shared) as Shared;
+const { sessions, instances, updates, tickers } = shared;
+export const outside = shared.outside;
 
 /** Remember `ctx` as its session's latest and say which session a request is for. */
-export function sessionOf(pi: ExtensionAPI, ctx: ExtensionContext, onState?: Session["onState"]): JsonObject {
+export function sessionOf(pi: ExtensionAPI, ctx: ExtensionContext, onState?: Session["onState"]): SessionRef {
 	const id = ctx.sessionManager.getSessionId();
-	const known = sessions.get(id);
+	let known = sessions.get(id);
 	if (known) {
 		known.ctx = ctx;
 		known.pi = pi;
 		if (onState) known.onState = onState;
 	} else {
-		sessions.set(id, { pi, ctx, state: { facts: null, evidence: [] }, onState });
+		known = { pi, ctx, state: { band: null, evidence: [], memory: {} }, onState };
+		sessions.set(id, known);
 	}
-	return { id, cwd: ctx.cwd, hasUI: ctx.hasUI };
+	return { id, cwd: ctx.cwd, hasUI: ctx.hasUI, memory: known.state.memory };
 }
 
-export function stateOf(sessionId: string): SessionState | undefined {
+export function stateOf(sessionId: string): State | undefined {
 	return sessions.get(sessionId)?.state;
 }
 
-/** Take the state an engine answer carries, and redraw what shows it. */
-export function applyState(sessionId: string, state: unknown): void {
+/** Take the state the engine sent, and redraw what shows it. */
+function applyState(sessionId: string, state: State): void {
 	const session = sessions.get(sessionId);
-	if (!session || state === null || typeof state !== "object") return;
-	session.state = state as SessionState;
-	session.onState?.(session.ctx, session.state);
+	if (!session) return;
+	session.state = state;
+	session.onState?.(session.ctx, state);
 }
 
 /**
@@ -83,9 +112,9 @@ export function tell(ctx: ExtensionContext, text: string, level: Level = "info")
 		ctx.ui.notify(text, level);
 		return;
 	}
-	if (level === "info") console.log(text);
-	else console.error(text);
-	if (level === "error") process.exitCode = 1;
+	if (level === "info") outside.print(text);
+	else outside.printError(text);
+	if (level === "error") outside.failExit();
 }
 
 /** Show a long analysis as under way, counting its seconds, until it is said to be over. */
@@ -104,8 +133,17 @@ function showProgress(key: string, text: string | null, show: (text: string | un
 	tickers.set(key, timer);
 }
 
-/** The side model's reply to `prompt`, or why there is none. Some transports refuse a turn with no tools; the reply to one with tools is as good, since a side turn runs none. */
-export async function askSideModel(ctx: ExtensionContext, prompt: string, seconds: number): Promise<JsonObject> {
+/**
+ * Whether `error` is omp refusing a side turn with no tools. Some transports need the tool definitions sent, and omp
+ * 18 says so only in the error's text ("… does not support tools: false …", agent-session.ts): there is no code or
+ * class to test. If omp rewords it, the retry below stops happening and the audit says the side turn failed.
+ */
+function refusesToolFreeTurn(error: unknown): boolean {
+	return error instanceof Error && error.message.includes("tools: false");
+}
+
+/** The side model's reply to `prompt`, or omp's reason there is none. The reply to a turn with tools is as good as one without, since a side turn runs none. */
+export async function askSideModel(ctx: ExtensionContext, prompt: string, seconds: number): Promise<ToHost["judge"]["result"]> {
 	const run = ctx.runEphemeralTurn;
 	if (typeof run !== "function" || !ctx.model) return {};
 	const signal = AbortSignal.timeout(seconds * 1000);
@@ -121,79 +159,90 @@ export async function askSideModel(ctx: ExtensionContext, prompt: string, second
 		try {
 			return { text: (await turn(true)).replyText };
 		} catch (error) {
-			if (!(error instanceof Error) || !error.message.includes("tools: false")) throw error;
+			if (!refusesToolFreeTurn(error)) throw error;
 			return { text: (await turn(false)).replyText };
 		}
 	} catch (error) {
-		return { reason: `the audit side turn failed: ${error instanceof Error ? error.message : String(error)}`.split("\n", 1)[0]!.slice(0, 200) };
+		return { reason: error instanceof Error ? error.message : String(error) };
 	}
 }
 
-function forSession(handle: (session: Session, params: JsonObject) => unknown | Promise<unknown>): HostHandler {
+/**
+ * Write the session's file now. omp writes one on a session's first model turn, so a headless run that only ran a
+ * `/re` line would lose what it recorded. The session manager has `ensureOnDisk` for this, but omp 18's extension
+ * API shows extensions a read-only view of the manager that leaves it out: there is no API to call. A manager
+ * without the method is left as it is.
+ */
+async function writeSessionNow(ctx: ExtensionContext): Promise<void> {
+	await (ctx.sessionManager as { ensureOnDisk?: () => Promise<void> }).ensureOnDisk?.();
+}
+
+function forSession<P extends { session: string }, R>(handle: (session: Session, params: P) => R): (params: P) => R {
 	return (params) => {
-		const session = sessions.get(String(params.session));
+		const session = sessions.get(params.session);
 		if (!session) throw new Error(`omp-re: omp has no session ${JSON.stringify(params.session)}`);
 		return handle(session, params);
 	};
 }
 
 /** The session's record as the engine reads it: the custom entries the engine wrote, on the current branch, root first. */
-function record(ctx: ExtensionContext): JsonObject[] {
-	const entries: JsonObject[] = [];
+function record(ctx: ExtensionContext): Entry[] {
+	const entries: Entry[] = [];
 	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type === "custom" && entry.customType.startsWith("re.")) entries.push({ id: entry.id, customType: entry.customType, data: entry.data as Json });
+		if (entry.type === "custom" && entry.customType.startsWith(CONSTANTS.entryPrefix)) entries.push({ id: entry.id, customType: entry.customType, data: entry.data as Json });
 	}
 	return entries;
 }
 
-const handlers: Record<string, HostHandler> = {
+const handlers: HostHandlers = {
 	entries: forSession(({ ctx }, { after, count }) => {
 		const all = record(ctx);
-		const held = typeof count === "number" ? count : 0;
-		const continues = held <= all.length && (held === 0 || all[held - 1]!.id === after);
-		return continues ? { append: all.slice(held) } : { all };
+		const continues = count <= all.length && (count === 0 || all[count - 1]!.id === after);
+		return continues ? { append: all.slice(count) } : { all };
 	}),
 	append: forSession(({ pi, ctx }, { type, data }) => {
-		pi.appendEntry(String(type), data);
+		pi.appendEntry(type, data);
 		// appendEntry answers nothing; the entry it wrote is the branch's new leaf.
-		return { id: ctx.sessionManager.getLeafId() };
+		const id = ctx.sessionManager.getLeafId();
+		if (id === null) throw new Error("omp-re: omp did not write the entry");
+		return { id };
 	}),
-	judge: forSession(({ ctx }, { prompt, seconds }) => askSideModel(ctx, String(prompt), typeof seconds === "number" ? seconds : 30)),
-	saveArtifact: forSession(async ({ ctx }, { content, label }) => ({ id: await ctx.sessionManager.saveArtifact(String(content), String(label)) })),
+	judge: forSession(({ ctx }, { prompt, seconds }) => askSideModel(ctx, prompt, seconds)),
+	saveArtifact: forSession(async ({ ctx }, { content, label }) => {
+		const id = await ctx.sessionManager.saveArtifact(content, label);
+		return id === undefined ? {} : { id };
+	}),
 	readArtifact: forSession(async ({ ctx }, { id }) => {
-		const path = await ctx.sessionManager.getArtifactPath(String(id));
+		const path = await ctx.sessionManager.getArtifactPath(id);
 		return path ? { text: await readFile(path, "utf8") } : {};
 	}),
 	keepSession: forSession(async ({ pi, ctx }, { name }) => {
-		// omp writes a session on its first model turn; a headless run that only ran a /re line would lose what it recorded.
-		const manager = ctx.sessionManager as { ensureOnDisk?: () => Promise<void> };
-		await manager.ensureOnDisk?.();
+		await writeSessionNow(ctx);
 		// `omp -c` skips a session with no turn and no title. An interactive session is left for omp to title.
-		if (!ctx.hasUI && !pi.getSessionName()) await pi.setSessionName(String(name));
+		if (!ctx.hasUI && !pi.getSessionName()) await pi.setSessionName(name);
 		return {};
 	}),
 	notify: forSession(({ pi, ctx }, { text, level }) => {
-		if (ctx.hasUI) ctx.ui.notify(String(text), level as Level);
-		else if (level === "error") pi.logger.error(String(text));
-		else pi.logger.warn(String(text));
+		if (ctx.hasUI) ctx.ui.notify(text, level);
+		else if (level === "error") pi.logger.error(text);
+		else pi.logger.warn(text);
 	}),
-	tell: forSession(({ ctx }, { text, level }) => tell(ctx, String(text), level as Level)),
+	tell: forSession(({ ctx }, { text, level }) => tell(ctx, text, level)),
 	transcript: forSession(({ pi }, { type, text, details }) => {
-		pi.sendMessage({ customType: String(type), content: String(text), display: true, details });
+		pi.sendMessage({ customType: type, content: text, display: true, details });
 	}),
-	state: ({ session, state }) => applyState(String(session), state),
+	state: ({ session, state }) => applyState(session, state),
 	progress: forSession(({ ctx }, { request, text }) => {
-		const update = typeof request === "number" ? updates.get(request) : undefined;
-		const said = typeof text === "string" ? text : null;
-		if (update) showProgress(`request ${request}`, said, (line) => line !== undefined && update({ content: [{ type: "text", text: line }], details: undefined }));
-		else if (ctx.hasUI) showProgress(`session ${ctx.sessionManager.getSessionId()}`, said, (line) => ctx.ui.setStatus("re", line));
+		const update = request === null ? undefined : updates.get(request);
+		if (update) showProgress(`request ${request}`, text, (line) => line !== undefined && update({ content: [{ type: "text", text: line }], details: undefined }));
+		else if (ctx.hasUI) showProgress(`session ${ctx.sessionManager.getSessionId()}`, text, (line) => ctx.ui.setStatus("re", line));
 	}),
 };
 
-/** The engine, started on first need. A start that failed, or an engine that ended, is not kept: the next need starts another, and its sessions come back from their records. */
+/** The engine, started on first need. A start that failed, or an engine that ended, is not kept: the next need starts another, and its sessions come back from their records and the memory omp holds of them. */
 export function engine(): Engine {
 	if (!shared.running) {
-		const started = new Engine(handlers);
+		const started = new Engine({ command: outside.engineCommand(), handlers, log: (line) => outside.log(line) });
 		shared.running = started;
 		void started.exited.then(() => {
 			if (shared.running === started) shared.running = undefined;
@@ -202,23 +251,31 @@ export function engine(): Engine {
 	return shared.running;
 }
 
+/** omp loaded the extension into a session: the engine is kept until `leaveSession` has ended every one of them. */
+export function enter(pi: ExtensionAPI): void {
+	instances.add(pi);
+}
+
+/** The engine's methods that are about a session. */
+type SessionMethod = { [M in EngineRequest]: ToEngine[M]["params"] extends { session: SessionRef } ? M : never }[EngineRequest];
+
 /** Ask the engine about `ctx`'s session, and take the state its answer carries. `onUpdate` is where a tool call's progress goes. */
-export async function ask<T extends JsonObject = JsonObject>(
+export async function ask<M extends SessionMethod>(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	method: string,
-	params: JsonObject = {},
+	method: M,
+	params: Omit<ToEngine[M]["params"], "session">,
 	options: { signal?: AbortSignal; onUpdate?: (partial: AgentToolResult) => void } = {},
-): Promise<T> {
+): Promise<ToEngine[M]["result"]> {
 	const session = sessionOf(pi, ctx);
 	let requestId: number | undefined;
 	try {
-		const answer = await engine().request<T>(method, { session, ...params }, options.signal, (id) => {
+		const answer: ToEngine[SessionMethod]["result"] = await engine().request<SessionMethod>(method, { session, ...params } as ToEngine[M]["params"], options.signal, (id) => {
 			requestId = id;
 			if (options.onUpdate) updates.set(id, options.onUpdate);
 		});
-		applyState(session.id as string, method === "facts" ? answer : answer.state);
-		return answer;
+		if ("state" in answer && answer.state) applyState(session.id, answer.state);
+		return answer as ToEngine[M]["result"];
 	} finally {
 		if (requestId !== undefined) {
 			updates.delete(requestId);
@@ -227,13 +284,19 @@ export async function ask<T extends JsonObject = JsonObject>(
 	}
 }
 
-/** omp left a session for another, or is done with it: the engine ends its processes. `over` when it is the session's end; the engine ends with the last of them, inside omp's shutdown budget. */
+/**
+ * omp left a session for another, or is done with it: the engine ends its processes. `over` when omp is done with
+ * the extension instance too; the engine ends with the last of them, inside omp's shutdown budget. A failure to say
+ * so to an engine that is going anyway is logged, not raised: nothing can be done about it here.
+ */
 export async function leaveSession(pi: ExtensionAPI, ctx: ExtensionContext, over: boolean): Promise<void> {
 	const id = ctx.sessionManager.getSessionId();
 	const live = shared.running;
-	if (live) await ask(pi, ctx, "event", { kind: over ? "shutdown" : "before-switch" }).catch(() => {});
+	if (live) await ask(pi, ctx, "event", { kind: over ? "shutdown" : "before-switch" }).catch((error) => outside.log(`leaving session ${id}: ${error instanceof Error ? error.message : String(error)}`));
 	sessions.delete(id);
-	if (over && live && sessions.size === 0) {
+	if (!over) return;
+	instances.delete(pi);
+	if (live && instances.size === 0 && shared.running === live) {
 		shared.running = undefined;
 		await live.stop();
 	}
