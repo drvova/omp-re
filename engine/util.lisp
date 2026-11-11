@@ -12,6 +12,10 @@
 
 ;;; --- small things ---------------------------------------------------------------
 
+(declaim (ftype (function ((or null string)) (values string &optional)) trimmed)
+         (ftype (function ((or null string)) (values boolean &optional)) blank-p)
+         (ftype (function (string) (values list &optional)) split-lines)
+         (ftype (function (list) (values string &optional)) join-lines))
 (defun trimmed (text)
   (string-trim '(#\Space #\Tab #\Return #\Newline) (or text "")))
 
@@ -83,6 +87,7 @@ from the system."
         (dotimes (i count) (setf (aref octets i) (random 256 state)))))
     octets))
 
+(declaim (ftype (function () (values record-id &optional)) uuid))
 (defun uuid ()
   (let ((octets (random-octets 16)))
     (setf (aref octets 6) (logior #x40 (logand #x0f (aref octets 6)))
@@ -145,6 +150,7 @@ and `-' kept, anything else an underscore."
 (defvar *js-scanners* (make-hash-table :test #'equal))
 (defvar *js-scanners-lock* (sb-thread:make-mutex :name "omp-re patterns"))
 
+(declaim (ftype (function (string string) (values boolean &optional)) js-scan))
 (defun js-scan (regex text)
   "Whether the pattern REGEX matches in TEXT, as JavaScript's test() answers.
 REGEX is a literal pattern; its scanner is compiled once."
@@ -181,6 +187,7 @@ lowercased as written."
     (fail "omp-re: invalid ~a: ~a" key (js-string value)))
   value)
 
+(declaim (ftype (function ((integer 0)) (values address-text &optional)) ea-from-offset))
 (defun ea-from-offset (offset)
   (format nil "0x~(~x~)" offset))
 

@@ -21,6 +21,7 @@
 
 ;;; --- settings -------------------------------------------------------------------------
 
+(declaim (type list +settings+))
 (defparameter +settings+
   '((:rizin-path :key "rizin_path" :type :path :default "" :env "OMPRE_RIZIN_PATH"
      :doc "the rizin to run when it is not the one on PATH")
@@ -93,6 +94,7 @@ nothing. A :path or :directory may arrive as a string or a pathname."
     (:integer (let ((number (ignore-errors (parse-integer (or (env variable) "")))))
                 (and number (plusp number) number)))))
 
+(declaim (ftype (function (keyword) (values t &optional)) setting-value))
 (defun setting-value (name)
   "The setting NAME. One rule for all of them: what the operator's section
 says, when it says something other than the declared default; else the
@@ -176,9 +178,27 @@ there is no turn, the record is the session's own file with every entry on
 the branch, a notice is a line on the log, an artifact is a file beside the
 record, nobody is watching and there is nobody to ask.")
 
-(defun install-host (&rest services)
+(declaim (ftype (function (&key (:setting function) (:environment function) (:voice function)
+                                (:home function) (:turn function) (:directory function)
+                                (:entries function) (:append-entry function) (:notify function)
+                                (:judge function) (:progress function) (:cancelled function)
+                                (:save-artifact function) (:read-artifact function)
+                                (:locate-artifact function) (:transcript function)
+                                (:has-ui function) (:keep-session function))
+                          (values t &optional))
+                install-host)
+         (ftype (function () (values null &optional)) clear-host))
+(defun install-host (&rest services
+                     &key setting environment voice home turn directory entries append-entry notify
+                          judge progress cancelled save-artifact read-artifact locate-artifact
+                          transcript has-ui keep-session)
   "Make SERVICES — a plist as *HOST* describes — the host, and start what
 the engine does for every host by itself: closing idle sessions' processes."
+  ;; The keys are named so that a host that installs a service the engine
+  ;; never asks for is told when it is compiled; the plist is what is kept.
+  (declare (ignore setting environment voice home turn directory entries append-entry notify
+                   judge progress cancelled save-artifact read-artifact locate-artifact
+                   transcript has-ui keep-session))
   (setf *host* services)
   (start-idle-reaper))
 
@@ -211,12 +231,15 @@ of its own handles it."
         (error (condition)
           (fail "omp-re: the host could not answer ~(~a~): ~a" service condition))))))
 
+(declaim (type session-id +default-session+))
 (defparameter +default-session+ "default"
   "The session a call outside any turn is for.")
 
+(declaim (ftype (function () (values session-id &optional)) turn-session-id))
 (defun turn-session-id ()
   (or (getf (ask-host :turn) :session-id) +default-session+))
 
+(declaim (ftype (function (level (or string function) &rest t) (values string &optional)) notify))
 (defun notify (level control &rest arguments)
   "Tell the operator something outside any answer, at LEVEL — :INFO for what
 is no fault, :WARNING, :ERROR. The one way the engine does: how loudly each
@@ -291,6 +314,7 @@ it when no host does:
   (or (and (host-service :voice) (ask-host :voice key))
       (cdr (or (assoc key +voice+) (error "omp-re has no phrase ~s" key)))))
 
+(declaim (ftype (function (string) (values null &optional)) check-cancelled))
 (defun check-cancelled (what)
   "Leave, with a refusal naming WHAT was under way, a call whoever asked for
 it has given up on. Called where a call waits — for rizin, for the session,

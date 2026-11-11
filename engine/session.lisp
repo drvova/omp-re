@@ -36,7 +36,7 @@
   (binary-path nil)
   (binary-sha256 nil)
   (load-options nil)                    ; a JSON object, or NIL for header autodetection
-  (file-entries (make-array 0 :adjustable t :fill-pointer 0)) ; the record's own file, as read and written
+  (file-entries (make-array 0 :adjustable t :fill-pointer 0) :type vector) ; the record's own file, as read and written
   (synced-view nil)                     ; the branch's entries the fields above were last set from,
   (synced-length -1)                    ; and how many there were then
   (applied '())                         ; ((CONTRIBUTION-NAME . FINGERPRINT) ...) of what the live rizin carries
@@ -47,12 +47,19 @@
   (artifacts 0)
   (last-used (get-universal-time)))
 
+;; The two accessors a host may call, said as every exported function is;
+;; the structure's own slot types are what holds them.
+(declaim (ftype (function (session) (values session-id &optional)) session-id)
+         (ftype (function (session) (values vector &optional)) session-file-entries))
+
 (defvar *sessions* (make-hash-table :test #'equal))
 (defvar *sessions-lock* (sb-thread:make-mutex :name "omp-re sessions"))
 
 (defvar *session* nil
   "The session the running tool call or /re line is for.")
 
+(declaim (ftype (function (session string) (values t &optional)) session-held)
+         (ftype (function (t session string) (values t &optional)) (setf session-held)))
 (defun session-held (session name)
   (cdr (assoc name (session-kept session) :test #'equal)))
 
@@ -83,6 +90,8 @@ mid-append — loses that one entry, never the record."
           (when (and (hash-table-p entry) (jstring entry "customType"))
             (vector-push-extend entry (session-file-entries session))))))))
 
+(declaim (ftype (function (session string json-value &optional (or null string)) (values json-object &optional))
+                file-append-entry))
 (defun file-append-entry (session type data &optional turn)
   "Append one entry of TYPE carrying DATA to SESSION's record file, on disk
 before it is in memory's list: what was said to be recorded is. TURN, when a
@@ -97,6 +106,7 @@ host has turns, stamps the entry with the one it was written in."
     (vector-push-extend entry (session-file-entries session))
     entry))
 
+(declaim (ftype (function (session-id) (values session &optional)) find-session))
 (defun find-session (id)
   "The session called ID, its record file read and its state restored from
 the record on first use."
@@ -386,6 +396,7 @@ started here."
       ;; One group's trouble must not leave another's process running.
       (ignore-errors (funcall (contribution-close contribution) session)))))
 
+(declaim (ftype (function () (values (member t) &optional)) shutdown-sessions))
 (defun shutdown-sessions ()
   "Close every session's processes and forget the sessions. A record is
 never deleted: a session comes back from its own."

@@ -113,6 +113,8 @@
   (with-output-to-string (out)
     (loop for octet across octets do (format out "~(~2,'0x~)" octet))))
 
+(declaim (ftype (function (string) (values sha256-hex &optional)) sha256-hex)
+         (ftype (function ((or string pathname)) (values sha256-hex &optional)) sha256-file))
 (defun sha256-hex (string)
   (hex (sha256-octets (utf-8 string))))
 

@@ -20,6 +20,7 @@
   (:report (lambda (condition stream)
              (format stream "not JSON: ~a" (json-refusal-detail condition)))))
 
+(declaim (ftype (function (string) (values json-value &optional)) json-decode json-parse))
 (defun json-decode (source)
   "The value the JSON text SOURCE spells; text after the first value is ignored.
 Signals JSON-REFUSAL on anything else."
@@ -194,9 +195,11 @@ JSON.stringify(value, null, INDENT) lays it out."
           ((listp value) (write-json (coerce value 'simple-vector) out indent depth))
           (t (error "no JSON form for ~s" value)))))
 
+(declaim (ftype (function (t &key (:indent (or null (integer 0)))) (values string &optional)) json-encode))
 (defun json-encode (value &key indent)
   (with-output-to-string (out) (write-json value out indent)))
 
+(declaim (ftype (function (&rest t) (values json-object &optional)) obj))
 (defun obj (&rest pairs)
   "A JSON object from alternating key and value PAIRS, in that order. A pair
 whose value is the keyword :ABSENT is left out, so an optional member is
@@ -207,6 +210,11 @@ written inline: (obj \"ea\" (or ea :absent))."
                (setf (gethash key object) value)))
     object))
 
+(declaim (ftype (function (t &rest string) (values t &optional)) jget)
+         (ftype (function (t &rest string) (values (or null string) &optional)) jstring)
+         (ftype (function (t &rest string) (values (or null real) &optional)) jnumber)
+         (ftype (function (t &rest string) (values list &optional)) jlist)
+         (ftype (function (t) (values boolean &optional)) json-array-p))
 (defun jget (object &rest path)
   "The member of the decoded JSON OBJECT at the string keys PATH, with null
 read as NIL; NIL as soon as a step is not an object."

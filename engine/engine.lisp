@@ -31,9 +31,60 @@
 ;;;; signals, but ENGINE-HOLD: a failure is an answer with "failed" true and
 ;;;; the reason as its text. What the engine in turn asks of the host is in
 ;;;; host.lisp.
+;;;;
+;;;; Each is declared in the types of types.lisp. Those that never signal
+;;;; are made by DEFINE-SURFACE, which keeps that promise for an argument of
+;;;; the wrong type too.
 
 (in-package #:omp-re)
 
+(defun mistyped-argument (function parameter type value)
+  (let ((*package* (find-package '#:omp-re))
+        (shown (prin1-to-string value)))
+    (format nil "omp-re: ~(~a~): ~(~a~) must be of type ~(~s~), not ~a"
+            function parameter type
+            (if (< 80 (length shown)) (format nil "~a..." (subseq shown 0 77)) shown))))
+
+(defmacro define-surface (name (&rest parameters) (result mistyped) &body body)
+  "Define NAME, a function of the surface that never signals. PARAMETERS is
+a lambda list in which every variable is (VARIABLE TYPE), or after &OPTIONAL
+and &KEY (VARIABLE TYPE [DEFAULT]); RESULT is the type of its value. That
+type is proclaimed, so a host's calls are held to it when the host is
+compiled. A call that arrives all the same with an argument of another type
+is answered, not signalled: MISTYPED, a function of what is wrong in the
+engine's words, gives the answer.
+
+This is why NAME is not a DEFUN. SBCL holds a DEFUN to its proclaimed type
+on entry, before anything of the function has run, and the caller would get
+a TYPE-ERROR where the surface promises an answer. The function installed
+here takes anything and checks for itself."
+  (let ((kind nil) (lambda-list '()) (types '()) (checks '())
+        (text (gensym "TEXT")))
+    (dolist (parameter parameters)
+      (if (member parameter '(&optional &key))
+          (progn (setf kind parameter)
+                 (push parameter lambda-list)
+                 (push parameter types))
+          (destructuring-bind (variable type &optional default) parameter
+            (push (if kind (list variable default) variable) lambda-list)
+            (push (if (eq kind '&key) (list (intern (symbol-name variable) '#:keyword) type) type) types)
+            (push `((not (typep ,variable ',type))
+                    (mistyped-argument ',name ',variable ',type ,variable))
+                  checks))))
+    (multiple-value-bind (documentation body)
+        (if (stringp (first body)) (values (first body) (rest body)) (values nil body))
+      `(progn
+         (declaim (ftype (function ,(reverse types) (values ,result &optional)) ,name))
+         (setf (fdefinition ',name)
+               (lambda ,(reverse lambda-list)
+                 (let ((,text (cond ,@(reverse checks))))
+                   (if ,text
+                       (funcall ,mistyped ,text)
+                       (progn ,@body)))))
+         (setf (documentation ',name 'function) ,documentation)
+         ',name))))
+
+(declaim (ftype (function () (values json-array &optional)) engine-tools))
 (defun engine-tools ()
   "The tools offered now, in the order defined => a vector of
   {name, label, description, parameters, approval, approvalReason?, render?,
@@ -64,7 +115,9 @@ asks again rather than keeping the answer."
               "evidence" (and (tool-evidence tool) t)))
        (offered-tools)))
 
-(defun engine-call (session name arguments &key call-id)
+(define-surface engine-call ((session session-id) (name string) (arguments (or null json-object))
+                             &key (call-id (or null string)))
+    (answer (lambda (text) (obj "text" text "failed" t "refused" t)))
   "Call the tool NAME with the JSON object ARGUMENTS in SESSION =>
   {text, failed, refused?, raw?, evidenceId?, artifactPath?, details?}
 TEXT is what the model reads. REFUSED is true when the call never came to a
@@ -87,6 +140,7 @@ CALL-ID is the host's own id for the call, written to the audit log."
          "artifactPath" (or artifact-path :absent)
          "details" (or details :absent))))
 
+(declaim (ftype (function () (values json-array &optional)) engine-commands))
 (defun engine-commands ()
   "The /re subcommands, in the order /re help lists them => a vector of
   {name, usage?, description, view?, completes?, row?}
@@ -115,7 +169,8 @@ with it; any other runs the subcommand as it is. Rows are shown by POSITION."
                         :absent)))
        *slash-commands*))
 
-(defun engine-command (session line &key by-model)
+(define-surface engine-command ((session session-id) (line (or null string)) &key (by-model t))
+    (answer (lambda (text) (obj "text" text "failed" t "level" "error")))
   "Run one /re LINE — \"status\", \"open /bin/ls\" — in SESSION =>
   {text, failed, level, draft?, userMessage?}
 BY-MODEL is true where the line comes from the model and not the operator:
@@ -136,7 +191,8 @@ the operator's next message."
                        :absent)
            "userMessage" (or user-message :absent)))))
 
-(defun engine-view (session kind &optional argument)
+(define-surface engine-view ((session session-id) (kind string) &optional (argument (or null json-object)))
+    (answer (lambda (text) (notice-view :error "~a" text)))
   "What a screen shows for KIND in SESSION => a view (views.lisp): a panel
 of rows to pick from, a function's code, or a notice to say instead. KIND is
 \"functions\", \"strings\", \"imports\", \"evidence\" or \"findings\", or
@@ -148,7 +204,8 @@ a notice at level \"error\"."
         (notice-view :error "~a" answer)
         answer)))
 
-(defun engine-facts (session)
+(define-surface engine-facts ((session session-id))
+    ((or null json-object) (constantly nil))
   "The facts of SESSION's open binary, for a status band (views.lisp,
 SESSION-FACTS) — as the session stands: a call that holds it is not waited
 for, rizin is asked nothing and none is started. NIL when they could not be
@@ -157,7 +214,8 @@ had."
                                          (session-facts))
     (and (not failed) answer)))
 
-(defun engine-evidence (session limit)
+(define-surface engine-evidence ((session session-id) (limit (integer 0)))
+    (json-array (constantly (vector)))
   "The newest LIMIT evidence records of SESSION, newest first => a vector of
 [id, \"tool @ address\"], for a host that completes an evidence id as it is
 typed. As the session stands, like ENGINE-FACTS; empty when it could not be
@@ -169,7 +227,8 @@ read."
              (reverse (last (evidence-records) limit))))
     (if failed (vector) answer)))
 
-(defun engine-memory (session)
+(define-surface engine-memory ((session session-id))
+    (json-object (lambda (text) (declare (ignore text)) (obj)))
   "What SESSION holds that is in no record, and so would be gone with this
 process => a JSON object, {toolsOff?}. A host that outlives the engine keeps
 the latest and hands it to ENGINE-REMEMBER when the session meets another
@@ -179,7 +238,8 @@ engine. As the session stands, like ENGINE-FACTS."
         (obj "toolsOff" (if (session-tools-off *session*) t :absent)))
     (if failed (obj) answer)))
 
-(defun engine-remember (session memory)
+(define-surface engine-remember ((session session-id) (memory json-object))
+    ((member t) (constantly t))
   "Give SESSION back what ENGINE-MEMORY answered of it under an engine that
 is gone."
   (in-session (session "the session's memory" :wait nil)
@@ -188,14 +248,17 @@ is gone."
     nil)
   t)
 
-(defun engine-preserved (session)
+(define-surface engine-preserved ((session session-id))
+    (json-array (constantly (vector)))
   "The lines to fold into a summary of SESSION's conversation when the host
 compacts it => a vector of strings, empty when there is nothing to keep."
   (multiple-value-bind (answer failed) (in-session (session "the compaction summary")
                                          (coerce (preserved-lines) 'simple-vector))
     (if failed (vector) answer)))
 
-(defun engine-approval (session call-id tool approved &optional reason)
+(define-surface engine-approval ((session session-id) (call-id (or null string)) (tool (or null string))
+                                 (approved t) &optional (reason (or null string)))
+    ((member t) (constantly t))
   "Write to SESSION's audit log what the host's approval gate decided of the
 call CALL-ID to TOOL. A call that was denied never reaches ENGINE-CALL, so
 this line is all the log has of it."
@@ -204,7 +267,8 @@ this line is all the log has of it."
     nil)
   t)
 
-(defun engine-restore (session &key open)
+(define-surface engine-restore ((session session-id) &key (open (or null string)))
+    (answer (lambda (text) (obj "text" text "failed" t "level" "error")))
   "Bring SESSION's rizin up without waiting to be called: when a session
 starts or its branch moved => {text?, failed, level}. OPEN, a path the
 operator started the host with, is opened unless the branch already has it
@@ -224,13 +288,18 @@ something: a failure, or what would not be put back."
          "failed" (and failed t)
          "level" (string-downcase (if failed :error (or level :info))))))
 
-(defun engine-rekey (from to)
+(define-surface engine-rekey ((from session-id) (to session-id))
+    ((member t) (constantly t))
+  "The session FROM goes on under the id TO, its rizin with it."
   (rekey-session from to)
   t)
 
-(defun engine-close (session)
+(define-surface engine-close ((session session-id))
+    ((member t) (constantly t))
+  "SESSION is over: end what runs for it. Its record stays."
   (close-session session))
 
+(declaim (ftype (function (session-id function) *) engine-hold))
 (defun engine-hold (session thunk)
   "Call THUNK holding SESSION, so the calls it makes for that session are
 one sequence no other call cuts into => THUNK's values. What THUNK signals

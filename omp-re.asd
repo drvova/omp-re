@@ -26,6 +26,7 @@
   :pathname "engine/"
   :serial t
   :components ((:file "package")
+               (:file "types")
                (:file "json")
                (:file "sha256")
                (:file "util")

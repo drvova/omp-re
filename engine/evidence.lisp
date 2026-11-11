@@ -20,6 +20,7 @@
 (defparameter +shown-id-length+ 8
   "How much of an evidence or finding id a result shows.")
 
+(declaim (ftype (function (record-id) (values string &optional)) shown-id))
 (defun shown-id (id)
   (subseq id 0 (min +shown-id-length+ (length id))))
 

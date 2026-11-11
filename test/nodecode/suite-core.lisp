@@ -141,14 +141,9 @@
                   "verify" "carry" "status" "on" "off" "help")
                 (mapcar (lambda (line) (second (omp-re::words line))) (omp-re:split-lines (re:slash "help")))))
   (check "(re:status) is RE-ERROR when the line fails, as (re:slash \"status\") is"
-         (let ((host omp-re::*host*))
-           (unwind-protect
-                (progn (setf omp-re::*host* (list* :entries (lambda (session) (declare (ignore session))
-                                                          (error "away"))
-                                               host))
-                       (in-session ((fresh-session))
-                         (has "could not answer entries" (refusal (lambda () (re:status))))))
-             (setf omp-re::*host* host))))
+         (with-service (:entries (lambda (session) (declare (ignore session)) (error "away")))
+           (in-session ((fresh-session))
+             (has "could not answer entries" (refusal (lambda () (re:status)))))))
   (check "a tool, a parameter and a subcommand are named by one rule: lowercase, underscores"
          (and (has ":path" (re:doc "Open-Binary"))
               (has "command is required" (refusal (lambda () (re:call "Rizin-Command"))))
@@ -319,6 +314,122 @@
 (check "a /re line's answer says how loudly: error when it failed"
        (and (equal "info" (gethash "level" (omp-re:engine-command (fresh-session) "help")))
             (equal "error" (gethash "level" (omp-re:engine-command (fresh-session) "cite")))))
+
+;;; The surface is declared in types (engine/types.lisp). A host's call is
+;;; held to them when the host is compiled; what arrives all the same must
+;;; be answered as any refusal is, in the engine's words.
+(suite "the surface's types")
+(declaim (notinline as-it-arrives))
+(defun as-it-arrives (value)
+  "VALUE, its type hidden from the compiler: an argument as a running host hands it over."
+  value)
+(flet ((warned (form)
+         "The first warning compiling FORM signals, as text, or NIL."
+         (let ((first nil)
+               (*error-output* (make-broadcast-stream)))
+           (handler-bind ((warning (lambda (warning)
+                                     (unless first (setf first (princ-to-string warning)))
+                                     (muffle-warning warning))))
+             (compile nil `(lambda () ,form)))
+           first)))
+  (check "a call compiled with an argument of the wrong type is a compiler warning"
+         (and (has "conflicts with its asserted type" (warned '(omp-re:engine-call "s" 42 nil)))
+              (has "conflicts with its asserted type" (warned '(omp-re:engine-command 'session "help")))
+              (has "conflicts with its asserted type" (warned '(omp-re:shown-id 42)))
+              (has "conflicting with its asserted type" (warned '(car (omp-re:engine-tools))))
+              (null (warned '(omp-re:engine-call "s" "rizin_command" (omp-re:obj) :call-id "c")))))
+  (check "so is a service the engine never asks for, and a key no function takes"
+         (and (has ":TELEPATHY is not a known argument keyword"
+                   (warned '(omp-re:install-host :telepathy (lambda ()))))
+              (has ":LOUDLY is not a known argument keyword"
+                   (warned '(omp-re:engine-command "s" "help" :loudly t))))))
+(check "every function the engine exports is declared: none is left to what the compiler can work out"
+       (let ((undeclared '()))
+         (do-external-symbols (symbol '#:omp-re)
+           (when (and (fboundp symbol) (not (macro-function symbol))
+                      (not (eq :declared (sb-int:info :function :where-from symbol))))
+             (push symbol undeclared)))
+         (when undeclared (format t "        not declared: ~{~(~a~)~^, ~}~%" undeclared))
+         (null undeclared)))
+(check "a tool called by something that is not a name is refused in words, not by a TYPE-ERROR"
+       (let ((answer (omp-re:engine-call (fresh-session) (as-it-arrives 42) (omp-re:obj))))
+         (and (eq t (gethash "failed" answer)) (eq t (gethash "refused" answer))
+              (equal "omp-re: engine-call: name must be of type string, not 42" (gethash "text" answer)))))
+(check "so are arguments that are no object, a session that is no id, and a call id that is no string"
+       (flet ((refused (&rest call)
+                (let ((answer (apply #'omp-re:engine-call (as-it-arrives call))))
+                  (and (eq t (gethash "refused" answer)) (gethash "text" answer)))))
+         (and (equal "omp-re: engine-call: arguments must be of type (or null json-object), not (\"command\" \"ij\")"
+                     (refused "s" "rizin_command" (list "command" "ij")))
+              (equal "omp-re: engine-call: session must be of type session-id, not :MAIN"
+                     (refused :main "rizin_command" (omp-re:obj)))
+              (equal "omp-re: engine-call: call-id must be of type (or null string), not 7"
+                     (refused "s" "rizin_command" (omp-re:obj) :call-id 7)))))
+(check "a /re line that is not text fails as a line does, and a view that is not named is a notice"
+       (let ((line (omp-re:engine-command (fresh-session) (as-it-arrives 42)))
+             (view (omp-re:engine-view (fresh-session) (as-it-arrives :functions))))
+         (and (eq t (gethash "failed" line)) (equal "error" (gethash "level" line))
+              (equal "omp-re: engine-command: line must be of type (or null string), not 42" (gethash "text" line))
+              (equal "notice" (gethash "type" view)) (equal "error" (gethash "level" view))
+              (equal "omp-re: engine-view: kind must be of type string, not :FUNCTIONS" (gethash "text" view)))))
+(check "the model's own (re:slash 42) reads that refusal as RE-ERROR"
+       (with-cell ()
+         (equal "omp-re: engine-command: line must be of type (or null string), not 42"
+                (refusal (lambda () (re:slash (as-it-arrives 42)))))))
+(check "what answers with data answers with none: no facts, no evidence, no lines, an empty memory"
+       (let ((session (as-it-arrives 42)))
+         (and (null (omp-re:engine-facts session))
+              (equalp #() (omp-re:engine-evidence session 10))
+              (equalp #() (omp-re:engine-evidence (fresh-session) (as-it-arrives "ten")))
+              (equalp #() (omp-re:engine-preserved session))
+              (zerop (hash-table-count (omp-re:engine-memory session)))
+              (eq t (omp-re:engine-remember session (omp-re:obj)))
+              (eq t (omp-re:engine-approval session "call" "tool" t))
+              (eq t (omp-re:engine-rekey session "other"))
+              (eq t (omp-re:engine-close session))
+              (equal "omp-re: engine-restore: open must be of type (or null string), not 42"
+                     (gethash "text" (omp-re:engine-restore (fresh-session) :open session))))))
+(check "the vocabulary's types tell their values: an address, a digest, a level, a JSON value"
+       (and (typep (omp-re:ea-from-offset 16400) 'omp-re:address-text)
+            (not (typep "0X4010" 'omp-re:address-text)) (not (typep "main" 'omp-re:address-text))
+            (typep (omp-re::sha256-hex "abc") 'omp-re:sha256-hex)
+            (not (typep "ba7816bf" 'omp-re:sha256-hex))
+            (typep :warning 'omp-re:level) (not (typep "warning" 'omp-re:level))
+            (typep (omp-re:json-decode "[1, 2.5, {\"a\": null}]") 'omp-re:json-array)
+            (typep (omp-re:obj) 'omp-re:json-object)
+            (every (lambda (value) (typep value 'omp-re:json-value)) (list t nil :null "text" 1 1.5d0))
+            (not (typep 1.5 'omp-re:json-value)) (not (typep '(1 2) 'omp-re:json-value))))
+
+;;; The engine's package is locked (engine/package.lisp): nothing outside
+;;; it defines, redefines or removes one of its functions, by accident or
+;;; for a test. A host's own FAIL once replaced the engine's this way.
+(suite "the engine's package is locked")
+(check "the lock is on"
+       (sb-ext:package-locked-p '#:omp-re))
+(flet ((violates (thunk)
+         (handler-case (progn (funcall thunk) nil)
+           (sb-ext:package-lock-violation () t))))
+  (check "redefining an engine function from another package is a package-lock violation"
+         (let ((fail (fdefinition 'omp-re::fail))
+               (call (fdefinition 'omp-re:engine-call)))
+           (and (violates (lambda () (setf (fdefinition (as-it-arrives 'omp-re::fail)) #'list)))
+                (violates (lambda () (setf (symbol-function (as-it-arrives 'omp-re:engine-call)) #'list)))
+                (eq fail (fdefinition 'omp-re::fail))
+                (eq call (fdefinition 'omp-re:engine-call)))))
+  (check "so is removing one, a macro of its name, and a new symbol in the package"
+         (and (violates (lambda () (fmakunbound (as-it-arrives 'omp-re:engine-call))))
+              (violates (lambda () (setf (macro-function (as-it-arrives 'omp-re:obj)) (constantly nil))))
+              (violates (lambda () (intern "A-HOSTS-OWN-NAME" '#:omp-re)))
+              (fboundp 'omp-re:engine-call)
+              (null (find-symbol "A-HOSTS-OWN-NAME" '#:omp-re)))))
+(check "a refusal still reads as the engine's FAIL words it"
+       (equal "omp-re: no tool named \"no_such_tool\""
+              (gethash "text" (omp-re:engine-call (fresh-session) "no_such_tool" (omp-re:obj)))))
+(check "the macros a host builds with expand under the lock: a service answered for a while, a session held"
+       (and (equal "said"
+                   (omp-re:with-host-service (:judge (lambda (prompt) (declare (ignore prompt)) "said"))
+                     (funcall (getf omp-re::*host* :judge) "asked")))
+            (equal "held" (omp-re::in-session ((fresh-session) "holding a session") "held"))))
 
 ;;; --- with rizin -----------------------------------------------------------------------
 

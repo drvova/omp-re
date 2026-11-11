@@ -168,6 +168,7 @@ naming the argument SUBJECT, the text shown as BODY says — :text, :json or
   (let ((description (tool-description tool)))
     (if (functionp description) (funcall description) description)))
 
+(declaim (ftype (function ((or string symbol)) (values string &optional)) engine-name))
 (defun engine-name (designator)
   "DESIGNATOR — a string, a keyword, a symbol — as the engine spells a tool,
 a parameter or a /re subcommand: lowercase, words joined by underscores. So

@@ -13,6 +13,7 @@
 
 (defpackage #:omp-re
   (:use #:cl)
+  (:lock t)
   (:export
    ;; the surface
    #:engine-tools #:engine-call #:engine-commands #:engine-command
@@ -29,7 +30,10 @@
    #:obj #:jget #:jstring #:jnumber #:jlist #:json-array-p
    #:json-encode #:json-decode #:json-parse #:json-refusal
    ;; text
-   #:trimmed #:blank-p #:split-lines #:join-lines #:js-scan #:ea-from-offset))
+   #:trimmed #:blank-p #:split-lines #:join-lines #:js-scan #:ea-from-offset
+   ;; the types the above are declared in (types.lisp); SESSION-ID is one too
+   #:json-object #:json-array #:json-value #:answer #:level
+   #:address-text #:record-id #:evidence-id #:finding-id #:sha256-hex))
 
 (in-package #:omp-re)
 

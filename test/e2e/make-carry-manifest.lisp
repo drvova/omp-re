@@ -20,7 +20,9 @@
   (handler-bind ((warning #'muffle-warning))
     (asdf:load-system "omp-re")))
 
-(in-package #:omp-re)
+(defpackage #:omp-re-carry-fixture
+  (:use #:cl #:omp-re))
+(in-package #:omp-re-carry-fixture)
 
 (destructuring-bind (&optional binary report) (uiop:command-line-arguments)
   (unless (and binary report)
