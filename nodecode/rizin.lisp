@@ -2,10 +2,9 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/rizin.ts. In `-q0' mode rizin ends
-;;;; every response with one 0x00 byte, including an empty frame for a
-;;;; command that only wrote to stderr, and emits one empty banner frame at
-;;;; startup. A unique `echo <marker>' is written right after each command;
+;;;; In `-q0' mode rizin ends every response with one 0x00 byte, including an
+;;;; empty frame for a command that only wrote to stderr, and emits one empty
+;;;; banner frame at startup. A unique `echo <marker>' is written right after each command;
 ;;;; rizin takes stdin lines strictly in order, so everything read before the
 ;;;; marker's own frame is that command's response, whatever number of frames
 ;;;; a future rizin chooses to emit.
@@ -27,19 +26,16 @@
 (defun analysis-seconds ()
   "The budget for the one `aaa' on open: full analysis of a large or packed
 binary routinely runs minutes."
-  (let ((ms (ignore-errors (parse-integer (or (env "OMPRE_ANALYSIS_TIMEOUT_MS") "")))))
-    (if (and ms (plusp ms)) (/ ms 1000) 300)))
+  (/ (setting-value :analysis-timeout-ms) 1000))
 
 (defstruct (rz (:copier nil))
-  pid process input output errors
-  binary-path
+  process input output errors
   (lock (sb-thread:make-mutex :name "rizin session"))
   (frame (make-array 4096 :element-type 'character :adjustable t :fill-pointer 0))
   (stderr-tail "")
   (stderr-seen 0)
   (counter 0)
   (pending-marker nil)                  ; a marker written whose frame was never read
-  (decompiler :unknown)
   (closed-p nil))
 
 (defun now-seconds ()
@@ -48,13 +44,12 @@ binary routinely runs minutes."
 (defun rz-alive-p (rz)
   (and rz
        (not (rz-closed-p rz))
-       (null (ignore-errors (nlk:child-exit (rz-pid rz) (rz-process rz))))))
+       (sb-ext:process-alive-p (rz-process rz))))
 
 (defun rz-close (rz)
-  "End RZ's process. Idempotent."
   (when (and rz (not (rz-closed-p rz)))
     (setf (rz-closed-p rz) t)
-    (ignore-errors (nlk:kill-tree (rz-pid rz)))
+    (kill-process-tree (rz-process rz))
     (dolist (stream (list (rz-input rz) (rz-output rz) (rz-errors rz)))
       (when stream (ignore-errors (close stream :abort t)))))
   nil)
@@ -159,7 +154,6 @@ rizin wrote there while the command ran."
           (fail "omp-re: rizin protocol desync waiting for sync marker after: ~a~a" command detail))))))
 
 (defun rz-cmd (rz command &key (seconds +command-seconds+))
-  "The output of the raw rizin COMMAND."
   (values (rz-run rz command :seconds seconds)))
 
 (defun rz-cmdj (rz command &key (seconds +command-seconds+))
@@ -176,19 +170,24 @@ unresolvable input: it prints 0x0. Failing here gives a clear error instead
 of treating address 0 as real."
   (let* ((raw (trimmed (rz-cmd rz (format nil "%v ~a" (validate-addr addr)))))
          (value (ignore-errors
-                 (parse-integer raw :start (if (starts-with "0x" raw) 2 0) :radix 16 :junk-allowed t))))
+                 (parse-integer raw :start (if (uiop:string-prefix-p "0x" raw) 2 0) :radix 16
+                                     :junk-allowed t))))
     (unless (and value (/= value 0))
       (fail "omp-re: could not resolve address: ~a" addr))
     value))
 
 ;;; --- spawn flags ------------------------------------------------------------------
 
+(defun stock-output-flags ()
+  "The flags of every rizin the engine reads the output of: color and UTF-8
+box drawing off keep it plain, and `-N' skips the user's rizinrc so what is
+parsed here is stock rizin's, while plugins still load."
+  (append (list "-e" "scr.color=0" "-e" "scr.utf8=false")
+          (unless (setting-value :load-user-config) (list "-N"))))
+
 (defun base-rizin-flags ()
-  "The flags every rizin process shares: `-q0' is the pipe protocol; color
-and UTF-8 box drawing off keep output plain; `-N' skips the user's rizinrc so
-the output parsed here is stock rizin's, while plugins still load."
-  (append (list "-q0" "-e" "scr.color=0" "-e" "scr.utf8=false")
-          (unless (env-on-p "OMPRE_RIZIN_LOAD_USER_CONFIG") (list "-N"))))
+  "The flags every rizin process on a pipe shares: `-q0' is the pipe protocol."
+  (cons "-q0" (stock-output-flags)))
 
 (defun build-load-flags (load)
   "The -a/-b/-B/-m/-F flags the JSON object LOAD spells, each value checked
@@ -222,23 +221,24 @@ shared flags (the debugger's launch)."
                     (append (base-rizin-flags)
                             (or debug-argv
                                 (append (build-load-flags load) (list binary-path)))))))
-    (multiple-value-bind (pid output errors process input)
-        (handler-case (nlk:spawn-program argv :input :stream :output :stream :error-output :stream)
-          (error (condition)
-            (fail "omp-re: rizin spawn failed: ~a" condition)))
-      (let ((rz (make-rz :pid pid :process process :input input :output output :errors errors
-                         :binary-path binary-path))
-            (ready nil))
-        (unwind-protect
-             (progn
-               (sb-thread:with-mutex ((rz-lock rz))
-                 (read-frame rz (+ (now-seconds) +command-seconds+) "<startup banner>" +command-seconds+))
-               (when analysis
-                 (rz-cmd rz analysis :seconds (analysis-seconds)))
-               (setf ready t)
-               rz)
-          ;; A half-analyzed process holds nothing worth keeping.
-          (unless ready (rz-close rz)))))))
+    (let* ((process (handler-case (spawn-program argv)
+                      (error (condition)
+                        (fail "omp-re: rizin spawn failed: ~a" condition))))
+           (rz (make-rz :process process
+                        :input (sb-ext:process-input process)
+                        :output (sb-ext:process-output process)
+                        :errors (sb-ext:process-error process)))
+           (ready nil))
+      (unwind-protect
+           (progn
+             (sb-thread:with-mutex ((rz-lock rz))
+               (read-frame rz (+ (now-seconds) +command-seconds+) "<startup banner>" +command-seconds+))
+             (when analysis
+               (rz-cmd rz analysis :seconds (analysis-seconds)))
+             (setf ready t)
+             rz)
+        ;; A half-analyzed process holds nothing worth keeping.
+        (unless ready (rz-close rz))))))
 
 ;;; --- finding rizin ------------------------------------------------------------------
 
@@ -247,7 +247,8 @@ shared flags (the debugger's launch)."
        (let ((file (probe-file path)))
          (and file
               (not (uiop:directory-pathname-p file))
-              #-win32 (eql 0 (ignore-errors (sb-posix:access (native file) sb-posix:x-ok)))
+              #-win32 (eql 0 (ignore-errors (sb-posix:access (uiop:native-namestring file)
+                                                             sb-posix:x-ok)))
               #+win32 t))))
 
 (defun find-on-path (name)
@@ -266,10 +267,6 @@ shared flags (the debugger's launch)."
             "/snap/bin/rizin" "~/.local/bin/rizin")
   "Where a package manager drops rizin, checked when it is not on PATH: an
 organism launched from a desktop often inherits a minimal one.")
-
-(defvar *configured-rizin* nil
-  "A function answering the operator's own rizin path (the cell's rizin_path
-setting), or NIL. Set by the cell at start.")
 
 (defun read-binary-bits (path)
   "The target's pointer width from its file header: ELF, PE and thin Mach-O
@@ -296,18 +293,17 @@ are read; anything else answers NIL rather than a guess."
 
 (defun resolve-rizin-path (&optional binary-path bits)
   "The rizin to run: a per-bits override when the target's width is known,
-then the operator's configured path, then PATH, then the common install
-places; the bare name when none is found, so the not-found refusal fires."
+then the operator's rizin_path, then PATH, then the common install places;
+the bare name when none is found, so the not-found refusal fires."
   (let ((bits (or bits (and binary-path (read-binary-bits binary-path)))))
-    (or (and (eql bits 64) (env "OMPRE_RIZIN_PATH_64"))
-        (and (eql bits 32) (env "OMPRE_RIZIN_PATH_32"))
-        (let ((configured (and *configured-rizin* (funcall *configured-rizin*))))
-          (and configured (not (blank-p configured)) (native (uiop:parse-native-namestring configured))))
-        (env "OMPRE_RIZIN_PATH")
+    (or (and (eql bits 64) (setting-value :rizin-path-64))
+        (and (eql bits 32) (setting-value :rizin-path-32))
+        (setting-value :rizin-path)
         (find-on-path "rizin")
         (loop for candidate in *common-rizin-paths*
-              for path = (if (starts-with "~/" candidate)
-                             (native (merge-pathnames (subseq candidate 2) (user-homedir-pathname)))
+              for path = (if (uiop:string-prefix-p "~/" candidate)
+                             (uiop:native-namestring
+                              (merge-pathnames (subseq candidate 2) (user-homedir-pathname)))
                              candidate)
               when (executable-p path) return path)
         "rizin")))
@@ -326,31 +322,34 @@ places; the bare name when none is found, so the not-found refusal fires."
 configured rizin when that is a path, else the bare name for PATH."
   (let* ((rizin (resolve-rizin-path))
          (slash (position-if (lambda (char) (find char "/\\")) rizin :from-end t))
-         (extension (if (ends-with ".exe" (string-downcase rizin)) ".exe" "")))
+         (extension (if (uiop:string-suffix-p (string-downcase rizin) ".exe") ".exe" "")))
     (if slash
         (concatenate 'string (subseq rizin 0 (1+ slash)) tool extension)
         (concatenate 'string tool extension))))
 
-(defun run-program (argv &key (seconds 60) input)
+(defun run-program (argv &key (seconds 60))
   "Run ARGV to completion => (values STDOUT STDERR STATUS), STATUS an exit
 code or :TIMEOUT. A program that cannot be started answers status 127 with
 the reason as its stderr."
   (handler-case
-      (multiple-value-bind (out err status)
-          (if input
-              (nlk:run-bounded argv :seconds seconds :input input)
-              (nlk:run-bounded argv :seconds seconds))
+      (multiple-value-bind (out err status) (run-bounded argv seconds)
         (values (or out "") (or err "") status))
     (error (condition)
       (values "" (princ-to-string condition) 127))))
 
-(defun rizin-version ()
-  "`rizin -v''s first line, or NIL when it cannot be run."
-  (multiple-value-bind (out err status) (run-program (list (resolve-rizin-path) "-v") :seconds 20)
-    (declare (ignore err))
-    (and (eql status 0)
-         (let ((line (trimmed (first (split-lines out)))))
-           (and (plusp (length line)) line)))))
+(defvar *versions* (make-hash-table :test #'equal :synchronized t)
+  "rizin path => the first line of its `-v'. Only a line that was read is
+kept, so installing rizin mid-session works.")
+
+(defun rizin-version (&optional (rizin-path (resolve-rizin-path)))
+  "`rizin -v''s first line for the rizin at RIZIN-PATH, or NIL when it
+cannot be run."
+  (or (gethash rizin-path *versions*)
+      (multiple-value-bind (out err status) (run-program (list rizin-path "-v") :seconds 20)
+        (declare (ignore err))
+        (let ((line (and (eql status 0) (trimmed (first (split-lines out))))))
+          (and line (plusp (length line))
+               (setf (gethash rizin-path *versions*) line))))))
 
 ;;; --- the build's width against the target's ---------------------------------------------
 ;;; The surfaces that depend on the build's addressing — the debugger, which
@@ -366,17 +365,9 @@ windows-x86-64\"), or NIL when it does not say."
           ((js-scan "x86_64|aarch64|arm64" version) 64)
           ((js-scan "x86|arm(?![_-]?[6-9])|i386" version) 32))))
 
-(defvar *build-bits* (make-hash-table :test #'equal :synchronized t)
-  "rizin path => its build's bits (or NIL), asked once per path.")
-
 (defun rizin-build-bits (rizin-path)
-  "The bits of the rizin at RIZIN-PATH, from its `-v'."
-  (multiple-value-bind (bits known) (gethash rizin-path *build-bits*)
-    (if known
-        bits
-        (setf (gethash rizin-path *build-bits*)
-              (parse-rizin-version-arch
-               (trimmed (first (split-lines (values (run-program (list rizin-path "-v") :seconds 20))))))))))
+  (let ((version (rizin-version rizin-path)))
+    (and version (parse-rizin-version-arch version))))
 
 (defun rizin-bits-mismatch (binary-path)
   "A note for when the rizin that would run BINARY-PATH is not of the
@@ -387,51 +378,6 @@ target's bits, or NIL when they match or either side is unknown."
       (format nil "rizin build is ~d-bit but the target is ~d-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_~d to a matching build."
               build target target))))
 
-(defvar *allowed-directories* nil
-  "A function answering the directories files may be opened from, as a list
-of strings, or NIL for no restriction. Set by the cell at start.")
-
-(defun allowed-directories ()
-  "The operator's allow-list: the cell's allowed_dirs, else OMPRE_ALLOWED_DIRS
-(comma-separated). Empty means any file the organism can read."
-  (remove-if #'blank-p
-             (or (and *allowed-directories* (funcall *allowed-directories*))
-                 (mapcar #'trimmed
-                         (uiop:split-string (or (env "OMPRE_ALLOWED_DIRS") "") :separator '(#\,))))))
-
-(defun assert-path-allowed (file)
-  "FILE — an existing file's true name, links already followed — when it lies
-under one of the allowed directories, or when there is no allow-list. The
-comparison is against each directory's own true name plus a separator, so
-neither a link that points out of an allowed folder nor a sibling folder
-whose name merely starts the same (/samples-evil beside /samples) passes."
-  (let ((allowed (allowed-directories)))
-    (when allowed
-      (let ((path (native file)))
-        (unless (some (lambda (directory)
-                        (let ((real (ignore-errors
-                                     (probe-file (uiop:ensure-directory-pathname
-                                                  (nlk:expand-home directory))))))
-                          (and real (starts-with (native real) path))))
-                      allowed)
-          (fail "omp-re: ~a is outside the directories files may be opened from (the re section's allowed_dirs: ~{~a~^, ~})"
-                path allowed)))))
-  file)
-
-(defun resolve-readable-file (input)
-  "INPUT resolved to an existing, readable, allowed file's native path, or NIL
-when there is no such file. A file outside the allow-list is a refusal."
-  (let ((file (ignore-errors (probe-file (uiop:parse-native-namestring input)))))
-    (and file
-         (not (uiop:directory-pathname-p file))
-         (ignore-errors (with-open-file (in file :element-type '(unsigned-byte 8)) t))
-         (native (assert-path-allowed file)))))
-
-(defun resolve-binary-path (input)
-  "INPUT resolved to an absolute, existing, readable file the operator allows."
-  (or (resolve-readable-file input)
-      (fail "omp-re: no such binary: ~a" input)))
-
 ;;; --- rizin's own catalog of commands --------------------------------------------------
 
 (defvar *catalogs* (make-hash-table :test #'equal)
@@ -441,9 +387,7 @@ when there is no such file. A file outside the allow-list is a refusal."
 
 (defun read-catalog (rizin-path)
   (multiple-value-bind (out err status)
-      (run-program (append (list rizin-path "-e" "scr.color=0")
-                           (unless (env-on-p "OMPRE_RIZIN_LOAD_USER_CONFIG") (list "-N"))
-                           (list "-qc" "?*j" "--"))
+      (run-program (append (list rizin-path) (stock-output-flags) (list "-qc" "?*j" "--"))
                    :seconds 60)
     (let ((parsed (and (eql status 0) (json-parse out))))
       (unless (hash-table-p parsed)
@@ -463,3 +407,10 @@ installing rizin mid-session works."
   (sb-thread:with-mutex (*catalog-lock*)
     (or (gethash rizin-path *catalogs*)
         (setf (gethash rizin-path *catalogs*) (read-catalog rizin-path)))))
+
+;;; --- names the tool groups' suites still call; removed when they move to the above -------
+;;; RZ-PID → (sb-ext:process-pid (rz-process RZ)); to end a session's rizin
+;;; in a test, the harness's KILL-RIZIN.
+
+(defun rz-pid (rz)
+  (sb-ext:process-pid (rz-process rz)))

@@ -195,7 +195,6 @@ JSON.stringify(value, null, INDENT) lays it out."
           (t (error "no JSON form for ~s" value)))))
 
 (defun json-encode (value &key indent)
-  "VALUE as JSON text."
   (with-output-to-string (out) (write-json value out indent)))
 
 (defun obj (&rest pairs)
@@ -219,12 +218,10 @@ read as NIL; NIL as soon as a step is not an object."
     (if (eq value :null) nil value)))
 
 (defun jstring (object &rest path)
-  "The member at PATH when it is a string, else NIL."
   (let ((value (apply #'jget object path)))
     (and (stringp value) value)))
 
 (defun jnumber (object &rest path)
-  "The member at PATH when it is a number, else NIL."
   (let ((value (apply #'jget object path)))
     (and (realp value) value)))
 

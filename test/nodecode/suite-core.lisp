@@ -98,13 +98,10 @@
 (suite "cell")
 (check "a verb refuses while the cell is not running"
        (has "not running" (refusal (lambda () (re:status)))))
-(check "the loader's contract: START-CELL is external in the system's package"
-       (eq :external (nth-value 1 (find-symbol "START-CELL" "NODECODE-RE"))))
 
 (with-cell ()
   (check "the help topic and the /re command are contributed"
          (and (assoc :re nle:*help*) (assoc "re" nle:*commands* :test #'string=)))
-  (check "no tool is registered with nodecode" (null nle:*tools*))
   (check "(re:tools) lists the engine's tools"
          (let ((text (re:tools))) (and (has "rizin_command" text) (has "open_binary" text) (has "rizin_help" text))))
   (check "(re:doc) spells a tool's parameters as eval keywords"
@@ -139,16 +136,172 @@
            (and (has "/re open" text) (has "/re status" text))))
   (check "an unknown /re line says so"
          (has "unknown /re subcommand" (refusal (lambda () (re:slash "frobnicate")))))
+  (check "/re help lists the subcommands in the order they declare"
+         (equal '("open" "functions" "strings" "imports" "evidence" "cite" "findings" "undo" "report"
+                  "verify" "carry" "status" "on" "off" "help")
+                (mapcar (lambda (line) (second (re::words line))) (re::split-lines (re:slash "help")))))
+  (check "(re:status) is RE-ERROR when the line fails, as (re:slash \"status\") is"
+         (let ((host re::*host*))
+           (unwind-protect
+                (progn (setf re::*host* (list* :entries (lambda (session) (declare (ignore session))
+                                                          (error "away"))
+                                               host))
+                       (in-session ((fresh-session))
+                         (has "could not answer entries" (refusal (lambda () (re:status))))))
+             (setf re::*host* host))))
+  (check "a tool, a parameter and a subcommand are named by one rule: lowercase, underscores"
+         (and (has ":path" (re:doc "Open-Binary"))
+              (has "command is required" (refusal (lambda () (re:call "Rizin-Command"))))
+              (has "/re status" (re:slash "HELP"))))
   (check "/re off refuses every tool call until /re on"
          (in-session ((fresh-session))
            (re:slash "off")
            (and (has "RE tools are off" (refusal (lambda () (re:cmd ""))))
                 (progn (re:slash "on") (has "omp-re manual" (re:cmd "")))))))
 
-(check "the cell registers no tool with nodecode: its model has one, eval, and the verbs live in it"
-       (null nle:*tools*))
 (check "stop takes the help topic and the command back"
        (and (null nle:*help*) (null nle:*commands*)))
+
+;;; --- the host port --------------------------------------------------------------------
+
+(defmacro with-variable ((name value) &body body)
+  "BODY with the environment variable NAME set to VALUE, and put back after."
+  (let ((before (gensym "BEFORE")))
+    `(let ((,before (sb-posix:getenv ,name)))
+       (sb-posix:setenv ,name ,value 1)
+       (unwind-protect (progn ,@body)
+         (if ,before (sb-posix:setenv ,name ,before 1) (sb-posix:unsetenv ,name))))))
+
+(suite "settings")
+(check "config.example.jsonc is the declaration's own text"
+       (string= (re::config-example)
+                (re::read-text-file (merge-pathnames "nodecode/config.example.jsonc" *root*))))
+(check "with no host, a setting is its environment variable, else its default"
+       (and (null (re::setting-value :rizin-path))
+            (with-variable ("OMPRE_RIZIN_PATH" " /opt/rz/rizin ")
+              (string= "/opt/rz/rizin" (re::setting-value :rizin-path)))
+            (= 30 (re::setting-value :idle-minutes))))
+(check "the section wins where it says something other than the default, and only there"
+       (with-variable ("OMPRE_RIZIN_PATH" "/from/environment")
+         (with-variable ("OMPRE_ALLOWED_DIRS" "/a, /b")
+           (and (with-cell (:rizin-path "/from/section")
+                  (string= "/from/section" (re::setting-value :rizin-path)))
+                (with-cell ()
+                  (and (string= "/from/environment" (re::setting-value :rizin-path))
+                       (equal '("/a" "/b") (re::setting-value :allowed-dirs))))
+                (with-cell (:allowed-dirs '("/c"))
+                  (equal '("/c") (re::setting-value :allowed-dirs)))))))
+(check "debugger: false is the default and does not veto OMPRE_ENABLE_DEBUGGER; audit: false says something"
+       (and (with-variable ("OMPRE_ENABLE_DEBUGGER" "1")
+              (with-cell (:debugger nil) (re::setting-value :debugger)))
+            (with-cell (:audit nil) (not (re::setting-value :audit)))
+            (with-cell () (re::setting-value :audit))))
+(check "the signing key is taken as set: a blank one signs, and the status says so; an empty one is none"
+       (flet ((signs-and-says (key)
+                (with-variable ("OMPRE_AUDIT_HMAC_KEY" key)
+                  (with-cell ()
+                    (let ((id (fresh-session)))
+                      (in-session (id)
+                        (re:cmd "")
+                        (list (has "\"hmac\":" (re::read-text-file
+                                                 (re::state-path "audit" (format nil "~a.log" id))))
+                              (has "audit log signing: HMAC-SHA256" (re:status)))))))))
+         (and (equal '(t t) (signs-and-says "  "))
+              (equal '(nil nil) (signs-and-says "")))))
+
+(suite "the host's services")
+(defmacro with-service ((service function) &body body)
+  "BODY with the running host's SERVICE answered by FUNCTION."
+  (let ((host (gensym "HOST")))
+    `(let ((,host re::*host*))
+       (setf re::*host* (list* ,service ,function ,host))
+       (unwind-protect (progn ,@body)
+         (setf re::*host* ,host)))))
+
+(with-cell ()
+  (check "a branch that cannot be read fails the call: nothing is read as if every entry were on it"
+         (let ((id (seed-session)))
+           (with-service (:entries (lambda (session) (declare (ignore session)) (error "the store is away")))
+             (in-session (id)
+               (has "the host could not answer entries: the store is away"
+                    (refusal (lambda () (re:slash "evidence"))))))))
+  (check "a turn that cannot be read fails the write: no entry goes in unstamped"
+         (let* ((id (seed-session))
+                (session (re::find-session id))
+                (before (length (re::session-file-entries session))))
+           (with-service (:append-entry (lambda (session type data)
+                                          (re::file-append-entry session type data
+                                                                 (error "no turn can be read"))))
+             (multiple-value-bind (text failed)
+                 (re::in-session (id "writing") (re::append-entry "re.note" (re::obj)))
+               (and failed
+                    (has "the host could not answer append-entry: no turn can be read" text)
+                    (= before (length (re::session-file-entries session))))))))
+  (check "what the operator is told carries a level"
+         (let ((told '()))
+           (with-service (:notify (lambda (text level) (push (list level text) told)))
+             (re::notify :error "it ~a" "broke")
+             (equal '((:error "it broke")) told)))))
+(check "stop clears what start installed" (null re::*host*))
+(check "with no host a session's record is its own file, all of it on the branch"
+       (let ((session (re::find-session (fresh-session))))
+         (re::in-session (session "writing")
+           (re::append-entry "re.note" (re::obj "n" 1)))
+         (and (= 1 (length (re::session-entries session)))
+              (has "\"customType\":\"re.note\"" (re::read-text-file (re::record-path session))))))
+
+(suite "acting in a session")
+(with-cell ()
+  (let ((id (fresh-session)))
+    (check "a call inside a held session acts in it: no second lock, and its refusal is still text"
+           (equal '("omp-re manual" t)
+                  (multiple-value-list
+                   (re::in-session (id "a composed read")
+                     (multiple-value-bind (text failed) (re::call-tool id "rizin_command" (re::obj "command" ""))
+                       (multiple-value-bind (refused refused-p)
+                           (re::call-tool id "rizin_command" (re::obj "command" "aflj"))
+                         (values (and (not failed) (subseq text 0 13))
+                                 (and refused-p (has "no binary open" refused)))))))))
+    (check "a /re line inside a held session, too"
+           (has "/re status" (re::in-session (id "a composed line") (values (re::run-slash-line id "help")))))
+    (check "anything that goes wrong in a session is an answer naming what was being done"
+           (equal '("omp-re: counting failed: lost count" t)
+                  (multiple-value-list (re::in-session (id "counting") (error "lost count")))))))
+
+(suite "evidence ids")
+(let ((records (list (re::obj "id" "abcdef01-1") (re::obj "id" "abcdef02-2") (re::obj "id" "123456789"))))
+  (check "an id is found by itself or by a prefix of six or more characters that names one record"
+         (and (eq (third records) (re::find-by-id records "123456"))
+              (eq (first records) (re::find-by-id records "abcdef01"))
+              (eq (first records) (re::find-by-id records "abcdef01-1"))))
+  (check "a shorter prefix, one that names two, and one that names none are each refused in words"
+         (equal '(:short :ambiguous :missing)
+                (mapcar (lambda (id) (nth-value 2 (re::find-by-id records id))) '("12345" "abcdef0" "999999")))))
+(with-cell ()
+  (in-session ((seed-session))
+    (check "/re cite and /re evidence take the ids record_finding takes, and refuse the rest in its words"
+           (and (has "Re: evidence 11111111" (re:slash "cite 111111"))
+                (has "is too short" (refusal (lambda () (re:slash "cite 1111"))))
+                (has "no evidence found with id 222222" (refusal (lambda () (re:slash "evidence 222222"))))))))
+
+(suite "the engine's surface")
+(check "a tool is described with its JSON Schema, its approval class and whether it records evidence"
+       (let ((tool (find "rizin_command" (re::engine-tools) :key (lambda (tool) (gethash "name" tool))
+                                                            :test #'string=)))
+         (and (equal "exec" (gethash "approval" tool)) (eq t (gethash "evidence" tool))
+              (equalp #("command") (gethash "required" (gethash "parameters" tool)))
+              (equal "string" (re::jstring tool "parameters" "properties" "addr" "type")))))
+(check "a /re subcommand is described with its usage and its dialog row"
+       (let ((open (find "open" (re::engine-commands) :key (lambda (command) (gethash "name" command))
+                                                      :test #'string=)))
+         (and (equal "<path>" (gethash "usage" open))
+              (equal "Path" (re::jstring open "row" "ask")))))
+(check "a call the engine refuses is an answer that failed, with the reason as its text"
+       (let ((answer (re::engine-call (fresh-session) "rizin_command" (re::obj "command" "aflj"))))
+         (and (eq t (gethash "failed" answer)) (has "no binary open" (gethash "text" answer)))))
+(check "a /re line's answer says how loudly: error when it failed"
+       (and (equal "info" (gethash "level" (re::engine-command (fresh-session) "help")))
+            (equal "error" (gethash "level" (re::engine-command (fresh-session) "cite")))))
 
 ;;; --- with rizin -----------------------------------------------------------------------
 
@@ -184,16 +337,21 @@
                 (let ((status (re:status)))
                   (and (has (file-namestring *binary*) status) (not (has "not running" status)))))
          (let* ((functions (re:cmd "aflj"))
-                (evidence (re::evidence-id-of functions)))
+                (evidence (tagged-evidence functions)))
            (check "(re:cmd) reads it; the result has a header, and an evidence id on its last line"
                   (and (has "rizin> aflj" functions) (= 8 (length evidence))))
-           (check "output past the size cap names a file that holds all of it"
-                  (let* ((mark (search "Full output: " functions))
-                         (file (and mark (subseq functions (+ mark 13) (position #\] functions :start mark)))))
+           (check "output past the size cap names a file that holds all of it, and the engine's answer says which"
+                  (let* ((answer (re::engine-call id "rizin_command" (re::obj "command" "aflj")))
+                         (file (gethash "artifactPath" answer)))
                     (and file (probe-file file)
-                         (vectorp (re::json-decode
-                                   (let ((text (re::read-text-file file)))
-                                     (subseq text (1+ (position #\Newline text)))))))))
+                         (has (format nil "Full output: ~a]" file) (gethash "text" answer))
+                         (eq t (re::jget answer "details" "truncated"))
+                         (string= (re::read-text-file file)
+                                  (format nil "rizin> aflj~%~a"
+                                          (string-right-trim '(#\Newline) (gethash "raw" answer))))
+                         (string= (tagged-evidence (gethash "text" answer))
+                                  (subseq (gethash "evidenceId" answer) 0 8))
+                         (equal (gethash "evidenceId" answer) (re::jget answer "details" "evidenceId")))))
            (multiple-value-bind (data id) (re:json "aflj")
              (check "(re:json) answers the decoded data, whole, and its evidence id"
                     (and (vectorp data) (> (length data) 10)
@@ -203,8 +361,8 @@
            (check "a command at an address, with the address recorded on its evidence"
                   (let ((text (re:cmd "pd 3" "entry0")))
                     (and (has "rizin> pd 3 @ entry0" text)
-                         (let ((record (re::find-evidence (re::evidence-id-of text) (re::find-session id))))
-                           (and (re::starts-with "0x" (gethash "ea" record))
+                         (let ((record (re::find-evidence (tagged-evidence text) (re::find-session id))))
+                           (and (eql 0 (search "0x" (gethash "ea" record)))
                                 (equalp #("pd 3 @ entry0") (gethash "commands" record))
                                 (= 64 (length (gethash "reproHash" record)))
                                 (= 64 (length (gethash "binarySha256" record))))))))
@@ -231,13 +389,10 @@
                          (has "\"command\":\"aflj\"" log))))
 
            ;; The process dies; the record is the truth.
-           (let* ((session (re::find-session id))
-                  (old (re::session-rz session)))
-             (nlk:kill-tree (re::rz-pid old))
-             (loop repeat 50 while (re::rz-alive-p old) do (sleep 0.1))
+           (let ((old (kill-rizin id)))
              (check "a killed rizin is replaced by the next call"
                     (and (has "rizin> iIj" (re:cmd "iIj"))
-                         (not (eq old (re::session-rz session))))))
+                         (not (eq old (re::session-rz (re::find-session id)))))))
 
            ;; The engine forgets the session; the record brings it back.
            (re::shutdown-sessions)
@@ -249,11 +404,25 @@
                          (= 64 (length (re::session-binary-sha256 (re::find-session id)))))))
            (check "and reads again without being reopened" (has "rizin> iIj" (re:cmd "iIj")))))
 
-       (check "/re open reads a relative path against the session's directory"
-              (let ((other (fresh-session)))
-                (uiop:copy-file *binary* (merge-pathnames "sample.bin" *scratch*))
-                (funcall (cdr (assoc "re" nle:*commands* :test #'string=)) "open sample.bin" other)
-                (in-session (other) (has "sample.bin" (re:status)))))
+       ;; One rule for a relative path, whichever way it comes in: it is read
+       ;; against the session's directory, and its spaces are its own.
+       (uiop:copy-file *binary* (merge-pathnames "sample  two.bin" *scratch*))
+       (flet ((opens-p (open)
+                (let ((other (fresh-session)))
+                  (in-session (other)
+                    (funcall open other)
+                    (has (scratch-path "sample  two.bin") (re:status))))))
+         (check "a typed /re open reads a relative path against the session's directory"
+                (opens-p (lambda (other)
+                           (funcall (cdr (assoc "re" nle:*commands* :test #'string=))
+                                    "open sample  two.bin" other))))
+         (check "and so does (re:slash \"open ...\")"
+                (opens-p (lambda (other) (declare (ignore other)) (re:slash "open sample  two.bin"))))
+         (check "and (re:open)"
+                (opens-p (lambda (other) (declare (ignore other)) (re:open "sample  two.bin"))))
+         (check "and (re:call \"open_binary\")"
+                (opens-p (lambda (other) (declare (ignore other))
+                           (re:call "open_binary" :path "sample  two.bin")))))
 
        (check "two sessions read side by side, each its own binary and record"
               (let* ((results (make-array 4 :initial-element nil))
@@ -302,6 +471,6 @@
 
      (let ((rz-before (loop for session being the hash-values of re::*sessions*
                             when (re::session-rz session) collect (re::session-rz session))))
-       (nodecode-re::stop-cell)
+       (stop-running-cell)
        (check "stopping the cell ends every rizin process"
               (and rz-before (notany #'re::rz-alive-p rz-before)))))))

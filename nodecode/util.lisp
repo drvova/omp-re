@@ -19,16 +19,6 @@
 (defun blank-p (text)
   (zerop (length (trimmed text))))
 
-(defun env (name)
-  "The environment variable NAME, trimmed, or NIL when unset or blank."
-  (let ((value (uiop:getenv name)))
-    (and value (not (blank-p value)) (trimmed value))))
-
-(defun env-on-p (name)
-  "Whether NAME is set to 1, true, yes or on — the engine's switch spelling."
-  (let ((value (env name)))
-    (and value (member value '("1" "true" "yes" "on") :test #'string-equal) t)))
-
 (defun split-lines (text)
   "TEXT's lines, as a split on newline gives them: a trailing newline leaves
 an empty last line."
@@ -45,14 +35,6 @@ an empty last line."
   "TEXT split on blanks, empty pieces dropped."
   (remove "" (uiop:split-string (or text "") :separator '(#\Space #\Tab #\Newline #\Return))
           :test #'string=))
-
-(defun starts-with (prefix text)
-  (and (<= (length prefix) (length text))
-       (string= prefix text :end2 (length prefix))))
-
-(defun ends-with (suffix text)
-  (and (<= (length suffix) (length text))
-       (string= suffix text :start2 (- (length text) (length suffix)))))
 
 (defun js-string (value)
   "VALUE the way JSON.stringify quotes a string in the engine's messages."
@@ -80,7 +62,6 @@ an empty last line."
               year month day hour minute second (floor microseconds 1000)))))
 
 (defun random-octets (count)
-  "COUNT octets from the system's generator."
   (let ((octets (make-array count :element-type '(unsigned-byte 8))))
     (handler-case
         (with-open-file (in "/dev/urandom" :element-type '(unsigned-byte 8))
@@ -108,7 +89,6 @@ an empty last line."
     (if (zerop (length safe)) "session" safe)))
 
 (defun write-text-file (path text)
-  "Write TEXT to PATH whole, creating its folder."
   (ensure-directories-exist path)
   (with-open-file (out path :direction :output :if-exists :supersede :if-does-not-exist :create
                             :external-format :utf-8)
@@ -116,7 +96,6 @@ an empty last line."
   path)
 
 (defun append-text-file (path text)
-  "Append TEXT to PATH, creating it and its folder."
   (ensure-directories-exist path)
   (with-open-file (out path :direction :output :if-exists :append :if-does-not-exist :create
                             :external-format :utf-8)
@@ -131,9 +110,6 @@ an empty last line."
         (let ((text (make-string (file-length in))))
           (subseq text 0 (read-sequence text in))))
     (error () nil)))
-
-(defun native (path)
-  (uiop:native-namestring path))
 
 ;;; --- patterns, read as JavaScript reads them -----------------------------------------
 ;;; The engine's patterns come from the TypeScript engine, and in JavaScript
@@ -175,7 +151,7 @@ or a pipe."
 0X01100 and \"0x1100 \" key the same evidence; anything not 0x-prefixed is
 lowercased as written."
   (let ((text (string-downcase (trimmed raw))))
-    (if (not (starts-with "0x" text))
+    (if (not (uiop:string-prefix-p "0x" text))
         text
         (let ((digits (string-left-trim "0" (subseq text 2))))
           (cond ((= (length text) 2) "0x")
@@ -191,11 +167,16 @@ lowercased as written."
 (defun ea-from-offset (offset)
   (format nil "0x~(~x~)" offset))
 
+(defun ends-pipe-line-p (text)
+  "Whether TEXT holds a line break or NUL: rizin reads its pipe a line at a
+time, so either would end the command and start another."
+  (and (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) text) t))
+
 (defun rz-quote (value)
   "VALUE as one single-quoted rizin argument. Inside single quotes rizin
 takes `;', `@', `~', `|', `>', backticks, `$(...)' and `#' as text, so no
 model-supplied comment or signature can end the command and start another."
-  (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) value)
+  (when (ends-pipe-line-p value)
     (fail "omp-re: invalid argument: contains a newline or NUL"))
   (with-output-to-string (out)
     (write-char #\' out)
@@ -213,8 +194,8 @@ model-supplied comment or signature can end the command and start another."
       (fail "omp-re: invalid ~a: forbidden character ~a" key (js-string (string char))))))
 
 (defun validate-text (value)
-  "VALUE when it has no line break or NUL, which would end the pipe line."
-  (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) value)
+  "VALUE when it has no line break or NUL."
+  (when (ends-pipe-line-p value)
     (fail "omp-re: invalid text: contains forbidden character"))
   value)
 
@@ -239,7 +220,7 @@ here so the two engines cut at the same line.")
          (lines (if (zerop (length content))
                     '()
                     (let ((lines (split-lines content)))
-                      (if (ends-with (string #\Newline) content) (butlast lines) lines))))
+                      (if (uiop:string-suffix-p content (string #\Newline)) (butlast lines) lines))))
          (total-lines (length lines)))
     (cond ((and (<= total-lines +max-lines+) (<= total-octets +max-octets+))
            (values content nil total-lines total-lines total-octets total-octets))
@@ -260,7 +241,6 @@ here so the two engines cut at the same line.")
 (defparameter +ansi-escape+ (ppcre:create-scanner "\\x1b\\[[0-9;?]*[A-Za-z]"))
 
 (defun replace-all (text old new)
-  "TEXT with every occurrence of the literal OLD replaced by NEW."
   (if (zerop (length old))
       text
       (with-output-to-string (out)
@@ -316,3 +296,17 @@ differ only in where the code sits."
   (let* ((lines (split-lines (canonicalize-rizin-output raw binary-path)))
          (head (join-lines (subseq lines 0 (min max-lines (length lines))))))
     (if (<= (length head) max-characters) head (subseq head 0 max-characters))))
+
+;;; --- names the tool groups still call; removed when they move to the above ---------------
+;;; STARTS-WITH  → (uiop:string-prefix-p PREFIX TEXT)
+;;; ENDS-WITH    → (uiop:string-suffix-p TEXT SUFFIX), the arguments the other way round
+;;; NATIVE       → (uiop:native-namestring PATH)
+
+(defun starts-with (prefix text)
+  (and (stringp text) (uiop:string-prefix-p prefix text)))
+
+(defun ends-with (suffix text)
+  (and (stringp text) (uiop:string-suffix-p text suffix)))
+
+(defun native (path)
+  (uiop:native-namestring path))

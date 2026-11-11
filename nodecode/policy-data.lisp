@@ -1,12 +1,10 @@
-;;;; policy-data.lisp --- GENERATED from extensions/re/catalog.ts. Do not edit.
+;;;; policy-data.lisp --- the read-only command policy's patterns and command lists.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Regenerate with: bun scripts/gen-nodecode-policy.ts
-;;;; The read-only command policy's patterns and command lists, lifted out of
-;;;; the TypeScript engine so the two engines cannot disagree about what
-;;;; rizin_command may run. policy.lisp is the logic over this data; the
-;;;; reasons for every entry are in catalog.ts.
+;;;; What rizin_command may run, as data: policy.lisp is the logic over it.
+;;;; The patterns are written as JavaScript reads a regular expression, `$'
+;;;; meaning the very end, and are compiled that way (JS-SCANNER).
 
 (in-package #:nodecode-re)
 

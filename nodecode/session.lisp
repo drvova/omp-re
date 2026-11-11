@@ -1,65 +1,43 @@
-;;;; session.lisp --- a session's record, its rizin process, and one tool call.
+;;;; session.lisp --- a session: its record, its rizin process, and acting in it.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's runtime.ts, state.ts, entries.ts, evidence.ts,
-;;;; audit.ts and the result half of format.ts.
+;;;; A SESSION is everything the engine holds for one host session: the open
+;;;; binary, the rizin process analyzing it, and the session's RECORD — an
+;;;; append-only list of entries (re.binary, re.evidence, re.annotation,
+;;;; re.finding, ...). The record is the truth and the process is a cache of
+;;;; it: a rizin that died, a session reaped for idleness and a host restarted
+;;;; all come back the same way, by spawning rizin on the recorded binary and
+;;;; replaying what the record says was done to it.
 ;;;;
-;;;; A SESSION is everything the engine holds for one nodecode session: the
-;;;; open binary, the rizin process analyzing it, and the session's RECORD —
-;;;; an append-only list of entries (re.binary, re.evidence, re.annotation,
-;;;; re.finding, ...) kept on disk as one JSON object a line. The record is
-;;;; the truth and the process is a cache of it: a rizin that died, a session
-;;;; reaped for idleness and an organism restarted all come back the same
-;;;; way, by spawning rizin on the recorded binary and replaying what the
-;;;; record says was done to it. The entries are the ones omp-re writes to an
-;;;; omp session branch, field for field.
+;;;; Where the record is kept, and which of it the session's current branch
+;;;; sees, is the host's to say (host.lisp, :ENTRIES and :APPEND-ENTRY). With
+;;;; no host saying, it is one JSON object a line in a file of the session's
+;;;; own, all of it on the branch.
 ;;;;
-;;;; CALL-TOOL is the one way a tool runs, whoever asks — a verb in eval, a
-;;;; top-level tool, the /re command: the `/re off' gate, a line in the audit
-;;;; log, the body, and for a tool that observes the binary an evidence
-;;;; record whose id is appended to what the model reads.
+;;;; What is replayed, what a status says of it and what else must be closed
+;;;; with a session is not known here: a tool group says so by name
+;;;; (CONTRIBUTE). IN-SESSION is the one way to act in a session, whoever
+;;;; asks — a tool call, a /re line, a recipe composing reads.
 
 (in-package #:nodecode-re)
-
-;;; --- where things are kept -------------------------------------------------------------
-
-(defvar *state-directory* nil
-  "A function answering the directory everything is kept under. Set by the
-cell at start; a test binds it.")
-
-(defun state-directory ()
-  (uiop:ensure-directory-pathname
-   (if *state-directory*
-       (funcall *state-directory*)
-       (nlk:home "omp-re/"))))
-
-(defun state-path (&rest parts)
-  "A path under the state directory's re/ folder — the layout omp-re keeps
-under omp's agent directory."
-  (merge-pathnames (format nil "re/~{~a~^/~}" parts) (state-directory)))
 
 ;;; --- the session -------------------------------------------------------------------------
 
 (defstruct (session (:copier nil))
-  (id "default" :type string)
+  (id +default-session+ :type string)
   ;; One tool call or /re line at a time: rizin answers one request at a time,
   ;; and a record written by two threads at once is no record.
   (lock (sb-thread:make-mutex :name "omp-re session"))
   (rz nil)                              ; the static analysis process
-  (dbg nil)                             ; the opt-in debug process, never respawned on its own
   (binary-path nil)
   (binary-sha256 nil)
   (load-options nil)                    ; a JSON object, or NIL for header autodetection
-  ;; Every entry this session wrote, in order. What a call reads is
-  ;; SESSION-ENTRIES: these, as the session's current branch sees them.
-  (all-entries (make-array 0 :adjustable t :fill-pointer 0))
-  (view nil)                            ; the branch's entries, as last computed
-  (view-key nil)                        ; what that computation depended on
-  (synced-view nil)                     ; the view the fields below were last set from,
-  (synced-length -1)                    ; and how long it was then
-  (evidence-by-addr (make-hash-table :test #'equal))
-  (applied-annotations "")
+  (file-entries (make-array 0 :adjustable t :fill-pointer 0)) ; the record's own file, as read and written
+  (synced-view nil)                     ; the branch's entries the fields above were last set from,
+  (synced-length -1)                    ; and how many there were then
+  (applied '())                         ; ((CONTRIBUTION-NAME . FINGERPRINT) ...) of what the live rizin carries
+  (kept '())                            ; ((NAME . VALUE) ...): what a tool group or a host keeps for the session
   (tools-off nil)
   (audit-warned nil)
   (calls 0)
@@ -72,52 +50,51 @@ under omp's agent directory."
 (defvar *session* nil
   "The session the running tool call or /re line is for.")
 
+(defun session-held (session name)
+  (cdr (assoc name (session-kept session) :test #'equal)))
+
+(defun (setf session-held) (value session name)
+  (let ((entry (assoc name (session-kept session) :test #'equal)))
+    (if entry
+        (setf (cdr entry) value)
+        (push (cons name value) (session-kept session)))
+    value))
+
 (defun session-directory (session)
   (uiop:ensure-directory-pathname (state-path "sessions" (file-safe (session-id session)))))
+
+;;; --- the record, in a file of the session's own -------------------------------------------
 
 (defun record-path (session)
   (merge-pathnames "branch.jsonl" (session-directory session)))
 
-;;; --- the branch a session is on ----------------------------------------------------------
-;;; A nodecode session is a tree of turns: /tree moves its head to an earlier
-;;; turn and new turns branch from there, /redo goes back, and /fork opens a
-;;; session that reads its parent's turns up to the fork point. omp-re's rule
-;;; under omp holds here too: evidence, annotations and the open binary follow
-;;; the active branch. After a rewind, what an abandoned branch renamed is
-;;; rolled back in rizin and what it observed no longer grounds a claim.
-;;;
-;;; So every entry is stamped with the turn it was written in, and what a
-;;; call reads is the entries whose turn is on the session's branch — its
-;;; own, and through a fork's lineage its ancestors'. Nothing is deleted: a
-;;; redo makes the same entries visible again.
-
-(defvar *branch-view* nil
-  "A function of a session id answering (values VISIBLE LINEAGE): VISIBLE a
-table whose keys are the turn ids on that session's current branch, across
-its fork lineage; LINEAGE the sessions it was forked from, root first, as
-((SESSION-ID ...) ...). NIL, or answering NIL for both, means every entry is
-on the branch. Set by the cell at start.")
-
-(defvar *current-turn* nil
-  "A function answering the id of the turn this thread works for, or NIL
-outside one. Set by the cell at start.")
-
-(defun current-turn-id ()
-  (and *current-turn* (ignore-errors (funcall *current-turn*))))
-
 (defun load-record (session)
-  "Read SESSION's record from disk. A torn last line — the process died
+  "Read SESSION's record file. A torn last line — the process died
 mid-append — loses that one entry, never the record."
   (let ((text (read-text-file (record-path session))))
     (when text
       (dolist (line (split-lines text))
         (let ((entry (and (not (blank-p line)) (json-parse line))))
           (when (and (hash-table-p entry) (jstring entry "customType"))
-            (vector-push-extend entry (session-all-entries session))))))))
+            (vector-push-extend entry (session-file-entries session))))))))
+
+(defun file-append-entry (session type data &optional turn)
+  "Append one entry of TYPE carrying DATA to SESSION's record file, on disk
+before it is in memory's list: what was said to be recorded is. TURN, when a
+host has turns, stamps the entry with the one it was written in."
+  (let ((entry (obj "type" "custom"
+                    "id" (format nil "~(~36r~)-~d" (get-universal-time)
+                                 (length (session-file-entries session)))
+                    "customType" type
+                    "turn" (or turn :absent)
+                    "data" data)))
+    (append-text-file (record-path session) (format nil "~a~%" (json-encode entry)))
+    (vector-push-extend entry (session-file-entries session))
+    entry))
 
 (defun find-session (id)
-  "The session called ID, its record read and its state restored from it on
-first use."
+  "The session called ID, its record file read and its state restored from
+the record on first use."
   (multiple-value-bind (session fresh)
       (sb-thread:with-mutex (*sessions-lock*)
         (let ((known (gethash id *sessions*)))
@@ -128,50 +105,24 @@ first use."
                 (values (setf (gethash id *sessions*) session) t)))))
     ;; Outside the table's lock: reading a fork's branch reads its ancestors'
     ;; records, which finds their sessions in turn.
-    (when fresh (sync-to-branch session))
+    (when fresh
+      (sb-thread:with-mutex ((session-lock session))
+        (sync-to-branch session)))
     session))
 
+;;; --- the record, as the session's branch sees it -------------------------------------------
+
 (defun session-entries (session)
-  "SESSION's record as its current branch sees it: a vector of the entries
-whose turn is on the branch — its ancestors' first, through a fork's lineage,
-then its own — and of those written outside any turn."
-  (multiple-value-bind (visible lineage)
-      (if *branch-view* (ignore-errors (funcall *branch-view* (session-id session))) (values nil nil))
-    (if (and (null visible) (null lineage))
-        (session-all-entries session)
-        (let* ((sources (append (loop for (ancestor) in lineage
-                                      for known = (and (stringp ancestor) (string/= ancestor (session-id session))
-                                                       (find-session ancestor))
-                                      when known collect (session-all-entries known))
-                                (list (session-all-entries session))))
-               (current (current-turn-id))
-               (key (list visible current (mapcar #'length sources))))
-          (if (and (session-view session) (equal key (session-view-key session))
-                   (eq visible (first (session-view-key session))))
-              (session-view session)
-              (let ((view (make-array 0 :adjustable t :fill-pointer 0)))
-                (dolist (entries sources)
-                  (loop for entry across entries
-                        for turn = (jstring entry "turn")
-                        ;; The running turn is on the branch by definition,
-                        ;; whatever the store has recorded of it so far.
-                        do (when (or (null turn) (null visible) (equal turn current) (gethash turn visible))
-                             (vector-push-extend entry view))))
-                (setf (session-view-key session) key
-                      (session-view session) view)))))))
+  "SESSION's record as its current branch sees it, a vector, oldest first."
+  (if (host-service :entries)
+      (or (ask-host :entries session) (vector))
+      (session-file-entries session)))
 
 (defun append-entry (type data &optional (session *session*))
-  "Append one entry of TYPE carrying the JSON object DATA to the record, on
-disk before it is in memory's list: what was said to be recorded is."
-  (let ((entry (obj "type" "custom"
-                    "id" (format nil "~(~36r~)-~d" (get-universal-time) (length (session-all-entries session)))
-                    "customType" type
-                    ;; The turn it was written in: what puts it on a branch.
-                    "turn" (or (current-turn-id) :absent)
-                    "data" data)))
-    (append-text-file (record-path session) (format nil "~a~%" (json-encode entry)))
-    (vector-push-extend entry (session-all-entries session))
-    entry))
+  "Record one entry of TYPE carrying the JSON object DATA => the entry."
+  (if (host-service :append-entry)
+      (ask-host :append-entry session type data)
+      (file-append-entry session type data)))
 
 (defun entries-of (type &optional (session *session*))
   "The data of every entry of TYPE, in the order recorded."
@@ -196,196 +147,65 @@ binary they were made on when a session opens another."
 (defun last-binary-entry (&optional (session *session*))
   (car (last (entries-of "re.binary" session))))
 
-;;; --- evidence ----------------------------------------------------------------------------
+;;; --- what a tool group contributes ---------------------------------------------------------
 
-(defun evidence-records (&optional (session *session*))
-  "Every re.evidence record, oldest first; malformed rows are skipped."
-  (remove-if-not (lambda (record) (jstring record "id")) (entries-of "re.evidence" session)))
+(defstruct (contribution (:copier nil))
+  (name "" :type string)
+  (order 100)
+  noun replay fingerprint status close)
 
-(defun find-evidence (id &optional (session *session*))
-  "The evidence record whose id is ID, or begins with it: a result shows
-only the first eight characters, so what the model retypes is a prefix."
-  (let ((records (evidence-records session)))
-    (or (find id records :key (lambda (record) (jstring record "id")) :test #'string=)
-        (and (plusp (length id))
-             (find-if (lambda (record) (starts-with id (jstring record "id"))) records)))))
+(defvar *contributions* '()
+  "What the tool groups have said of themselves, in ORDER.")
 
-(defun record-evidence-at (ea id &optional (session *session*))
-  (when (and ea (plusp (length ea)))
-    (setf (gethash (normalize-addr ea) (session-evidence-by-addr session)) id)))
+(defun contribute (name &key (order 100) noun replay fingerprint status close)
+  "Say, in one call, what the tool group NAME adds to a session. All of it
+is optional:
+  REPLAY       (SESSION RZ BINARY-PATH) puts back into a fresh rizin what the
+               record says the group did to this binary => (values FAILURES
+               APPLIED): a line for each thing that would not go back, and
+               how many did. A group that answers no APPLIED is not counted
+               when a binary is opened, only its failures are listed.
+  NOUN         what one replayed thing is called: \"annotation(s)\".
+  FINGERPRINT  (SESSION BINARY-PATH) a string naming what of the group's the
+               record has in effect: when it is no longer what the live rizin
+               was given, that rizin is dropped and the next call replays.
+  STATUS       (SESSION) the group's lines of /re status.
+  CLOSE        (SESSION) end whatever else the group runs for the session.
+ORDER places it among the others — in the replay, where a later layer may
+name what an earlier one recovered, and in the status. Saying a NAME again
+replaces what it said."
+  (setf *contributions*
+        (stable-sort (append (remove name *contributions* :key #'contribution-name :test #'string=)
+                             (list (make-contribution :name name :order order :noun noun
+                                                      :replay replay :fingerprint fingerprint
+                                                      :status status :close close)))
+                     #'< :key #'contribution-order))
+  name)
 
-(defun evidence-id-at (ea &optional (session *session*))
-  "The most recent evidence observed at EA, or NIL: what grounds an annotation there."
-  (gethash (normalize-addr ea) (session-evidence-by-addr session)))
+(defun applied-fingerprint (session name)
+  (or (cdr (assoc name (session-applied session) :test #'string=)) ""))
 
-(defun rebuild-evidence-index (session)
-  (clrhash (session-evidence-by-addr session))
-  (dolist (record (evidence-records session))
-    (record-evidence-at (jstring record "ea") (jstring record "id") session)))
+(defun (setf applied-fingerprint) (fingerprint session name)
+  (let ((entry (assoc name (session-applied session) :test #'string=)))
+    (if entry
+        (setf (cdr entry) fingerprint)
+        (push (cons name fingerprint) (session-applied session)))
+    fingerprint))
 
-(defun blob-path (hash)
-  (state-path "blobs" (subseq hash 0 2) (subseq hash 2 4) hash))
+(defun mark-applied (name &optional (session *session*))
+  "Say that SESSION's rizin now holds exactly what the record has in effect
+of the group NAME: a tool has just applied the one thing that changed."
+  (let ((contribution (find name *contributions* :key #'contribution-name :test #'string=)))
+    (when (and contribution (contribution-fingerprint contribution) (session-binary-path session))
+      (setf (applied-fingerprint session name)
+            (funcall (contribution-fingerprint contribution) session (session-binary-path session))))))
 
-(defun write-blob (content)
-  "Store CONTENT in the content-addressed blob store => its SHA-256. Written
-through a temporary file and one rename, so a reader never sees half a blob;
-a blob already there is left alone."
-  (let* ((hash (sha256-hex content))
-         (target (blob-path hash)))
-    (unless (probe-file target)
-      (ensure-directories-exist target)
-      (nlk:write-file-atomically target content))
-    hash))
-
-(defun read-blob (hash)
-  "The blob stored under HASH, or NIL when it is missing."
-  (and (stringp hash) (>= (length hash) 4) (read-text-file (blob-path hash))))
-
-(defun evidence-tag (id)
-  (format nil "[evidence ~a — cite it in record_finding]" (subseq id 0 8)))
-
-(defun record-evidence (tool-name arguments text details &optional (session *session*))
-  "Append one re.evidence record for a successful observation => its id.
-TEXT is what the model was sent; DETAILS the result's own details object,
-whose reproducibility fields are what /re verify later re-runs."
-  (let* ((id (uuid))
-         (ea (jstring details "ea"))
-         (commands (jget details "commands")))
-    (record-evidence-at ea id session)
-    (append-entry "re.evidence"
-                  (obj "id" id
-                       "tool" tool-name
-                       "args" arguments
-                       "ea" (or ea :absent)
-                       "outputHash" (write-blob text)
-                       "artifactId" (or (jstring details "artifactId") :absent)
-                       "commands" (if (and (vectorp commands) (every #'stringp commands)) commands :absent)
-                       "reproHash" (or (jstring details "reproHash") :absent)
-                       "canonicalExcerpt" (or (jstring details "canonicalExcerpt") :absent)
-                       "shiftHash" (or (jstring details "shiftHash") :absent)
-                       ;; Binds the evidence to the exact bytes it was taken against.
-                       "binarySha256" (or (session-binary-sha256 session) :absent)
-                       "summary" (clip-utf-8 text 512))
-                  session)
-    id))
-
-;;; --- the audit log -------------------------------------------------------------------------
-
-(defvar *notify* nil
-  "A function of (TEXT &key level) that tells the operator and the model
-something that lasts, or NIL. Set by the cell at start to post a standing
-notice; without one the text is a warning on the process's log.")
-
-(defun notify (control &rest arguments)
-  "Say something the operator should not miss: a standing notice where the
-host has them."
-  (let ((text (apply #'format nil control arguments)))
-    (if *notify*
-        (ignore-errors (funcall *notify* text :level :warning))
-        (warn "~a" text))
-    text))
-
-(defun append-audit-line (session call-id tool arguments)
-  "Append one line for this call to the session's audit log, signed when
-OMPRE_AUDIT_HMAC_KEY is set. Never signals: the log is a mirror for the
-operator, and must not abort the call it records."
-  (handler-case
-      (let* ((base (obj "ts" (iso-now) "sessionId" (session-id session)
-                        "toolCallId" call-id "tool" tool "args" arguments))
-             (canonical (json-encode base))
-             (key (uiop:getenv "OMPRE_AUDIT_HMAC_KEY")))
-        (cond ((and key (plusp (length key)))
-               ;; The signature is over the line as written without it.
-               (setf (gethash "hmac" base) (base64 (hmac-sha256 (utf-8 key) (utf-8 canonical)))
-                     canonical (json-encode base)))
-              ((not (session-audit-warned session))
-               (setf (session-audit-warned session) t)
-               ;; Said once a session, and only on the log: the status line
-               ;; carries it for anyone who asks, and it is not a fault.
-               (warn "omp-re: OMPRE_AUDIT_HMAC_KEY not configured — audit log entries will not be signed.")))
-        (append-text-file (state-path "audit" (format nil "~a.log" (session-id session)))
-                          (format nil "~a~%" canonical)))
-    (error (condition)
-      (notify "omp-re: audit log write failed: ~a" condition))))
-
-;;; --- what a tool answers -------------------------------------------------------------------
-
-(defstruct (result (:copier nil))
-  (text "" :type string)
-  (details (obj))                       ; the JSON object omp-re calls a result's details
-  (failed nil))
-
-(defun result-ea (result)
-  (jstring (result-details result) "ea"))
-
-(defun plain-result (text &optional ea)
-  "A one-off, untruncated result: a mutation, a hash, session setup."
-  (make-result :text text
-               :details (obj "ea" (or ea :absent)
-                             "summary" (subseq text 0 (min 512 (length text)))
-                             "header" (first (split-lines text)))))
-
-(defun failed-result (text &optional ea)
-  (let ((result (plain-result text ea)))
-    (setf (result-failed result) t)
-    result))
-
-(defun artifact-path (id &optional (session *session*))
-  (merge-pathnames (format nil "artifacts/~a.txt" (file-safe id)) (session-directory session)))
-
-(defun save-artifact (content label &optional (session *session*))
-  "Keep CONTENT whole beside the session's record => the artifact's id, or
-NIL when it could not be written: a result then stays truncated, never fails."
-  (ignore-errors
-   ;; An evidence record keeps the id and the record outlives this process,
-   ;; so an id is never reused after a restart.
-   (let ((id (format nil "~(~36r~)-~d-~a" (get-universal-time) (incf (session-artifacts session))
-                     (file-safe label))))
-     (write-text-file (artifact-path id session) content)
-     id)))
-
-(defun build-result (lead header body &key ea tool narrow-hint decompiler commands repro-hash
-                                           canonical-excerpt shift-hash)
-  "LEAD then BODY, cut to what a context can take; the whole text is kept as
-an artifact and the result names the file that holds it."
-  (multiple-value-bind (kept truncated shown-lines total-lines shown-octets total-octets)
-      (truncate-head body)
-    (let* ((artifact (and truncated *session*
-                          (save-artifact (concatenate 'string lead body) (or tool "omp-re"))))
-           (text (concatenate
-                  'string lead kept
-                  (if truncated
-                      (format nil "~%~%[Output truncated: ~d of ~d lines (~a of ~a). ~a]"
-                              shown-lines total-lines (format-size shown-octets) (format-size total-octets)
-                              (if artifact
-                                  (format nil "Full output: ~a" (native (artifact-path artifact)))
-                                  (or narrow-hint "Full output was larger.")))
-                      ""))))
-      (make-result
-       :text text
-       :details (obj "ea" (or ea :absent)
-                     "summary" (subseq text 0 (min 512 (length text)))
-                     "header" header
-                     "truncated" (if truncated t :absent)
-                     "artifactId" (or artifact :absent)
-                     "decompiler" (or decompiler :absent)
-                     "commands" (if commands (coerce commands 'simple-vector) :absent)
-                     "reproHash" (or repro-hash :absent)
-                     "canonicalExcerpt" (or canonical-excerpt :absent)
-                     "shiftHash" (or shift-hash :absent))))))
-
-(defun text-result (header body &rest keys)
-  "Plain-text output — disassembly, decompiled code, a listing — under HEADER."
-  (apply #'build-result (format nil "~a~%" header) header body keys))
-
-(defun json-result (header data &rest keys)
-  "DATA as the real JSON payload under HEADER, not just a count."
-  (apply #'build-result (format nil "~a~%" header) header (format-json data)
-         (append keys (list :narrow-hint "Narrow with offset/limit or filter."))))
-
-(defun prefixed-text-result (prefix body &rest keys)
-  "Like TEXT-RESULT, but PREFIX stays at byte 0 of the content."
-  (apply #'build-result prefix (trimmed prefix) body keys))
+(defun applied-in-step-p (session)
+  (loop for contribution in *contributions*
+        for fingerprint = (contribution-fingerprint contribution)
+        always (or (null fingerprint)
+                   (string= (funcall fingerprint session (session-binary-path session))
+                            (applied-fingerprint session (contribution-name contribution))))))
 
 ;;; --- the rizin process a session owns ------------------------------------------------------
 
@@ -393,57 +213,42 @@ an artifact and the result names the file that holds it."
   (or (session-binary-path session)
       (fail "omp-re: no binary open — use /re open <path>, (re:open \"path\") or the open_binary tool first")))
 
-(defvar *replay-hooks* '()
-  "Functions (name . function) run on every fresh rizin process, in the order
-registered, each putting back what the record says was done to this binary —
-mapped files, analysis passes, signatures, annotations. A function takes
-(SESSION RZ BINARY-PATH) and answers a list of failure lines.")
-
-(defun register-replay (name function)
-  "Register FUNCTION under NAME to run on every fresh rizin process, after
-those registered before it. Registering a name again replaces it in place."
-  (let ((existing (assoc name *replay-hooks* :test #'string=)))
-    (if existing
-        (setf (cdr existing) function)
-        (setf *replay-hooks* (append *replay-hooks* (list (cons name function))))))
-  name)
-
-(defvar *annotation-fingerprint* nil
-  "A function of (SESSION BINARY-PATH) answering a string that names the set
-of annotations in effect, or NIL when no annotation module is loaded.")
-
-(defvar *live-annotations* nil
-  "A function of (BINARY-PATH SESSION) answering the annotations in effect
-for that binary as a list of their recorded data objects, or NIL when no
-annotation module is loaded. Set by annotate.lisp.")
-
 (defun spawn-rizin (binary-path &key load (session *session*))
   "Spawn and analyze a fresh rizin for BINARY-PATH, replay the record into
-it, and make it SESSION's process => (values RZ FAILURES). The process it
+it, and make it SESSION's process => (values RZ REPLAYED), REPLAYED being
+(CONTRIBUTION FAILURES APPLIED) for each group that replays. The process it
 replaces is closed only once the new one is analyzed and live."
   (let ((binary-path (resolve-binary-path binary-path)))
     (assert-rizin-available)
     (when load (setf (session-load-options session) load))
     (let* ((load (or load (session-load-options session)))
-           (rz (spawn-rz (resolve-rizin-path binary-path (and load (jget load "bits")))
-                         binary-path :load load))
-           (previous (session-rz session))
-           (failures '()))
+           (rz (unwind-protect
+                    (progn
+                      (report-progress (format nil "rizin: analyzing ~a…" (file-namestring binary-path)))
+                      (spawn-rz (resolve-rizin-path binary-path (and load (jget load "bits")))
+                                binary-path :load load))
+                 (report-progress nil)))
+           (previous (session-rz session)))
       ;; The replay reads the record as it stands for this binary, so the
       ;; session must already say which binary is open.
       (setf (session-binary-path session) binary-path)
-      (handler-case
-          (loop for (nil . hook) in *replay-hooks*
-                do (setf failures (append failures (funcall hook session rz binary-path))))
-        (error (condition)
-          (rz-close rz)
-          (error condition)))
-      (setf (session-rz session) rz
-            (session-applied-annotations session)
-            (if *annotation-fingerprint* (funcall *annotation-fingerprint* session binary-path) ""))
-      (when (and previous (not (eq previous rz)))
-        (rz-close previous))
-      (values rz failures))))
+      (let ((replayed (handler-case
+                          (loop for contribution in *contributions*
+                                when (contribution-replay contribution)
+                                  collect (multiple-value-bind (failures applied)
+                                              (funcall (contribution-replay contribution)
+                                                       session rz binary-path)
+                                            (list contribution failures applied)))
+                        (error (condition)
+                          (rz-close rz)
+                          (error condition)))))
+        (setf (session-rz session) rz
+              (session-applied session) '())
+        (dolist (contribution *contributions*)
+          (mark-applied (contribution-name contribution) session))
+        (when (and previous (not (eq previous rz)))
+          (rz-close previous))
+        (values rz replayed)))))
 
 (defun ensure-rizin (&optional (session *session*))
   "SESSION's live rizin, respawned — and the record replayed — when the
@@ -453,24 +258,30 @@ previous process died."
         rz
         (progn
           (when rz (rz-close rz))
-          (multiple-value-bind (rz failures) (spawn-rizin (require-binary session) :session session)
-            (when failures
-              (notify "omp-re: ~d annotation(s) could not be replayed:~%~{~a~^~%~}" (length failures) failures))
+          (multiple-value-bind (rz replayed) (spawn-rizin (require-binary session) :session session)
+            (let ((lost (loop for (contribution failures) in replayed
+                              when failures
+                                collect (format nil "omp-re: ~d ~a could not be replayed:~%~{~a~^~%~}"
+                                                (length failures)
+                                                (or (contribution-noun contribution)
+                                                    (contribution-name contribution))
+                                                failures))))
+              (when lost
+                (notify :warning "~{~a~^~%~}" lost)))
             rz)))))
 
 (defun sync-to-branch (session)
   "Bring SESSION in line with the branch it is on: the binary its branch
-last opened, that binary's hash and load options, the evidence index, and —
-when the annotations in effect are no longer the ones the live rizin
-carries — no rizin, so the next call that needs one starts it and replays
-exactly this branch's. Cheap when nothing moved: it acts only on a view it
-has not seen. No process is started here."
+last opened, that binary's hash and load options, and — when what the record
+has in effect is no longer what the live rizin carries — no rizin, so the
+next call that needs one starts it and replays exactly this branch's. Cheap
+when nothing moved: it acts only on a view it has not seen. No process is
+started here."
   (let ((view (session-entries session)))
     (unless (and (eq view (session-synced-view session))
                  (eql (length view) (session-synced-length session)))
       (setf (session-synced-view session) view
             (session-synced-length session) (length view))
-      (rebuild-evidence-index session)
       (let* ((binary (last-binary-entry session))
              (path (and binary (jstring binary "path"))))
         (unless (equal path (session-binary-path session))
@@ -482,24 +293,18 @@ has not seen. No process is started here."
         (setf (session-binary-sha256 session) (and binary (jstring binary "sha256"))
               (session-load-options session) (let ((load (and binary (jget binary "load"))))
                                                (and (hash-table-p load) load)))
-        (when (and path *annotation-fingerprint* (rz-alive-p (session-rz session))
-                   (string/= (funcall *annotation-fingerprint* session path)
-                             (session-applied-annotations session)))
+        (when (and path (rz-alive-p (session-rz session)) (not (applied-in-step-p session)))
           (rz-close (session-rz session))
           (setf (session-rz session) nil)))))
   session)
 
 (defun close-session-processes (session)
   (rz-close (session-rz session))
-  ;; Killing only the debug rizin detaches its tracee, which would then run
-  ;; on to completion: the sample, executing with nothing watching it. So the
-  ;; debuggee is killed first, through rizin, as the tool's own stop does.
-  (let ((dbg (session-dbg session)))
-    (when (rz-alive-p dbg)
-      (ignore-errors (rz-cmd dbg "dk 9" :seconds 5))))
-  (rz-close (session-dbg session))
-  (setf (session-rz session) nil
-        (session-dbg session) nil))
+  (setf (session-rz session) nil)
+  (dolist (contribution *contributions*)
+    (when (contribution-close contribution)
+      ;; One group's trouble must not leave another's process running.
+      (ignore-errors (funcall (contribution-close contribution) session)))))
 
 (defun shutdown-sessions ()
   "Close every session's processes and forget the sessions; their records stay."
@@ -511,173 +316,134 @@ has not seen. No process is started here."
 
 (defun reap-idle-sessions (idle-seconds)
   "Close the processes of every session nothing has called for IDLE-SECONDS.
-Nothing is lost: the record is on disk and the next call restores from it."
+Nothing is lost: the record is kept and the next call restores from it."
   (let ((now (get-universal-time)))
     (dolist (session (sb-thread:with-mutex (*sessions-lock*)
                        (loop for session being the hash-values of *sessions* collect session)))
-      (when (and (>= (- now (session-last-used session)) idle-seconds)
-                 (or (session-rz session) (session-dbg session)))
+      (when (>= (- now (session-last-used session)) idle-seconds)
         ;; Only when nothing is running on it: never wait, never interrupt.
         (when (sb-thread:grab-mutex (session-lock session) :waitp nil)
           (unwind-protect (close-session-processes session)
             (sb-thread:release-mutex (session-lock session))))))))
 
-;;; --- tools -----------------------------------------------------------------------------------
+(defun start-idle-reaper ()
+  "Reap, once a minute, the sessions unused for idle_minutes => a function
+that stops doing so."
+  (let* ((idle (* 60 (setting-value :idle-minutes)))
+         (worker (start-worker "omp-re idle sessions" (lambda () (reap-idle-sessions idle)) 60)))
+    (lambda () (stop-worker worker))))
 
-(defstruct (tool (:copier nil))
-  (name "" :type string)
-  (label nil)
-  (description "" :type string)
-  (parameters '())                      ; ((NAME TYPE &key required doc enum) ...)
-  (function nil)                        ; (lambda (ARGS)) => a RESULT
-  (tier :exec)                          ; :read observes; anything else changes state or runs code
-  (evidence nil)                        ; a successful result is an observation of the binary
-  (available nil))                      ; NIL, or a predicate: offered only while it answers true
+;;; --- acting in a session -------------------------------------------------------------------
 
-(defvar *tools* '() "Every engine tool, in the order defined.")
+(defun hold-session (session thunk)
+  "Call THUNK with SESSION as *SESSION*. The session's lock is taken, and
+the session brought in line with its branch, only when this thread does not
+hold it already: a verb called inside a recipe or a /re line's body acts in
+the session its caller holds."
+  (if (sb-thread:holding-mutex-p (session-lock session))
+      (let ((*session* session))
+        (funcall thunk))
+      (sb-thread:with-mutex ((session-lock session))
+        (let ((*session* session))
+          (setf (session-last-used session) (get-universal-time))
+          (sync-to-branch session)
+          (funcall thunk)))))
 
-(defun register-engine-tool (tool)
-  (setf *tools* (append (remove (tool-name tool) *tools* :key #'tool-name :test #'string=)
-                        (list tool)))
-  tool)
+(defun act-in-session (session what thunk)
+  (handler-case (hold-session (if (stringp session) (find-session session) session) thunk)
+    (re-error (condition)
+      (values (princ-to-string condition) t))
+    (error (condition)
+      (values (format nil "omp-re: ~a failed: ~a" what condition) t))))
 
-(defmacro define-tool (name (&key label description (tier :exec) evidence available) parameters
-                       (arguments) &body body)
-  "Define the engine tool NAME. PARAMETERS is a list of
-(\"name\" TYPE &key required doc enum) with TYPE one of :string, :integer,
-:number, :boolean and :strings (an array of strings); the body runs with
-ARGUMENTS bound to the validated JSON object and *SESSION* to the session,
-and answers a RESULT."
-  `(register-engine-tool
-    (make-tool :name ,name :label ,label :description ,description :tier ,tier
-               :evidence ,evidence :available ,available
-               :parameters (list ,@(mapcar (lambda (parameter)
-                                             `(list ,(first parameter) ,(second parameter)
-                                                    ,@(cddr parameter)))
-                                           parameters))
-               :function (lambda (,arguments) (declare (ignorable ,arguments)) ,@body))))
+(defmacro in-session ((session what) &body body)
+  "BODY acting in SESSION — a session or the id of one — with *SESSION*
+bound to it => BODY's values, the first of them the text of an answer. This
+is the one place a refusal becomes text: an RE-ERROR in BODY answers
+(values ITS-WORDS T), and anything else that goes wrong answers the same way
+as `omp-re: WHAT failed: ...'. A failure is an answer, never a signal."
+  `(act-in-session ,session ,what (lambda () ,@body)))
 
-(defun tool-offered-p (tool)
-  (or (null (tool-available tool)) (funcall (tool-available tool))))
-
-(defun offered-tools ()
-  (remove-if-not #'tool-offered-p *tools*))
-
-(defun find-tool (name)
-  (let ((tool (find name *tools* :key #'tool-name :test #'string=)))
-    (and tool (tool-offered-p tool) tool)))
-
-(defun parameter-schema (parameter)
-  (destructuring-bind (name type &key doc enum &allow-other-keys) parameter
-    (declare (ignore name))
-    (let ((schema (ecase type
-                    (:string (obj "type" "string"))
-                    (:integer (obj "type" "integer"))
-                    (:number (obj "type" "number"))
-                    (:boolean (obj "type" "boolean"))
-                    (:strings (obj "type" "array" "items" (obj "type" "string"))))))
-      (when enum (setf (gethash "enum" schema) (coerce enum 'simple-vector)))
-      (when doc (setf (gethash "description" schema) doc))
-      schema)))
-
-(defun tool-schema (tool)
-  "TOOL's parameters as the JSON Schema a provider is shown."
-  (let ((properties (obj))
-        (required '()))
-    (dolist (parameter (tool-parameters tool))
-      (setf (gethash (first parameter) properties) (parameter-schema parameter))
-      (when (getf (cddr parameter) :required) (push (first parameter) required)))
-    (obj "type" "object"
-         "properties" properties
-         "required" (if required (coerce (nreverse required) 'simple-vector) :absent))))
-
-(defun check-arguments (tool arguments)
-  "ARGUMENTS held to TOOL's parameters => a fresh object of exactly the
-declared members that were given. A member of the wrong type is refused,
-never coerced; null reads as absent."
-  (let ((checked (obj)) (problems '()))
-    (dolist (parameter (tool-parameters tool))
-      (destructuring-bind (name type &key required enum &allow-other-keys) parameter
-        (multiple-value-bind (value present) (gethash name arguments)
-          (let ((present (and present (not (eq value :null)))))
-            (cond ((not present)
-                   (when required (push (format nil "~a is required (was missing)" name) problems)))
-                  ((not (ecase type
-                          (:string (stringp value))
-                          (:integer (integerp value))
-                          (:number (realp value))
-                          (:boolean (member value '(t nil)))
-                          (:strings (and (vectorp value) (not (stringp value)) (every #'stringp value)))))
-                   (push (format nil "~a must be ~a (was ~a)" name
-                                 (ecase type
-                                   (:string "a string") (:integer "an integer") (:number "a number")
-                                   (:boolean "true or false") (:strings "an array of strings"))
-                                 (json-encode value))
-                         problems))
-                  ((and enum (not (member value enum :test #'equal)))
-                   (push (format nil "~a must be one of ~{~a~^, ~} (was ~a)" name
-                                 (mapcar #'json-encode enum) (json-encode value))
-                         problems))
-                  (t (setf (gethash name checked) value)))))))
-    (when problems
-      (fail "omp-re: ~a was called with arguments that do not fit its schema: ~{~a~^; ~}"
-            (tool-name tool) (nreverse problems)))
-    checked))
+;;; --- names the tool groups still call; removed when they move to the above ---------------
+;;; WITH-SESSION ((session) body)   → (in-session (session "what") body), which
+;;;     answers a refusal as (values TEXT T) instead of signalling it.
+;;; REGISTER-REPLAY name function   → (contribute name :order N :replay function),
+;;;     the function answering (values FAILURES APPLIED) where it is to be counted.
+;;; *LIVE-ANNOTATIONS*, *ANNOTATION-FINGERPRINT* (annotate.lisp sets them,
+;;;     report.lisp reads the first) → the :replay and :fingerprint of
+;;;     (contribute "annotations" :order 60 :noun "annotation(s)" ...); report.lisp
+;;;     calls LIVE-ANNOTATIONS itself.
+;;; SESSION-APPLIED-ANNOTATIONS     → (applied-fingerprint session "annotations");
+;;;     (setf (session-applied-annotations s) (annotation-fingerprint ...)) → (mark-applied "annotations" s)
+;;; SESSION-DBG                     → (session-held session "debugger")
+;;; SESSION-ALL-ENTRIES             → SESSION-FILE-ENTRIES, and only a host that keeps the record in files
+;;; The "debugger" contribution below is the debug group's own to make
+;;;     (debug.lisp), with DEBUGGER-ENABLED-P; the spine knows no debugger.
 
 (defmacro with-session ((session) &body body)
-  "BODY with SESSION as *SESSION*, holding its lock: one call at a time."
-  (let ((it (gensym "SESSION")))
-    `(let ((,it ,session))
-       (sb-thread:with-mutex ((session-lock ,it))
-         (let ((*session* ,it))
-           (setf (session-last-used ,it) (get-universal-time))
-           ;; The head may have moved since the last call: read the branch first.
-           (sync-to-branch ,it)
-           ,@body)))))
+  `(hold-session ,session (lambda () ,@body)))
 
-(defun call-tool-in-session (name arguments)
-  "Run the tool NAME with the JSON object ARGUMENTS for *SESSION*, whose lock
-the caller holds => (values TEXT FAILED-P RAW). RAW is the tool's second
-value, when it has one: the whole of what rizin printed, where TEXT may be
-cut. This is the whole pipeline — the `/re off' gate, the audit line, the
-body, the evidence record — so code that composes reads (a recipe, a verb)
-makes each of them a tool call in its own right, not a way around one."
-  (let ((tool (find-tool name))
-        (session *session*))
-    (unless tool
-      (return-from call-tool-in-session
-        (values (format nil "omp-re: no tool named ~a — (re:tools) lists them" (js-string name)) t)))
-    (handler-case
-        (let ((arguments (check-arguments tool (or arguments (obj)))))
-          (when (session-tools-off session)
-            (return-from call-tool-in-session
-              (values "omp-re: RE tools are off for this session — the user can re-enable them with /re on" t)))
-          (let ((call-id (format nil "~a-~d" (file-safe (session-id session))
-                                 (incf (session-calls session)))))
-            (append-audit-line session call-id name arguments)
-            (multiple-value-bind (result raw) (funcall (tool-function tool) arguments)
-              (let ((text (result-text result)))
-                (cond ((result-failed result) (values text t raw))
-                      ((and (tool-evidence tool) (not (jget (result-details result) "manual")))
-                       ;; The id rides on its own trailing line, so a *j
-                       ;; result's body stays valid JSON between the header
-                       ;; and the tag. A blob-store failure degrades to "no
-                       ;; evidence recorded", it does not fail the call.
-                       (let ((id (handler-case (record-evidence name arguments text (result-details result))
-                                   (error (condition)
-                                     (notify "omp-re: evidence recording failed: ~a" condition)
-                                     nil))))
-                         (values (if id (format nil "~a~%~a" text (evidence-tag id)) text) nil raw)))
-                      (t (values text nil raw)))))))
-      (re-error (condition)
-        (values (princ-to-string condition) t))
-      (error (condition)
-        (values (format nil "omp-re: ~a failed: ~a" name condition) t)))))
+(defvar *live-annotations* nil)
+(defvar *annotation-fingerprint* nil)
 
-(defun call-tool (session name arguments)
-  "Run the tool NAME for SESSION with the JSON object ARGUMENTS
-=> (values TEXT FAILED-P). A failure is an answer, never a signal: TEXT is
-then what went wrong, in words the model can act on."
-  (with-session (session)
-    (multiple-value-bind (text failed) (call-tool-in-session name arguments)
-      (values text failed))))
+(defparameter +replay-places+
+  '(("mapfiles" 10 "mapped file(s)") ("passes" 20 "analysis pass(es)")
+    ("signatures" 30 "signature file(s)") ("annotations" 60 "annotation(s)"))
+  "Where REGISTER-REPLAY's callers stand among the contributions, and what
+each replays, until they say so themselves: (NAME ORDER NOUN).")
+
+(defun register-replay (name function)
+  (destructuring-bind (&optional (order 100) noun) (rest (assoc name +replay-places+ :test #'string=))
+    (if (string= name "annotations")
+        (contribute name :order order :noun noun
+                         :replay (lambda (session rz binary-path)
+                                   (let ((failures (funcall function session rz binary-path)))
+                                     (values failures
+                                             (- (length (funcall *live-annotations* binary-path session))
+                                                (length failures)))))
+                         :fingerprint (lambda (session binary-path)
+                                        (funcall *annotation-fingerprint* session binary-path)))
+        (contribute name :order order :noun noun :replay function))))
+
+;; *REPLAY-HOOKS* is read by two checks alone (suite-annotate, suite-extras),
+;; which pin this wiring; the order they mean is the contributions'.
+(define-symbol-macro *replay-hooks*
+    (loop for contribution in *contributions*
+          when (contribution-replay contribution)
+            collect (cons (contribution-name contribution) (contribution-replay contribution))))
+
+(defun session-applied-annotations (session)
+  (applied-fingerprint session "annotations"))
+
+(defun (setf session-applied-annotations) (fingerprint session)
+  (setf (applied-fingerprint session "annotations") fingerprint))
+
+(defun session-dbg (session)
+  (session-held session "debugger"))
+
+(defun (setf session-dbg) (process session)
+  (setf (session-held session "debugger") process))
+
+(defun session-all-entries (session)
+  (session-file-entries session))
+
+(defun debugger-enabled-p ()
+  "Whether dynamic analysis — which executes the sample — was switched on."
+  (setting-value :debugger))
+
+(contribute "debugger" :order 40
+  :status (lambda (session)
+            (list (if (debugger-enabled-p)
+                      (format nil "debugger: enabled~:[ (the re section's debugger setting); executes the sample~; — a process is running under it~]"
+                              (rz-alive-p (session-dbg session)))
+                      "debugger: off (set the re section's debugger to true to enable dynamic analysis — it executes the sample)")))
+  :close (lambda (session)
+           ;; Killing only the debug rizin detaches its tracee, which would
+           ;; then run on to completion: the sample, executing with nothing
+           ;; watching it. So the debuggee is killed first, through rizin, as
+           ;; the tool's own stop does.
+           (let ((dbg (session-dbg session)))
+             (when (rz-alive-p dbg)
+               (ignore-errors (rz-cmd dbg "dk 9" :seconds 5)))
+             (rz-close dbg)
+             (setf (session-dbg session) nil))))

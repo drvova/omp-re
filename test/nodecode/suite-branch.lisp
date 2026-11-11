@@ -23,46 +23,52 @@
   (clrhash nlk:*stub-visible*)
   (clrhash nlk:*stub-lineage*))
 
+(defun note (session-id turn n)
+  "Write the note N to SESSION-ID's record in TURN."
+  (in-turn (session-id turn)
+    (re::in-session (session-id "writing a note")
+      (re::append-entry "re.note" (re::obj "n" n)))))
+
+(defun notes (session-id)
+  (mapcar (lambda (data) (gethash "n" data)) (re::entries-of "re.note" (re::find-session session-id))))
+
 (suite "branch: the record alone")
 (with-cell ()
   (let* ((id (fresh-session))
          (session (re::find-session id)))
     (unwind-protect
          (progn
-           (in-turn (id "t1") (re::with-session (session) (re::append-entry "re.note" (re::obj "n" 1))))
-           (in-turn (id "t2") (re::with-session (session) (re::append-entry "re.note" (re::obj "n" 2))))
-           (in-turn (id nil) (re::with-session (session) (re::append-entry "re.note" (re::obj "n" 0))))
+           (note id "t1" 1)
+           (note id "t2" 2)
+           (note id nil 0)
            (check "an entry is stamped with the turn it was written in, and one written outside a turn with none"
                   (equal '("t1" "t2" nil)
-                         (map 'list (lambda (entry) (gethash "turn" entry)) (re::session-all-entries session))))
+                         (map 'list (lambda (entry) (gethash "turn" entry)) (re::session-file-entries session))))
            (check "with no session tree to read, every entry is on the branch"
-                  (= 3 (length (re::session-entries session))))
+                  (equal '(1 2 0) (notes id)))
            (branch id "t1" "t2")
            (check "on the branch that holds both turns, all three are read"
-                  (equal '(1 2 0) (mapcar (lambda (data) (gethash "n" data)) (re::entries-of "re.note" session))))
+                  (equal '(1 2 0) (notes id)))
            (branch id "t1")
            (check "after a rewind to the first turn, the second turn's entry is not read; the turnless one still is"
-                  (equal '(1 0) (mapcar (lambda (data) (gethash "n" data)) (re::entries-of "re.note" session))))
+                  (equal '(1 0) (notes id)))
            (check "nothing was deleted: the record on disk still holds all three"
                   (= 3 (length (re::split-lines (re::trimmed (re::read-text-file (re::record-path session)))))))
-           (in-turn (id "t3")
-             (check "the running turn's own entries are read whatever the store has recorded of it"
-                    (progn (re::with-session (session) (re::append-entry "re.note" (re::obj "n" 3)))
-                           (equal '(1 0 3) (mapcar (lambda (data) (gethash "n" data))
-                                                   (re::entries-of "re.note" session))))))
+           (check "the running turn's own entries are read whatever the store has recorded of it"
+                  (progn (note id "t3" 3)
+                         (in-turn (id "t3") (equal '(1 0 3) (notes id)))))
            (branch id "t1" "t2")
            (check "a redo makes the abandoned branch's entry visible again"
-                  (equal '(1 2 0) (mapcar (lambda (data) (gethash "n" data)) (re::entries-of "re.note" session))))
+                  (equal '(1 2 0) (notes id)))
            ;; A fork reads its parent's turns up to the fork point.
-           (let* ((fork (fresh-session))
-                  (forked (progn (setf (gethash fork nlk:*stub-lineage*) (list (list id "t1" 10)))
-                                 (branch fork "t1" "f1")
-                                 (re::find-session fork))))
-             (in-turn (fork "f1") (re::with-session (forked) (re::append-entry "re.note" (re::obj "n" 9))))
+           (let ((fork (fresh-session)))
+             (setf (gethash fork nlk:*stub-lineage*) (list (list id "t1" 10)))
+             (branch fork "t1" "f1")
+             (note fork "f1" 9)
              (check "a fork reads its parent's entries up to the fork point, then its own"
-                    (equal '(1 0 9) (mapcar (lambda (data) (gethash "n" data)) (re::entries-of "re.note" forked))))
+                    (in-turn (fork "f1") (equal '(1 0 9) (notes fork))))
              (check "and writes only to its own record: the parent does not see the fork's entry"
-                    (notany (lambda (data) (eql 9 (gethash "n" data))) (re::entries-of "re.note" session)))))
+                    (not (member 9 (notes id))))))
       (forget-tree))))
 
 (cond
@@ -81,7 +87,7 @@
                 (re:cmd "iIj"))
               (let (second-evidence)
                 (in-turn (id "t2")
-                  (setf second-evidence (re::evidence-id-of (re:cmd "pd 2" "entry0")))
+                  (setf second-evidence (tagged-evidence (re:cmd "pd 2" "entry0")))
                   (re:call "set_comment" :addr "entry0" :text "branch: second turn")
                   (re:call "record_finding" :claim "The entry point begins as rizin disassembles it."
                                             :evidence (list second-evidence))
@@ -136,7 +142,7 @@
      (let ((id (fresh-session)))
        (in-session (id)
          (re:open *binary*)
-         (let* ((evidence (re::evidence-id-of (re:cmd "iIj")))
+         (let* ((evidence (tagged-evidence (re:cmd "iIj")))
                 (command (cdr (assoc "re" nle:*commands* :test #'string=))))
            (check "/re cite from a shell that takes a draft puts the citation in the input box"
                   (let ((nle:*slash-effects* '(:clipboard :draft)))
@@ -155,16 +161,21 @@
        (in-session (id)
          (re:open *binary*)
          (re:call "set_comment" :addr "entry0" :text "notice: fine")
-         ;; A recorded annotation that cannot be replayed: its address resolves to nothing.
-         (let ((session (re::find-session id)))
-           (re::with-session (session)
-             (re::append-entry "re.annotation"
-                               (re::obj "kind" "comment" "ea" "0xffffffffffff0000" "oldValue" :null
-                                        "newValue" "notice: lost" "evidenceId" :null "ungrounded" t)))
-           (nlk:kill-tree (re::rz-pid (re::session-rz session)))
-           (loop repeat 50 while (re::rz-alive-p (re::session-rz session)) do (sleep 0.1)))
+         ;; A recorded annotation that cannot be replayed: a comment at
+         ;; something that is no address, which the engine will not send rizin.
+         (re::in-session (id "recording an annotation that cannot be replayed")
+           (re::append-entry "re.annotation"
+                             (re::obj "kind" "set_comment" "ea" "no;where" "oldValue" ""
+                                      "newValue" "notice: lost" "evidenceId" :null "ungrounded" t)))
+         (kill-rizin id)
          (re:cmd "iIj")
-         (check "a replay that fails stands as a keyed notice the model reads, not a line in a log"
+         (check "a replay that fails stands as a keyed notice the model reads, not a line in a log: it counts the annotation that was lost, names it, and the one that went back is in rizin"
                 (let ((notice (gethash "nodecode-re" nle:*notices*)))
-                  (has "could not be replayed" notice))))))
+                  (and (has "omp-re: 1 annotation(s) could not be replayed:" notice)
+                       (has "set_comment @ no;where: omp-re: invalid address or expression" notice)
+                       (has "notice: fine" (re:cmd "pd 1" "entry0")))))
+         (check "opening the binary again counts the annotations that went back out of those recorded"
+                (let ((opened (re:open *binary*)))
+                  (and (has "Re-applied 1 of 2 annotation(s) recorded earlier for this binary." opened)
+                       (has "  could not re-apply set_comment @ no;where" opened)))))))
    (check "stopping the cell clears its notice" (null (gethash "nodecode-re" nle:*notices*)))))
