@@ -233,6 +233,24 @@ describe("the wire, method by method, against a stand-in that holds both sides t
 		});
 	}, 30_000);
 
+	test("a session that ends says so to the engine, by its own id, while the engine goes on for the others", async () => {
+		await withEngine(standIn("serve"), async () => {
+			const staying = await boot(await inMemory());
+			try {
+				const leaving = await boot(await inMemory());
+				const left = leaving.session.sessionManager.getSessionId();
+				const pid = engine().pid!;
+				await leaving.shutdown();
+				expect(alive(pid)).toBe(true);
+				const { heard, violations } = await standInSays<Heard>(staying, "heard");
+				expect(violations).toEqual([]);
+				expect(heard.filter((one) => one.method === "event" && one.params.session?.id === left).map((one) => one.params.kind)).toEqual(["start", "shutdown"]);
+			} finally {
+				await staying.shutdown();
+			}
+		});
+	}, 30_000);
+
 	test("a call's answer is the tool's result: a refusal is thrown, a failure is a result marked as one, and a read carries its details", async () => {
 		await withEngine(standIn("serve"), async () => {
 			const h = await boot(await inMemory());
@@ -384,12 +402,15 @@ describe("how long omp's side waits for the engine", () => {
 		}
 	});
 
-	test("an engine told to leave leaves at once; one that does not is killed when its grace is over, inside omp's two-second shutdown budget", async () => {
-		const obedient = start("serve").engine;
-		await obedient.request("describe", {});
-		let started = Date.now();
-		await obedient.stop();
-		expect(Date.now() - started).toBeLessThan(1000);
+	test("an engine is ended by telling it to leave and by closing its input, either of which is enough; one that heeds neither is killed when its grace is over, inside omp's two-second shutdown budget", async () => {
+		let started = 0;
+		for (const heeds of ["told-only", "eof-only"]) {
+			const obedient = start(heeds).engine;
+			await obedient.request("describe", {});
+			started = Date.now();
+			await obedient.stop();
+			expect(Date.now() - started).toBeLessThan(1000);
+		}
 
 		const deaf = start("deaf").engine;
 		await deaf.request("describe", {});

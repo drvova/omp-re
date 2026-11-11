@@ -85,7 +85,9 @@ the only places a nodecode name (`nlk:`, `nle:`) appears:
   the turn they were written in, and a call reads those on the session's
   branch.
 - `verbs.lisp` is the model's surface: functions in the `RE` package called
-  from `eval`, over the engine's surface.
+  from `eval`, over the engine's surface. `RE` (`nodecode-re`) is this host's
+  own package: it uses what the engine's package exports
+  (`engine/package.lisp`) and nothing else of it.
 - `cell.lisp` declares the cell: the config section, the manual, `/re` and its
   dialog, the side question a support audit asks, start and stop.
 
@@ -98,29 +100,43 @@ The recipes (`recipes.lisp`, with `recipe-data.lisp` generated from
 omp is a TypeScript program, so the engine runs beside it as one SBCL child
 for the whole omp process — the main session and every task subagent are
 session ids on one pipe. `stdio/server.lisp` answers the port by asking omp
-over that pipe; `stdio/voice.lisp` holds omp's phrases and manual. The
-conversation is written down in [`engine-protocol.md`](engine-protocol.md).
+over that pipe; `stdio/voice.lisp` holds omp's phrases and manual. Like the
+nodecode host, it is a package of its own (`omp-re-stdio`) that uses only what
+the engine's package exports.
+
+The conversation is described once, as data, in `stdio/protocol.json`: each
+method either way, its members and types, the version, the constants and keys
+both sides share. `stdio/protocol.lisp` loads it; the server finds each
+method's handler from it and refuses what it does not have, in and out.
+`scripts/gen-protocol.ts` writes omp's types from it
+(`extensions/re/protocol.ts`) and the tables of
+[`engine-protocol.md`](engine-protocol.md), which has the prose.
 
 `extensions/re` is the other end, and is thin on purpose:
 
-- `engine.ts` starts the child, frames messages and ends it. It does not know
-  what a message means.
+- `protocol.ts` is generated: the wire's types, methods, constants and keys.
+- `engine.ts` starts the child, frames messages, bounds how long it waits
+  (a start deadline, and the engine's silence while a request is under way)
+  and ends it. It does not know what a message means.
 - `host.ts` keeps the one engine of the process (on `globalThis`, because omp
   imports an extension afresh for each session) and answers the engine's
   requests: the session's record is omp's own session file, artifacts are
-  omp's, the side question is omp's `runEphemeralTurn`.
+  omp's, the side question is omp's `runEphemeralTurn`. It also carries each
+  session's `memory` — what the engine holds in no record, such as `/re off` —
+  back to an engine started after the first ended.
 - `index.ts` asks the engine what tools and subcommands exist and registers
   exactly those with omp, forwards calls and the session's life, and fills an
   approval sentence from the data the engine sent.
-- `ui.ts` and `render.ts` draw what the engine sends: the status band, the
-  panels, the code view, a tool's transcript card.
+- `ui.ts` and `render.ts` draw what the engine sends: the status band's
+  lines, the panels, the code view, a tool's transcript card. Neither knows a
+  record's shape.
 
 The engine is started while the extension's factory runs, not later: omp
 accepts tool registrations only then, and the tool list comes from the engine.
 That start is about a quarter of a second, or a few seconds the first time
 after an install or upgrade, when ASDF compiles the engine into the user's
 cache. If the child dies, the next call starts another and each session comes
-back from its record.
+back from its record and the memory omp kept of it.
 
 Every RE tool is registered `discoverable`, so omp mounts it as an
 `xd://<name>` device and the model reaches it from omp's `eval` as
@@ -137,8 +153,9 @@ engine. [`omp-eval.md`](omp-eval.md) is what the plugin relies on there.
 | a `/re` subcommand | its `define-slash` in `engine/` | the suites; `test/extension-sdk.test.ts` for omp's help and errors |
 | a setting | `+settings+` in `engine/host.lisp` | `suite-core` (the example file equals the declaration) |
 | what a panel or the code view shows | `engine/views.lisp` | `suite-views` |
-| how omp draws it, a key binding | `extensions/re/ui.ts`, `render.ts` | type check only; the tmux tiers by hand |
-| a message between omp and the engine | `stdio/server.lisp`, `extensions/re/host.ts` or `index.ts`, and [`engine-protocol.md`](engine-protocol.md) | `suite-stdio` (the Lisp end, over real pipes), `test/shim.test.ts` (omp's end) |
+| how omp draws it | `extensions/re/ui.ts`, `render.ts` | `test/shim.test.ts` (the band, the overlays and a result card, drawn without colours); the tmux tiers by hand |
+| a key binding | `keys` in `stdio/protocol.json`, then `bun run gen:protocol` | `test/shim.test.ts`; `suite-stdio` (each names a view the engine has) |
+| a message between omp and the engine | `stdio/protocol.json`, then `bun run gen:protocol`; its handler in `stdio/server.lisp` or `extensions/re/host.ts`, its sender, and the prose of [`engine-protocol.md`](engine-protocol.md) | the type check (omp's side) and the server's load (a method with no handler); `suite-stdio` and `test/shim.test.ts`, whose stand-ins check every message against the same file |
 | a verb, the nodecode dialog, the primer | `nodecode/verbs.lisp`, `nodecode/cell.lisp` | `suite-core`, over a stand-in for nodecode's kernel |
 | a recipe's reads, wording or tables | `recipes/tables.json`, then `bun run gen:recipes` | `test/recipes-eval.test.ts` (three hosts, whole reports); `suite-recipes` |
 

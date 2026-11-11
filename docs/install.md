@@ -85,7 +85,9 @@ says SBCL was not found although `sbcl` works in your terminal, set
 
 Install SBCL with the installer from [sbcl.org](https://www.sbcl.org/platform-table.html)
 (or `choco install sbcl`), and make sure `sbcl.exe` is on `PATH` or set
-`OMPRE_SBCL_PATH` to its full path. Then put cl-ppcre under your user
+`OMPRE_SBCL_PATH` to its full path. Name the executable itself: the engine is
+started without a shell, so a `.cmd` or `.bat` wrapper cannot be run and is
+reported as SBCL not found. Then put cl-ppcre under your user
 directory, where ASDF looks:
 
 ```powershell
@@ -116,6 +118,13 @@ machine it was measured on. The compiled files go to ASDF's cache in your home
 directory (`~/.cache/common-lisp/` on Linux), and later starts take a fraction
 of a second. That cache must be writable. The cost is once per omp process,
 not per session.
+
+A start is given two minutes. One that takes longer is ended, and the error
+says what to check: that the SBCL named answers `--version`, that
+`~/quicklisp/setup.lisp` (loaded when it exists, to find cl-ppcre) asks
+nothing, and that the cache can be written. Whatever the engine writes to its
+standard error, then and later, goes to omp's log as `omp-re engine: …`; the
+end of it is quoted in the error when the engine process ends unasked.
 
 ## rizin
 

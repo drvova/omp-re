@@ -8,16 +8,17 @@
 # announcement, a nonzero metric, an exact notify literal) rather than
 # sleeping a fixed window, and no assertion here depends on a model
 # round-trip — the behavioural (model-facing) proof of the RE tool toggle
-# lives in the exhaustive tier, test/tui-qa.sh phase K, which budgets for
-# a real model turn and has a skip-on-outage path.
+# lives in the exhaustive tier, test/tui-qa.sh phase K, which needs a real
+# model turn.
 #
-# Skips (exit 0, printed reason) when tmux, rizin, or the fixture binary
-# is missing, so `bun test` / CI stays green on a machine without them.
+# A manual tier, run in no workflow. Exits 0 with a printed SKIP when tmux,
+# rizin, sbcl, omp or the fixture binary (OMPRE_TEST_BINARY, default
+# /bin/ls) is missing.
 set -u
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION="ompre-e2e"
-TEST_BINARY="${OMPRE_TEST_BINARY:-/tmp/rzx-dogfood/wannacry.bin}"
+TEST_BINARY="${OMPRE_TEST_BINARY:-/bin/ls}"
 BASENAME="$(basename "$TEST_BINARY")"
 FAIL=0
 
@@ -90,7 +91,7 @@ band() {
 
 # --- readiness handshake ----------------------------------------------------
 # MCP servers connect during startup and swallow keystrokes sent too early,
-# and R2Session.spawn runs `aaa` synchronously against the fixture before
+# and the engine runs `aaa` against the fixture before
 # either the binary-opened announcement or a nonzero function count can
 # render. Neither the band alone nor a fixed sleep is a readiness signal:
 # poll for the real sequence of events, then confirm the TUI actually
@@ -126,11 +127,11 @@ fi
 
 BAND_LINE1="$(band | sed -n '1p')"
 if printf '%s' "$BAND_LINE1" | grep -q "$BASENAME" \
-	&& printf '%s' "$BAND_LINE1" | grep -q 'PE32' \
-	&& printf '%s' "$BAND_LINE1" | grep -q 'x86/32'; then
+	&& printf '%s' "$BAND_LINE1" | grep -Eq '(PE32|PE32\+|ELF(32|64)|Mach-O)' \
+	&& printf '%s' "$BAND_LINE1" | grep -Eq '[a-z0-9_]+/(8|16|32|64)'; then
 	pass "status band line 1 shows binary name, format, and arch"
 else
-	fail "status band line 1 missing binary name, PE32, or arch:"$'\n'"$BAND_LINE1"
+	fail "status band line 1 missing binary name, format, or arch:"$'\n'"$BAND_LINE1"
 fi
 
 BAND_LINE2="$(band | sed -n '2p')"

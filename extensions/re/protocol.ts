@@ -53,8 +53,6 @@ export const KEYS = {
 	]
 } as const;
 
-export const EVENT_KINDS = ["start","switch","tree","branch","before-switch","shutdown"] as const;
-
 export type Session = { id: string; cwd: string; hasUI: boolean; memory?: JsonObject };
 
 export type Level = "info" | "warning" | "error";

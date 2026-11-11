@@ -43,12 +43,18 @@ provides any isolation:
   in your home directory and loads them at the next start, so that cache is as
   trusted as the plugin's own files.
 - `OMPRE_ALLOWED_DIRS` (nodecode: `allowed_dirs`) limits the directories the
-  engine opens a binary, a mapped file or YARA rules from, compared after
-  links are resolved. It is unset by default, which allows any file you can
-  read. It is a guard against a model opening the wrong file, not a sandbox,
-  and it does not cover two paths rizin and the `rz-*` tools open themselves:
-  the FLIRT file given to `apply_signatures`, and a file named in
-  `rizin_cli`'s arguments.
+  engine opens a binary, a mapped file, YARA rules or a FLIRT signature file
+  (`apply_signatures`) from, compared after links are resolved. It is unset by
+  default, which allows any file you can read. It is a guard against a model
+  opening the wrong file, not a sandbox. Three kinds of path are not held to
+  it:
+  - a file named in `rizin_cli`'s arguments, which the `rz-*` tool opens
+    itself: an argument list has no reliable way to tell a path;
+  - `rizin_debug`'s `run.stdin`, `run.stdout`, `run.stderr` and `run.cwd`,
+    which rz-run opens for the debuggee. The debugger is off unless you
+    switch it on, and it runs the target's code in any case;
+  - the manifest `/re carry` reads, which is a line the operator types. The
+    binary given with `--against` is held to the list.
 
 ## Mutations never touch the file on disk
 

@@ -4,15 +4,21 @@
 # every user-facing surface as it goes. The exhaustive tier (~5-8 min) that
 # complements the fast smoke tier test/tui.sh (~55s, 7 assertions).
 #
-# Skips (exit 0, printed reason) when tmux, rizin, omp, or the fixture binary is
-# missing, so CI stays green on a machine without them. Model-dependent phases
-# (G, H, K) degrade to SKIP on a provider outage; skips never fail the run.
+# A manual tier: it runs in no workflow, and needs a real `omp` with a model
+# configured. It exits 0 with a printed SKIP only when a program it needs to
+# start at all is missing (tmux, rizin, sbcl, omp, the fixture). Once it runs,
+# nothing is skipped for want of an answer: phases G, H and K each need a model
+# turn, and a turn that does not finish FAILS its step and the steps that rest
+# on it. A step skips only where the fixture has nothing to show it on (no
+# function named main, no second binary, no yara).
 set -u
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION="ompre-qa"
-PE_BINARY="${OMPRE_TEST_BINARY:-/tmp/rzx-dogfood/wannacry.bin}"
-ALT_BINARY="${OMPRE_TEST_BINARY_ALT:-/tmp/rzx-dogfood/synth_malware}"
+# Any two readable binaries. The names are historical: the script was first
+# written against a PE, and holds for ELF and Mach-O alike.
+PE_BINARY="${OMPRE_TEST_BINARY:-/bin/ls}"
+ALT_BINARY="${OMPRE_TEST_BINARY_ALT:-/bin/cat}"
 TMP="$(mktemp -d /tmp/ompre-qa-XXXXXX)"
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -39,10 +45,6 @@ if ! command -v omp >/dev/null 2>&1; then
 	echo "SKIP: omp not on PATH"
 	exit 0
 fi
-if ! command -v sha256sum >/dev/null 2>&1; then
-	echo "SKIP: sha256sum not on PATH"
-	exit 0
-fi
 if ! command -v python3 >/dev/null 2>&1; then
 	echo "SKIP: python3 not on PATH"
 	exit 0
@@ -57,9 +59,9 @@ fi
 
 PE_NAME="$(basename "$PE_BINARY")"
 ALT_NAME="$(basename "$ALT_BINARY")"
-# Phase L's branding guard greps the whole scrollback for "rzx". The fixture
-# lives under /tmp/rzx-dogfood on this machine, so the fixture's own path would
-# be a permanent false positive; strip the fixture path tokens before grepping.
+# Phase L's branding guard greps the whole scrollback for "rzx", the plugin's
+# earlier name. A fixture kept in a directory of that name would be a permanent
+# false positive; strip the fixture path tokens before grepping.
 PE_DIR_TOKEN="$(basename "$(dirname "$PE_BINARY")")"
 ALT_DIR_TOKEN="$(basename "$(dirname "$ALT_BINARY")")"
 
@@ -219,10 +221,10 @@ clear_editor() {
 	# header, and a tight burst of BSpace keys can lose some to the TUI's own
 	# render/input loop, so retry in batches against a wall-clock deadline
 	# rather than trusting one pass of N keypresses to land. Measured against
-	# a real WannaCry hash_binary evidence entry (~250 bytes), the previous
-	# 20s/40-per-batch budget cleared only ~85% of the content before timing
-	# out, leaving a leftover fragment that the next slash command appended
-	# to; 45s/80-per-batch leaves comfortable margin up to the 512-byte cap.
+	# a real evidence entry of ~250 bytes, a 20s/40-per-batch budget cleared
+	# only ~85% of the content before timing out, leaving a leftover fragment
+	# that the next slash command appended to; 45s/80-per-batch leaves
+	# comfortable margin up to the 512-byte cap.
 	local deadline=$((SECONDS + 45))
 	local j
 	while ((SECONDS < deadline)); do
@@ -430,10 +432,11 @@ picker_enter() {
 	return 1
 }
 
-# Send a prompt and wait for the model's reply. On timeout, latch MODEL_OK=0 so
-# every later model_step short-circuits to a skip, and return 1 so the caller
-# skips its dependent assertions. A provider outage degrades phases G/H/K to
-# SKIP without failing the run.
+# Send a prompt and wait for the model's reply. A turn that does not finish
+# fails the step: this tier is run to see the model-driven surfaces work, and a
+# skip would report them as fine. MODEL_OK=0 is latched so every later
+# model_step fails at once instead of waiting out its own timeout, and 1 is
+# returned so the caller fails the assertions that rest on the turn.
 model_step() {
 	local label="$1"
 	local prompt="$2"
@@ -441,7 +444,7 @@ model_step() {
 	local want="${4:-1}"
 	local timeout="${5:-180}"
 	if [ "$MODEL_OK" -eq 0 ]; then
-		skip "$label" "model round-trip timed out earlier"
+		fail "$label (no model turn: an earlier one did not finish)"
 		return 1
 	fi
 	say "$prompt"
@@ -450,7 +453,7 @@ model_step() {
 		return 0
 	fi
 	MODEL_OK=0
-	skip "$label" "model round-trip timed out"
+	fail "$label (the model turn did not finish in ${timeout}s)"
 	diagnose
 	return 1
 }
@@ -548,9 +551,9 @@ if ! wait_for 'disable the RE tools' 20; then
 	diagnose
 	exit 1
 fi
-expect 'A6 help line: open'     '/re open <path>      open a binary'
-expect 'A6 help line: evidence' '/re evidence \[id\]    evidence log'
-expect 'A6 help line: off'      '/re off              disable RE tools'
+expect 'A6 help line: open'     '/re open <path>            open a binary and analyze it with rizin'
+expect 'A6 help line: evidence' '/re evidence \[id\]          evidence recorded on this branch'
+expect 'A6 help line: off'      '/re off                    disable the RE tools for this session'
 
 # Checks two physically-adjacent cheatsheet lines with one assertion via
 # fixed-string matching (avoids ERE-escaping the "[", "]", "(" in several
@@ -570,13 +573,13 @@ expect_lines() {
 	diagnose
 }
 expect_lines 'A6 help line: functions+strings' \
-	'/re functions        function navigator   alt+s  strings' \
-	'/re strings          string list          in code view:'
-expect 'A6 help line: imports' '/re imports          import list             d  toggle decompile'
-expect_lines 'A6 help line: undo+report' \
-	'/re undo             revert annotation       a  ask the model' \
-	'/re report [path]    write report'
-expect 'A6 help line: on' '/re on               enable RE tools'
+	'/re functions              the functions rizin found, with address and size' \
+	'/re strings                the strings rizin found, with address'
+expect 'A6 help line: imports' '/re imports                the imports, with address'
+expect_lines 'A6 help line: undo+keys' \
+	'/re undo                   revert the last annotation' \
+	'keys: alt+g functions · alt+s strings · alt+i imports; in a code view: d toggle'
+expect 'A6 help line: on' '/re on                     enable the RE tools for this session'
 
 # --- Phase A — cold start, nothing open -------------------------------------
 
@@ -598,7 +601,7 @@ slash "/re bogus"
 expect 'A7 unknown subcommand "bogus"' 'omp-re: unknown /re subcommand "bogus" — try /re help'
 
 slash "/re"
-expect 'A8 bare /re shows the help text' '/re open <path>      open a binary'
+expect 'A8 bare /re shows the help text' '/re open <path>            open a binary'
 
 slash "/re open"
 expect 'A9 /re open without a path' 'Usage: /re open <path>'
@@ -634,8 +637,8 @@ expect 'A16 /re cite without an id' 'Usage: /re cite <id>'
 slash "/re cite deadbeef"
 expect 'A17 /re cite with an unknown id' 'omp-re: no evidence found with id deadbeef'
 
-# --- Phase B — open the PE binary -------------------------------------------
-# Generous timeout: R2Session.spawn runs `aaa` synchronously on a 3.6 MB PE.
+# --- Phase B — open the first binary ----------------------------------------
+# Generous timeout: the open runs `aaa`, which takes minutes on a large binary.
 
 # PE_NAME may contain regex metacharacters (a `.` is common, `+`/`[` possible
 # for a user-supplied OMPRE_TEST_BINARY); escape it before using it in an ERE.
@@ -1021,15 +1024,18 @@ picker_enter 'F6 enter on an import opens its callers, its PLT stub, or reports 
 close_overlay 'omp-re: imports'
 
 # --- Phase G — evidence surface (needs one model round-trip) ----------------
-# Compute the expected digest at runtime so the assertion holds for any fixture
-# passed via OMPRE_TEST_BINARY, not just the WannaCry one.
+# Evidence is recorded only for a read the model makes with rizin_command, so
+# one model turn is needed. What the model says of it proves nothing; what it
+# cannot fake is the record: the band's evidence count and the evidence list.
+# The reply ends with a marker the prompt echo does not contain on a line of
+# its own, so the turn's end can be seen.
 
-EXPECTED_SHA256="$(sha256sum "$PE_BINARY" | awk '{print $1}')"
-[ -n "$EXPECTED_SHA256" ] || { echo 'FAIL: could not compute the fixture digest'; exit 1; }
+# The band's evidence count, as a number.
+evidence_count() { band | sed -n '2p' | grep -oE '[0-9]+ evidence' | grep -oE '[0-9]+' || echo 0; }
 
-if model_step 'G1 model calls hash_binary and reports the real digest' \
-	'Call hash_binary on the open binary and report only the SHA-256.' \
-	"$EXPECTED_SHA256" 1 180; then
+if model_step 'G1 model makes a read with rizin_command' \
+	'Use the rizin_command tool to run the rizin command ij on the open binary. Then end your reply with the bare word READDONE on its own line.' \
+	'^ *READDONE *$' 1 180; then
 
 	# The audit HMAC warning fires on the first RE tool call, not at startup
 	# (APPEND-AUDIT-LINE in engine/call.lisp), so G1 is the earliest point
@@ -1045,19 +1051,19 @@ if model_step 'G1 model calls hash_binary and reports the real digest' \
 	fi
 
 	slash "/re evidence"
-	expect 'G3 evidence panel lists the hash_binary entry' '\[[0-9a-f]{8}\] hash_binary @'
+	expect 'G3 evidence panel lists the rizin_command entry' '\[[0-9a-f]{8}\] rizin_command @'
 
-	EV_ID="$(pane | grep -oE '\[[0-9a-f]{8}\] hash_binary' | head -1 | grep -oE '[0-9a-f]{8}' | head -1)"
+	EV_ID="$(pane | grep -oE '\[[0-9a-f]{8}\] rizin_command' | head -1 | grep -oE '[0-9a-f]{8}' | head -1)"
 	if [ -n "$EV_ID" ]; then
-		# Filter to hash_binary first: the model's own tool calls also write
-		# evidence, so row 1 is whatever ran last, not necessarily this entry.
+		# Typing filters the list, which is what is exercised; every row is a
+		# rizin_command read, so any row left is one.
 		ensure_panel 'omp-re: evidence'
-		lit "hash_binary"
+		lit "rizin_command"
 		sleep 2
 		keys Enter
 		# Enter cites the row: the panel closes and the editor is prefilled, so
 		# nothing renders underneath a still-open overlay.
-		if wait_for "Re: evidence [0-9a-f]{8} \\(hash_binary @" 10 && clear_editor; then
+		if wait_for "Re: evidence [0-9a-f]{8} \\(rizin_command @" 10 && clear_editor; then
 			pass 'G4 enter cites the evidence entry into the editor'
 		else
 			fail 'G4 enter cites the evidence entry into the editor'
@@ -1068,7 +1074,7 @@ if model_step 'G1 model calls hash_binary and reports the real digest' \
 		# The picker only ever shows 8 chars of the UUID, so exact-equality
 		# lookup alone would be unusable; this proves the prefix match.
 		slash "/re evidence $EV_ID"
-		expect 'G5 /re evidence <8-char prefix> resolves' '\[hash_binary:' 15
+		expect 'G5 /re evidence <8-char prefix> resolves' '\[rizin_command:' 15
 
 		slash "/re cite $EV_ID"
 		if wait_for "Re: evidence $EV_ID" 15 && clear_editor; then
@@ -1080,20 +1086,20 @@ if model_step 'G1 model calls hash_binary and reports the real digest' \
 	else
 		fail 'G4 enter cites the evidence entry into the editor (could not capture an evidence id)'
 		close_overlay 'omp-re: evidence'
-		skip 'G5 /re evidence <8-char prefix> resolves' 'no evidence id captured'
-		skip 'G7 /re cite prefills the editor' 'no evidence id captured'
+		fail 'G5 /re evidence <8-char prefix> resolves (could not capture an evidence id)'
+		fail 'G7 /re cite prefills the editor (could not capture an evidence id)'
 	fi
 
 	slash "/re evidence deadbeef"
 	expect 'G6 /re evidence with an unknown id' 'no evidence found with id deadbeef'
 else
-	skip 'G1b audit HMAC warning on first tool call' 'model round-trip timed out'
-	skip 'G2 tool_result refreshed the band evidence count' 'model round-trip timed out'
-	skip 'G3 evidence panel lists the hash_binary entry' 'model round-trip timed out'
-	skip 'G4 enter cites the evidence entry into the editor' 'model round-trip timed out'
-	skip 'G5 /re evidence <8-char prefix> resolves' 'model round-trip timed out'
-	skip 'G6 /re evidence with an unknown id' 'model round-trip timed out'
-	skip 'G7 /re cite prefills the editor' 'model round-trip timed out'
+	fail 'G1b audit HMAC warning on first tool call (no model turn to rest on)'
+	fail 'G2 tool_result refreshed the band evidence count (no model turn to rest on)'
+	fail 'G3 evidence panel lists the rizin_command entry (no model turn to rest on)'
+	fail 'G4 enter cites the evidence entry into the editor (no model turn to rest on)'
+	fail 'G5 /re evidence <8-char prefix> resolves (no model turn to rest on)'
+	fail 'G6 /re evidence with an unknown id (no model turn to rest on)'
+	fail 'G7 /re cite prefills the editor (no model turn to rest on)'
 fi
 
 # --- Phase H — annotate, then undo ------------------------------------------
@@ -1123,9 +1129,9 @@ if model_step 'H1 model renames a function via rename_function' \
 	expect 'H3 /re undo again reports nothing left' \
 		'omp-re: no annotation left to undo' 20
 else
-	skip 'H1b tool result mentions qa_probe_fn' 'model round-trip timed out'
-	skip 'H2 /re undo reverts the rename' 'model round-trip timed out'
-	skip 'H3 /re undo again reports nothing left' 'model round-trip timed out'
+	fail 'H1b tool result mentions qa_probe_fn (no model turn to rest on)'
+	fail 'H2 /re undo reverts the rename (no model turn to rest on)'
+	fail 'H3 /re undo again reports nothing left (no model turn to rest on)'
 fi
 
 # --- Phase I — report writer -------------------------------------------------
@@ -1159,8 +1165,8 @@ else
 	slash "/re open $ALT_BINARY"
 	expect 'J1 /re open swaps to the second binary' "\\[re: opened .*${ALT_NAME}\\]" 240
 
-	# Proves openBinary closes the old R2Session, swaps state.binaryPath, and
-	# the band re-renders rather than caching the first binary's facts.
+	# Proves the open ended the first binary's rizin and the band is drawn
+	# from the new one's facts, not the first's.
 	J_LINE1="$(band | sed -n '1p')"
 	if printf '%s' "$J_LINE1" | grep -q "$ALT_NAME" && ! printf '%s' "$J_LINE1" | grep -q "$PE_NAME"; then
 		pass 'J2 band re-renders for the new binary'
@@ -1177,47 +1183,47 @@ else
 fi
 
 # --- Phase K — tool gating and triage registration --------------------------
-# Gating is asserted BEHAVIOURALLY, not by asking the model what tools it has.
-# A model's self-report proved unreliable here: with the RE tools disabled it
-# still claimed hash_binary=YES while correctly denying the others. What it
-# cannot fake is the digest — hash_binary either runs and produces the real
-# SHA-256, or it does not exist and the digest never appears.
+# Gating is asserted BEHAVIOURALLY, not by asking the model what tools it has:
+# a model's self-report proved unreliable here. With the tools off they stay
+# mounted and every call is refused, so no read can leave an evidence record.
+# What the model cannot fake is the band's evidence count: it stays where it
+# was while the tools are off, and grows once they are back on.
 
 slash "/re off"
 expect 'K1 /re off disables the RE tools' 'omp-re: RE tools disabled for this session — /re on to re-enable' 20
 
-ALT_SHA256="$EXPECTED_SHA256"
-if [ "$ALT_OK" -eq 1 ]; then
-	# Phase J retargeted the session, so the digest to expect is the alt binary's.
-	ALT_SHA256="$(sha256sum "$ALT_BINARY" | awk '{print $1}')"
-fi
-
 if [ "$MODEL_OK" -eq 1 ]; then
-	say 'Call hash_binary on the open binary and report only the SHA-256. If you have no such tool, reply exactly NOTOOL.'
+	K_BEFORE="$(evidence_count)"
+	say 'Use the rizin_command tool to run the rizin command ij on the open binary. If the tool refuses, reply exactly NOTOOL.'
 	# Completion must be a real turn boundary, not the reply's wording: with the
 	# RE tools gated off the model may decline in prose instead of emitting the
 	# literal NOTOOL, and that is still a correct gating outcome. wait_turn
 	# gates on the busy edge and accepts the marker only as a fallback.
 	if wait_turn 'NOTOOL' 180; then
-		# Absence is checked against the VISIBLE pane, never scrollback: when
-		# the alt fixture is unavailable ALT_SHA256 falls back to the PE's
-		# digest, which phase G1 already printed into scrollback on purpose.
-		if ! pane | grep -q "$ALT_SHA256"; then
-			pass 'K2 hash_binary cannot run while the RE tools are off'
+		K_OFF="$(evidence_count)"
+		if [ "$K_OFF" = "$K_BEFORE" ]; then
+			pass 'K2 no read is recorded while the RE tools are off'
 		else
-			fail 'K2 hash_binary cannot run while the RE tools are off (digest appeared anyway)'
+			fail "K2 no read is recorded while the RE tools are off (evidence went from $K_BEFORE to $K_OFF)"
 			diagnose
 		fi
 	else
-		skip 'K2 hash_binary cannot run while the RE tools are off' 'model turn never completed'
+		MODEL_OK=0
+		fail 'K2 no read is recorded while the RE tools are off (the model turn did not finish)'
 	fi
 
 	slash "/re on"
 	expect 'K3 /re on re-enables the RE tools' 'omp-re: RE tools enabled for this session' 20
 
-	if model_step 'K4 hash_binary runs again once the RE tools are back on' \
-		'Call hash_binary on the open binary and report only the SHA-256.' \
-		"$ALT_SHA256" 1 180; then
+	if model_step 'K4 a read runs again once the RE tools are back on' \
+		'Use the rizin_command tool to run the rizin command ij on the open binary. Then end your reply with the bare word READAGAIN on its own line.' \
+		'^ *READAGAIN *$' 1 180; then
+		K_ON="$(evidence_count)"
+		if [ "$K_ON" -gt "$K_BEFORE" ]; then
+			pass 'K4b the read was recorded as evidence'
+		else
+			fail "K4b the read was recorded as evidence (evidence stayed at $K_ON)"
+		fi
 
 		# K5: triage tools self-register only when their backing binary is on
 		# PATH (PROGRAM-AVAILABLE-P, engine/extras.lisp). Proven behaviourally
@@ -1236,13 +1242,15 @@ if [ "$MODEL_OK" -eq 1 ]; then
 			skip 'K5 triage_yara is registered because yara is on PATH' 'yara not on PATH'
 		fi
 	else
-		skip 'K5 triage_yara is registered because yara is on PATH' 'model round-trip timed out'
+		fail 'K4b the read was recorded as evidence (no model turn to rest on)'
+		fail 'K5 triage_yara is registered because yara is on PATH (no model turn to rest on)'
 	fi
 else
-	skip 'K2 hash_binary cannot run while the RE tools are off' 'model round-trip timed out'
-	skip 'K3 /re on re-enables the RE tools' 'model round-trip timed out'
-	skip 'K4 hash_binary runs again once the RE tools are back on' 'model round-trip timed out'
-	skip 'K5 triage_yara is registered because yara is on PATH' 'model round-trip timed out'
+	fail 'K2 no read is recorded while the RE tools are off (no model turn to rest on)'
+	fail 'K3 /re on re-enables the RE tools (no model turn to rest on)'
+	fail 'K4 a read runs again once the RE tools are back on (no model turn to rest on)'
+	fail 'K4b the read was recorded as evidence (no model turn to rest on)'
+	fail 'K5 triage_yara is registered because yara is on PATH (no model turn to rest on)'
 fi
 
 
@@ -1260,8 +1268,8 @@ check_layout() {
 	tmux resize-window -t "$SESSION" -x "$width" -y "$height"
 	sleep 3
 
-	# L2: the band's two lines hold their documented shapes (bandLines,
-	# extensions/re/ui.ts), not just a line count. "wc -l -eq 2" was
+	# L2: the band's two lines hold their documented shapes (BAND-LINES,
+	# stdio/server.lisp), not just a line count. "wc -l -eq 2" was
 	# a tautology: band()'s awk unconditionally prints two (possibly empty)
 	# lines whenever the editor anchor exists, making it exactly equivalent
 	# to editor_visible — a band that wrapped to 3 rows at 60 columns, the
@@ -1379,10 +1387,10 @@ if [ "$MODEL_OK" -eq 1 ] && [ "$SENTINEL_SEEN" -eq 0 ]; then
 	exit 1
 fi
 
-# Skips never touch FAIL_COUNT and nothing else checks the expected total,
-# so a model-outage skip cascade could print PASS 62 / FAIL 0 / SKIP 15 and
-# still exit 0. Pin the total so any drift fails loudly.
-[ $((PASS_COUNT + FAIL_COUNT + SKIP_COUNT)) -eq 99 ] || { echo "FAIL: assertion count drift (expected 99, got $((PASS_COUNT + FAIL_COUNT + SKIP_COUNT)))"; exit 1; }
+# Nothing else checks the expected total, so a branch that forgot to report
+# an assertion either way would shrink the run without a word. Pin the total
+# so any drift fails loudly.
+[ $((PASS_COUNT + FAIL_COUNT + SKIP_COUNT)) -eq 100 ] || { echo "FAIL: assertion count drift (expected 100, got $((PASS_COUNT + FAIL_COUNT + SKIP_COUNT)))"; exit 1; }
 
 echo ""
 echo "=============================================="

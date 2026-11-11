@@ -235,10 +235,12 @@ answers.
 
 The cell is three files of host and the recipes:
 
-- `nodecode-host.lisp` gives the engine's package the nicknames `NODECODE-RE`
-  and `RE`, and answers where a session's record is kept: each entry is
-  stamped with the turn it was written in, and a call reads the entries on the
-  session's branch.
+- `nodecode-host.lisp` makes the cell's own package, `NODECODE-RE` (nickname
+  `RE`), which uses the engine's package and so only what that exports
+  (`engine/package.lisp`). It has its own `RE-ERROR`, which a verb signals with
+  the engine's words when the engine answers a failure. The file also answers
+  where a session's record is kept: each entry is stamped with the turn it was
+  written in, and a call reads the entries on the session's branch.
 - `verbs.lisp` is the verbs and the argument mapping, over the engine's
   surface (`engine/engine.lisp`).
 - `cell.lisp` is the primer, the manual, `/re` and its dialog, the side

@@ -9,9 +9,8 @@ name: Cross-OS
 #     the engine process, drive rizin over its pipe, and open a PE.
 #
 # It does not run the Lisp suite (test/nodecode/run.lisp): the suite's harness
-# and its stand-in programs are POSIX (sb-posix, /bin/sh scripts). Three tests
-# of test/shim.test.ts that use a shell-script stand-in for the engine skip
-# themselves on Windows too.
+# and its stand-in programs are POSIX (sb-posix, /bin/sh scripts). The
+# stand-in engine of test/shim.test.ts is a bun script, so its tests run here.
 #
 # This leg was written with the engine's move to Common Lisp and had not been
 # seen to pass when it was written. A red run here is information about

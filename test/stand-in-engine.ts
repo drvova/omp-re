@@ -18,6 +18,8 @@
  *   framing         serves, on a wire that ends lines with CRLF, carries lines that are not messages, and splits a character in two writes
  *   serve           serves (the default)
  *   deaf            serves, and ignores `shutdown` and the end of its input
+ *   told-only       serves, and leaves when told `shutdown` but not at the end of its input
+ *   eof-only        serves, and leaves at the end of its input but not when told `shutdown`
  *   mute            serves, but never answers a `call` and says nothing while it is waited for
  *   forgetful       serves, never answers a `call`, and its `alive` names no request
  *   slow            serves; a `call` is answered after ten beats, `alive` naming it meanwhile
@@ -197,7 +199,7 @@ async function receive(message: Message): Promise<void> {
 	heard.push({ method: message.method, params, request: message.id !== undefined });
 	if (wrong) violations.push(`omp sent: ${wrong}`);
 	if (message.id === undefined) {
-		if (message.method === "shutdown" && behaviour !== "deaf") process.exit(0);
+		if (message.method === "shutdown" && behaviour !== "deaf" && behaviour !== "eof-only") process.exit(0);
 		return;
 	}
 	const id = message.id;
@@ -244,5 +246,5 @@ for await (const line of console) {
 	if (message !== undefined && message !== null && typeof message === "object") void receive(message);
 }
 // The end of the input: omp is gone, or done.
-if (behaviour === "deaf") await new Promise(() => {});
+if (behaviour === "deaf" || behaviour === "told-only") await new Promise(() => {});
 process.exit(0);

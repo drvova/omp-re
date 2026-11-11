@@ -64,12 +64,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   is unchanged.
 - **A transcript card** takes its header from the first line of the result
   text.
-- **Completion after `/re cite` and `/re evidence`** offers up to 200 evidence
-  ids, not all of them.
+- **Completion after `/re cite` and `/re evidence`** offers the newest 200
+  evidence ids, not all of them, and matches what is typed against the eight
+  characters an id is shown by.
 - **The debugger's launch warning** is in the result text only, no longer
   also a notification.
 - **A support audit whose side turn failed** records why (`the audit side
   turn failed: …`) where it said only `unaudited`.
+- **The wire between omp and the engine is described once**, in
+  `stdio/protocol.json`, and both sides are held to it: the server finds its
+  handlers from it and answers a method, member or value it does not have with
+  an error that names it; the extension is type-checked against
+  `extensions/re/protocol.ts`, generated from it by `bun run gen:protocol`
+  with the tables of `docs/engine-protocol.md`. The protocol version is 2, and
+  each side now refuses the other when it speaks another: the error says to
+  reinstall or upgrade the plugin.
+- **A session event of an unknown kind is an error.** It was taken for a
+  restore, so a misspelt `shutdown` re-opened the session it was meant to
+  close.
+- **What the wire carries.** A call's answer is `text`, `failed`, `refused?`,
+  `details?` and `state`: `refused` says a call never came to a result, where
+  that was read off a missing `details`; `raw` and the second copies of
+  `evidenceId` and `artifactPath` are gone (both are in `details`). `state`
+  is the status band as its lines, the evidence ids as they are shown, and
+  `memory`. A described tool has no `evidence` member. `hello` takes no
+  `voice`; the `facts` method is gone (every answer carries the state);
+  `environment` is a notification. The engine sends `alive` while it serves
+  anything.
+- **The status band's lines are the engine's.** The extension draws them as
+  sent; the text is unchanged.
+- **Keys are named in one list** (`keys` in `stdio/protocol.json`), which the
+  extension binds from and `/re help` names from.
+- **A transcript card** shows the line that names a read's evidence record
+  beside its header, not as the last line of its body, so a JSON body
+  highlights as JSON.
+- **Starting the engine has a deadline** of two minutes; a start that takes
+  longer is ended with an error that says what to check and quotes the
+  engine's log. An engine that says nothing for 30 s while a request waits is
+  taken for hung and ended, and the request fails saying so; a request the
+  engine's `alive` does not name twice running fails alone. No clock bounds a
+  request the engine is serving.
+- **The engine's standard error goes to omp's log** line by line as it is
+  written (`omp-re engine: …`), not only into the error when the process
+  ends. A line on the wire that is not a message is noted there too, as is a
+  failure to answer a notification or to write an approval to the audit log.
+- **omp ending** closes the engine's input, at which the engine closes its
+  rizin processes and exits. It is no longer killed from an exit hook; a kill
+  is only what ends an engine that has not left 1.5 s after it was told to.
+- **The engine ends with the last extension instance omp shuts down**, not
+  when no session has yet reported an event: a subagent's shutdown can no
+  longer stop the engine under a session that had not started.
+- **The SBCL-not-found error** also covers a `.cmd` or `.bat` named in
+  `OMPRE_SBCL_PATH` (the engine is started without a shell) and says where
+  cl-ppcre goes on Windows.
+- `skills/re-triage/recipes.js` and `recipes.py` read the id of a read's
+  evidence record from the result's `details.evidenceId`, not from the tag in
+  its text. Their reports are unchanged.
+- **`open_binary` and `/re open` say what was re-applied** of mapped files,
+  analysis passes and signature files (`Re-applied N of M mapped file(s) …
+  recorded earlier for this binary.`), as they did for annotations.
+- **`map_file`, `analyze` and `apply_signatures` descriptions and results** no
+  longer say that reopening the binary drops a map or a pass. It never did:
+  they stay for the session, and only a branch from before the call is
+  without them.
+- **`/re verify --strict`** says `provenance-only: no reproducible hash to
+  compare (re-run by hand)` for a record that cannot be re-run. A record of a
+  tool other than `rizin_command` that carries a hash (older sessions'
+  decompile results) now reads `provenance-only` in a report, a manifest and
+  `record_finding`'s count, not `reproducible`.
+- **The audit log** gets one `rizin_command` line for each command
+  `adopt_finding` or `/re carry --inherit` re-runs.
+- **`adopt_finding` accepts confidence `possible`**, and a manifest finding
+  marked so is read as speculative.
+- **`/re carry` file errors** are in the engine's words (`… no such file`,
+  `… it is a directory`); a relocation in `<out>.json` names both ends.
+- **`/re status`** says `none — pdg and pdd need a decompiler plugin
+  (rz-ghidra, jsdec)` when there is none; a decompiler is found from rizin's
+  command catalog.
+- **`/re imports` as text** leaves out the address of an import that has none
+  (it printed `0x0`).
+- **The unsigned-audit-log notice** is said at level info, once a session.
+- **Under omp, a session nothing has called for 30 minutes** has its rizin
+  closed; the next call restores it from the record.
+- `set_arch_hint` refuses with `bits: none given`; a finding with no audit
+  status says `status not recorded`. `rizin_emulate`'s `set_mem` accepts
+  blanks in its hex and `rizin_debug`'s `write_memory` a `0x` prefix.
 - **The `/re` command's description** in omp lists the subcommand names.
 - **nodecode: object arguments are written as lists, not text.**
   `rizin_debug`'s `run` and `attach` and `adopt_finding`'s `commands` were JSON
@@ -100,21 +179,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **`OMPRE_ALLOWED_DIRS` under omp.** The directory allow-list the nodecode
   cell had now applies to omp as well: `open_binary`, `/re open`, `map_file`,
-  YARA rules and `/re carry --against` open only files under the listed
-  directories, links resolved first. (A FLIRT file given to
-  `apply_signatures` is not checked against it: rizin opens that path
-  itself.)
+  YARA rules, the FLIRT file given to `apply_signatures` and
+  `/re carry --against` open only files under the listed directories, links
+  resolved first. A missing signature file is refused (`no such signature
+  file`), and a relative one is read against the session's directory. Not
+  held to the list: `rizin_cli`'s arguments, `rizin_debug`'s `run.stdin`,
+  `run.stdout`, `run.stderr` and `run.cwd`, and the manifest `/re carry`
+  reads (`SECURITY.md`).
 - **Relative paths and `~/` wherever the engine opens a file.** `open_binary`,
   `map_file`, YARA rules, a carry manifest, `--against`, and the paths
   `/re report` and `/re carry --out` write are read against the session's
   directory, where only `/re open` was. A path with spaces in `/re open` is no
   longer collapsed.
 - **An engine that dies is replaced.** Under omp the next call starts another
-  engine process and each session comes back from its record. `/re off` is
-  held in memory, so a replaced engine starts with the tools on.
+  engine process and each session comes back from its record. What a session
+  holds in no record — that `/re off` was said — the engine gives omp with
+  every answer, and omp hands it to the new engine, so the tools stay off.
+  The request that was waiting when the engine died fails; it is not sent
+  again.
 - **Fail-closed record lookups.** When the host cannot say which branch a
   session is on, the call is refused; when it cannot say which turn an entry
   belongs to, the entry is not written.
+- **A branch moved to before a `map_file`, `analyze` or `apply_signatures`**
+  no longer keeps it: rizin is started again without it.
+- `test/versions.test.ts`, and `bun run gen:protocol` / `check:protocol`.
 - `docs/engine-protocol.md`: the messages between omp and the engine.
   `docs/ARCHITECTURE.md` is rewritten around the engine, the port a host
   answers and the two hosts.
@@ -145,6 +233,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - A cut result whose whole text could not be saved ends `Full output was
   larger.` in place of advice to narrow with paging parameters that no longer
   exist.
+- **`bun test` exited 1 with every test passing** on a newer bun: a test of a
+  headless `/re` error left the process's exit status set. The extension no
+  longer writes a headless run's output and exit status where a test cannot
+  stand in for them.
+- **A cancel sent for a call omp had already given up on** reached the engine
+  before the call it was for, and was ignored.
+- **The manual tiers.** `test/tui-qa.sh` drove `hash_binary`, a tool that no
+  longer exists, and skipped the steps when it timed out; it now asks for a
+  `rizin_command` read, checks the evidence record it leaves, and fails a
+  step whose model turn does not finish. `test/tui.sh` and `test/tui-qa.sh`
+  default to `/bin/ls` (and `/bin/cat`) instead of a path that named a malware
+  sample. `test/live-model.sh` names no model: it requires
+  `OMPRE_LIVE_MODEL`. None of the three was run after these changes: `omp` is
+  not installed where they were made.
 
 ## [0.10.0] - 2026-11-10
 

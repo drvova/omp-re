@@ -15,13 +15,15 @@
 #      the model should revise the drifted finding; then /re report on v2.
 #
 # Asserts only on recorded state (session entries, report files), never on model
-# prose. Model choice: OMPRE_LIVE_MODEL (default minimax-code/MiniMax-M3, which
-# reads MINIMAX_CODE_API_KEY). Skips (exit 0) without a key, omp, rizin, sbcl or
-# a C compiler. Costs real tokens; not run in CI.
+# prose. The model is the caller's to name: OMPRE_LIVE_MODEL, in the form omp's
+# --model takes (<provider>/<model>), with that provider's key in the
+# environment as omp reads it. There is no default: without it this exits 2.
+# Skips (exit 0) without omp, rizin, sbcl or a C compiler. Costs real tokens;
+# a manual tier, run in no workflow.
 set -u
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL="${OMPRE_LIVE_MODEL:-minimax-code/MiniMax-M3}"
+MODEL="${OMPRE_LIVE_MODEL:-}"
 FAIL=0
 log() { printf '%s\n' "$*"; }
 pass() { log "PASS: $*"; }
@@ -30,9 +32,9 @@ fail() {
 	FAIL=1
 }
 
-if [ -z "${OMPRE_LIVE_MODEL:-}" ] && [ -z "${MINIMAX_CODE_API_KEY:-}" ]; then
-	log "SKIP: set MINIMAX_CODE_API_KEY (or OMPRE_LIVE_MODEL plus that provider's key)"
-	exit 0
+if [ -z "$MODEL" ]; then
+	log "live-model: set OMPRE_LIVE_MODEL to the model to drive, as omp's --model takes it (<provider>/<model>), and that provider's API key. This tier calls a real model and names none itself."
+	exit 2
 fi
 for tool in omp "${OMPRE_SBCL_PATH:-sbcl}" "${OMPRE_RIZIN_PATH:-rizin}"; do
 	command -v "$tool" >/dev/null 2>&1 || {

@@ -8,7 +8,7 @@
 ;;;; process. Standard output is the wire and belongs to the protocol alone:
 ;;;; before anything is loaded it is put aside for the server, and everything
 ;;;; that prints — a compiler note on a first load, a warning, a backtrace —
-;;;; goes to standard error, which omp keeps as a log. The first line on the
+;;;; goes to standard error, which omp writes to its log. The first line on the
 ;;;; wire is {"ready": PROTOCOL}, or {"fatal": TEXT} when the engine could
 ;;;; not be loaded, TEXT saying what to install.
 

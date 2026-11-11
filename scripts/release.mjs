@@ -162,7 +162,6 @@ function emit(outputs) {
 	writeFileSync(file, `${lines}\n`, { flag: "a" });
 }
 
-// --- decide -----------------------------------------------------------------
 
 const commits = resolveCommits();
 let level = "none";
@@ -194,7 +193,6 @@ if (dryRun) {
 	process.exit(0);
 }
 
-// --- apply -------------------------------------------------------------------
 
 writeFileSync(PKG, setJsonVersion(pkgRaw, next));
 writeFileSync(MARKET, setJsonVersion(readFileSync(MARKET, "utf8"), next));

@@ -39,7 +39,7 @@ that artifact.
 | --- | --- | --- | --- |
 | `open_binary` | `read` | `path`, `arch?`, `bits?`, `base?`, `map?`, `format?` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 | `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
-| `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable — reopen to drop the map. |
+| `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable: the map stays with this binary for the session, reopening included; only a branch from before the call is without it. |
 
 ## Reading the binary — `rizin_command` (one tool)
 
@@ -208,8 +208,9 @@ functions. List the built-in database with `rizin_command Flt`.
 or format-specific passes it skips (book: analysis/code_analysis), each
 additive — it finds functions, xrefs, names, or types; none deletes. The pass
 is recorded and re-run on resume/respawn (before signatures and annotations,
-so each layer sees the one before it), not as an undoable annotation —
-reopen the binary to return to the baseline.
+so each layer sees the one before it), not as an undoable annotation. A pass
+stays with the binary for the session, reopening included; only a branch from
+before the call is without it.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |

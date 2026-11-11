@@ -30,13 +30,15 @@ bun run check          # tsc-ts (native TypeScript 7 build) --noEmit — must ex
 bun run test:engine    # the Lisp suite: the engine and both hosts' Lisp
 bun test test/         # the extension through omp's SDK, the engine behind it
 bun run check:recipes  # the recipes' generated blocks are current
+bun run check:protocol # the shim's types and the protocol page's tables are current
 bash test/tui.sh       # fast tmux smoke test
-bun run qa:tui         # full tmux QA pass, 99 assertions
+bun run qa:tui         # full tmux QA pass
 ```
 
-CI runs the first four on Linux with rizin installed. The last two need tmux,
-`omp`, a test binary (`OMPRE_TEST_BINARY`), and for `qa:tui` a working model;
-they are not run in CI, so run them yourself when you change what the terminal
+CI runs the first five on Linux with rizin installed. The last two are manual
+tiers: they need tmux, `omp`, a test binary (`/bin/ls` unless
+`OMPRE_TEST_BINARY` names another), and for `qa:tui` a working model; no
+workflow runs them, so run them yourself when you change what the terminal
 shows. See [`docs/testing.md`](docs/testing.md) for what each tier needs and
 what none of them proves.
 
@@ -51,8 +53,12 @@ annotation commands are built only by `annotation-commands`
 (`engine/annotate.lisp`), which the forward tools, `/re undo` and replay all
 share. Keep it that way.
 
-When you change a message between omp and the engine, change
-[`docs/engine-protocol.md`](docs/engine-protocol.md) in the same commit. When
+The messages between omp and the engine are described once, in
+`stdio/protocol.json`. To change one, change it there and run
+`bun run gen:protocol`, which rewrites `extensions/re/protocol.ts` and the
+tables of [`docs/engine-protocol.md`](docs/engine-protocol.md); the type check
+then points at every use in the shim, and the Lisp server refuses at load a
+method it has no handler for. Update the page's prose in the same commit. When
 you change `recipes/tables.json`, run `bun run gen:recipes` and commit what it
 writes.
 
@@ -60,16 +66,18 @@ writes.
 
 1. **The assertion-count drift guard.** `test/tui-qa.sh` pins its own total
    assertion count in a literal near the end of the script (currently `-eq
-   99`). Any PR that adds or removes an assertion **must** update that
-   literal in the same commit — the guard exists specifically to catch a
-   silent count drift (e.g. a model-outage skip cascade) that would
-   otherwise still exit 0.
-2. **Every conditional assertion needs a `skip` mirror on every other branch
-   it could take.** If an assertion only runs inside an `if [ -n "$SOME_ID"
-   ]` block, the corresponding `else` branch (and any outer failure branch)
-   must call `skip '<same assertion name>' '<reason>'` — otherwise the total
-   assertion count differs between branches, and the drift guard fails a
-   run that is actually healthy.
+   100`). Any PR that adds or removes an assertion **must** update that
+   literal in the same commit — the guard exists to catch a branch that
+   forgot to report an assertion and would otherwise still exit 0.
+2. **Every conditional assertion needs a mirror on every other branch it
+   could take.** If an assertion only runs inside an `if [ -n "$SOME_ID" ]`
+   block, the corresponding `else` branch (and any outer failure branch)
+   must report the same assertion: `fail '<same assertion name> (<why>)'`
+   when the thing it tests should have been there — a model turn that did
+   not finish is a failure, not a skip — and `skip '<same assertion name>'
+   '<reason>'` only when the fixture has nothing to show it on. Otherwise
+   the total differs between branches and the drift guard fails a healthy
+   run.
 
 ## Versioning and releases
 
