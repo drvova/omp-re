@@ -12,8 +12,8 @@
 
 (defun seeded-session (&key (sha (sha-of #\a)))
   "A fresh session whose record says a binary with hash SHA is open and
-holds one reproducible rizin_command record, as findings.test.ts's setup
-does. Nothing in it needs the binary to exist. => the session's id."
+holds one reproducible rizin_command record. Nothing in it needs the binary
+to exist. => the session's id."
   (let* ((id (fresh-session))
          (session (re::find-session id)))
     (re::append-entry "re.binary" (re::obj "path" "/bin/sample" "sha256" sha) session)

@@ -12,8 +12,8 @@
 ;;;; The judge is a side question put to the model: no tools, no history
 ;;;; written. There is no structured-output path for it, so the prompt asks
 ;;;; for JSON in prose and the reply is parsed defensively — a fenced block,
-;;;; then a balanced scan. Everything here is model-agnostic given
-;;;; *CLAIM-JUDGE*, which the cell sets (cell.lisp) and a test binds.
+;;;; then a balanced scan. Everything here is model-agnostic given the
+;;;; host's :JUDGE service (host.lisp), which a test installs its own.
 ;;;;
 ;;;; Fail-open by design: whenever the side question cannot be asked or its
 ;;;; reply cannot be read, the audit degrades to "unaudited" and never blocks

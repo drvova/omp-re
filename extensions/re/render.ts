@@ -89,16 +89,10 @@ function highlighted(source: string, lang: string, theme: Theme): string[] {
 	}
 }
 
-/** Drop the trailing truncation/artifact notice; the header meta already says so. */
-function withoutNotice(body: string): string {
-	return body.replace(/\n\n\[Output truncated:[^\n]*\]/, "");
-}
-
 function bodyLines(style: BodyStyle, body: string, theme: Theme): string[] {
 	if (style === "none" || body.trim() === "") return [];
-	const trimmed = withoutNotice(body);
-	if (style === "json") return highlighted(trimmed, "json", theme);
-	return trimmed.split("\n").map((line) => theme.fg("toolOutput", line));
+	if (style === "json") return highlighted(body, "json", theme);
+	return body.split("\n").map((line) => theme.fg("toolOutput", line));
 }
 
 function nativeHead(spec: RenderSpec, args: RenderArgs, meta: NativeToolHead["meta"] = []): NativeToolHead {
@@ -108,9 +102,8 @@ function nativeHead(spec: RenderSpec, args: RenderArgs, meta: NativeToolHead["me
 
 function nativeBody(style: BodyStyle, body: string) {
 	if (style === "none" || body.trim() === "") return undefined;
-	const source = withoutNotice(body);
-	if (style === "json") return code(source, { lang: "json", preview: { lines: 6 } });
-	return code(source, { preview: { lines: 12 } });
+	if (style === "json") return code(body, { lang: "json", preview: { lines: 6 } });
+	return code(body, { preview: { lines: 12 } });
 }
 
 /** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */

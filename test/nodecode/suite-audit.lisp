@@ -36,7 +36,7 @@ to parse."
 
 (defun audit-session ()
   "A fresh session whose record says a binary is open and holds one
-reproducible rizin_command record: findings.test.ts's setup => its id."
+reproducible rizin_command record => its id."
   (let* ((id (fresh-session))
          (session (re::find-session id))
          (sha (make-string 64 :initial-element #\a)))
