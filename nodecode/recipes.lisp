@@ -138,9 +138,9 @@ is outside, DEFAULT when it was not given."
 (defun lookup (path facts row)
   "What PATH names: a fact, or (when it opens with \".\") ROW, and then
 members of it."
-  (let ((value (if (string= "." (aref path 0)) row facts)))
-    (loop for index from 1 below (length path)
-          do (setf value (jget value (aref path index))))
+  (let ((value (if (char= #\. (char path 0)) row facts)))
+    (dolist (key (uiop:split-string path :separator "."))
+      (unless (string= key "") (setf value (jget value key))))
     (if (eq value :null) nil value)))
 
 (defun there (value)
@@ -188,7 +188,7 @@ members of it."
           ((gethash "plural" node) (gethash (if (eql 1 (size (at "plural"))) "one" "many") node))
           (t
            (let ((text (or (loop for path across (gethash "get" node)
-                                 for text = (formatted (gethash "as" node) (lookup path facts row))
+                                 for text = (formatted (gethash "as" node "text") (lookup path facts row))
                                  unless (eq text :missing) return text)
                            (gethash "or" node))))
              (cond ((null text) :missing)
@@ -212,7 +212,7 @@ or comes out empty."
 
 (defun section-lines (section facts &optional row)
   "The lines of one section."
-  (flet ((each (key function) (loop for item across (gethash key section) append (funcall function item)))
+  (flet ((each (key function) (loop for item in (rows (gethash key section)) append (funcall function item)))
          (one (key) (and (gethash key section) (written (gethash key section) facts row))))
     (when (and (gethash "when" section) (not (there (lookup (gethash "when" section) facts row))))
       (return-from section-lines '()))

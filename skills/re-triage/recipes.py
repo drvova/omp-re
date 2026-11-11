@@ -437,63 +437,52 @@ def _omp_re_recipes():
         8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279
       ],
       "text": {
-        "more": [
-          "  … ",
-          {"get": [["$", "hidden"]], "as": "d"},
-          " more ",
-          {"get": [["$", "what"]], "as": "text"},
-          " not shown"
-        ],
+        "more": ["  … ", {"get": ["hidden"], "as": "d"}, " more ", {"get": ["what"]}, " not shown"],
         "evidenceTaken": "Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",
-        "evidenceRow": ["  ", {"get": [[".", "id"]], "as": "text"}, "  ", {"get": [[".", "label"]], "as": "text"}],
+        "evidenceRow": ["  ", {"get": [".id"]}, "  ", {"get": [".label"]}],
         "nameless": "?",
         "refusals": {
           "notAString": [
             "omp-re: ",
-            {"get": [["$", "recipe"]], "as": "text"},
+            {"get": ["recipe"]},
             ": a function is named by a string, not ",
-            {"get": [["$", "given"]], "as": "text"}
+            {"get": ["given"]}
           ],
           "optionsNotOneObject": [
             "omp-re: ",
-            {"get": [["$", "recipe"]], "as": "text"},
+            {"get": ["recipe"]},
             ": options are one object, e.g. { maxItems: 20 }, not ",
-            {"get": [["$", "given"]], "as": "text"}
+            {"get": ["given"]}
           ],
           "noFunction": [
             "omp-re: ",
-            {"get": [["$", "recipe"]], "as": "text"},
+            {"get": ["recipe"]},
             ": no function at ",
-            {"get": [["$", "addr"]], "as": "text"},
+            {"get": ["addr"]},
             " — list them with ",
-            {"get": [["$", "listFunctions"]], "as": "text"},
+            {"get": ["listFunctions"]},
             ", or define one with define_function"
           ],
           "noInstructions": [
             "omp-re: ",
-            {"get": [["$", "recipe"]], "as": "text"},
+            {"get": ["recipe"]},
             ": no function at ",
-            {"get": [["$", "addr"]], "as": "text"},
+            {"get": ["addr"]},
             " — list them with ",
-            {"get": [["$", "listFunctions"]], "as": "text"}
+            {"get": ["listFunctions"]}
           ],
           "cutOutput": [
             "omp-re: ",
-            {"get": [["$", "recipe"]], "as": "text"},
+            {"get": ["recipe"]},
             ": the output of rizin_command ",
-            {"get": [["$", "label"]], "as": "json"},
+            {"get": ["label"], "as": "json"},
             " was cut at the size cap and the whole of it could not be read back (",
-            {"get": [["$", "why"]], "as": "text"},
+            {"get": ["why"]},
             "). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands."
           ],
           "cutNoArtifact": ["the engine saved no artifact for it"],
-          "cutUnreadable": [
-            "artifact://",
-            {"get": [["$", "artifact"]], "as": "text"},
-            ": ",
-            {"get": [["$", "error"]], "as": "text"}
-          ],
-          "cutNotText": ["artifact://", {"get": [["$", "artifact"]], "as": "text"}, " did not read as text"]
+          "cutUnreadable": ["artifact://", {"get": ["artifact"]}, ": ", {"get": ["error"]}],
+          "cutNotText": ["artifact://", {"get": ["artifact"]}, " did not read as text"]
         }
       },
       "host": {
@@ -522,115 +511,99 @@ def _omp_re_recipes():
             {"read": "entries", "command": "iej"},
             {"derive": "triage"}
           ],
-          "title": ["triage: ", {"get": [["$", "path", "core", "file"]], "as": "text", "or": "?"}],
+          "title": ["triage: ", {"get": ["path.core.file"], "or": "?"}],
           "sections": [
             {
-              "title": ["Identity ", {"cite": ["$", "@info"]}],
+              "title": ["Identity ", {"cite": "@info"}],
               "lines": [
                 [
                   "  ",
-                  {
-                    "get": [["$", "info", "class"], ["$", "info", "bintype"]],
-                    "as": "text",
-                    "or": "unknown format"
-                  },
+                  {"get": ["info.class", "info.bintype"], "or": "unknown format"},
                   ", ",
-                  {"get": [["$", "info", "arch"]], "as": "text", "or": "?"},
+                  {"get": ["info.arch"], "or": "?"},
                   " ",
-                  {"get": [["$", "info", "bits"]], "as": "d", "or": "?"},
+                  {"get": ["info.bits"], "as": "d", "or": "?"},
                   "-bit ",
-                  {"get": [["$", "info", "endian"]], "as": "text", "or": ""},
+                  {"get": ["info.endian"], "or": ""},
                   ", ",
-                  {"get": [["$", "info", "os"]], "as": "text", "or": "?"},
-                  {"group": [", language ", {"get": [["$", "info", "lang"]], "as": "text"}]},
-                  {"group": [", interpreter ", {"get": [["$", "info", "intrp"]], "as": "text"}]}
+                  {"get": ["info.os"], "or": "?"},
+                  {"group": [", language ", {"get": ["info.lang"]}]},
+                  {"group": [", interpreter ", {"get": ["info.intrp"]}]}
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             },
             {
-              "title": ["Build protections ", {"cite": ["$", "@info"]}],
+              "title": ["Build protections ", {"cite": "@info"}],
               "lines": [
                 [
                   "  stack canary: ",
                   {
-                    "choose": ["$", "info", "canary"],
+                    "choose": "info.canary",
                     "yes": "yes",
                     "no": "NO — a stack overflow reaches the return address unchecked"
                   }
                 ],
                 [
                   "  NX: ",
-                  {
-                    "choose": ["$", "info", "nx"],
-                    "yes": "yes",
-                    "no": "NO — data pages are executable"
-                  }
+                  {"choose": "info.nx", "yes": "yes", "no": "NO — data pages are executable"}
                 ],
                 [
                   "  PIE: ",
                   {
-                    "choose": ["$", "info", "pie"],
+                    "choose": "info.pie",
                     "yes": "yes",
                     "no": "NO — the image loads at a fixed address"
                   }
                 ],
                 [
                   "  RELRO: ",
-                  {"get": [["$", "info", "relro"]], "as": "text", "or": "none"},
-                  {
-                    "group": [{"if": ["$", "info", "relro"], "is": "partial"}, " — the GOT stays writable"]
-                  },
+                  {"get": ["info.relro"], "or": "none"},
+                  {"group": [{"if": "info.relro", "is": "partial"}, " — the GOT stays writable"]},
                   {
                     "group": [
-                      {"unless": ["$", "info", "relro"], "is": "partial"},
-                      {"unless": ["$", "info", "relro"], "is": "full"},
+                      {"unless": "info.relro", "is": "partial"},
+                      {"unless": "info.relro", "is": "full"},
                       " — the GOT and other relocated data stay writable"
                     ]
                   }
                 ],
                 [
                   "  fortified libc calls: ",
-                  {"choose": ["$", "info", "fortify_source"], "yes": "yes", "no": "no"}
+                  {"choose": "info.fortify_source", "yes": "yes", "no": "no"}
                 ],
                 [
                   "  stripped: ",
-                  {"choose": ["$", "info", "stripped"], "yes": "yes", "no": "no"},
+                  {"choose": "info.stripped", "yes": "yes", "no": "no"},
                   "   static: ",
-                  {"choose": ["$", "info", "static"], "yes": "yes", "no": "no"}
+                  {"choose": "info.static", "yes": "yes", "no": "no"}
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             },
             {
-              "title": ["Sections: ", {"count": ["$", "sections"]}, " ", {"cite": ["$", "@sectionData"]}],
-              "lines": [],
-              "rows": ["$", "sections"],
+              "title": ["Sections: ", {"count": "sections"}, " ", {"cite": "@sectionData"}],
+              "rows": "sections",
               "row": [
                 "  ",
-                {"get": [[".", "section", "name"]], "as": "text", "padRight": 18},
+                {"get": [".section.name"], "padRight": 18},
                 " ",
-                {"get": [[".", "section", "perm"]], "as": "text", "padRight": 4, "or": ""},
+                {"get": [".section.perm"], "padRight": 4, "or": ""},
                 " ",
-                {"get": [[".", "section", "size"]], "as": "d", "padLeft": 9, "or": "0"},
+                {"get": [".section.size"], "as": "d", "padLeft": 9, "or": "0"},
                 " bytes  entropy ",
-                {"get": [[".", "entropy"]], "as": "f2", "padLeft": 4, "or": "?"},
-                {"group": [{"if": [".", "notes"]}, "  <- ", {"join": [".", "notes"], "with": "; "}]}
+                {"get": [".entropy"], "as": "f2", "padLeft": 4, "or": "?"},
+                {"group": [{"if": ".notes"}, "  <- ", {"join": ".notes", "with": "; "}]}
               ],
-              "under": [],
               "after": [
                 [
                   {
                     "group": [
-                      {"if": ["$", "flagged"]},
+                      {"if": "flagged"},
                       "  ",
-                      {"count": ["$", "flagged"]},
+                      {"count": "flagged"},
                       " section",
-                      {"plural": ["$", "flagged"], "one": "", "many": "s"},
+                      {"plural": "flagged", "one": "", "many": "s"},
                       " stand",
-                      {"plural": ["$", "flagged"], "one": "s", "many": ""},
+                      {"plural": "flagged", "one": "s", "many": ""},
                       " out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list."
                     ]
                   }
@@ -638,19 +611,19 @@ def _omp_re_recipes():
               ]
             },
             {
-              "title": ["Imports: ", {"count": ["$", "imports"]}, " ", {"cite": ["$", "@imports"]}],
+              "title": ["Imports: ", {"count": "imports"}, " ", {"cite": "@imports"}],
               "lines": [
                 [
                   {
                     "group": [
-                      {"if": ["$", "reach"]},
+                      {"if": "reach"},
                       "  reach, by what it links: ",
-                      {"join": ["$", "reach"], "with": ", "}
+                      {"join": "reach", "with": ", "}
                     ]
                   },
                   {
                     "group": [
-                      {"unless": ["$", "reach"]},
+                      {"unless": "reach"},
                       "  none of the capability groups (network, process control, injection, …) is linked"
                     ]
                   }
@@ -658,84 +631,68 @@ def _omp_re_recipes():
                 [
                   {
                     "group": [
-                      {"if": ["$", "riskyShown"]},
+                      {"if": "riskyShown"},
                       "  worth a reviewer's look: ",
-                      {"join": ["$", "riskyShown"], "with": ", "},
+                      {"join": "riskyShown", "with": ", "},
                       " — scan_imports says why and who calls them"
                     ]
                   }
                 ],
                 [
                   {
-                    "choose": ["$", "fewImports"],
+                    "choose": "fewImports",
                     "yes": "  very few imports for a dynamic binary: resolved at run time, or packed",
                     "no": ""
                   }
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             },
             {
               "title": [
                 "Strings: ",
-                {"count": ["$", "strings"]},
+                {"count": "strings"},
                 "; notable ",
-                {"count": ["$", "notable"]},
+                {"count": "notable"},
                 " ",
-                {"cite": ["$", "@strings"]}
+                {"cite": "@strings"}
               ],
-              "lines": [],
-              "rows": ["$", "notable"],
+              "rows": "notable",
               "limit": "maxStrings",
               "row": [
                 "  ",
-                {"get": [[".", "kind"]], "as": "text", "padRight": 11},
+                {"get": [".kind"], "padRight": 11},
                 " ",
-                {"get": [[".", "entry", "vaddr"]], "as": "x", "or": "?"},
+                {"get": [".entry.vaddr"], "as": "x", "or": "?"},
                 "  ",
-                {"get": [[".", "entry", "string"]], "as": "line", "or": ""}
+                {"get": [".entry.string"], "as": "line", "or": ""}
               ],
-              "under": [],
-              "more": "notable strings",
-              "after": []
+              "more": "notable strings"
             },
             {
               "title": [
                 "Functions: ",
-                {"count": ["$", "functions"]},
+                {"count": "functions"},
                 "; largest by code size ",
-                {"cite": ["$", "@functionData"]}
+                {"cite": "@functionData"}
               ],
-              "lines": [],
-              "rows": ["$", "functions"],
+              "rows": "functions",
               "limit": "maxFunctions",
               "row": [
                 "  ",
-                {"get": [[".", "offset"], [".", "addr"]], "as": "x", "or": "0x0"},
+                {"get": [".offset", ".addr"], "as": "x", "or": "0x0"},
                 "  ",
-                {"get": [[".", "realsz"], [".", "size"]], "as": "d", "padLeft": 7, "or": "0"},
+                {"get": [".realsz", ".size"], "as": "d", "padLeft": 7, "or": "0"},
                 " bytes  ",
-                {"group": [{"get": [[".", "nbbs"]], "as": "d"}, " blocks  "]},
-                {"get": [[".", "name"]], "as": "text", "or": "?"}
+                {"group": [{"get": [".nbbs"], "as": "d"}, " blocks  "]},
+                {"get": [".name"], "or": "?"}
               ],
-              "under": [],
-              "more": "functions",
-              "after": []
+              "more": "functions"
             },
             {
-              "title": ["Entry points ", {"cite": ["$", "@entries"]}],
-              "lines": [],
-              "rows": ["$", "entries"],
-              "row": [
-                "  ",
-                {"get": [[".", "vaddr"]], "as": "x"},
-                "  ",
-                {"get": [[".", "type"]], "as": "text", "or": ""}
-              ],
-              "under": [],
-              "empty": ["  none reported"],
-              "after": []
+              "title": ["Entry points ", {"cite": "@entries"}],
+              "rows": "entries",
+              "row": ["  ", {"get": [".vaddr"], "as": "x"}, "  ", {"get": [".type"], "or": ""}],
+              "empty": ["  none reported"]
             }
           ]
         },
@@ -751,76 +708,66 @@ def _omp_re_recipes():
           "steps": [{"read": "imports", "command": "iij"}, {"derive": "scanImports"}],
           "title": [
             "scan_imports: ",
-            {"count": ["$", "imports"]},
+            {"count": "imports"},
             " imports, ",
-            {"count": ["$", "risky"]},
+            {"count": "risky"},
             " worth a look"
           ],
           "sections": [
             {
-              "title": ["Reach, by what it links ", {"cite": ["$", "@imports"]}],
-              "lines": [],
-              "rows": ["$", "reach"],
+              "title": ["Reach, by what it links ", {"cite": "@imports"}],
+              "rows": "reach",
               "row": [
                 "  ",
-                {"get": [[".", "capability"]], "as": "text", "padRight": 18},
+                {"get": [".capability"], "padRight": 18},
                 " ",
-                {"join": [".", "names"], "with": ", "}
+                {"join": ".names", "with": ", "}
               ],
-              "under": [],
-              "empty": ["  none of the capability groups is linked"],
-              "after": []
+              "empty": ["  none of the capability groups is linked"]
             },
             {
-              "title": ["Imports worth a reviewer's look ", {"cite": ["$", "@imports"]}],
-              "lines": [],
-              "rows": ["$", "risky"],
+              "title": ["Imports worth a reviewer's look ", {"cite": "@imports"}],
+              "rows": "risky",
               "row": [
                 "  [",
-                {"get": [[".", "severity"]], "as": "text"},
+                {"get": [".severity"]},
                 "] ",
-                {"get": [[".", "bare"]], "as": "text"},
-                {"group": [" (linked as ", {"get": [[".", "linkedAs"]], "as": "text"}, ")"]},
+                {"get": [".bare"]},
+                {"group": [" (linked as ", {"get": [".linkedAs"]}, ")"]},
                 " (",
-                {"get": [[".", "category"]], "as": "text"},
+                {"get": [".category"]},
                 ")",
-                {"group": [" @ ", {"get": [[".", "plt"]], "as": "x"}]},
+                {"group": [" @ ", {"get": [".plt"], "as": "x"}]},
                 " — ",
-                {"get": [[".", "why"]], "as": "text"}
+                {"get": [".why"]}
               ],
               "under": [
                 {
-                  "when": [".", "traced"],
-                  "lines": [],
-                  "rows": [".", "places"],
+                  "when": ".traced",
+                  "rows": ".places",
                   "limit": "maxCallers",
                   "line": [
                     "      called from ",
-                    {"count": [".", "places"]},
+                    {"count": ".places"},
                     " place",
-                    {"plural": [".", "places"], "one": "", "many": "s"},
+                    {"plural": ".places", "one": "", "many": "s"},
                     " ",
-                    {"cite": [".", "@places"]},
+                    {"cite": ".@places"},
                     ": ",
-                    {"join": ["$", "shown"], "with": ", "}
+                    {"join": "shown", "with": ", "}
                   ],
-                  "under": [],
-                  "empty": ["      no caller found by analysis ", {"cite": [".", "@places"]}],
-                  "more": "callers",
-                  "after": []
+                  "empty": ["      no caller found by analysis ", {"cite": ".@places"}],
+                  "more": "callers"
                 }
               ],
-              "empty": ["  none of the imports in the table is linked"],
-              "after": []
+              "empty": ["  none of the imports in the table is linked"]
             },
             {
               "lines": [
                 [
                   "An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             }
           ]
         },
@@ -838,134 +785,105 @@ def _omp_re_recipes():
             {"read": "strings", "command": "izj"},
             {"derive": "inspectFunction"}
           ],
-          "title": ["inspect_function: ", {"get": [["$", "info", "name"], ["$", "addr"]], "as": "text"}],
+          "title": ["inspect_function: ", {"get": ["info.name", "addr"]}],
           "sections": [
             {
-              "title": ["Shape ", {"cite": ["$", "@infoData"]}],
+              "title": ["Shape ", {"cite": "@infoData"}],
               "lines": [
                 [
                   "  ",
-                  {
-                    "get": [["$", "info", "signature"], ["$", "info", "name"], ["$", "addr"]],
-                    "as": "text"
-                  },
+                  {"get": ["info.signature", "info.name", "addr"]},
                   " at ",
-                  {"get": [["$", "info", "offset"], ["$", "info", "addr"]], "as": "x", "or": "0x0"}
+                  {"get": ["info.offset", "info.addr"], "as": "x", "or": "0x0"}
                 ],
                 [
                   "  ",
-                  {"get": [["$", "info", "realsz"], ["$", "info", "size"]], "as": "d", "or": "0"},
+                  {"get": ["info.realsz", "info.size"], "as": "d", "or": "0"},
                   " bytes of code, ",
-                  {"get": [["$", "info", "nbbs"]], "as": "d", "or": "0"},
+                  {"get": ["info.nbbs"], "as": "d", "or": "0"},
                   " basic blocks, ",
-                  {"get": [["$", "info", "edges"]], "as": "d", "or": "0"},
+                  {"get": ["info.edges"], "as": "d", "or": "0"},
                   " edges, cyclomatic complexity ",
-                  {"get": [["$", "info", "cc"]], "as": "d", "or": "0"},
+                  {"get": ["info.cc"], "as": "d", "or": "0"},
                   ", ",
-                  {"get": [["$", "info", "loops"]], "as": "d", "or": "0"},
+                  {"get": ["info.loops"], "as": "d", "or": "0"},
                   " loop",
-                  {"plural": ["$", "info", "loops"], "one": "", "many": "s"}
+                  {"plural": "info.loops", "one": "", "many": "s"}
                 ],
                 [
                   "  calling convention ",
-                  {"get": [["$", "info", "calltype"]], "as": "text", "or": "?"},
+                  {"get": ["info.calltype"], "or": "?"},
                   ", stack frame ",
-                  {"get": [["$", "info", "stackframe"]], "as": "d", "or": "0"},
+                  {"get": ["info.stackframe"], "as": "d", "or": "0"},
                   " bytes",
-                  {"choose": ["$", "info", "noreturn"], "yes": ", does not return", "no": ""}
+                  {"choose": "info.noreturn", "yes": ", does not return", "no": ""}
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             },
             {
-              "title": ["Body ", {"cite": ["$", "@body"]}],
+              "title": ["Body ", {"cite": "@body"}],
               "lines": [
                 [
                   "  ",
-                  {"count": ["$", "ops"]},
+                  {"count": "ops"},
                   " instructions, ",
-                  {"get": [["$", "compares"]], "as": "d"},
+                  {"get": ["compares"], "as": "d"},
                   " compare",
-                  {"plural": ["$", "compares"], "one": "", "many": "s"},
+                  {"plural": "compares", "one": "", "many": "s"},
                   ", ",
-                  {"get": [["$", "branches"]], "as": "d"},
+                  {"get": ["branches"], "as": "d"},
                   " conditional branch",
-                  {"plural": ["$", "branches"], "one": "", "many": "es"},
+                  {"plural": "branches", "one": "", "many": "es"},
                   " — find_comparisons lists them"
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             },
             {
-              "title": [
-                "Variables: ",
-                {"get": [["$", "variableCount"]], "as": "d"},
-                " ",
-                {"cite": ["$", "@variables"]}
-              ],
-              "lines": [],
-              "under": [],
-              "after": []
+              "title": ["Variables: ", {"get": ["variableCount"], "as": "d"}, " ", {"cite": "@variables"}]
             },
             {
               "title": [
                 "Called from ",
-                {"count": ["$", "callers"]},
+                {"count": "callers"},
                 " place",
-                {"plural": ["$", "callers"], "one": "", "many": "s"},
+                {"plural": "callers", "one": "", "many": "s"},
                 " ",
-                {"cite": ["$", "@callers"]}
+                {"cite": "@callers"}
               ],
-              "lines": [],
-              "rows": ["$", "callers"],
+              "rows": "callers",
               "limit": "maxItems",
-              "row": ["  ", {"get": [["."]], "as": "text"}],
-              "under": [],
-              "more": "callers",
-              "after": []
+              "row": ["  ", {"get": ["."]}],
+              "more": "callers"
             },
             {
               "title": [
                 "Calls ",
-                {"count": ["$", "calls"]},
+                {"count": "calls"},
                 " distinct target",
-                {"plural": ["$", "calls"], "one": "", "many": "s"},
+                {"plural": "calls", "one": "", "many": "s"},
                 " ",
-                {"cite": ["$", "@body"]}
+                {"cite": "@body"}
               ],
-              "lines": [],
-              "rows": ["$", "calls"],
+              "rows": "calls",
               "limit": "maxItems",
-              "row": ["  ", {"get": [["."]], "as": "text"}],
-              "under": [],
-              "more": "callees",
-              "after": []
+              "row": ["  ", {"get": ["."]}],
+              "more": "callees"
             },
             {
               "title": [
                 "Refers to ",
-                {"count": ["$", "referenced"]},
+                {"count": "referenced"},
                 " string",
-                {"plural": ["$", "referenced"], "one": "", "many": "s"},
+                {"plural": "referenced", "one": "", "many": "s"},
                 " ",
-                {"cite": ["$", "@body"]},
+                {"cite": "@body"},
                 " ",
-                {"cite": ["$", "@strings"]}
+                {"cite": "@strings"}
               ],
-              "lines": [],
-              "rows": ["$", "referenced"],
+              "rows": "referenced",
               "limit": "maxItems",
-              "row": [
-                "  ",
-                {"get": [[".", "address"]], "as": "x"},
-                "  ",
-                {"get": [[".", "text"]], "as": "line"}
-              ],
-              "under": [],
-              "more": "strings",
-              "after": []
+              "row": ["  ", {"get": [".address"], "as": "x"}, "  ", {"get": [".text"], "as": "line"}],
+              "more": "strings"
             }
           ]
         },
@@ -981,91 +899,80 @@ def _omp_re_recipes():
             {"read": "strings", "command": "izj"},
             {"derive": "findComparisons"}
           ],
-          "title": ["find_comparisons: ", {"get": [["$", "body", "name"], ["$", "addr"]], "as": "text"}],
+          "title": ["find_comparisons: ", {"get": ["body.name", "addr"]}],
           "sections": [
             {
               "title": [
                 "Compares and the branches that follow: ",
-                {"count": ["$", "decisions"]},
+                {"count": "decisions"},
                 " ",
-                {"cite": ["$", "@body"]}
+                {"cite": "@body"}
               ],
-              "lines": [],
-              "rows": ["$", "decisions"],
+              "rows": "decisions",
               "limit": "maxItems",
               "row": [
                 "  ",
-                {"get": [[".", "op", "offset"]], "as": "x", "or": "0x0"},
+                {"get": [".op.offset"], "as": "x", "or": "0x0"},
                 "  ",
-                {"get": [[".", "op", "disasm"]], "as": "text", "or": ""},
-                {"group": [" ; \"", {"get": [[".", "printable"]], "as": "text"}, "\""]},
+                {"get": [".op.disasm"], "or": ""},
+                {"group": [" ; \"", {"get": [".printable"]}, "\""]},
                 {
                   "group": [
                     "  ->  ",
-                    {"get": [[".", "next", "disasm"]], "as": "text", "or": ""},
+                    {"get": [".next.disasm"], "or": ""},
                     ": ",
-                    {"get": [[".", "meaning"]], "as": "text"},
-                    {"group": [", to ", {"get": [[".", "next", "jump"]], "as": "x"}]},
-                    {"group": [", else ", {"get": [[".", "next", "fail"]], "as": "x"}]}
+                    {"get": [".meaning"]},
+                    {"group": [", to ", {"get": [".next.jump"], "as": "x"}]},
+                    {"group": [", else ", {"get": [".next.fail"], "as": "x"}]}
                   ]
                 }
               ],
-              "under": [],
-              "more": "comparisons",
-              "after": []
+              "more": "comparisons"
             },
             {
               "title": [
                 "Calls that compare or validate: ",
-                {"count": ["$", "decidingCalls"]},
+                {"count": "decidingCalls"},
                 " ",
-                {"cite": ["$", "@body"]}
+                {"cite": "@body"}
               ],
-              "lines": [],
-              "rows": ["$", "decidingCalls"],
+              "rows": "decidingCalls",
               "limit": "maxItems",
               "row": [
                 "  ",
-                {"get": [[".", "offset"]], "as": "x", "or": "0x0"},
+                {"get": [".offset"], "as": "x", "or": "0x0"},
                 "  ",
-                {"get": [[".", "disasm"]], "as": "text", "or": ""}
+                {"get": [".disasm"], "or": ""}
               ],
-              "under": [],
-              "empty": ["  none by name"],
-              "after": []
+              "empty": ["  none by name"]
             },
             {
               "title": [
                 "Strings on the way: ",
-                {"count": ["$", "onTheWay"]},
+                {"count": "onTheWay"},
                 " ",
-                {"cite": ["$", "@body"]},
+                {"cite": "@body"},
                 " ",
-                {"cite": ["$", "@strings"]}
+                {"cite": "@strings"}
               ],
-              "lines": [],
-              "rows": ["$", "onTheWay"],
+              "rows": "onTheWay",
               "limit": "maxItems",
               "row": [
                 "  ",
-                {"get": [[".", "offset"]], "as": "x"},
+                {"get": [".offset"], "as": "x"},
                 "  refers to ",
-                {"get": [[".", "target"]], "as": "x"},
+                {"get": [".target"], "as": "x"},
                 "  ",
-                {"get": [[".", "text"]], "as": "line"}
+                {"get": [".text"], "as": "line"}
               ],
-              "under": [],
-              "empty": ["  none"],
-              "after": []
+              "empty": ["  none"]
             },
             {
               "lines": [
                 [
                   "This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             }
           ]
         },
@@ -1078,73 +985,59 @@ def _omp_re_recipes():
           "steps": [{"read": "material", "command": "/cmj"}, {"derive": "findCrypto"}],
           "title": [
             "find_crypto: ",
-            {"count": ["$", "hits"]},
+            {"count": "hits"},
             " constant hit",
-            {"plural": ["$", "hits"], "one": "", "many": "s"}
+            {"plural": "hits", "one": "", "many": "s"}
           ],
           "sections": [
             {
-              "title": ["rizin's search for keys and certificates ", {"cite": ["$", "@material"]}],
-              "lines": [],
-              "rows": ["$", "material"],
+              "title": ["rizin's search for keys and certificates ", {"cite": "@material"}],
+              "rows": "material",
               "limit": "cryptoMaterial",
-              "row": ["  ", {"get": [["."]], "as": "json"}],
-              "under": [],
-              "empty": ["  nothing found"],
-              "after": []
+              "row": ["  ", {"get": ["."], "as": "json"}],
+              "empty": ["  nothing found"]
             },
             {
               "title": ["Published constants"],
-              "lines": [],
-              "rows": ["$", "hits"],
+              "rows": "hits",
               "limit": "cryptoHits",
               "row": [
                 "  ",
-                {"get": [[".", "address"]], "as": "x"},
+                {"get": [".address"], "as": "x"},
                 "  ",
-                {"get": [[".", "algorithm"]], "as": "text"},
+                {"get": [".algorithm"]},
                 " — ",
-                {"get": [[".", "what"]], "as": "text"},
+                {"get": [".what"]},
                 " ",
-                {"cite": [".", "@hit"]},
-                {
-                  "choose": [".", "weak"],
-                  "yes": " (weak: four bytes can occur by chance)",
-                  "no": ""
-                }
+                {"cite": ".@hit"},
+                {"choose": ".weak", "yes": " (weak: four bytes can occur by chance)", "no": ""}
               ],
               "under": [
                 {
-                  "when": [".", "traced"],
-                  "lines": [],
-                  "rows": [".", "places"],
+                  "when": ".traced",
+                  "rows": ".places",
                   "limit": "cryptoReferences",
                   "line": [
                     "      referred to from ",
-                    {"join": ["$", "shown"], "with": ", "},
+                    {"join": "shown", "with": ", "},
                     " ",
-                    {"cite": [".", "@places"]}
+                    {"cite": ".@places"}
                   ],
-                  "under": [],
                   "empty": [
                     "      no reference found by analysis ",
-                    {"cite": [".", "@places"]},
+                    {"cite": ".@places"},
                     " — reached by computed address, or unused"
-                  ],
-                  "after": []
+                  ]
                 }
               ],
-              "empty": ["  none of the constants in the table was found"],
-              "after": []
+              "empty": ["  none of the constants in the table was found"]
             },
             {
               "lines": [
                 [
                   "A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."
                 ]
-              ],
-              "under": [],
-              "after": []
+              ]
             }
           ]
         }
@@ -1347,8 +1240,9 @@ def _omp_re_recipes():
     def lookup(path, facts, row):
         """What a path names: a fact, or (when it opens with ".") the row, and then members of it."""
         value = row if path[0] == "." else facts
-        for key in path[1:]:
-            value = get(value, key)
+        for key in path.split("."):
+            if key != "":
+                value = get(value, key)
         return value
 
     def there(value):
@@ -1390,7 +1284,7 @@ def _omp_re_recipes():
             return node["one"] if size(lookup(node["plural"], facts, row)) == 1 else node["many"]
         text = MISSING
         for path in node["get"]:
-            text = AS[node["as"]](lookup(path, facts, row))
+            text = AS[node.get("as", "text")](lookup(path, facts, row))
             if text is not MISSING:
                 break
         if text is MISSING:
@@ -1419,7 +1313,7 @@ def _omp_re_recipes():
         if "when" in section and not there(lookup(section["when"], facts, row)):
             return []
         lines = written(section["title"], facts, row) if "title" in section else []
-        for line in section["lines"]:
+        for line in section.get("lines", []):
             lines += written(line, facts, row)
         if "rows" in section:
             everything = rows(lookup(section["rows"], facts, row))
@@ -1434,14 +1328,14 @@ def _omp_re_recipes():
                 total = len(listed)
                 for item, text in listed[:most]:
                     lines.append(text)
-                    for inner in section["under"]:
+                    for inner in section.get("under", []):
                         lines += section_lines(inner, facts, item)
             if total == 0 and "empty" in section:
                 lines += written(section["empty"], facts, row)
             # So a short list is never read as a whole one.
             if "more" in section and most is not None and total > most:
                 lines += written(TEXT["more"], {"hidden": total - most, "what": section["more"]})
-        for line in section["after"]:
+        for line in section.get("after", []):
             lines += written(line, facts, row)
         return lines
 

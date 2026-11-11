@@ -285,61 +285,50 @@
     "text" (obj
       "more" (vector
         "  … "
-        (obj "get" (vector (vector "$" "hidden")) "as" "d")
+        (obj "get" (vector "hidden") "as" "d")
         " more "
-        (obj "get" (vector (vector "$" "what")) "as" "text")
+        (obj "get" (vector "what"))
         " not shown")
       "evidenceTaken" "Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):"
-      "evidenceRow" (vector
-        "  "
-        (obj "get" (vector (vector "." "id")) "as" "text")
-        "  "
-        (obj "get" (vector (vector "." "label")) "as" "text"))
+      "evidenceRow" (vector "  " (obj "get" (vector ".id")) "  " (obj "get" (vector ".label")))
       "nameless" "?"
       "refusals" (obj
         "notAString" (vector
           "omp-re: "
-          (obj "get" (vector (vector "$" "recipe")) "as" "text")
+          (obj "get" (vector "recipe"))
           ": a function is named by a string, not "
-          (obj "get" (vector (vector "$" "given")) "as" "text"))
+          (obj "get" (vector "given")))
         "optionsNotOneObject" (vector
           "omp-re: "
-          (obj "get" (vector (vector "$" "recipe")) "as" "text")
+          (obj "get" (vector "recipe"))
           ": options are one object, e.g. { maxItems: 20 }, not "
-          (obj "get" (vector (vector "$" "given")) "as" "text"))
+          (obj "get" (vector "given")))
         "noFunction" (vector
           "omp-re: "
-          (obj "get" (vector (vector "$" "recipe")) "as" "text")
+          (obj "get" (vector "recipe"))
           ": no function at "
-          (obj "get" (vector (vector "$" "addr")) "as" "text")
+          (obj "get" (vector "addr"))
           " — list them with "
-          (obj "get" (vector (vector "$" "listFunctions")) "as" "text")
+          (obj "get" (vector "listFunctions"))
           ", or define one with define_function")
         "noInstructions" (vector
           "omp-re: "
-          (obj "get" (vector (vector "$" "recipe")) "as" "text")
+          (obj "get" (vector "recipe"))
           ": no function at "
-          (obj "get" (vector (vector "$" "addr")) "as" "text")
+          (obj "get" (vector "addr"))
           " — list them with "
-          (obj "get" (vector (vector "$" "listFunctions")) "as" "text"))
+          (obj "get" (vector "listFunctions")))
         "cutOutput" (vector
           "omp-re: "
-          (obj "get" (vector (vector "$" "recipe")) "as" "text")
+          (obj "get" (vector "recipe"))
           ": the output of rizin_command "
-          (obj "get" (vector (vector "$" "label")) "as" "json")
+          (obj "get" (vector "label") "as" "json")
           " was cut at the size cap and the whole of it could not be read back ("
-          (obj "get" (vector (vector "$" "why")) "as" "text")
+          (obj "get" (vector "why"))
           "). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands.")
         "cutNoArtifact" (vector "the engine saved no artifact for it")
-        "cutUnreadable" (vector
-          "artifact://"
-          (obj "get" (vector (vector "$" "artifact")) "as" "text")
-          ": "
-          (obj "get" (vector (vector "$" "error")) "as" "text"))
-        "cutNotText" (vector
-          "artifact://"
-          (obj "get" (vector (vector "$" "artifact")) "as" "text")
-          " did not read as text")))
+        "cutUnreadable" (vector "artifact://" (obj "get" (vector "artifact")) ": " (obj "get" (vector "error")))
+        "cutNotText" (vector "artifact://" (obj "get" (vector "artifact")) " did not read as text")))
     "host" (obj "listFunctions" "(re:json \"aflj\")")
     "recipes" (vector
       (obj
@@ -365,201 +354,151 @@ MAX-FUNCTIONS (default 15, 1..100): at most this many functions are listed."
           (obj "read" "functionData" "command" "aflj")
           (obj "read" "entries" "command" "iej")
           (obj "derive" "triage"))
-        "title" (vector
-          "triage: "
-          (obj "get" (vector (vector "$" "path" "core" "file")) "as" "text" "or" "?"))
+        "title" (vector "triage: " (obj "get" (vector "path.core.file") "or" "?"))
         "sections" (vector
           (obj
-            "title" (vector "Identity " (obj "cite" (vector "$" "@info")))
+            "title" (vector "Identity " (obj "cite" "@info"))
             "lines" (vector
               (vector
                 "  "
-                (obj
-                  "get" (vector (vector "$" "info" "class") (vector "$" "info" "bintype"))
-                  "as" "text"
-                  "or" "unknown format")
+                (obj "get" (vector "info.class" "info.bintype") "or" "unknown format")
                 ", "
-                (obj "get" (vector (vector "$" "info" "arch")) "as" "text" "or" "?")
+                (obj "get" (vector "info.arch") "or" "?")
                 " "
-                (obj "get" (vector (vector "$" "info" "bits")) "as" "d" "or" "?")
+                (obj "get" (vector "info.bits") "as" "d" "or" "?")
                 "-bit "
-                (obj "get" (vector (vector "$" "info" "endian")) "as" "text" "or" "")
+                (obj "get" (vector "info.endian") "or" "")
                 ", "
-                (obj "get" (vector (vector "$" "info" "os")) "as" "text" "or" "?")
-                (obj
-                  "group" (vector ", language " (obj "get" (vector (vector "$" "info" "lang")) "as" "text")))
-                (obj
-                  "group" (vector
-                    ", interpreter "
-                    (obj "get" (vector (vector "$" "info" "intrp")) "as" "text")))))
-            "under" (vector)
-            "after" (vector))
+                (obj "get" (vector "info.os") "or" "?")
+                (obj "group" (vector ", language " (obj "get" (vector "info.lang"))))
+                (obj "group" (vector ", interpreter " (obj "get" (vector "info.intrp")))))))
           (obj
-            "title" (vector "Build protections " (obj "cite" (vector "$" "@info")))
+            "title" (vector "Build protections " (obj "cite" "@info"))
             "lines" (vector
               (vector
                 "  stack canary: "
                 (obj
-                  "choose" (vector "$" "info" "canary")
+                  "choose" "info.canary"
                   "yes" "yes"
                   "no" "NO — a stack overflow reaches the return address unchecked"))
               (vector
                 "  NX: "
-                (obj
-                  "choose" (vector "$" "info" "nx")
-                  "yes" "yes"
-                  "no" "NO — data pages are executable"))
+                (obj "choose" "info.nx" "yes" "yes" "no" "NO — data pages are executable"))
               (vector
                 "  PIE: "
-                (obj
-                  "choose" (vector "$" "info" "pie")
-                  "yes" "yes"
-                  "no" "NO — the image loads at a fixed address"))
+                (obj "choose" "info.pie" "yes" "yes" "no" "NO — the image loads at a fixed address"))
               (vector
                 "  RELRO: "
-                (obj "get" (vector (vector "$" "info" "relro")) "as" "text" "or" "none")
+                (obj "get" (vector "info.relro") "or" "none")
+                (obj
+                  "group" (vector (obj "if" "info.relro" "is" "partial") " — the GOT stays writable"))
                 (obj
                   "group" (vector
-                    (obj "if" (vector "$" "info" "relro") "is" "partial")
-                    " — the GOT stays writable"))
-                (obj
-                  "group" (vector
-                    (obj "unless" (vector "$" "info" "relro") "is" "partial")
-                    (obj "unless" (vector "$" "info" "relro") "is" "full")
+                    (obj "unless" "info.relro" "is" "partial")
+                    (obj "unless" "info.relro" "is" "full")
                     " — the GOT and other relocated data stay writable")))
               (vector
                 "  fortified libc calls: "
-                (obj "choose" (vector "$" "info" "fortify_source") "yes" "yes" "no" "no"))
+                (obj "choose" "info.fortify_source" "yes" "yes" "no" "no"))
               (vector
                 "  stripped: "
-                (obj "choose" (vector "$" "info" "stripped") "yes" "yes" "no" "no")
+                (obj "choose" "info.stripped" "yes" "yes" "no" "no")
                 "   static: "
-                (obj "choose" (vector "$" "info" "static") "yes" "yes" "no" "no")))
-            "under" (vector)
-            "after" (vector))
+                (obj "choose" "info.static" "yes" "yes" "no" "no"))))
           (obj
-            "title" (vector
-              "Sections: "
-              (obj "count" (vector "$" "sections"))
-              " "
-              (obj "cite" (vector "$" "@sectionData")))
-            "lines" (vector)
-            "rows" (vector "$" "sections")
+            "title" (vector "Sections: " (obj "count" "sections") " " (obj "cite" "@sectionData"))
+            "rows" "sections"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "section" "name")) "as" "text" "padRight" 18)
+              (obj "get" (vector ".section.name") "padRight" 18)
               " "
-              (obj "get" (vector (vector "." "section" "perm")) "as" "text" "padRight" 4 "or" "")
+              (obj "get" (vector ".section.perm") "padRight" 4 "or" "")
               " "
-              (obj "get" (vector (vector "." "section" "size")) "as" "d" "padLeft" 9 "or" "0")
+              (obj "get" (vector ".section.size") "as" "d" "padLeft" 9 "or" "0")
               " bytes  entropy "
-              (obj "get" (vector (vector "." "entropy")) "as" "f2" "padLeft" 4 "or" "?")
-              (obj
-                "group" (vector
-                  (obj "if" (vector "." "notes"))
-                  "  <- "
-                  (obj "join" (vector "." "notes") "with" "; "))))
-            "under" (vector)
+              (obj "get" (vector ".entropy") "as" "f2" "padLeft" 4 "or" "?")
+              (obj "group" (vector (obj "if" ".notes") "  <- " (obj "join" ".notes" "with" "; "))))
             "after" (vector
               (vector
                 (obj
                   "group" (vector
-                    (obj "if" (vector "$" "flagged"))
+                    (obj "if" "flagged")
                     "  "
-                    (obj "count" (vector "$" "flagged"))
+                    (obj "count" "flagged")
                     " section"
-                    (obj "plural" (vector "$" "flagged") "one" "" "many" "s")
+                    (obj "plural" "flagged" "one" "" "many" "s")
                     " stand"
-                    (obj "plural" (vector "$" "flagged") "one" "s" "many" "")
+                    (obj "plural" "flagged" "one" "s" "many" "")
                     " out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list.")))))
           (obj
-            "title" (vector
-              "Imports: "
-              (obj "count" (vector "$" "imports"))
-              " "
-              (obj "cite" (vector "$" "@imports")))
+            "title" (vector "Imports: " (obj "count" "imports") " " (obj "cite" "@imports"))
             "lines" (vector
               (vector
                 (obj
                   "group" (vector
-                    (obj "if" (vector "$" "reach"))
+                    (obj "if" "reach")
                     "  reach, by what it links: "
-                    (obj "join" (vector "$" "reach") "with" ", ")))
+                    (obj "join" "reach" "with" ", ")))
                 (obj
                   "group" (vector
-                    (obj "unless" (vector "$" "reach"))
+                    (obj "unless" "reach")
                     "  none of the capability groups (network, process control, injection, …) is linked")))
               (vector
                 (obj
                   "group" (vector
-                    (obj "if" (vector "$" "riskyShown"))
+                    (obj "if" "riskyShown")
                     "  worth a reviewer's look: "
-                    (obj "join" (vector "$" "riskyShown") "with" ", ")
+                    (obj "join" "riskyShown" "with" ", ")
                     " — scan_imports says why and who calls them")))
               (vector
                 (obj
-                  "choose" (vector "$" "fewImports")
+                  "choose" "fewImports"
                   "yes" "  very few imports for a dynamic binary: resolved at run time, or packed"
-                  "no" "")))
-            "under" (vector)
-            "after" (vector))
+                  "no" ""))))
           (obj
             "title" (vector
               "Strings: "
-              (obj "count" (vector "$" "strings"))
+              (obj "count" "strings")
               "; notable "
-              (obj "count" (vector "$" "notable"))
+              (obj "count" "notable")
               " "
-              (obj "cite" (vector "$" "@strings")))
-            "lines" (vector)
-            "rows" (vector "$" "notable")
+              (obj "cite" "@strings"))
+            "rows" "notable"
             "limit" "maxStrings"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "kind")) "as" "text" "padRight" 11)
+              (obj "get" (vector ".kind") "padRight" 11)
               " "
-              (obj "get" (vector (vector "." "entry" "vaddr")) "as" "x" "or" "?")
+              (obj "get" (vector ".entry.vaddr") "as" "x" "or" "?")
               "  "
-              (obj "get" (vector (vector "." "entry" "string")) "as" "line" "or" ""))
-            "under" (vector)
-            "more" "notable strings"
-            "after" (vector))
+              (obj "get" (vector ".entry.string") "as" "line" "or" ""))
+            "more" "notable strings")
           (obj
             "title" (vector
               "Functions: "
-              (obj "count" (vector "$" "functions"))
+              (obj "count" "functions")
               "; largest by code size "
-              (obj "cite" (vector "$" "@functionData")))
-            "lines" (vector)
-            "rows" (vector "$" "functions")
+              (obj "cite" "@functionData"))
+            "rows" "functions"
             "limit" "maxFunctions"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "offset") (vector "." "addr")) "as" "x" "or" "0x0")
+              (obj "get" (vector ".offset" ".addr") "as" "x" "or" "0x0")
               "  "
-              (obj
-                "get" (vector (vector "." "realsz") (vector "." "size"))
-                "as" "d"
-                "padLeft" 7
-                "or" "0")
+              (obj "get" (vector ".realsz" ".size") "as" "d" "padLeft" 7 "or" "0")
               " bytes  "
-              (obj "group" (vector (obj "get" (vector (vector "." "nbbs")) "as" "d") " blocks  "))
-              (obj "get" (vector (vector "." "name")) "as" "text" "or" "?"))
-            "under" (vector)
-            "more" "functions"
-            "after" (vector))
+              (obj "group" (vector (obj "get" (vector ".nbbs") "as" "d") " blocks  "))
+              (obj "get" (vector ".name") "or" "?"))
+            "more" "functions")
           (obj
-            "title" (vector "Entry points " (obj "cite" (vector "$" "@entries")))
-            "lines" (vector)
-            "rows" (vector "$" "entries")
+            "title" (vector "Entry points " (obj "cite" "@entries"))
+            "rows" "entries"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "vaddr")) "as" "x")
+              (obj "get" (vector ".vaddr") "as" "x")
               "  "
-              (obj "get" (vector (vector "." "type")) "as" "text" "or" ""))
-            "under" (vector)
-            "empty" (vector "  none reported")
-            "after" (vector))))
+              (obj "get" (vector ".type") "or" ""))
+            "empty" (vector "  none reported"))))
       (obj
         "name" "scan_imports"
         "call" "SCAN-IMPORTS"
@@ -576,67 +515,56 @@ MAX-CALLERS (default 12, 1..100): at most this many callers are listed for each.
         "steps" (vector (obj "read" "imports" "command" "iij") (obj "derive" "scanImports"))
         "title" (vector
           "scan_imports: "
-          (obj "count" (vector "$" "imports"))
+          (obj "count" "imports")
           " imports, "
-          (obj "count" (vector "$" "risky"))
+          (obj "count" "risky")
           " worth a look")
         "sections" (vector
           (obj
-            "title" (vector "Reach, by what it links " (obj "cite" (vector "$" "@imports")))
-            "lines" (vector)
-            "rows" (vector "$" "reach")
+            "title" (vector "Reach, by what it links " (obj "cite" "@imports"))
+            "rows" "reach"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "capability")) "as" "text" "padRight" 18)
+              (obj "get" (vector ".capability") "padRight" 18)
               " "
-              (obj "join" (vector "." "names") "with" ", "))
-            "under" (vector)
-            "empty" (vector "  none of the capability groups is linked")
-            "after" (vector))
+              (obj "join" ".names" "with" ", "))
+            "empty" (vector "  none of the capability groups is linked"))
           (obj
-            "title" (vector "Imports worth a reviewer's look " (obj "cite" (vector "$" "@imports")))
-            "lines" (vector)
-            "rows" (vector "$" "risky")
+            "title" (vector "Imports worth a reviewer's look " (obj "cite" "@imports"))
+            "rows" "risky"
             "row" (vector
               "  ["
-              (obj "get" (vector (vector "." "severity")) "as" "text")
+              (obj "get" (vector ".severity"))
               "] "
-              (obj "get" (vector (vector "." "bare")) "as" "text")
-              (obj
-                "group" (vector " (linked as " (obj "get" (vector (vector "." "linkedAs")) "as" "text") ")"))
+              (obj "get" (vector ".bare"))
+              (obj "group" (vector " (linked as " (obj "get" (vector ".linkedAs")) ")"))
               " ("
-              (obj "get" (vector (vector "." "category")) "as" "text")
+              (obj "get" (vector ".category"))
               ")"
-              (obj "group" (vector " @ " (obj "get" (vector (vector "." "plt")) "as" "x")))
+              (obj "group" (vector " @ " (obj "get" (vector ".plt") "as" "x")))
               " — "
-              (obj "get" (vector (vector "." "why")) "as" "text"))
+              (obj "get" (vector ".why")))
             "under" (vector
               (obj
-                "when" (vector "." "traced")
-                "lines" (vector)
-                "rows" (vector "." "places")
+                "when" ".traced"
+                "rows" ".places"
                 "limit" "maxCallers"
                 "line" (vector
                   "      called from "
-                  (obj "count" (vector "." "places"))
+                  (obj "count" ".places")
                   " place"
-                  (obj "plural" (vector "." "places") "one" "" "many" "s")
+                  (obj "plural" ".places" "one" "" "many" "s")
                   " "
-                  (obj "cite" (vector "." "@places"))
+                  (obj "cite" ".@places")
                   ": "
-                  (obj "join" (vector "$" "shown") "with" ", "))
-                "under" (vector)
-                "empty" (vector "      no caller found by analysis " (obj "cite" (vector "." "@places")))
-                "more" "callers"
-                "after" (vector)))
-            "empty" (vector "  none of the imports in the table is linked")
-            "after" (vector))
+                  (obj "join" "shown" "with" ", "))
+                "empty" (vector "      no caller found by analysis " (obj "cite" ".@places"))
+                "more" "callers"))
+            "empty" (vector "  none of the imports in the table is linked"))
           (obj
             "lines" (vector
               (vector
-                "An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."))
-            "under" (vector)
-            "after" (vector))))
+                "An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does.")))))
       (obj
         "name" "inspect_function"
         "call" "INSPECT-FUNCTION"
@@ -655,128 +583,99 @@ MAX-ITEMS (default 30, 1..300): at most this many of each list are shown."
           (obj "read" "variables" "command" "afvlj" "at" t)
           (obj "read" "strings" "command" "izj")
           (obj "derive" "inspectFunction"))
-        "title" (vector
-          "inspect_function: "
-          (obj "get" (vector (vector "$" "info" "name") (vector "$" "addr")) "as" "text"))
+        "title" (vector "inspect_function: " (obj "get" (vector "info.name" "addr")))
         "sections" (vector
           (obj
-            "title" (vector "Shape " (obj "cite" (vector "$" "@infoData")))
+            "title" (vector "Shape " (obj "cite" "@infoData"))
             "lines" (vector
               (vector
                 "  "
-                (obj
-                  "get" (vector
-                    (vector "$" "info" "signature")
-                    (vector "$" "info" "name")
-                    (vector "$" "addr"))
-                  "as" "text")
+                (obj "get" (vector "info.signature" "info.name" "addr"))
                 " at "
-                (obj
-                  "get" (vector (vector "$" "info" "offset") (vector "$" "info" "addr"))
-                  "as" "x"
-                  "or" "0x0"))
+                (obj "get" (vector "info.offset" "info.addr") "as" "x" "or" "0x0"))
               (vector
                 "  "
-                (obj
-                  "get" (vector (vector "$" "info" "realsz") (vector "$" "info" "size"))
-                  "as" "d"
-                  "or" "0")
+                (obj "get" (vector "info.realsz" "info.size") "as" "d" "or" "0")
                 " bytes of code, "
-                (obj "get" (vector (vector "$" "info" "nbbs")) "as" "d" "or" "0")
+                (obj "get" (vector "info.nbbs") "as" "d" "or" "0")
                 " basic blocks, "
-                (obj "get" (vector (vector "$" "info" "edges")) "as" "d" "or" "0")
+                (obj "get" (vector "info.edges") "as" "d" "or" "0")
                 " edges, cyclomatic complexity "
-                (obj "get" (vector (vector "$" "info" "cc")) "as" "d" "or" "0")
+                (obj "get" (vector "info.cc") "as" "d" "or" "0")
                 ", "
-                (obj "get" (vector (vector "$" "info" "loops")) "as" "d" "or" "0")
+                (obj "get" (vector "info.loops") "as" "d" "or" "0")
                 " loop"
-                (obj "plural" (vector "$" "info" "loops") "one" "" "many" "s"))
+                (obj "plural" "info.loops" "one" "" "many" "s"))
               (vector
                 "  calling convention "
-                (obj "get" (vector (vector "$" "info" "calltype")) "as" "text" "or" "?")
+                (obj "get" (vector "info.calltype") "or" "?")
                 ", stack frame "
-                (obj "get" (vector (vector "$" "info" "stackframe")) "as" "d" "or" "0")
+                (obj "get" (vector "info.stackframe") "as" "d" "or" "0")
                 " bytes"
-                (obj "choose" (vector "$" "info" "noreturn") "yes" ", does not return" "no" "")))
-            "under" (vector)
-            "after" (vector))
+                (obj "choose" "info.noreturn" "yes" ", does not return" "no" ""))))
           (obj
-            "title" (vector "Body " (obj "cite" (vector "$" "@body")))
+            "title" (vector "Body " (obj "cite" "@body"))
             "lines" (vector
               (vector
                 "  "
-                (obj "count" (vector "$" "ops"))
+                (obj "count" "ops")
                 " instructions, "
-                (obj "get" (vector (vector "$" "compares")) "as" "d")
+                (obj "get" (vector "compares") "as" "d")
                 " compare"
-                (obj "plural" (vector "$" "compares") "one" "" "many" "s")
+                (obj "plural" "compares" "one" "" "many" "s")
                 ", "
-                (obj "get" (vector (vector "$" "branches")) "as" "d")
+                (obj "get" (vector "branches") "as" "d")
                 " conditional branch"
-                (obj "plural" (vector "$" "branches") "one" "" "many" "es")
-                " — find_comparisons lists them"))
-            "under" (vector)
-            "after" (vector))
+                (obj "plural" "branches" "one" "" "many" "es")
+                " — find_comparisons lists them")))
           (obj
             "title" (vector
               "Variables: "
-              (obj "get" (vector (vector "$" "variableCount")) "as" "d")
+              (obj "get" (vector "variableCount") "as" "d")
               " "
-              (obj "cite" (vector "$" "@variables")))
-            "lines" (vector)
-            "under" (vector)
-            "after" (vector))
+              (obj "cite" "@variables")))
           (obj
             "title" (vector
               "Called from "
-              (obj "count" (vector "$" "callers"))
+              (obj "count" "callers")
               " place"
-              (obj "plural" (vector "$" "callers") "one" "" "many" "s")
+              (obj "plural" "callers" "one" "" "many" "s")
               " "
-              (obj "cite" (vector "$" "@callers")))
-            "lines" (vector)
-            "rows" (vector "$" "callers")
+              (obj "cite" "@callers"))
+            "rows" "callers"
             "limit" "maxItems"
-            "row" (vector "  " (obj "get" (vector (vector ".")) "as" "text"))
-            "under" (vector)
-            "more" "callers"
-            "after" (vector))
+            "row" (vector "  " (obj "get" (vector ".")))
+            "more" "callers")
           (obj
             "title" (vector
               "Calls "
-              (obj "count" (vector "$" "calls"))
+              (obj "count" "calls")
               " distinct target"
-              (obj "plural" (vector "$" "calls") "one" "" "many" "s")
+              (obj "plural" "calls" "one" "" "many" "s")
               " "
-              (obj "cite" (vector "$" "@body")))
-            "lines" (vector)
-            "rows" (vector "$" "calls")
+              (obj "cite" "@body"))
+            "rows" "calls"
             "limit" "maxItems"
-            "row" (vector "  " (obj "get" (vector (vector ".")) "as" "text"))
-            "under" (vector)
-            "more" "callees"
-            "after" (vector))
+            "row" (vector "  " (obj "get" (vector ".")))
+            "more" "callees")
           (obj
             "title" (vector
               "Refers to "
-              (obj "count" (vector "$" "referenced"))
+              (obj "count" "referenced")
               " string"
-              (obj "plural" (vector "$" "referenced") "one" "" "many" "s")
+              (obj "plural" "referenced" "one" "" "many" "s")
               " "
-              (obj "cite" (vector "$" "@body"))
+              (obj "cite" "@body")
               " "
-              (obj "cite" (vector "$" "@strings")))
-            "lines" (vector)
-            "rows" (vector "$" "referenced")
+              (obj "cite" "@strings"))
+            "rows" "referenced"
             "limit" "maxItems"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "address")) "as" "x")
+              (obj "get" (vector ".address") "as" "x")
               "  "
-              (obj "get" (vector (vector "." "text")) "as" "line"))
-            "under" (vector)
-            "more" "strings"
-            "after" (vector))))
+              (obj "get" (vector ".text") "as" "line"))
+            "more" "strings")))
       (obj
         "name" "find_comparisons"
         "call" "FIND-COMPARISONS"
@@ -794,83 +693,67 @@ MAX-ITEMS (default 80, 1..1000): at most this many of each list are shown."
           (obj "derive" "functionBody")
           (obj "read" "strings" "command" "izj")
           (obj "derive" "findComparisons"))
-        "title" (vector
-          "find_comparisons: "
-          (obj "get" (vector (vector "$" "body" "name") (vector "$" "addr")) "as" "text"))
+        "title" (vector "find_comparisons: " (obj "get" (vector "body.name" "addr")))
         "sections" (vector
           (obj
             "title" (vector
               "Compares and the branches that follow: "
-              (obj "count" (vector "$" "decisions"))
+              (obj "count" "decisions")
               " "
-              (obj "cite" (vector "$" "@body")))
-            "lines" (vector)
-            "rows" (vector "$" "decisions")
+              (obj "cite" "@body"))
+            "rows" "decisions"
             "limit" "maxItems"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "op" "offset")) "as" "x" "or" "0x0")
+              (obj "get" (vector ".op.offset") "as" "x" "or" "0x0")
               "  "
-              (obj "get" (vector (vector "." "op" "disasm")) "as" "text" "or" "")
-              (obj
-                "group" (vector " ; \"" (obj "get" (vector (vector "." "printable")) "as" "text") "\""))
+              (obj "get" (vector ".op.disasm") "or" "")
+              (obj "group" (vector " ; \"" (obj "get" (vector ".printable")) "\""))
               (obj
                 "group" (vector
                   "  ->  "
-                  (obj "get" (vector (vector "." "next" "disasm")) "as" "text" "or" "")
+                  (obj "get" (vector ".next.disasm") "or" "")
                   ": "
-                  (obj "get" (vector (vector "." "meaning")) "as" "text")
-                  (obj
-                    "group" (vector ", to " (obj "get" (vector (vector "." "next" "jump")) "as" "x")))
-                  (obj
-                    "group" (vector ", else " (obj "get" (vector (vector "." "next" "fail")) "as" "x"))))))
-            "under" (vector)
-            "more" "comparisons"
-            "after" (vector))
+                  (obj "get" (vector ".meaning"))
+                  (obj "group" (vector ", to " (obj "get" (vector ".next.jump") "as" "x")))
+                  (obj "group" (vector ", else " (obj "get" (vector ".next.fail") "as" "x"))))))
+            "more" "comparisons")
           (obj
             "title" (vector
               "Calls that compare or validate: "
-              (obj "count" (vector "$" "decidingCalls"))
+              (obj "count" "decidingCalls")
               " "
-              (obj "cite" (vector "$" "@body")))
-            "lines" (vector)
-            "rows" (vector "$" "decidingCalls")
+              (obj "cite" "@body"))
+            "rows" "decidingCalls"
             "limit" "maxItems"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "offset")) "as" "x" "or" "0x0")
+              (obj "get" (vector ".offset") "as" "x" "or" "0x0")
               "  "
-              (obj "get" (vector (vector "." "disasm")) "as" "text" "or" ""))
-            "under" (vector)
-            "empty" (vector "  none by name")
-            "after" (vector))
+              (obj "get" (vector ".disasm") "or" ""))
+            "empty" (vector "  none by name"))
           (obj
             "title" (vector
               "Strings on the way: "
-              (obj "count" (vector "$" "onTheWay"))
+              (obj "count" "onTheWay")
               " "
-              (obj "cite" (vector "$" "@body"))
+              (obj "cite" "@body")
               " "
-              (obj "cite" (vector "$" "@strings")))
-            "lines" (vector)
-            "rows" (vector "$" "onTheWay")
+              (obj "cite" "@strings"))
+            "rows" "onTheWay"
             "limit" "maxItems"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "offset")) "as" "x")
+              (obj "get" (vector ".offset") "as" "x")
               "  refers to "
-              (obj "get" (vector (vector "." "target")) "as" "x")
+              (obj "get" (vector ".target") "as" "x")
               "  "
-              (obj "get" (vector (vector "." "text")) "as" "line"))
-            "under" (vector)
-            "empty" (vector "  none")
-            "after" (vector))
+              (obj "get" (vector ".text") "as" "line"))
+            "empty" (vector "  none"))
           (obj
             "lines" (vector
               (vector
-                "This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."))
-            "under" (vector)
-            "after" (vector))))
+                "This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to.")))))
       (obj
         "name" "find_crypto"
         "call" "FIND-CRYPTO"
@@ -885,62 +768,47 @@ REFERENCES (default T; :FALSE for no): say what refers to each hit."
         "steps" (vector (obj "read" "material" "command" "/cmj") (obj "derive" "findCrypto"))
         "title" (vector
           "find_crypto: "
-          (obj "count" (vector "$" "hits"))
+          (obj "count" "hits")
           " constant hit"
-          (obj "plural" (vector "$" "hits") "one" "" "many" "s"))
+          (obj "plural" "hits" "one" "" "many" "s"))
         "sections" (vector
           (obj
-            "title" (vector
-              "rizin's search for keys and certificates "
-              (obj "cite" (vector "$" "@material")))
-            "lines" (vector)
-            "rows" (vector "$" "material")
+            "title" (vector "rizin's search for keys and certificates " (obj "cite" "@material"))
+            "rows" "material"
             "limit" "cryptoMaterial"
-            "row" (vector "  " (obj "get" (vector (vector ".")) "as" "json"))
-            "under" (vector)
-            "empty" (vector "  nothing found")
-            "after" (vector))
+            "row" (vector "  " (obj "get" (vector ".") "as" "json"))
+            "empty" (vector "  nothing found"))
           (obj
             "title" (vector "Published constants")
-            "lines" (vector)
-            "rows" (vector "$" "hits")
+            "rows" "hits"
             "limit" "cryptoHits"
             "row" (vector
               "  "
-              (obj "get" (vector (vector "." "address")) "as" "x")
+              (obj "get" (vector ".address") "as" "x")
               "  "
-              (obj "get" (vector (vector "." "algorithm")) "as" "text")
+              (obj "get" (vector ".algorithm"))
               " — "
-              (obj "get" (vector (vector "." "what")) "as" "text")
+              (obj "get" (vector ".what"))
               " "
-              (obj "cite" (vector "." "@hit"))
-              (obj
-                "choose" (vector "." "weak")
-                "yes" " (weak: four bytes can occur by chance)"
-                "no" ""))
+              (obj "cite" ".@hit")
+              (obj "choose" ".weak" "yes" " (weak: four bytes can occur by chance)" "no" ""))
             "under" (vector
               (obj
-                "when" (vector "." "traced")
-                "lines" (vector)
-                "rows" (vector "." "places")
+                "when" ".traced"
+                "rows" ".places"
                 "limit" "cryptoReferences"
                 "line" (vector
                   "      referred to from "
-                  (obj "join" (vector "$" "shown") "with" ", ")
+                  (obj "join" "shown" "with" ", ")
                   " "
-                  (obj "cite" (vector "." "@places")))
-                "under" (vector)
+                  (obj "cite" ".@places"))
                 "empty" (vector
                   "      no reference found by analysis "
-                  (obj "cite" (vector "." "@places"))
-                  " — reached by computed address, or unused")
-                "after" (vector)))
-            "empty" (vector "  none of the constants in the table was found")
-            "after" (vector))
+                  (obj "cite" ".@places")
+                  " — reached by computed address, or unused")))
+            "empty" (vector "  none of the constants in the table was found"))
           (obj
             "lines" (vector
               (vector
-                "A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."))
-            "under" (vector)
-            "after" (vector))))))
+                "A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it.")))))))
   "The recipes' data, in the shapes decoded JSON has.")

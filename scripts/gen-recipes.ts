@@ -220,7 +220,8 @@ unique("recipes", tables.recipes.map((recipe) => recipe.name));
 
 // --- templates ---------------------------------------------------------------------------------
 
-type Path = string[];
+/** What a placeholder names, as a host looks it up: `info.class` is a fact and a member of it, `.name` a member of the row, `.` the row. */
+type Path = string;
 type Node =
 	| string
 	| { group: Node[] }
@@ -231,7 +232,7 @@ type Node =
 	| { count: Path }
 	| { join: Path; with: string }
 	| { plural: Path; one: string; many: string }
-	| { get: Path[]; as: string; padLeft?: number; padRight?: number; or?: string };
+	| { get: Path[]; as?: string; padLeft?: number; padRight?: number; or?: string };
 
 const SCALARS = ["text", "d", "x", "f2", "line", "json"];
 const PATH = String.raw`\.|\.?[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*`;
@@ -252,7 +253,7 @@ function compile(where: string, template: string, known: Set<string> | undefined
 			keys[0] = `@${keys[0]}`;
 		}
 		if (!row && known !== undefined && !known.has(keys[0]!)) bad(`names ${keys[0]}, which no option, limit, read or fact of this recipe is called`);
-		return [row ? "." : "$", ...keys];
+		return `${row ? "." : ""}${keys.join(".")}`;
 	};
 	const placeholder = (body: string): Node => {
 		const test = /^(if|unless) ([^=]+)(?:=(.*))?$/.exec(body);
@@ -286,7 +287,7 @@ function compile(where: string, template: string, known: Set<string> | undefined
 		if (format !== "" && !SCALARS.includes(format)) bad(`has the format ${format}; there are ${[...SCALARS, "n", ...Object.keys(tables.formats.joins), ...Object.keys(tables.formats.plurals)].join(", ")}`);
 		return {
 			get: names.split("/").map((name) => path(name)),
-			as: format === "" ? "text" : format,
+			...(format === "" || format === "text" ? {} : { as: format }),
 			...(side === ">" ? { padLeft: Number(width) } : side === "<" ? { padRight: Number(width) } : {}),
 			...(fallback === undefined ? {} : { or: fallback }),
 		};
@@ -380,15 +381,15 @@ function compiledRecipe(host: Host, recipe: Recipe): Record<string, unknown> {
 		return {
 			...(source.when === undefined ? {} : { when: single(source.when).if }),
 			...text("title"),
-			lines: (source.lines ?? []).map((line, index) => compile(`${at}.lines[${index}]`, line, known)),
+			...(source.lines === undefined ? {} : { lines: source.lines.map((line, index) => compile(`${at}.lines[${index}]`, line, known)) }),
 			...(source.rows === undefined ? {} : { rows: single(source.rows).if }),
 			...(source.limit === undefined ? {} : { limit: count(source.limit) }),
 			...text("row"),
 			...text("line"),
-			under: (source.under ?? []).map((inner, index) => section(`${at}.under[${index}]`, inner, true)),
+			...(source.under === undefined ? {} : { under: source.under.map((inner, index) => section(`${at}.under[${index}]`, inner, true)) }),
 			...text("empty"),
 			...(source.more === undefined ? {} : { more: source.more }),
-			after: (source.after ?? []).map((line, index) => compile(`${at}.after[${index}]`, line, known)),
+			...(source.after === undefined ? {} : { after: source.after.map((line, index) => compile(`${at}.after[${index}]`, line, known)) }),
 		};
 	};
 	return {
@@ -592,7 +593,20 @@ const lispFile = `;;;; recipe-data.lisp --- GENERATED from recipes/tables.json. 
   "The recipes' data, in the shapes decoded JSON has.")
 `;
 
-const jsBlock = `// ${MARK_BEGIN}\nconst TABLES = ${written(json, hostTables("js"), "")};\n// ${MARK_END}`;
+/** `value` as a JavaScript literal with nothing spent on layout: a key that is a name goes unquoted. */
+function jsLiteral(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(jsLiteral).join(",")}]`;
+	if (isScalar(value)) return JSON.stringify(value);
+	return `{${Object.entries(value as object)
+		.map(([key, member]) => `${/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key)}:${jsLiteral(member)}`)
+		.join(",")}}`;
+}
+
+// One table a line, and one recipe, written small: omp's read() cuts what it returns at 50 KB, and a skill's script should come back whole.
+const jsLines = Object.entries(hostTables("js")).map(([key, value]) =>
+	key === "recipes" ? `  recipes: [\n${(value as unknown[]).map((recipe) => `    ${jsLiteral(recipe)}`).join(",\n")}\n  ]` : `  ${key}: ${jsLiteral(value)}`,
+);
+const jsBlock = `// ${MARK_BEGIN}\nconst TABLES = {\n${jsLines.join(",\n")}\n};\n// ${MARK_END}`;
 
 /** A recipe as Python calls it: the signature is Python's own, so a stray argument is refused in Python's words. */
 function pythonFunction(recipe: Recipe): string {
