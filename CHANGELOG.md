@@ -6,6 +6,261 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: one engine, and under omp it needs SBCL.** omp-re had two
+  engines: TypeScript for omp, Common Lisp for nodecode. The TypeScript one is
+  gone. The Lisp engine (`engine/`, ASDF system `omp-re`) now serves both
+  hosts: inside the organism under nodecode, and under omp as one SBCL child
+  process for the whole omp process, spoken to over its standard input and
+  output (`docs/engine-protocol.md`). **Under omp you must now install SBCL
+  and the cl-ppcre library** (`apt install sbcl cl-ppcre` on Debian and
+  Ubuntu; `docs/install.md` for macOS and Windows). Without them the
+  extension does not load, and the error says what to install.
+  `OMPRE_SBCL_PATH` names an SBCL that is not on `PATH`. The first omp start
+  after an install or upgrade compiles the engine (a few seconds); later
+  starts take a fraction of a second. Linux is what was run; Windows and
+  macOS are written for and were not run.
+- **`/re help` and bare `/re`** print the engine's list, one line per
+  subcommand with its description, then one line of keys, in place of the
+  fixed two-column text.
+- **`/re functions`, `strings`, `imports`, `evidence` and `findings` under
+  `omp -p`** print the engine's lists (`name  addr · size`, and so on), ending
+  `… cut at 4000 characters; read the rest with rizin_command` when cut. They
+  were labels only, silently sliced.
+- **`/re open` always answers** `Binary opened: <path>`, with what was
+  re-applied and what could not be under it. It was silent unless annotations
+  were replayed.
+- **`/re cite <id>` in the terminal UI** says `Evidence <id> is in your
+  draft.` as it fills the editor.
+- **An id typed by hand** (`/re evidence`, `/re cite`, `/re findings`) must be
+  the whole id or a unique prefix of at least 6 characters, under both hosts.
+  The first match of any prefix was taken before. A short or ambiguous one is
+  refused in words (`… is too short (use at least 6 characters of the id)`,
+  `… is ambiguous (N matches)`).
+- **`/re status` under omp** follows the engine's order (rizin, binary,
+  debugger, evidence, annotations, findings, audit log) and gains the lines
+  nodecode already had: `CHANGED ON DISK since it was opened` and `the file is
+  no longer readable there`.
+- **With no binary open under omp**, a panel and a tool say the same thing:
+  `omp-re: no binary open — use /re open <path>, open_binary, or --binary
+  <path> first`.
+- **Progress** reads `rizin: analyzing <name>… Ns`, the same text in the
+  footer and in the tool's partial result.
+- **A call waiting for omp's own answer** (the session's record, an artifact,
+  the side model) is woken by its cancel or by omp ending; it looked every
+  tenth of a second. A program a tool runs is bounded by a timed wait, not a
+  twentieth-of-a-second poll.
+- **Aborting a call** is answered by the engine at its next wait: `omp-re:
+  rizin command "<line>" aborted`, or `omp-re: the call aborted` for one still
+  queued. The session goes on, and rizin keeps its analysis.
+- **The audit log under omp** gets a call's line when the call runs, not
+  before approval. A call the approval gate denied has only the gate's
+  decision; a call refused by `/re off` or by its schema has no line.
+- **Tool schemas under omp** are the engine's JSON Schema. Length bounds
+  (claim, reason, the number of evidence ids or commands) are no longer in
+  the schema: the engine refuses in its own words. An unknown member of
+  `rizin_debug`'s `run` is refused (`… is not a supported rz-run setting`)
+  where it was dropped silently.
+- **A tool result's `details`** no longer has `summary`, `header` or
+  `decompiler`, and gains `evidenceId` and `artifactPath`. The `[evidence …]`
+  tag is the last line of the result's one text block; the text `eval` sees
+  is unchanged.
+- **A transcript card** takes its header from the first line of the result
+  text.
+- **Completion after `/re cite` and `/re evidence`** offers the newest 200
+  evidence ids, not all of them, and matches what is typed against the eight
+  characters an id is shown by.
+- **The debugger's launch warning** is in the result text only, no longer
+  also a notification.
+- **A support audit whose side turn failed** records why (`the audit side
+  turn failed: …`) where it said only `unaudited`.
+- **The wire between omp and the engine is described once**, in
+  `stdio/protocol.json`, and both sides are held to it: the server finds its
+  handlers from it and answers a method, member or value it does not have with
+  an error that names it; the extension is type-checked against
+  `extensions/re/protocol.ts`, generated from it by `bun run gen:protocol`
+  with the tables of `docs/engine-protocol.md`. The protocol version is 2, and
+  each side now refuses the other when it speaks another: the error says to
+  reinstall or upgrade the plugin.
+- **A session event of an unknown kind is an error.** It was taken for a
+  restore, so a misspelt `shutdown` re-opened the session it was meant to
+  close.
+- **What the wire carries.** A call's answer is `text`, `failed`, `refused?`,
+  `details?` and `state`: `refused` says a call never came to a result — the
+  engine says so where the refusal happens — where omp's side read that off a
+  missing `details`; `raw` and the second copies of
+  `evidenceId` and `artifactPath` are gone (both are in `details`). `state`
+  is the status band as its lines, the evidence ids as they are shown, and
+  `memory`. A described tool has no `evidence` member. `hello` takes no
+  `voice`; the `facts` method is gone (every answer carries the state);
+  `environment` is a notification. The engine sends `alive` while it serves
+  anything.
+- **The status band's lines are the engine's.** The extension draws them as
+  sent; the text is unchanged.
+- **Keys are named in one list** (`keys` in `stdio/protocol.json`), which the
+  extension binds from and `/re help` names from.
+- **A transcript card** shows the line that names a read's evidence record
+  beside its header, not as the last line of its body, so a JSON body
+  highlights as JSON.
+- **Starting the engine has a deadline** of two minutes; a start that takes
+  longer is ended with an error that says what to check and quotes the
+  engine's log. An engine that says nothing for 30 s while a request waits is
+  taken for hung and ended, and the request fails saying so; a request the
+  engine's `alive` does not name twice running fails alone. No clock bounds a
+  request the engine is serving.
+- **The engine's standard error goes to omp's log** line by line as it is
+  written (`omp-re engine: …`), not only into the error when the process
+  ends. A line on the wire that is not a message is noted there too, as is a
+  failure to answer a notification or to write an approval to the audit log.
+- **omp ending** closes the engine's input, at which the engine closes its
+  rizin processes and exits. It is no longer killed from an exit hook; a kill
+  is only what ends an engine that has not left 1.5 s after it was told to.
+- **The engine ends with the last extension instance omp shuts down**, not
+  when no session has yet reported an event: a subagent's shutdown can no
+  longer stop the engine under a session that had not started.
+- **The SBCL-not-found error** also covers a `.cmd` or `.bat` named in
+  `OMPRE_SBCL_PATH` (the engine is started without a shell) and says where
+  cl-ppcre goes on Windows.
+- `skills/re-triage/recipes.js` and `recipes.py` read the id of a read's
+  evidence record from the result's `details.evidenceId`, not from the tag in
+  its text. Their reports are unchanged.
+- **`open_binary` and `/re open` say what was re-applied** of mapped files,
+  analysis passes and signature files (`Re-applied N of M mapped file(s) …
+  recorded earlier for this binary.`), as they did for annotations.
+- **`map_file`, `analyze` and `apply_signatures` descriptions and results** no
+  longer say that reopening the binary drops a map or a pass. It never did:
+  they stay for the session, and only a branch from before the call is
+  without them.
+- **`/re verify --strict`** says `provenance-only: no reproducible hash to
+  compare (re-run by hand)` for a record that cannot be re-run. A record of a
+  tool other than `rizin_command` that carries a hash (older sessions'
+  decompile results) now reads `provenance-only` in a report, a manifest and
+  `record_finding`'s count, not `reproducible`.
+- **The audit log** gets one `rizin_command` line for each command
+  `adopt_finding` or `/re carry --inherit` re-runs.
+- **`adopt_finding` accepts confidence `possible`**, and a manifest finding
+  marked so is read as speculative.
+- **`/re carry` file errors** are in the engine's words (`… no such file`,
+  `… it is a directory`); a relocation in `<out>.json` names both ends.
+- **`/re status`** says `none — pdg and pdd need a decompiler plugin
+  (rz-ghidra, jsdec)` when there is none; a decompiler is found from rizin's
+  command catalog.
+- **`/re imports` as text** leaves out the address of an import that has none
+  (it printed `0x0`).
+- **The unsigned-audit-log notice** is said at level info, once a session.
+- **Under omp, a session nothing has called for 30 minutes** has its rizin
+  closed; the next call restores it from the record.
+- `set_arch_hint` refuses with `bits: none given`; a finding with no audit
+  status says `status not recorded`. `rizin_emulate`'s `set_mem` accepts
+  blanks in its hex and `rizin_debug`'s `write_memory` a `0x` prefix.
+- **The `/re` command's description** in omp lists the subcommand names.
+- **nodecode: object arguments are written as lists, not text.**
+  `rizin_debug`'s `run` and `attach` and `adopt_finding`'s `commands` were JSON
+  text or `"pdf @ x"` strings; they are now `:attach '(:pid 1234)` and
+  `:commands '((:command "pdf" :addr "main"))`, and the string forms are
+  refused. `(re:doc …)` shows them that way.
+- **nodecode: `(re:status)` signals `RE-ERROR`** when it fails, where it
+  returned the failure as text.
+- **nodecode: `/re help`, `status`, `on` and `off`** answer at once while
+  another call holds the session.
+- **nodecode: `(re:slash …)` is refused while `/re off`,** as a tool call is:
+  a line from `eval` is the model's. The operator's typed lines are not gated.
+- **A setting has one precedence rule**: the `re` section's value when it says
+  something other than the default, else the environment variable, else the
+  default. `state_dir` now shows its real default, `omp-re/`.
+- **Tool and subcommand names are normalised**, so `Open-Binary` is
+  `open_binary`.
+- `test:nodecode` is now `test:engine` (it runs the whole engine's suite) and
+  `gen:nodecode` is `gen:recipes`; `check:recipes` and `check:versions` are
+  new. CI is one Linux job that installs SBCL, cl-ppcre and rizin and runs
+  the type check, both generator checks, the engine loaded alone, the Lisp
+  suite and the bun suites; the cross-OS workflow is a Windows job that runs
+  what can run there (not the Lisp suite).
+- `scripts/release.mjs` writes the version to all three `.asd` files, and
+  `--check-versions` fails when the five files that carry it disagree.
+
+### Added
+
+- **`OMPRE_ALLOWED_DIRS` under omp.** The directory allow-list the nodecode
+  cell had now applies to omp as well: `open_binary`, `/re open`, `map_file`,
+  YARA rules, the FLIRT file given to `apply_signatures` and
+  `/re carry --against` open only files under the listed directories, links
+  resolved first. A missing signature file is refused (`no such signature
+  file`), and a relative one is read against the session's directory. Not
+  held to the list: `rizin_cli`'s arguments, `rizin_debug`'s `run.stdin`,
+  `run.stdout`, `run.stderr` and `run.cwd`, and the manifest `/re carry`
+  reads (`SECURITY.md`).
+- **Relative paths and `~/` wherever the engine opens a file.** `open_binary`,
+  `map_file`, YARA rules, a carry manifest, `--against`, and the paths
+  `/re report` and `/re carry --out` write are read against the session's
+  directory, where only `/re open` was. A path with spaces in `/re open` is no
+  longer collapsed.
+- **An engine that dies is replaced.** Under omp the next call starts another
+  engine process and each session comes back from its record. What a session
+  holds in no record — that `/re off` was said — the engine gives omp with
+  every answer, and omp hands it to the new engine, so the tools stay off.
+  The request that was waiting when the engine died fails; it is not sent
+  again.
+- **Fail-closed record lookups.** When the host cannot say which branch a
+  session is on, the call is refused; when it cannot say which turn an entry
+  belongs to, the entry is not written.
+- **A branch moved to before a `map_file`, `analyze` or `apply_signatures`**
+  no longer keeps it: rizin is started again without it.
+- `test/versions.test.ts`, and `bun run gen:protocol` / `check:protocol`.
+- `docs/engine-protocol.md`: the messages between omp and the engine.
+  `docs/ARCHITECTURE.md` is rewritten around the engine, the port a host
+  answers and the two hosts.
+
+### Removed
+
+- The TypeScript engine (33 modules under `extensions/re`) and its 22 unit
+  test files; what they held is held by the Lisp suite, and `extensions/re`
+  is five files that register what the engine describes and draw what it
+  sends.
+- `scripts/gen-nodecode-policy.ts` and `test/nodecode-parity.test.ts`. There
+  is one copy of the read-only command policy now
+  (`engine/policy-data.lisp`), so nothing is generated from another and
+  there are no two engines to compare.
+
+### Fixed
+
+- **`/re status` called a signed audit log unsigned** when
+  `OMPRE_AUDIT_HMAC_KEY` was only whitespace: the lines were signed with it.
+  The status now says HMAC-SHA256.
+- **`Re-applied N of M annotation(s)` on open** subtracted other layers'
+  failures from N. It counts annotations only, and a mapped file, analysis
+  pass or signature file that could not be put back is listed under its own
+  name; the notice after a respawn names each layer too, where it called all
+  of them annotations.
+- **Evidence rows with no tool or summary** are left out of `/re evidence`,
+  the status count and the address index.
+- A cut result whose whole text could not be saved ends `Full output was
+  larger.` in place of advice to narrow with paging parameters that no longer
+  exist.
+- **`bun test` exited 1 with every test passing** on a newer bun: a test of a
+  headless `/re` error left the process's exit status set. The extension no
+  longer writes a headless run's output and exit status where a test cannot
+  stand in for them.
+- **A cancel sent for a call omp had already given up on** reached the engine
+  before the call it was for, and was ignored.
+- **A finding or report aborted while its support audit was being asked** was
+  recorded all the same, marked `unaudited — the audit side turn returned no
+  usable verdict`. The call now ends as `omp-re: the support audit aborted`
+  and nothing is recorded.
+- **The bun suites could call a model.** On a machine where omp had provider
+  credentials, every test that recorded a finding put the claim audit to the
+  configured model. The one harness the suites boot a session through now
+  gives the session no model, or a test's own stand-in for one.
+- **The manual tiers.** `test/tui-qa.sh` drove `hash_binary`, a tool that no
+  longer exists, and skipped the steps when it timed out; it now asks for a
+  `rizin_command` read, checks the evidence record it leaves, and fails a
+  step whose model turn does not finish. `test/tui.sh` and `test/tui-qa.sh`
+  default to `/bin/ls` (and `/bin/cat`) instead of a path that named a malware
+  sample. `test/live-model.sh` names no model: it requires
+  `OMPRE_LIVE_MODEL`. None of the three was run after these changes: `omp` is
+  not installed where they were made.
+
 ## [0.10.0] - 2026-11-10
 
 ### Added

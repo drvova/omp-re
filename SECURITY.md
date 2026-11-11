@@ -5,7 +5,7 @@
 Open a private security advisory on this repository's GitHub Security tab,
 or email the maintainer listed in `package.json`. Do not open a public issue
 for an unpatched vulnerability. Include a minimal reproduction and the
-`omp`/`rizin`/`omp-re` versions involved; expect an initial response
+`omp`/`rizin`/SBCL/`omp-re` versions involved; expect an initial response
 within a few business days.
 
 ## Analysis hygiene — this is not a sandbox
@@ -35,41 +35,66 @@ provides any isolation:
   omp's `eval`, the code runs in omp's own eval kernel under omp's approval of
   `eval`; each RE tool it calls is still a separate tool call with its own
   approval tier, audit line, and (for `/re off`) block.
+- Under omp the engine is a child process: the extension starts the `sbcl` on
+  your `PATH` (or `OMPRE_SBCL_PATH`) by argv, with no shell, with
+  `--no-sysinit --no-userinit` so no init file runs in it. It talks to omp on
+  its standard input and output only; it opens no socket. It runs with your
+  privileges, as omp does. ASDF keeps the engine's compiled files in its cache
+  in your home directory and loads them at the next start, so that cache is as
+  trusted as the plugin's own files.
+- `OMPRE_ALLOWED_DIRS` (nodecode: `allowed_dirs`) limits the directories the
+  engine opens a binary, a mapped file, YARA rules or a FLIRT signature file
+  (`apply_signatures`) from, compared after links are resolved. It is unset by
+  default, which allows any file you can read. It is a guard against a model
+  opening the wrong file, not a sandbox. Three kinds of path are not held to
+  it:
+  - a file named in `rizin_cli`'s arguments, which the `rz-*` tool opens
+    itself: an argument list has no reliable way to tell a path;
+  - `rizin_debug`'s `run.stdin`, `run.stdout`, `run.stderr` and `run.cwd`,
+    which rz-run opens for the debuggee. The debugger is off unless you
+    switch it on, and it runs the target's code in any case;
+  - the manifest `/re carry` reads, which is a line the operator types. The
+    binary given with `--against` is held to the list.
 
 ## Mutations never touch the file on disk
 
 `set_comment`, `rename_function`, `rename_variable`, `set_prototype`, and
 `set_variable_type` only mutate rizin's **in-process analysis database**
-for the running session. `RzSession.spawn` launches rizin as
-`rizin -q0 -N <path>` — no `-w` (write) flag — so rizin opens the file
-read-only and none of these tools ever writes back to the sample on disk.
-The annotations themselves are recorded in the omp session and replayed into
-rizin when the session is resumed.
+for the running session. The engine starts rizin with `-q0`, `-N`, two
+settings that keep its output plain, and the path — no `-w` (write) flag — so
+rizin opens the file read-only and none of these tools ever writes back to
+the sample on disk. The annotations themselves are recorded in the session's
+record and replayed into rizin when the session is resumed.
 
 `map_file` opens a *second* file into the session (`o <file> <addr>`, book:
 basic_commands/mapping_files) — a dump, a library, a blob to analyze alongside
 the primary binary. Reading a file the model names is the same trust boundary
-as `open_binary` (which opens the sample itself); the path is realpath-checked
-for readability and single-quoted so it cannot inject a command. It is opened
+as `open_binary` (which opens the sample itself); the path is resolved to an
+existing readable file, held to `OMPRE_ALLOWED_DIRS` when that is set, and
+single-quoted so it cannot inject a command. It is opened
 with `o`, never `o+`, so the mapped file stays read-only on disk — mapping
 never writes it.
 
-The sample is never written. The only file omp-re itself emits is a memory
-dump from the debugger (`rizin_debug`'s `dump_memory`, for extracting an
-unpacked or decrypted region too large to return inline). It goes to a single
-confined directory — `OMPRE_OUTPUT_DIR`, or `<tmpdir>/omp-re-out` when unset —
-under a basename validated to letters, digits, `.`, `_` and `-` (no
-separators, no `..`, not absolute). The model never supplies the output path,
-so the dump cannot traverse out of that directory or overwrite an arbitrary
-file, and the bytes are read in TypeScript and written directly (rizin is
-never handed a file path to write).
+The sample is never written. The files the tools themselves emit — a memory
+dump (`rizin_debug`'s `dump_memory`), a saved trace (`trace_save`), an
+exported project (`export_project`) and a created signature
+(`create_signature`) — all go to a single confined directory:
+`OMPRE_OUTPUT_DIR`, or `<tmpdir>/omp-re-out` when unset. The model supplies at
+most a bare file name, validated to letters, digits, `.`, `_` and `-` (no
+separators, no `..`, not absolute), never a path, so none of them can
+traverse out of that directory or overwrite an arbitrary file. A memory dump's
+bytes are read by the engine through the debugger and written by the engine;
+for the other three rizin is handed the confined path, single-quoted.
+`/re report <path>` and `/re carry --out <path>` write where the `/re` line
+says. Under omp only the operator types `/re` lines. Under nodecode the model
+can send one from `eval` (`(re:slash …)`), where it can already write files.
 
 `-N` additionally skips the user's `rizinrc` and startup scripts, so a global
 eval var or alias in the operator's config can't silently change the command
 output omp-re parses; plugins still load (that needs `-NN`, which omp-re never
 uses), so decompilers are unaffected. `OMPRE_RIZIN_LOAD_USER_CONFIG=1` restores
-`rizinrc` loading for operators who need it. The debug session
-(`RzSession.spawnDebug`) adds `-d` to the same flags — see `## rizin_debug`.
+`rizinrc` loading for operators who need it. The debug session adds `-d` to
+the same flags — see `## rizin_debug`.
 
 ## Command construction
 
@@ -90,9 +115,8 @@ none of them can start a second command:
 - The single read entry, `rizin_command` (the one tool through which the model
   reads the binary — searches included, as `/xj`, `/xrj`, `/Rj`, …), gates every
   command against the read-only catalog check and a forbidden-syntax guard
-  (`forbiddenSyntaxReason`) before it reaches the pipe: no `;`, `|`, `<`/`>`,
-  backticks, `~`, line breaks, or `@` modifiers except `@!<n>`. (The retired
-  typed `search_*` wrappers reused the same guard on their free-form arguments.)
+  (`forbidden-syntax-reason` in `engine/policy.lisp`) before it reaches the pipe: no `;`, `|`, `<`/`>`,
+  backticks, `~`, line breaks, or `@` modifiers except `@!<n>`.
 
 **0.1.x is affected by a command-injection bug fixed in 0.2.0.** It
 interpolated `set_comment` text into `CC <text> @ <addr>` unquoted, and the
@@ -137,9 +161,10 @@ and it refuses before anything reaches rizin unless the command:
 
 Raw-byte printers (`pr`, `prz`, `prg`, `p6d`) are refused too: a NUL in
 their output ends a `-q0` frame, which desyncs the pipe and kills the
-session's rizin process (and with it the live analysis). Each refusal and
-the policy table live in `extensions/re/catalog.ts`; the escapes above are
-covered by `test/rizin-cli.test.ts`.
+session's rizin process (and with it the live analysis). The checks are
+`check-rizin-command` in `engine/policy.lisp` and the patterns and command
+lists are `engine/policy-data.lisp`; both hosts run this one copy. The escapes
+above are covered by the policy checks of `test/nodecode/suite-core.lisp`.
 
 The forbidden-syntax set is drawn from rizin's own documented prompt grammar
 (the Rizin Book, *First Steps → Command-line*): command separator `;`, pipes
@@ -148,16 +173,16 @@ modifier family (`@@` iterators, `@e:`, `@f:`, `@x:`, `@r:`, `@o:`, … — all
 refused, with only `@!<n>` block size allowed), substitution, and comments.
 The shell (`!`/`!!`) and background-task (`&`/`&t`) operators are command
 heads, so they are refused by the read-only-family check rather than the
-syntax scan. `test/rizin-cli.test.ts` pins each of these.
+syntax scan.
 
 Even read-only commands parse the sample, so the analysis-hygiene advice
 above applies to them unchanged.
 
 ## rizin_cli
 
-`rizin_cli` runs the standalone `rz-*` tools. They are invoked by argv
-through omp's `exec`, never a shell, so `;`/`|`/`$()`/backticks in an
-argument are inert text. What is gated is the flags, refused before the tool
+`rizin_cli` runs the standalone `rz-*` tools. The engine starts them by argv,
+never through a shell, so `;`/`|`/`$()`/backticks in an argument are inert
+text. What is gated is the flags, refused before the tool
 is spawned:
 
 - flags that run code: `rz-find -E` (shell command per hit), `rz-find -R`
@@ -186,8 +211,8 @@ but its directives configure the debugger's launch environment via
 only; a `!command` target that would run a shell command is refused. This is
 a convenience boundary over the flags, not a sandbox: the tools read whatever
 files you point them at, with your privileges, exactly as if you ran them.
-The policy lives in `extensions/re/tools-rzcli.ts` and is covered by
-`test/rzcli.test.ts`.
+The policy is `check-rz-cli` in `engine/extras.lisp`, covered by
+`test/nodecode/suite-extras.lisp`.
 
 ## rizin_debug
 
@@ -196,8 +221,9 @@ binary under rizin's debugger (`rizin -d`) so it can be stepped and inspected
 at runtime. Because that inverts the "never runs the file" property the rest
 of the suite holds:
 
-- It is **off by default**. The tool is registered only when
-  `OMPRE_ENABLE_DEBUGGER` is set, so a default install cannot be talked into
+- It is **off by default**. The tool is offered only when
+  `OMPRE_ENABLE_DEBUGGER` is set (nodecode: or `debugger` is true in the `re`
+  section), so a default install cannot be talked into
   executing a sample — the capability has to be deliberately enabled by the
   operator, out of band.
 - It runs in a **separate rizin session** (`-d`) from the static one, which
@@ -216,7 +242,7 @@ of the suite holds:
   but, running inside the live debugger, it additionally allows a vetted set
   of read-only debugger-state reads (register/arena views, memory-map/module/
   library/heap listings, backtraces, process/thread/fd/signal listings; see
-  `checkDebugOnHitCommand` in `catalog.ts`). Matched by exact command token,
+  `check-debug-on-hit-command` in `engine/policy.lisp`). Matched by exact command token,
   with any `=` refused, so a register-assign dual (`dr rax=0`), a control
   command (`dc`/`ds`), a write, config, shell, or script form can never be
   stored — the on-hit command can only log state, never drive or mutate the
@@ -243,11 +269,13 @@ of the suite holds:
 
 The debugger provides **no isolation whatsoever** — it is the opposite of a
 sandbox. Enable it and run a sample only inside a disposable VM or container
-you are prepared to lose. The implementation is `extensions/re/tools-debug.ts`
-(launch in `RzSession.spawnDebug`), covered by `test/debug.test.ts`.
+you are prepared to lose. The implementation is `engine/debug.lisp`, covered
+by `test/nodecode/suite-debug.lisp`.
 
 ## Scope
 
-In scope: `extensions/re/*.ts`, the `/re` command surface, and the tool
+In scope: the engine (`engine/`), its two hosts (`stdio/` with
+`extensions/re/`, and `nodecode/`), the `/re` command surface, and the tool
 implementations. Out of scope: rizin itself, rz-ghidra, jsdec, capa/floss/
-diec/yara, and omp — report vulnerabilities in those projects upstream.
+diec/yara, SBCL, cl-ppcre, omp and nodecode — report vulnerabilities in those
+projects upstream.

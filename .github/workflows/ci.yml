@@ -1,54 +1,66 @@
 name: CI
 
+# One job, on Linux, with everything the repository's checks need: bun, SBCL
+# and cl-ppcre (the engine is Common Lisp, and the omp extension starts it),
+# rizin, python3 (omp's Python eval kernel, for recipes.py) and a C compiler
+# for the fixture. Nothing is skipped for want of a tool here; what the suites
+# still skip is said in docs/testing.md.
+#
+# Never fetch a malware sample into CI: the fixture is a trivial program built
+# from test/fixtures/sample.c on the runner.
+
 on:
   push:
     branches: [main]
   pull_request:
 
+env:
+  RIZIN_VERSION: "0.9.1"
+
 jobs:
-  check:
+  suite:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
+      - name: Install SBCL and cl-ppcre
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
+      - name: Install rizin (portable static build; the release has no .deb)
+        run: |
+          set -eux
+          curl -fsSL "https://github.com/rizinorg/rizin/releases/download/v${RIZIN_VERSION}/rizin-v${RIZIN_VERSION}-static-x86_64.tar.xz" -o /tmp/rizin.tar.xz
+          mkdir -p "$HOME/rizin" && tar -xJf /tmp/rizin.tar.xz -C "$HOME/rizin"
+          dirname "$(find "$HOME/rizin" -type f -name rizin | head -1)" >> "$GITHUB_PATH"
+      - name: Show tool versions
+        run: |
+          bun --version
+          sbcl --version
+          rizin -v
+          python3 --version
+      - name: Build fixture
+        run: |
+          cc -o fixture test/fixtures/sample.c
+          echo "OMPRE_TEST_BINARY=$PWD/fixture" >> "$GITHUB_ENV"
       - run: bun install --ignore-scripts
-      - run: bun run check
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-      - run: bun install --ignore-scripts
-      # No rizin install here. The rizin-free suites — including
-      # extension-sdk, which loads the extension through omp's real SDK and
-      # catches host API drift — run in full; the rizin suites
-      # `describe.skipIf(...)` themselves out except for their rizin-free tests
-      # — 102 pass, 98 skip, 0 fail, exit code 0. That is the expected shape of
-      # this job; run the rizin suites locally (they use /bin/ls). See
-      # docs/testing.md. Never fetch a malware sample into CI.
-      - run: bun test
-
-  # The nodecode cell is omp-re's engine ported to Common Lisp (nodecode/*.lisp).
-  # This job loads the real system under SBCL and runs its suites
-  # (test/nodecode/run.lisp), then lets `bun test` hold the Lisp engine to the
-  # TypeScript one (test/nodecode-parity.test.ts needs sbcl to do it). The
-  # suites run over a stand-in for nodecode's kernel, so they prove the cell's
-  # own code; see docs/testing.md. No rizin here: each suite's rizin half
-  # prints SKIPPED, and the parity test judges a fixed list of command names
-  # instead of the installed catalog.
-  nodecode:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
-      - run: bun install --ignore-scripts
-      - run: bun run test:nodecode
-      - run: bun test test/nodecode-parity.test.ts
+      - name: Type check
+        run: bun run check
+      - name: One version in package.json, the marketplace entry and the three .asd files
+        run: node scripts/release.mjs --check-versions
+      - name: The recipes' generated blocks are current with recipes/tables.json
+        run: bun scripts/gen-recipes.ts --check
+      - name: The shim's types and the protocol document's tables are current with stdio/protocol.json
+        run: bun scripts/gen-protocol.ts --check
+      # The engine must need nothing of either host: system omp-re, in a plain SBCL.
+      - name: The engine loads alone
+        run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames "omp-re.asd" (uiop:getcwd)))' --eval '(asdf:load-system "omp-re")'
+      # The engine, the nodecode host over a stand-in for nodecode's kernel,
+      # and the omp host served over real pipes.
+      - name: The Lisp suite
+        run: sbcl --non-interactive --load test/nodecode/run.lisp
+      # The extension loaded through omp's real SDK, which starts the engine.
+      - name: The bun suites
+        run: bun test test/

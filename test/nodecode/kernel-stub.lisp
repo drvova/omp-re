@@ -2,23 +2,23 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; This is NOT nodecode. It is the two dozen names nodecode/*.lisp
-;;;; uses from NODECODE.KERNEL (nlk) and NODECODE.EVOLVED (nle), written to
-;;;; the contract nodecode's own docs/CELLS.md and docstrings state, so that
-;;;; the cell — the whole engine and its verbs — can be compiled and run
-;;;; under a bare SBCL against a real rizin, with no nodecode build in the
-;;;; loop. It proves the cell's own code; it cannot
-;;;; prove nodecode's side of the seam. smoke.lisp is what runs on it.
+;;;; This is NOT nodecode. It is the names the nodecode host
+;;;; (nodecode/nodecode-host.lisp, verbs.lisp, cell.lisp) uses from
+;;;; NODECODE.KERNEL (nlk) and NODECODE.EVOLVED (nle), written to the contract
+;;;; nodecode's own docs/CELLS.md and docstrings state, so that the cell can
+;;;; be compiled and run under a bare SBCL against a real rizin, with no
+;;;; nodecode build in the loop. The engine itself (omp-re.asd) needs none of
+;;;; it. It proves the cell's own code; it cannot prove nodecode's side of
+;;;; the seam.
 
 (require :asdf)
-(require :sb-posix)
+#-win32 (require :sb-posix)
 
 (defpackage #:nodecode.kernel
   (:use #:cl)
   (:nicknames #:nlk)
-  (:export #:define-peripheral #:spawn-program #:child-exit #:kill-tree #:run-bounded
-           #:worker-start #:worker-stop #:write-file-atomically
-           #:home #:expand-home #:find-session-cwd
+  (:export #:define-peripheral
+           #:home #:find-session-cwd
            #:store-open-p #:session-visible-turn-set #:session-lineage
            ;; a side question (docs/cell-api.mdx, "Ask a side question")
            #:session-exists-p #:create-session #:durable-session-id
@@ -31,10 +31,10 @@
 (defpackage #:nodecode.evolved
   (:use #:cl)
   (:nicknames #:nle)
-  (:export #:define-cell #:turn #:failure #:notice #:on-stop #:register-tool #:unregister-tool
+  (:export #:define-cell #:turn #:notice #:on-stop
            #:submit #:set-session-title
            #:list-dialog #:run-row #:ask-row #:bare-args-p #:*slash-effects*
-           #:*tools* #:*notices* #:*help* #:*commands* #:*stub-session* #:*stub-turn* #:*failed*))
+           #:*notices* #:*help* #:*commands* #:*stub-session* #:*stub-turn*))
 
 (in-package #:nodecode.kernel)
 
@@ -45,23 +45,6 @@
 
 (defun home (&optional (relative ""))
   (merge-pathnames relative *stub-home*))
-
-(defun expand-home (text &aux (text (string-trim '(#\Space #\Tab) text)))
-  (if (uiop:string-prefix-p "~/" text)
-      (merge-pathnames (subseq text 2) (user-homedir-pathname))
-      (uiop:parse-native-namestring text)))
-
-(defun write-file-atomically (path content &key mode directory-mode (parents t))
-  "CONTENT, a string, to PATH through a temporary file beside it and one rename."
-  (declare (ignore mode directory-mode))
-  (let* ((native (if (stringp path) path (sb-ext:native-namestring path)))
-         (temporary (format nil "~a.~a.~a.tmp" native (sb-posix:getpid) (random 1000000))))
-    (when parents (ensure-directories-exist (uiop:parse-native-namestring native)))
-    (with-open-file (out (uiop:parse-native-namestring temporary) :direction :output
-                         :if-exists :supersede :external-format :utf-8)
-      (write-string content out))
-    (sb-posix:rename temporary native)
-    path))
 
 ;;; --- the session tree: which turns are on a session's branch -------------------------
 ;;; A test sets these to play /tree, /redo and /fork.
@@ -216,96 +199,6 @@ an anchor are the two edges and never both."
     (setf (gethash id *stub-turns*) turn)
     id))
 
-;;; --- processes --------------------------------------------------------------------
-
-(defun spawn-program (argv &key directory environment (output :stream) (error-output :stream) (input :null))
-  "=> (values PID OUTPUT-STREAM ERROR-STREAM PROCESS INPUT-STREAM)"
-  (let ((process (sb-ext:run-program (first argv) (rest argv)
-                                     :search t :wait nil
-                                     :input (if (eq input :stream) :stream nil)
-                                     :output output
-                                     :error (if (pathnamep error-output) (uiop:native-namestring error-output) error-output)
-                                     :if-error-exists :append
-                                     ;; What a binary prints is not always UTF-8: never signal on it.
-                                     :external-format '(:utf-8 :replacement #\?)
-                                     :directory (and directory (uiop:native-namestring directory))
-                                     :environment (or environment (sb-ext:posix-environ)))))
-    (values (sb-ext:process-pid process)
-            (sb-ext:process-output process)
-            (sb-ext:process-error process)
-            process
-            (sb-ext:process-input process))))
-
-(defun run-bounded (argv &key (seconds 60) directory environment input
-                             (output :string) (error-output :string))
-  "Run ARGV to completion or SECONDS => (values OUTPUT ERROR-OUTPUT STATUS),
-STATUS the exit code or :TIMEOUT."
-  (declare (ignore output error-output))
-  ;; stdout is read here to its end; stderr goes to a file so a child that
-  ;; fills one pipe while the other is read cannot wedge; a watchdog thread
-  ;; enforces the bound.
-  (let* ((errors (uiop:native-namestring
-                  (merge-pathnames (format nil "run-bounded-~a-~a.err" (sb-posix:getpid) (random 1000000))
-                                   (uiop:temporary-directory))))
-         (process (sb-ext:run-program (first argv) (rest argv)
-                                      :search t :wait nil
-                                      :input (if input :stream nil)
-                                      :output :stream :error errors :if-error-exists :supersede
-                                      :external-format '(:utf-8 :replacement #\?)
-                                      :directory (and directory (uiop:native-namestring directory))
-                                      :environment (or environment (sb-ext:posix-environ))))
-         (timed-out nil)
-         (watchdog (sb-thread:make-thread
-                    (lambda ()
-                      (loop repeat (ceiling (* seconds 20))
-                            while (sb-ext:process-alive-p process)
-                            do (sleep 0.05))
-                      (when (sb-ext:process-alive-p process)
-                        (setf timed-out t)
-                        (sb-ext:process-kill process sb-posix:sigkill))))))
-    (when input
-      (ignore-errors (write-string input (sb-ext:process-input process))
-                     (close (sb-ext:process-input process))))
-    (let ((out (with-output-to-string (collected)
-                 (loop for char = (read-char (sb-ext:process-output process) nil nil)
-                       while char do (write-char char collected)))))
-      (sb-ext:process-wait process)
-      (sb-thread:join-thread watchdog :default nil)
-      (close (sb-ext:process-output process))
-      (let ((err (or (ignore-errors (uiop:read-file-string errors)) "")))
-        (ignore-errors (delete-file errors))
-        (values out err (if timed-out :timeout (sb-ext:process-exit-code process)))))))
-
-(defstruct worker thread (stopping nil) (semaphore (sb-thread:make-semaphore)))
-
-(defun worker-start (name step &key (wake 60) prime &aux (worker (make-worker)))
-  "A thread NAME running STEP whenever WAKE seconds pass, until stopped."
-  (declare (ignore prime))
-  (setf (worker-thread worker)
-        (sb-thread:make-thread
-         (lambda ()
-           (loop
-             (sb-thread:wait-on-semaphore (worker-semaphore worker) :timeout wake)
-             (when (worker-stopping worker) (return))
-             (handler-case (funcall step) (error (condition) (warn "~a: ~a" name condition)))))
-         :name name))
-  worker)
-
-(defun worker-stop (worker &key (timeout 5))
-  (when worker
-    (setf (worker-stopping worker) t)
-    (sb-thread:signal-semaphore (worker-semaphore worker))
-    (sb-thread:join-thread (worker-thread worker) :default nil :timeout timeout))
-  nil)
-
-(defun child-exit (pid process)
-  (declare (ignore pid))
-  (unless (sb-ext:process-alive-p process)
-    (sb-ext:process-exit-code process)))
-
-(defun kill-tree (pid)
-  (ignore-errors (sb-posix:kill pid sb-posix:sigkill)))
-
 ;;; --- NLK:DEFINE-PERIPHERAL, to the shape of nodecode's own -------------------------
 
 (defmacro define-peripheral (name &key not-running lock recursive filter)
@@ -338,11 +231,9 @@ STATUS the exit code or :TIMEOUT."
 
 (in-package #:nodecode.evolved)
 
-;;; --- the engine's side: a turn, tools, notices --------------------------------------
+;;; --- the engine's side: a turn, notices ----------------------------------------------
 
 (defvar *stub-session* "smoke" "The session NLE:TURN says the calling thread works for.")
-(defvar *failed* nil "T once NLE:FAILURE was called.")
-(defvar *tools* '())
 (defvar *notices* (make-hash-table :test #'equal))
 (defvar *help* '())
 (defvar *commands* '())
@@ -373,10 +264,6 @@ STATUS the exit code or :TIMEOUT."
 (defun list-dialog (&rest keys &key title rows summary &allow-other-keys)
   (declare (ignore title rows summary))
   (list* :dialog :list keys))
-
-(defun failure (text)
-  (setf *failed* t)
-  text)
 
 ;;; --- the one in-process ingress, as gateway.lisp shapes it -------------------------------
 
@@ -415,16 +302,6 @@ STATUS the exit code or :TIMEOUT."
   (unless *registrations* (error "on-stop: no (starting ...) scope is open on this thread"))
   (push fn (car *registrations*))
   fn)
-
-(defun register-tool (name schema function)
-  (check-type name string)
-  (check-type schema list)
-  (setf *tools* (cons (list name schema function) (remove name *tools* :key #'first :test #'string=)))
-  name)
-
-(defun unregister-tool (name)
-  (setf *tools* (remove name *tools* :key #'first :test #'string=))
-  name)
 
 ;;; --- NLE:DEFINE-CELL: the clauses the cell uses, each with its inverse ----------------
 

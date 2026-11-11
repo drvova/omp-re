@@ -4,9 +4,13 @@
 binary — `rizin_command` — plus a few stateful tools** (open, annotate, findings,
 the rz-* CLI, triage, debugger). You observe the binary by running rizin's own
 read-only commands through `rizin_command` and composing them in omp's `eval`;
-there is no typed tool per read. (The 31 typed read wrappers of earlier versions
-remain in the codebase but are no longer registered — see
-[Reading the binary](#reading-the-binary--rizin_command-one-tool).)
+there is no typed tool per read.
+
+The tools are the engine's, and the same under nodecode, where they are
+reached as `(re:cmd …)` and `(re:call "tool" …)` ([`nodecode.md`](nodecode.md)).
+This page describes them as omp presents them. The authoritative description
+of each is the engine's own: `read xd://<name>` under omp, `(re:doc "name")`
+under nodecode.
 
 Every tool is registered `discoverable`, so omp presents it as an `xd://<name>`
 device rather than a top-level tool: `read xd://<name>` shows its documentation,
@@ -14,24 +18,28 @@ device rather than a top-level tool: `read xd://<name>` shows its documentation,
 `await tool.<name>({ ...params })`, which returns `{ text, details }` and throws
 on failure. Call `rizin_command` with an empty command for the manual.
 
-Every tool follows omp's standard `ToolDefinition` shape: `approval` gates
+Every tool is registered with omp in its standard shape: `approval` gates
 whether omp prompts before running it (`tools.approvalMode` /
 `tools.approval.<name>` in your omp config), every tool has its own transcript
 renderer, and every `rizin_command` read becomes a `re.evidence` entry — see
-[`workflow.md`](workflow.md). All tools honor cancellation.
+[`workflow.md`](workflow.md). Parameters are checked by the engine against the
+tool's declaration, and a call that does not fit is refused in the engine's
+words. A cancelled call leaves at its next wait on rizin, and rizin keeps its
+analysis; an external program a tool started (`rz-*`, a triage scanner) is
+left to finish or reach its time limit.
 
-Output larger than the context cap (2000 lines or 50 KB) is truncated for the
+Output larger than the cap (2000 lines or 48 KiB of body) is truncated for the
 model and saved in full to the session's artifact store; the result ends with
 `[Output truncated: … Full output: artifact://<id>]` and the model can `read`
-that artifact. `*j` command results are a single compact JSON array.
+that artifact.
 
 ## Session (3 tools)
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
-| `open_binary` | `read` | `path: string` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
+| `open_binary` | `read` | `path`, `arch?`, `bits?`, `base?`, `map?`, `format?` | Spawns rizin on a binary and runs full analysis (`aaa`), streaming progress. Re-applies annotations this branch already recorded for the same binary. Every other RE tool acts on whichever binary was most recently opened — a `task` subagent must call this first. |
 | `export_project` | `exec` | `file?` | Saves the current analysis — functions, names, comments, flags, types, including every annotation omp-re applied — to a rizin project (`.rzdb`, via `Ps`) so it can be opened in interactive rizin or Cutter (`rizin -p <file>`). Written to omp-re's output directory, never the sample. Export only: omp-re manages analysis state through its own session log and does not load projects. |
-| `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable — reopen to drop the map. |
+| `map_file` | `exec` | `path, addr, perm?` | Opens an additional file into the current session at a virtual address (`o <file> <addr>`) alongside the primary binary — overlay a dumped/unpacked region, or map a library for cross-module analysis. Mapped read-only (the file on disk is never written); the map is re-applied on resume/respawn (recorded like analysis passes). To analyze a dump on its own, use `open_binary`. Not undoable: the map stays with this binary for the session, reopening included; only a branch from before the call is without it. |
 
 ## Reading the binary — `rizin_command` (one tool)
 
@@ -105,8 +113,9 @@ The model's own conclusions, recorded as report claims (`re.finding` entries).
 A finding is gated when it is recorded, while the model can still act on the
 result, and again at `/re report`. It lands in the report's **Findings**
 section and in the verification manifest, and `/re carry --inherit` re-proves
-it on the next build. Neither tool reads the binary, and neither records
-evidence.
+it on the next build. `record_finding` and `retract_finding` read nothing of
+the binary and record no evidence; `adopt_finding` re-runs the commands it is
+given, and those reads are evidence like any other.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -149,9 +158,9 @@ anything reaches rizin:
 
 `rizin_cli` fronts the standalone `rz-*` executables that ship beside rizin,
 for analysis the in-core commands don't cover. It registers only when those
-binaries are found next to the configured rizin (or on PATH). Invoked by argv
-through omp's `exec` — no shell — so there is no `;`/`|`/`$()` surface; the
-gating is on the flags.
+binaries are found next to the configured rizin (or on PATH). The engine
+starts them by argv — no shell — so there is no `;`/`|`/`$()` surface; the
+gating is on the flags. A run is ended after 180 s.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
@@ -200,12 +209,24 @@ functions. List the built-in database with `rizin_command Flt`.
 or format-specific passes it skips (book: analysis/code_analysis), each
 additive — it finds functions, xrefs, names, or types; none deletes. The pass
 is recorded and re-run on resume/respawn (before signatures and annotations,
-so each layer sees the one before it), not as an undoable annotation —
-reopen the binary to return to the baseline.
+so each layer sees the one before it), not as an undoable annotation. A pass
+stays with the binary for the session, reopening included; only a branch from
+before the call is without it.
 
 | Tool | Approval | Parameters | What it does |
 | --- | --- | --- | --- |
 | `analyze` | `exec` | `pass` (enum) | Runs one pass and reports the function count before/after. `calls` (`aac`), `xrefs` (`aar`), `pointers` (`aav`), `preludes` (`aap` — recovers functions in stripped code), `all_functions` (`aaf`), `data_refs` (`aad`), `autoname` (`aan`), `types` (`aaft`), `struct_offsets` (`aat`), `golang` (`aalg`), `objc` (`aalor`), `rtti_classes` (`avrr` — C++ classes from RTTI), `emulate_functions` (`aaef` — thorough, slow). A pass that doesn't apply (e.g. `golang` on a non-Go binary) surfaces rizin's own message and records nothing. |
+
+## Emulation — `rizin_emulate` (1 tool)
+
+Runs the target's own code in rizin's RzIL VM. No process is started and the
+file is never written; the VM's state lives in the analysis session. External
+calls and syscalls are not emulated, so keep runs small — a decryptor loop, an
+argument computation.
+
+| Tool | Approval | Parameters | What it does |
+| --- | --- | --- | --- |
+| `rizin_emulate` | `exec` | `action` (enum), `addr?`, `count?`, `name?`, `value?`, `bytes?` | `init` starts the VM at `addr`; `step` runs `count` instructions and returns the register, flag and PC writes; `step_until` runs until the PC equals `addr`; `vars` is the whole VM state as JSON; `set_var` sets VM variable `name` to `value`; `set_mem` writes hex `bytes` into the VM's memory at `addr` (an in-memory overlay). |
 
 ## Dynamic analysis — `rizin_debug` (1 tool, opt-in)
 
@@ -273,16 +294,19 @@ at `OMPRE_DEBUG_TIMEOUT_MS` (60 s default). The debugger has
 no facilities for evading detection or hiding the debuggee; see
 [`SECURITY.md`](../SECURITY.md#rizin_debug).
 
-`dump_memory` is the one tool that emits a file (the sample itself is still
-never written). Dumps go to `OMPRE_OUTPUT_DIR` — or `<tmpdir>/omp-re-out` when
-unset — under a bare filename it validates; it never writes to a path the
-model chose, so it can't traverse out of that directory or clobber an
+`dump_memory` writes a file, as `trace_save`, `export_project` and
+`create_signature` do (the sample itself is still never written). All of them
+go to `OMPRE_OUTPUT_DIR` — or `<tmpdir>/omp-re-out` when
+unset — under a bare filename the engine validates; none writes to a path the
+model chose, so none can traverse out of that directory or clobber an
 arbitrary file.
 
 ## Triage tier (up to 4 tools, conditional on PATH)
 
-Each runs against the currently open binary via omp's `exec`, so cancelling
-the tool call stops the scanner.
+Each is started by the engine, by argv, against the currently open binary,
+and is ended at its time limit (capa 300 s, floss 600 s). Their results are
+not recorded as evidence: follow a lead with `rizin_command` before a finding
+cites it.
 
 | Tool | Approval | Requires on PATH | Parameters | What it does |
 | --- | --- | --- | --- | --- |

@@ -4,58 +4,50 @@
  *
  * - `renderCall`/`renderResult` (the ANSI transcript): a compact call line
  *   (title + the address/query it targets), and a result block with a status
- *   icon, the tool's own header line ("206 functions", "decompiled 0x4da0
- *   (pdg)"), and a collapsible body. Decompiler output is syntax-highlighted
- *   as C with omp's own highlighter.
+ *   icon, the tool's own header line and a collapsible body.
  * - `describeCall`/`describeResult` (Tern and other TSP terminals): the same
  *   facts as a native tool view — head with title, target, and meta; the body
  *   as a `code` node the terminal highlights and clamps itself.
  *
- * Without these, omp shows RE tools as a generic card of raw text. Rendering
- * is presentation only: the model still receives the full text content, and
- * nothing here feeds the evidence store.
+ * Without these, omp shows RE tools as a generic card of raw text. How one
+ * tool is shown is the engine's to say (the `render` hint of its
+ * description); this module draws from the hint, the call's arguments and
+ * the result. The model still receives the full text.
  */
 import { highlightCode, type Theme, type ToolRenderResultOptions } from "@oh-my-pi/pi-coding-agent";
-import { Text, type Component } from "@oh-my-pi/pi-tui";
-import { code, span, text } from "@oh-my-pi/pi-tui/native/describe";
+import { code, span, Text, text, type Component } from "@oh-my-pi/pi-tui";
+// The native tool view's types are not in pi-tui's root module; `./tools` is the entry its package.json exports for them.
 import type { NativeToolHead, NativeToolView } from "@oh-my-pi/pi-tui/tools";
-import type { ReToolDetails } from "./format.ts";
+import type { Details, Render } from "./protocol.ts";
 
 /**
  * How every RE tool is presented: `discoverable`, never `essential`. omp mounts
  * a discoverable tool as an `xd://<name>` device instead of putting its schema
- * in the model's top-level tool list, so 64 RE tools cost the context nothing
+ * in the model's top-level tool list, so the RE tools cost the context nothing
  * until they are used. The model reads a device's documentation with
  * `read xd://<name>`, calls it directly with `write xd://<name>`, or — to
  * compose, loop, and build its own helpers — from omp's `eval` tool as
  * `await tool.<name>({ ... })`. Every one of those paths goes through omp's own
- * tool wrapper: the tool's approval tier, and the `tool_call` / `tool_result`
- * events the audit log and the evidence store hook. (With omp's `tools.xdev`
- * setting off, omp lists discoverable tools top-level instead.)
+ * tool wrapper: the tool's approval tier and omp's tool events. (With omp's
+ * `tools.xdev` setting off, omp lists discoverable tools top-level instead.)
  */
 export const RE_LOAD_MODE = "discoverable" as const;
 
-/** How a result body is shown: "code" highlights C (decompiler output), "json" highlights JSON and stays collapsed, "text" shows plain lines, "none" shows only the header. */
-export type BodyStyle = "code" | "json" | "text" | "none";
-
-export interface RenderSpec {
-	/** Short title shown in the transcript, e.g. "Decompile". */
-	title: string;
-	/** Which argument names the call's subject (address, query, path), shown after the title. */
-	subject?: string;
-	body: BodyStyle;
-}
+/**
+ * `Render` is how the engine says one tool is shown (the protocol's `render`): its title, the argument that names the
+ * call's subject (address, query, path), shown after the title, and its body — "json" highlights JSON and stays
+ * collapsed, "text" shows plain lines, "none" shows only the header.
+ */
+type BodyStyle = Render["body"];
 
 const COLLAPSED_LINES = 6;
 const EXPANDED_LINES = 400;
 /** Error gist length in a native head; the full message goes in the body. */
 const ERROR_GIST_CHARS = 120;
 
-type RenderArgs = Record<string, unknown>;
-
 interface RenderableResult {
 	content: { type: string; text?: string }[];
-	details?: ReToolDetails;
+	details?: Details;
 	isError?: boolean;
 }
 
@@ -64,125 +56,105 @@ function firstText(result: RenderableResult): string {
 	return block?.text ?? "";
 }
 
-function callLine(spec: RenderSpec, args: RenderArgs | undefined, theme: Theme): string {
+function subjectOf(spec: Render, args: unknown): string | undefined {
+	const subject = spec.subject && args !== null && typeof args === "object" ? (args as Record<string, unknown>)[spec.subject] : undefined;
+	return typeof subject === "string" && subject.length > 0 ? subject : undefined;
+}
+
+function callLine(spec: Render, args: unknown, theme: Theme): string {
 	const parts = [theme.fg("toolTitle", theme.bold(spec.title))];
-	const subject = spec.subject ? args?.[spec.subject] : undefined;
-	if (typeof subject === "string" && subject.length > 0) parts.push(theme.fg("accent", subject));
-	const meta: string[] = [];
-	for (const key of ["offset", "limit", "filter"]) {
-		const value = args?.[key];
-		if (value !== undefined && value !== "") meta.push(`${key}:${String(value)}`);
-	}
-	if (meta.length > 0) parts.push(theme.fg("dim", meta.join(" ")));
+	const subject = subjectOf(spec, args);
+	if (subject) parts.push(theme.fg("accent", subject));
 	return parts.join(" ");
 }
 
-/** Split the content text into the header the details recorded and the body below it. */
-function splitBody(text: string, details: ReToolDetails | undefined): { header: string; body: string } {
-	const header = details?.header ?? text.split("\n")[0] ?? "";
-	if (text.startsWith(`${header}\n`)) return { header, body: text.slice(header.length + 1) };
-	if (text.startsWith(header)) return { header, body: text.slice(header.length).replace(/^\s*\n?/, "") };
-	const nl = text.indexOf("\n");
-	return nl === -1 ? { header: text, body: "" } : { header: text.slice(0, nl), body: text.slice(nl + 1) };
+/**
+ * A result's text as it is drawn: its first line is its header and the rest the body. A result that left an evidence
+ * record (`details.evidenceId`) ends with one line of its own that names the record; that line is not the tool's
+ * output and is shown beside the header, so a JSON body is JSON.
+ */
+function splitBody(text: string, details: Details | undefined): { header: string; body: string; tag?: string } {
+	const first = text.indexOf("\n");
+	if (first === -1) return { header: text, body: "" };
+	const last = text.lastIndexOf("\n");
+	if (details?.evidenceId === undefined) return { header: text.slice(0, first), body: text.slice(first + 1) };
+	return { header: text.slice(0, first), body: last > first ? text.slice(first + 1, last) : "", tag: text.slice(last + 1) };
 }
 
 /** omp's highlighter, degrading to plain lines: a renderer must never be the thing that breaks the transcript. */
-function highlighted(code: string, lang: string, theme: Theme): string[] {
+function highlighted(source: string, lang: string, theme: Theme): string[] {
 	try {
-		return highlightCode(code, lang, theme);
+		return highlightCode(source, lang, theme);
 	} catch {
-		return code.split("\n").map((line) => theme.fg("toolOutput", line));
+		return source.split("\n").map((line) => theme.fg("toolOutput", line));
 	}
 }
 
-/** Drop the trailing truncation/artifact notice; the header meta already says so. */
-function withoutNotice(body: string): string {
-	return body.replace(/\n\n\[Output truncated:[^\n]*\]$/, "");
-}
-
-function bodyLines(style: BodyStyle, body: string, details: ReToolDetails | undefined, theme: Theme): string[] {
+function bodyLines(style: BodyStyle, body: string, theme: Theme): string[] {
 	if (style === "none" || body.trim() === "") return [];
-	const trimmed = withoutNotice(body);
-	if (style === "code" && details?.decompiler && details.decompiler !== "disasm") return highlighted(trimmed, "c", theme);
-	if (style === "json") return highlighted(trimmed, "json", theme);
-	return trimmed.split("\n").map((line) => theme.fg("toolOutput", line));
+	if (style === "json") return highlighted(body, "json", theme);
+	return body.split("\n").map((line) => theme.fg("toolOutput", line));
 }
 
-function nativeHead(spec: RenderSpec, args: RenderArgs | undefined, meta: NativeToolHead["meta"] = []): NativeToolHead {
-	const subject = spec.subject ? args?.[spec.subject] : undefined;
-	return {
-		title: spec.title,
-		...(typeof subject === "string" && subject.length > 0 ? { target: subject } : {}),
-		meta,
-	};
+function nativeHead(spec: Render, args: unknown, meta: NativeToolHead["meta"] = []): NativeToolHead {
+	const subject = subjectOf(spec, args);
+	return { title: spec.title, ...(subject ? { target: subject } : {}), meta };
 }
 
-/** The result body as a native node: C for decompiler output, JSON for list payloads, plain text otherwise. */
-function nativeBody(style: BodyStyle, body: string, details: ReToolDetails | undefined) {
+function nativeBody(style: BodyStyle, body: string) {
 	if (style === "none" || body.trim() === "") return undefined;
-	const source = withoutNotice(body);
-	if (style === "code" && details?.decompiler && details.decompiler !== "disasm") return code(source, { lang: "c", preview: { lines: 12 } });
-	if (style === "json") return code(source, { lang: "json", preview: { lines: 6 } });
-	return code(source, { preview: { lines: 12 } });
+	if (style === "json") return code(body, { lang: "json", preview: { lines: 6 } });
+	return code(body, { preview: { lines: 12 } });
 }
 
 /** renderCall/renderResult and describeCall/describeResult for one RE tool, following the shape omp's built-in tools use. */
-export function reRenderers(spec: RenderSpec) {
+export function reRenderers(spec: Render) {
 	return {
-		renderCall(args: RenderArgs, _options: ToolRenderResultOptions, theme: Theme): Component {
+		renderCall(args: unknown, _options: ToolRenderResultOptions, theme: Theme): Component {
 			return new Text(callLine(spec, args, theme), 0, 0);
 		},
 
-		renderResult(result: RenderableResult, options: ToolRenderResultOptions, theme: Theme, args?: RenderArgs): Component {
-			const text = firstText(result);
+		renderResult(result: RenderableResult, options: ToolRenderResultOptions, theme: Theme, args?: unknown): Component {
+			const shown = firstText(result);
 			if (options.isPartial) {
 				const frames = theme.spinnerFrames;
-				const spinner =
-					options.spinnerFrame !== undefined && frames.length > 0
-						? frames[options.spinnerFrame % frames.length]
-						: theme.styledSymbol("status.running", "accent");
-				return new Text(`${spinner} ${theme.fg("muted", text || `${spec.title}…`)}`, 0, 0);
+				const spinner = options.spinnerFrame !== undefined && frames.length > 0 ? frames[options.spinnerFrame % frames.length] : theme.styledSymbol("status.running", "accent");
+				return new Text(`${spinner} ${theme.fg("muted", shown || `${spec.title}…`)}`, 0, 0);
 			}
 			if (result.isError) {
-				const message = text.split("\n")[0] || "failed";
+				const message = shown.split("\n")[0] || "failed";
 				return new Text(`${theme.styledSymbol("status.error", "error")} ${theme.fg("error", message)}`, 0, 0);
 			}
 
 			const details = result.details;
-			const { header, body } = splitBody(text, details);
+			const { header, body, tag } = splitBody(shown, details);
 			const meta: string[] = [];
-			if (details?.decompiler === "disasm") meta.push(theme.fg("warning", "disassembly only"));
 			if (details?.truncated) meta.push(theme.fg("warning", "truncated"));
 			if (details?.artifactId) meta.push(theme.fg("dim", `artifact://${details.artifactId}`));
-			const subject = spec.subject ? args?.[spec.subject] : undefined;
-			const headLine = [
-				theme.styledSymbol("status.success", "success"),
-				theme.fg("toolTitle", header),
-				...(typeof subject === "string" && !header.includes(subject) ? [theme.fg("dim", `(${subject})`)] : []),
-				...meta,
-			].join(" ");
+			if (tag) meta.push(theme.fg("dim", tag));
+			const subject = subjectOf(spec, args);
+			const headLine = [theme.styledSymbol("status.success", "success"), theme.fg("toolTitle", header), ...(subject && !header.includes(subject) ? [theme.fg("dim", `(${subject})`)] : []), ...meta].join(" ");
 
-			const lines = bodyLines(spec.body, body, details, theme);
+			const lines = bodyLines(spec.body, body, theme);
 			const limit = options.expanded ? EXPANDED_LINES : spec.body === "json" ? 0 : COLLAPSED_LINES;
-			const shown = lines.slice(0, limit);
-			const out = [headLine, ...shown];
-			const hidden = lines.length - shown.length;
+			const visible = lines.slice(0, limit);
+			const out = [headLine, ...visible];
+			const hidden = lines.length - visible.length;
 			if (hidden > 0) out.push(theme.fg("dim", `… ${hidden} more line${hidden === 1 ? "" : "s"}${options.expanded ? "" : " (expand to show)"}`));
 			return new Text(out.join("\n"), 0, 0);
 		},
 
-		describeCall(args: RenderArgs): NativeToolView {
+		describeCall(args: unknown): NativeToolView {
 			return { tool: nativeHead(spec, args), inline: true };
 		},
 
-		describeResult(result: RenderableResult, options: ToolRenderResultOptions, args?: RenderArgs): NativeToolView {
-			const textContent = firstText(result);
+		describeResult(result: RenderableResult, options: ToolRenderResultOptions, args?: unknown): NativeToolView {
+			const shown = firstText(result);
 			if (options.isPartial) {
-				const progress = textContent || `${spec.title}…`;
-				return { tool: nativeHead(spec, args, [[span(progress, "muted", { fx: "shimmer" })]]), inline: true };
+				return { tool: nativeHead(spec, args, [[span(shown || `${spec.title}…`, "muted", { fx: "shimmer" })]]), inline: true };
 			}
 			if (result.isError) {
-				const full = textContent.trim() || "failed";
+				const full = shown.trim() || "failed";
 				const first = full.split("\n", 1)[0]!.trim();
 				const gist = first.length > ERROR_GIST_CHARS ? `${first.slice(0, ERROR_GIST_CHARS - 1)}…` : first;
 				return {
@@ -193,17 +165,15 @@ export function reRenderers(spec: RenderSpec) {
 				};
 			}
 			const details = result.details;
-			const { header, body } = splitBody(textContent, details);
+			const { header, body, tag } = splitBody(shown, details);
 			const meta = [
 				header,
-				...(details?.decompiler === "disasm" ? [[span("disassembly only", "warning")]] : []),
 				...(details?.truncated ? [[span("truncated", "warning")]] : []),
 				...(details?.artifactId ? [[span(`artifact://${details.artifactId}`, "muted")]] : []),
+				...(tag ? [[span(tag, "muted")]] : []),
 			];
-			const node = nativeBody(spec.body, body, details);
-			return node
-				? { tool: nativeHead(spec, args, meta), body: [node], ...(details?.decompiler === "disasm" ? { tone: "warning" as const } : {}) }
-				: { tool: nativeHead(spec, args, meta), inline: true };
+			const node = nativeBody(spec.body, body);
+			return node ? { tool: nativeHead(spec, args, meta), body: [node] } : { tool: nativeHead(spec, args, meta), inline: true };
 		},
 	};
 }

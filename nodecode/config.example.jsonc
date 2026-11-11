@@ -1,23 +1,24 @@
 // The section ~/.nodecode/config.jsonc may carry for this cell —
 // documentation, not config: the folder gets pushed and holds no secret.
-// The declaration in nodecode/cell.lisp is the authority; this is an
-// illustration of it. A present section is enabled; "enabled": false vetoes
-// it. Every member is optional.
+// Written from the declarations in engine/host.lisp and nodecode/cell.lisp,
+// and the Lisp suite checks they agree. A present section is enabled;
+// "enabled": false vetoes it. Every member is optional. Where a member names
+// an environment variable, that variable is read while the member is left at
+// its default.
 {
   "re": {
     "enabled": true,
-    // The rizin to run when it is not the one on PATH.
+    // The rizin to run when it is not the one on PATH. Environment: OMPRE_RIZIN_PATH.
     "rizin_path": "",
-    // Where session records, evidence, the audit log and reports go. A relative folder is under the home.
+    // Where session records, evidence, the audit log and reports are kept; a relative folder is under the home.
     "state_dir": "omp-re/",
-    // Directories binaries and other input files may be opened from. Empty: any file the organism can read.
+    // Directories binaries and other input files may be opened from; empty allows any file the organism can read. Environment: OMPRE_ALLOWED_DIRS.
     "allowed_dirs": [],
-    // Offers rizin_debug, which EXECUTES the binary under analysis. Leave off outside a sandbox.
+    // Offer rizin_debug, which EXECUTES the binary under analysis on this machine; leave off outside a sandbox. Environment: OMPRE_ENABLE_DEBUGGER.
     "debugger": false,
     // Close the rizin process of a session unused this long; its next call restores it.
     "idle_minutes": 30,
-    // Ask the model, in a side question, whether a finding's (and a report claim's) evidence supports it.
-    // Each question is a model turn and costs tokens; false records findings and writes reports unaudited.
+    // Ask the model, in a side question that costs tokens, whether a finding's or a report claim's evidence supports it; off records them unaudited.
     "audit": true,
     // How long a support audit waits for its answer before the claim goes unaudited.
     "audit_seconds": 120

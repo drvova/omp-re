@@ -2,13 +2,14 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Config, a sibling top-level key of ~/.nodecode/config.jsonc:
-;;;;   "re": {"rizin_path": "", "state_dir": "omp-re/",
-;;;;          "allowed_dirs": [], "debugger": false, "idle_minutes": 30,
-;;;;          "audit": true, "audit_seconds": 120}
-;;;; A vetoed section ("enabled": false) installs nothing. There is no secret
-;;;; here: the audit log's signing key stays the engine's own environment
-;;;; variable, OMPRE_AUDIT_HMAC_KEY.
+;;;; The nodecode host: what the engine's port (host.lisp) asks, answered by
+;;;; the organism, installed at start and taken back at stop. The `re'
+;;;; section of ~/.nodecode/config.jsonc is declared from the engine's own
+;;;; table of settings (host.lisp, +SETTINGS+) and this host's own
+;;;; (+HOST-SETTINGS+); config.example.jsonc shows it. A vetoed section
+;;;; ("enabled": false) installs nothing. There is no secret in it: the audit
+;;;; log's signing key stays the engine's own environment variable,
+;;;; OMPRE_AUDIT_HMAC_KEY.
 
 (in-package #:nodecode-re)
 
@@ -68,57 +69,85 @@ The operator has the same lines as /re: /re open <path>, /re status, /re report.
   "What (help :re) answers while the cell runs: the omp plugin's re-triage
 skill, in the cell's voice.")
 
+(defparameter +nodecode-voice+
+  '((:open-first . "use /re open <path>, (re:open \"path\") or the open_binary tool first")
+    (:list-tools . " — (re:tools) lists them")
+    (:read-more . "read the rest with (re:cmd …)")
+    (:debugger-switch . "the re section's debugger setting")
+    (:debugger-enable . "set the re section's debugger to true")
+    (:allowed-dirs . "the re section's allowed_dirs")
+    (:rizin-path . "set the re section's rizin_path (or OMPRE_RIZIN_PATH)")
+    (:launcher . "An organism launched from a desktop")
+    (:slash . "(re:slash \"~a\")")
+    (:manual-start . "omp-re — reverse engineering with rizin, driven from code.
+
+You observe the binary by running rizin's own commands through one tool,
+rizin_command, which eval reaches as (re:cmd \"command\" &optional addr), or as
+(re:json \"command\" &optional addr) for a *j command's decoded data. Define
+helpers in eval and reuse them: what you define there stays.
+
+Start here
+  1. (re:open \"/path/to/binary\")        — spawn rizin + analyze (aaa).
+     Every command acts on the binary opened last in this session.
+  2. (re:call \"rizin_help\" :query \"<prefix or keywords>\")  — find the command
+     (e.g. \"entropy\", \"call graph\", \"pdf\") and its exact arguments for THIS rizin.
+  3. (re:cmd \"aflj\")                     — run it. Put an address in the second
+     argument (sent as `@ addr`), never `@` in the command.")
+    (:manual-results . "How a result reads
+  A read is recorded as evidence, so its text is: the header line (rizin> <cmd>),
+  the body (JSON for a *j command), then a trailing [evidence …] tag line.
+  (re:json …) parses the body for you and answers the evidence id as its second
+  value. A big list (aflj, izj on a large binary) is cut at the size cap and ends
+  with [Output truncated … Full output: <file>]: (re:json …) reads that file
+  itself; otherwise read it, or run a narrower command.")
+    (:manual-tools . "The other (stateful) tools — (re:call \"<name>\" :key value …); (re:tools) lists
+them and (re:doc \"<name>\") shows one's arguments")
+    (:manual-config . "Config
+  the re section of config.jsonc (rizin_path, debugger, state_dir) ·
+  OMPRE_DECOMPILER (pdg/pdd order) · OMPRE_AUDIT_HMAC_KEY.  (re:status) for live state."))
+  "The engine's phrases (engine/host.lisp, +VOICE+) that this host says its
+own way: the operator's settings are a config section, and the model reaches
+the tools as verbs in eval.")
+
 ;;; --- the operator's command ----------------------------------------------------------
 
 (defun re-dialog ()
-  "What /re offers typed alone: a row a thing it does. A command is its name
-— nobody types after it — so the lines that need a word ask for it."
+  "What /re offers typed alone: a row a thing it does, as the subcommands
+declare them. A command is its name — nobody types after it — so the lines
+that need a word ask for it."
   (nle:list-dialog
    :title "Reverse engineering"
    :summary "rizin, with every read recorded as evidence"
-   :rows (list (nle:ask-row "Open a binary" "Path" "/re open" :placeholder "/path/to/binary" :verb "open")
-               (nle:run-row "Status" "/re status" :detail "rizin, the open binary, evidence and findings")
-               (nle:run-row "Functions" "/re functions")
-               (nle:run-row "Strings" "/re strings")
-               (nle:run-row "Imports" "/re imports")
-               (nle:run-row "Evidence" "/re evidence" :detail "what has been observed on this branch")
-               (nle:ask-row "Cite evidence" "Evidence id" "/re cite" :placeholder "1a2b3c4d" :verb "cite")
-               (nle:run-row "Findings" "/re findings" :detail "the conclusions recorded, each on its evidence")
-               (nle:run-row "Verify" "/re verify" :detail "re-run the evidence and compare")
-               (nle:ask-row "Write the report" "File" "/re report" :placeholder "analysis.md" :verb "write")
-               (nle:run-row "Undo the last annotation" "/re undo")
-               (nle:run-row "Turn the tools off" "/re off")
-               (nle:run-row "Turn the tools on" "/re on")
-               (nle:run-row "Help" "/re help"))))
+   :rows (loop for command in (sort (remove-if-not (lambda (command) (jget command "row"))
+                                                   (coerce (engine-commands) 'list))
+                                    #'< :key (lambda (command) (jget command "row" "position")))
+               for row = (jget command "row")
+               for line = (format nil "/re ~a" (jstring command "name"))
+               collect (if (jstring row "ask")
+                           (nle:ask-row (jstring row "label") (jstring row "ask") line
+                                        :placeholder (jstring row "placeholder")
+                                        :verb (jstring row "verb"))
+                           (apply #'nle:run-row (jstring row "label") line
+                                  (and (jstring row "detail") (list :detail (jstring row "detail"))))))))
 
 (defun run-slash (&optional args session-id)
   "One /re invocation for the session it was typed in: typed alone, the
-dialog of what it offers; with a line, the engine's /re answer, and — where
-the caller has an input box — the draft a line such as `cite' leaves in it."
+dialog of what it offers; with a line, the engine's answer, and — where the
+caller has an input box and the line offers a draft — the draft put in it."
   (if (nle:bare-args-p args)
       (values "Reverse engineering with rizin" (re-dialog))
-      (handler-case
-          (let* ((line (trimmed args))
-                 (session-id (if (and (stringp session-id) (plusp (length session-id))) session-id "default"))
-                 (words (words line))
-                 (*offered-draft* (if (member :draft nle:*slash-effects*) nil :unbound))
-                 (text (values
-                        (run-slash-line
-                         (find-session session-id)
-                         ;; A path typed after `open' reads against the session's directory, as (re:open) reads it.
-                         (if (and (string-equal (first words) "open") (rest words))
-                             (format nil "open ~a"
-                                     (session-path (trimmed (subseq line (length (first words)))) session-id))
-                             line)))))
-            (if (stringp *offered-draft*)
-                (values text nil (list (list :draft *offered-draft*)))
-                text))
-        (re-error (condition)
-          (format nil "re: ~a" condition)))))
+      (let* ((answer (engine-command (if (and (stringp session-id) (plusp (length session-id)))
+                                         session-id
+                                         +default-session+)
+                                     args))
+             (draft (jget answer "draft")))
+        (if (and draft (member :draft nle:*slash-effects*))
+            (values (jstring draft "notice") nil (list (list :draft (jstring draft "text"))))
+            (jstring answer "text")))))
 
 ;;; --- the support auditor ---------------------------------------------------------------
-;;; audit-claims.lisp asks *CLAIM-JUDGE* one question and reads the reply.
-;;; Here the question goes to the model the way nodecode's cell API says a
+;;; The engine's claim audit asks its host one question (the port's :JUDGE)
+;;; and reads the reply. Here the question goes to the model the way nodecode's cell API says a
 ;;; side question is asked: NLE:SUBMIT to a session of the cell's own, with
 ;;; no tool the turn may call. omp's judge is a turn with no history, so the
 ;;; session is not a fork: it hangs under the session that asked as a
@@ -197,7 +226,7 @@ there the question is not asked, and the report says its claims went
 unaudited and how to have them audited."
   (let ((settings *re*)
         (origin (getf (nle:turn) :session-id)))
-    (cond ((not (and settings (setting :audit))) nil)
+    (cond ((not settings) nil)
           ((not (nlk:store-open-p)) nil)
           ((null (nle:turn))
            (values nil "a /re line typed as a command does not wait for the audit's side question; (re:slash \"report\") from eval asks it"))
@@ -210,7 +239,7 @@ unaudited and how to have them audited."
                               (if parent
                                   (nlk:create-session :parent parent :detached t
                                                       :cwd (if (pathnamep directory)
-                                                               (native directory)
+                                                               (uiop:native-namestring directory)
                                                                directory))
                                   (nlk:create-session))))
                       (turn (progn
@@ -246,69 +275,90 @@ unaudited and how to have them audited."
 
 (defun start ()
   "Nothing runs until a binary is opened: a home that never reverses one
-never starts rizin. What start owes is the way back — every session's
-process closed on stop — and a worker that closes the rizin of a session
-nothing has called for idle_minutes, which loses nothing: the session's
-record is on disk and its next call restores it."
-  (setf *state-directory*
-        (lambda ()
-          ;; A :directory value may arrive as a string or a pathname, home-
-          ;; relative or expanded; all of them end up under the home.
-          (let* ((value (and *re* (setting :state-dir)))
-                 (named (trimmed (if (pathnamep value) (native value) value))))
-            (if (plusp (length named))
-                (merge-pathnames (uiop:ensure-directory-pathname (nlk:expand-home named)) (nlk:home))
-                (nlk:home "omp-re/"))))
-        ;; Read through *RE*, not SETTING: a stopped cell answers "unset", it does not refuse.
-        *configured-rizin* (lambda ()
-                             (let ((value (and *re* (setting :rizin-path))))
-                               (if (pathnamep value) (native value) value)))
-        *debugger-setting* (lambda () (and *re* (setting :debugger)))
-        *allowed-directories* (lambda () (and *re* (setting :allowed-dirs)))
-        *current-turn* (lambda () (getf (nle:turn) :turn-id))
-        ;; Which turns are on a session's branch, across its fork lineage:
-        ;; what makes evidence and annotations follow /tree, /redo and /fork.
-        *branch-view* (lambda (session-id)
-                        (when (nlk:store-open-p)
-                          (values (nlk:session-visible-turn-set session-id)
-                                  (nlk:session-lineage session-id))))
-        ;; What lasts is a keyed notice: it stands in /cells and at the tail
-        ;; of the model's prompt until it is replaced or the cell stops.
-        *notify* (lambda (text &key (level :warning))
-                   (nle:notice text :level level :key "nodecode-re"))
-        ;; Who answers the support audit's question (audit-claims.lisp).
-        *claim-judge* #'ask-judge)
+never starts rizin. What start owes is the way back: the port cleared and
+every session's process closed on stop."
+  (install-host
+   ;; Read through *RE*, not SETTING: a stopping cell answers "unset", it does not refuse.
+   :setting (lambda (name) (if *re* (values (setting name) t) (values nil nil)))
+   :home (lambda () (nlk:home))
+   :voice (lambda (key) (cdr (assoc key +nodecode-voice+)))
+   :turn #'nle:turn
+   ;; A session nodecode does not know — the one a call outside any turn is
+   ;; for — has no directory, and its paths are read as written.
+   :directory (lambda (session-id) (ignore-errors (nlk:find-session-cwd session-id)))
+   :entries #'branch-entries
+   :append-entry #'turn-stamped-append
+   ;; What lasts is a keyed notice: it stands in /cells and at the tail of
+   ;; the model's prompt until it is replaced or the cell stops. So only
+   ;; what is wrong is one, at the one level a notice has here; what the
+   ;; engine says for information is a line on the organism's log.
+   :notify (lambda (text level)
+             (if (eq level :info)
+                 (warn "~a" text)
+                 (nle:notice text :level :warning :key "nodecode-re")))
+   :judge #'ask-judge)
   (nle:on-stop (lambda () (nle:notice nil :key "nodecode-re")))
-  (nle:on-stop (lambda ()
-                 (setf *claim-judge* nil)
-                 (stop-audits)))
-  (nle:on-stop #'shutdown-sessions)
-  (let* ((idle (* 60 (setting :idle-minutes)))
-         (worker (nlk:worker-start "nodecode-re idle sessions"
-                                   (lambda () (reap-idle-sessions idle))
-                                   :wake 60)))
-    (nle:on-stop (lambda () (nlk:worker-stop worker)))))
+  (nle:on-stop #'clear-host)
+  (nle:on-stop #'stop-audits)
+  (nle:on-stop #'shutdown-sessions))
 
-(nle:define-cell re
-  (:section ("re")
-    (:guide "install rizin (https://rizin.re); nothing else is required. (re:status) says what the engine found")
-    ("rizin_path" :path :default ""
-     :doc "the rizin to run when it is not the one on PATH (the engine's OMPRE_RIZIN_PATH)")
-    ("state_dir" :directory :default "omp-re/"
-     :doc "where session records, evidence, the audit log and reports are kept; a relative folder is under the home")
-    ("allowed_dirs" :list :default '()
-     :doc "directories binaries and other input files may be opened from; empty allows any file the organism can read")
-    ("debugger" :boolean :default nil
-     :doc "offer rizin_debug, which EXECUTES the binary under analysis on this machine; leave off outside a sandbox")
-    ("idle_minutes" :integer :default 30 :min 1
-     :doc "close the rizin process of a session unused this long; its next call restores it")
-    ("audit" :boolean :default t
-     :doc "ask the model, in a side question that costs tokens, whether a finding's or a report claim's evidence supports it; off records them unaudited")
-    ("audit_seconds" :integer :default 120 :min 1
-     :doc "how long a support audit waits for its answer before the claim goes unaudited"))
-  (:help :re
-         "re: reverse engineering with rizin - (re:open \"path\"), (re:cmd \"aflj\"), evidence-backed findings - (help :re)"
-         +primer+)
-  (:command "re" 'run-slash
-            :description "Reverse engineering with rizin: open <path>, status, functions, findings, report")
-  (:start #'start))
+;;; --- the section -----------------------------------------------------------------------
+
+;; Evaluated when this file is compiled too: the cell's declaration below is
+;; a macro call written from them.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter +host-settings+
+    '((:audit-seconds :key "audit_seconds" :type :integer :default 120 :min 1
+       :doc "how long a support audit waits for its answer before the claim goes unaudited"))
+    "The settings this host reads itself, declared as the engine declares its
+  own (engine/host.lisp, +SETTINGS+): how long the side question may take is
+  the asker's to bound.")
+
+  (defun section-settings ()
+    "Every member of the `re' section: the engine's, then this host's."
+    (remove-if-not (lambda (setting) (getf (rest setting) :key))
+                   (append +settings+ +host-settings+)))
+
+  (defun section-fields ()
+    "The members of the `re' section as a nodecode cell declares them:
+  (KEY TYPE :default FORM [:min N] :doc TEXT)."
+    (loop for (nil . options) in (section-settings)
+          collect `(,(getf options :key) ,(getf options :type)
+                    :default ,(getf options :default)
+                    ,@(when (getf options :min) (list :min (getf options :min)))
+                    :doc ,(format nil "~a~@[ (the engine's ~a)~]"
+                                  (getf options :doc) (getf options :env))))))
+
+(defun config-example ()
+  (with-output-to-string (out)
+    (format out "// The section ~~/.nodecode/config.jsonc may carry for this cell —~%")
+    (format out "// documentation, not config: the folder gets pushed and holds no secret.~%")
+    (format out "// Written from the declarations in engine/host.lisp and nodecode/cell.lisp,~%")
+    (format out "// and the Lisp suite checks they agree. A present section is enabled;~%")
+    (format out "// \"enabled\": false vetoes it. Every member is optional. Where a member names~%")
+    (format out "// an environment variable, that variable is read while the member is left at~%")
+    (format out "// its default.~%")
+    (format out "{~%  \"re\": {~%    \"enabled\": true")
+    (loop for (nil . options) in (section-settings)
+          for doc = (getf options :doc)
+          do (format out ",~%    // ~a~a.~@[ Environment: ~a.~]~%    ~a: ~a"
+                     (char-upcase (char doc 0)) (subseq doc 1) (getf options :env)
+                     (json-encode (getf options :key))
+                     (ecase (getf options :type)
+                       (:list (json-encode (coerce (getf options :default) 'simple-vector)))
+                       (:boolean (if (getf options :default) "true" "false"))
+                       ((:path :directory :integer) (json-encode (getf options :default))))))
+    (format out "~%  }~%}~%")))
+
+(macrolet ((declare-cell ()
+             `(nle:define-cell re
+                (:section ("re")
+                  (:guide "install rizin (https://rizin.re); the engine's one Lisp library, cl-ppcre, nodecode already loads. (re:status) says what the engine found")
+                  ,@(section-fields))
+                (:help :re
+                       "re: reverse engineering with rizin - (re:open \"path\"), (re:cmd \"aflj\"), evidence-backed findings - (help :re)"
+                       +primer+)
+                (:command "re" 'run-slash
+                          :description "Reverse engineering with rizin: open <path>, status, functions, findings, report")
+                (:start #'start))))
+  (declare-cell))

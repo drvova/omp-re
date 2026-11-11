@@ -357,6 +357,24 @@
     "low",
     "info"
   ],
+  "importNameRules": [
+    {
+      "rule": "dropThrough",
+      "text": "imp."
+    },
+    {
+      "rule": "dropPrefix",
+      "text": "__isoc99_"
+    },
+    {
+      "rule": "dropLeading",
+      "text": "_"
+    },
+    {
+      "rule": "dropSuffix",
+      "text": "_chk"
+    }
+  ],
   "stringInterest": [
     {
       "kind": "credentials",
@@ -496,6 +514,648 @@
       "algorithm": "Base64",
       "what": "URL-safe alphabet tail",
       "hex": "7778797a303132333435363738392d5f"
+    }
+  ],
+  "opTypes": {
+    "call": [
+      "call",
+      "ucall",
+      "rcall",
+      "icall",
+      "ccall"
+    ],
+    "decidingCall": [
+      "call",
+      "ucall",
+      "rcall",
+      "icall"
+    ],
+    "compare": [
+      "cmp",
+      "acmp"
+    ],
+    "branch": [
+      "cjmp"
+    ]
+  },
+  "calleeAfter": "call",
+  "branchMeanings": [
+    {
+      "mnemonics": [
+        "je",
+        "jz"
+      ],
+      "meaning": "taken when equal / zero"
+    },
+    {
+      "mnemonics": [
+        "jne",
+        "jnz"
+      ],
+      "meaning": "taken when not equal / not zero"
+    },
+    {
+      "mnemonics": [
+        "ja",
+        "jnbe"
+      ],
+      "meaning": "taken when above (unsigned >)"
+    },
+    {
+      "mnemonics": [
+        "jae",
+        "jnb",
+        "jnc"
+      ],
+      "meaning": "taken when above or equal (unsigned >=)"
+    },
+    {
+      "mnemonics": [
+        "jb",
+        "jc",
+        "jnae"
+      ],
+      "meaning": "taken when below (unsigned <)"
+    },
+    {
+      "mnemonics": [
+        "jbe",
+        "jna"
+      ],
+      "meaning": "taken when below or equal (unsigned <=)"
+    },
+    {
+      "mnemonics": [
+        "jg",
+        "jnle"
+      ],
+      "meaning": "taken when greater (signed >)"
+    },
+    {
+      "mnemonics": [
+        "jge",
+        "jnl"
+      ],
+      "meaning": "taken when greater or equal (signed >=)"
+    },
+    {
+      "mnemonics": [
+        "jl",
+        "jnge"
+      ],
+      "meaning": "taken when less (signed <)"
+    },
+    {
+      "mnemonics": [
+        "jle",
+        "jng"
+      ],
+      "meaning": "taken when less or equal (signed <=)"
+    },
+    {
+      "mnemonics": [
+        "js"
+      ],
+      "meaning": "taken when negative"
+    },
+    {
+      "mnemonics": [
+        "jns"
+      ],
+      "meaning": "taken when not negative"
+    }
+  ],
+  "otherBranch": "conditional",
+  "sectionNotes": {
+    "writableExecutable": "writable+executable",
+    "veryHighEntropy": "very high entropy (compressed or encrypted data)",
+    "highEntropyForCode": "high entropy for code",
+    "packerName": "a name packers use"
+  },
+  "thresholds": {
+    "veryHighEntropy": 7.2,
+    "highEntropyForCode": 6.8,
+    "fewImports": 8,
+    "shortConstantHexDigits": 8
+  },
+  "limits": {
+    "lineWidth": 100,
+    "triageRiskyImports": 20,
+    "cryptoMaterial": 40,
+    "cryptoHits": 60,
+    "cryptoReferences": 8
+  },
+  "whitespace": [
+    "U+0009",
+    "U+000A",
+    "U+000B",
+    "U+000C",
+    "U+000D",
+    "U+0020",
+    "U+00A0",
+    "U+1680",
+    "U+2000",
+    "U+2001",
+    "U+2002",
+    "U+2003",
+    "U+2004",
+    "U+2005",
+    "U+2006",
+    "U+2007",
+    "U+2008",
+    "U+2009",
+    "U+200A",
+    "U+2028",
+    "U+2029",
+    "U+202F",
+    "U+205F",
+    "U+3000",
+    "U+FEFF"
+  ],
+  "formats": {
+    "joins": {
+      "commas": ", ",
+      "semicolons": "; "
+    },
+    "plurals": {
+      "s": [
+        "",
+        "s"
+      ],
+      "es": [
+        "",
+        "es"
+      ],
+      "1s": [
+        "s",
+        ""
+      ]
+    }
+  },
+  "text": {
+    "more": "  … {hidden:d} more {what} not shown",
+    "evidenceTaken": "Evidence taken (cite these in record_finding; each is a rizin_command read you can re-run):",
+    "evidenceRow": "  {.id}  {.label}",
+    "nameless": "?",
+    "refusals": {
+      "notAString": "omp-re: {recipe}: a function is named by a string, not {given}",
+      "optionsNotOneObject": "omp-re: {recipe}: options are one object, e.g. \\{ maxItems: 20 \\}, not {given}",
+      "noFunction": "omp-re: {recipe}: no function at {addr} — list them with {listFunctions}, or define one with define_function",
+      "noInstructions": "omp-re: {recipe}: no function at {addr} — list them with {listFunctions}",
+      "cutOutput": "omp-re: {recipe}: the output of rizin_command {label:json} was cut at the size cap and the whole of it could not be read back ({why}). The recipe needs all of it and will not report from cut JSON — run the reads by hand with narrower commands.",
+      "cutNoArtifact": "the engine saved no artifact for it",
+      "cutUnreadable": "artifact://{artifact}: {error}",
+      "cutNotText": "artifact://{artifact} did not read as text"
+    }
+  },
+  "hosts": {
+    "js": {
+      "global": "re",
+      "listFunctions": "await tool.rizin_command({ command: \"aflj\" })",
+      "openFirst": "Open a binary first (await tool.open_binary({ path }))."
+    },
+    "py": {
+      "global": "omp_re",
+      "listFunctions": "await tool.rizin_command({\"command\": \"aflj\"})",
+      "openFirst": "Open a binary first (await tool.open_binary({\"path\": ...})). The recipes themselves need no await."
+    },
+    "lisp": {
+      "listFunctions": "(re:json \"aflj\")"
+    }
+  },
+  "help": {
+    "header": [
+      "omp-re recipes — wide reads composed over rizin_command. Not tools: each read a recipe makes is its own",
+      "rizin_command call (approved, audited, recorded as evidence). Each returns its report as a string; print() it.",
+      "{openFirst}"
+    ],
+    "footer": [
+      "Every section cites the [evidence xxxxxxxx] id of the read it rests on, and each report ends with the",
+      "reads it took. A line of a report is a lead, not a finding: record_finding with those ids makes it one."
+    ],
+    "loaded": "omp-re recipes loaded: {calls} — print({global}.help()) says what each answers.",
+    "shown": "<omp-re recipes: {names} — print({global}.help()) says what each answers>"
+  },
+  "facts": {
+    "triage": [
+      "sections",
+      "flagged",
+      "reach",
+      "riskyShown",
+      "fewImports",
+      "notable",
+      "functions"
+    ],
+    "scanImports": [
+      "reach",
+      "risky"
+    ],
+    "theFunction": [
+      "info"
+    ],
+    "inspectFunction": [
+      "callers",
+      "@callers",
+      "calls",
+      "compares",
+      "branches",
+      "variableCount",
+      "referenced",
+      "ops"
+    ],
+    "functionBody": [
+      "ops"
+    ],
+    "findComparisons": [
+      "decisions",
+      "decidingCalls",
+      "onTheWay"
+    ],
+    "findCrypto": [
+      "hits"
+    ]
+  },
+  "recipes": [
+    {
+      "name": "triage",
+      "about": "A first look at the open binary, composed from rizin's own reads: what it is, which protections the build has, its sections with entropy, the imports that give it reach, the strings worth a first look, its largest functions and its entry points. Nothing here is a finding until one is recorded citing the ids.",
+      "summary": [
+        "what the binary is, build protections, sections with entropy, imports and what they reach,",
+        "notable strings, the largest functions, entry points."
+      ],
+      "options": [
+        {
+          "name": "maxStrings",
+          "default": 25,
+          "least": 1,
+          "most": 200,
+          "doc": "at most this many notable strings are listed"
+        },
+        {
+          "name": "maxFunctions",
+          "default": 15,
+          "least": 1,
+          "most": 100,
+          "doc": "at most this many functions are listed"
+        }
+      ],
+      "steps": [
+        {
+          "read": "path",
+          "command": "ij"
+        },
+        {
+          "read": "info",
+          "command": "iIj"
+        },
+        {
+          "read": "sectionData",
+          "command": "iSj entropy"
+        },
+        {
+          "read": "imports",
+          "command": "iij"
+        },
+        {
+          "read": "strings",
+          "command": "izj"
+        },
+        {
+          "read": "functionData",
+          "command": "aflj"
+        },
+        {
+          "read": "entries",
+          "command": "iej"
+        },
+        {
+          "derive": "triage"
+        }
+      ],
+      "title": "triage: {path.core.file|?}",
+      "sections": [
+        {
+          "title": "Identity {@info}",
+          "lines": [
+            "  {info.class/info.bintype|unknown format}, {info.arch|?} {info.bits:d|?}-bit {info.endian|}, {info.os|?}{?, language {info.lang}}{?, interpreter {info.intrp}}"
+          ]
+        },
+        {
+          "title": "Build protections {@info}",
+          "lines": [
+            "  stack canary: {info.canary?yes|NO — a stack overflow reaches the return address unchecked}",
+            "  NX: {info.nx?yes|NO — data pages are executable}",
+            "  PIE: {info.pie?yes|NO — the image loads at a fixed address}",
+            "  RELRO: {info.relro|none}{?{if info.relro=partial} — the GOT stays writable}{?{unless info.relro=partial}{unless info.relro=full} — the GOT and other relocated data stay writable}",
+            "  fortified libc calls: {info.fortify_source?yes|no}",
+            "  stripped: {info.stripped?yes|no}   static: {info.static?yes|no}"
+          ]
+        },
+        {
+          "title": "Sections: {sections:n} {@sectionData}",
+          "rows": "sections",
+          "row": "  {.section.name:<18} {.section.perm:<4|} {.section.size:d>9|0} bytes  entropy {.entropy:f2>4|?}{?{if .notes}  <- {.notes:semicolons}}",
+          "after": [
+            "{?{if flagged}  {flagged:n} section{flagged:s} stand{flagged:1s} out; high entropy in code, or a section both writable and executable, is what a packed or self-modifying binary looks like — read it before trusting the function list.}"
+          ]
+        },
+        {
+          "title": "Imports: {imports:n} {@imports}",
+          "lines": [
+            "{?{if reach}  reach, by what it links: {reach:commas}}{?{unless reach}  none of the capability groups (network, process control, injection, …) is linked}",
+            "{?{if riskyShown}  worth a reviewer's look: {riskyShown:commas} — scan_imports says why and who calls them}",
+            "{fewImports?  very few imports for a dynamic binary: resolved at run time, or packed|}"
+          ]
+        },
+        {
+          "title": "Strings: {strings:n}; notable {notable:n} {@strings}",
+          "rows": "notable",
+          "limit": "maxStrings",
+          "row": "  {.kind:<11} {.entry.vaddr:x|?}  {.entry.string:line|}",
+          "more": "notable strings"
+        },
+        {
+          "title": "Functions: {functions:n}; largest by code size {@functionData}",
+          "rows": "functions",
+          "limit": "maxFunctions",
+          "row": "  {.offset/.addr:x|0x0}  {.realsz/.size:d>7|0} bytes  {?{.nbbs:d} blocks  }{.name|?}",
+          "more": "functions"
+        },
+        {
+          "title": "Entry points {@entries}",
+          "rows": "entries",
+          "row": "  {.vaddr:x}  {.type|}",
+          "empty": "  none reported"
+        }
+      ]
+    },
+    {
+      "name": "scan_imports",
+      "about": "The imports a reviewer would stop at, each with why it matters and who calls it; plus what the program can reach, read off what it links. An import is a lead, not a bug: whether a call is safe is decided at its call site, which is what the callers are listed for.",
+      "summary": [
+        "the imports a reviewer stops at, why, and who calls each; what the program can reach."
+      ],
+      "options": [
+        {
+          "name": "callers",
+          "default": true,
+          "doc": "list who calls each import"
+        },
+        {
+          "name": "maxCallers",
+          "default": 12,
+          "least": 1,
+          "most": 100,
+          "doc": "at most this many callers are listed for each"
+        }
+      ],
+      "steps": [
+        {
+          "read": "imports",
+          "command": "iij"
+        },
+        {
+          "derive": "scanImports"
+        }
+      ],
+      "title": "scan_imports: {imports:n} imports, {risky:n} worth a look",
+      "sections": [
+        {
+          "title": "Reach, by what it links {@imports}",
+          "rows": "reach",
+          "row": "  {.capability:<18} {.names:commas}",
+          "empty": "  none of the capability groups is linked"
+        },
+        {
+          "title": "Imports worth a reviewer's look {@imports}",
+          "rows": "risky",
+          "row": "  [{.severity}] {.bare}{? (linked as {.linkedAs})} ({.category}){? @ {.plt:x}} — {.why}",
+          "under": [
+            {
+              "when": ".traced",
+              "rows": ".places",
+              "limit": "maxCallers",
+              "line": "      called from {.places:n} place{.places:s} {@.places}: {shown:commas}",
+              "empty": "      no caller found by analysis {@.places}",
+              "more": "callers"
+            }
+          ],
+          "empty": "  none of the imports in the table is linked"
+        },
+        {
+          "lines": [
+            "An import is a lead. Read each call site (rizin_command pdg or pdf at the caller) before saying what it does."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "inspect_function",
+      "about": "One function, read from every side at once: its size, complexity and signature, its variables, who calls it and what it calls, and the strings it refers to — the context to read before its code. Follow it with rizin_command pdg at the same address for the code.",
+      "summary": [
+        "one function's shape, variables, callers, callees and the strings it refers to."
+      ],
+      "takes": {
+        "example": "main",
+        "doc": "the function's name or address, a string"
+      },
+      "options": [
+        {
+          "name": "maxItems",
+          "default": 30,
+          "least": 1,
+          "most": 300,
+          "doc": "at most this many of each list are shown"
+        }
+      ],
+      "steps": [
+        {
+          "read": "infoData",
+          "command": "afij",
+          "at": true
+        },
+        {
+          "derive": "theFunction"
+        },
+        {
+          "read": "body",
+          "command": "pdfj",
+          "at": true
+        },
+        {
+          "read": "variables",
+          "command": "afvlj",
+          "at": true
+        },
+        {
+          "read": "strings",
+          "command": "izj"
+        },
+        {
+          "derive": "inspectFunction"
+        }
+      ],
+      "title": "inspect_function: {info.name/addr}",
+      "sections": [
+        {
+          "title": "Shape {@infoData}",
+          "lines": [
+            "  {info.signature/info.name/addr} at {info.offset/info.addr:x|0x0}",
+            "  {info.realsz/info.size:d|0} bytes of code, {info.nbbs:d|0} basic blocks, {info.edges:d|0} edges, cyclomatic complexity {info.cc:d|0}, {info.loops:d|0} loop{info.loops:s}",
+            "  calling convention {info.calltype|?}, stack frame {info.stackframe:d|0} bytes{info.noreturn?, does not return|}"
+          ]
+        },
+        {
+          "title": "Body {@body}",
+          "lines": [
+            "  {ops:n} instructions, {compares:d} compare{compares:s}, {branches:d} conditional branch{branches:es} — find_comparisons lists them"
+          ]
+        },
+        {
+          "title": "Variables: {variableCount:d} {@variables}"
+        },
+        {
+          "title": "Called from {callers:n} place{callers:s} {@callers}",
+          "rows": "callers",
+          "limit": "maxItems",
+          "row": "  {.}",
+          "more": "callers"
+        },
+        {
+          "title": "Calls {calls:n} distinct target{calls:s} {@body}",
+          "rows": "calls",
+          "limit": "maxItems",
+          "row": "  {.}",
+          "more": "callees"
+        },
+        {
+          "title": "Refers to {referenced:n} string{referenced:s} {@body} {@strings}",
+          "rows": "referenced",
+          "limit": "maxItems",
+          "row": "  {.address:x}  {.text:line}",
+          "more": "strings"
+        }
+      ]
+    },
+    {
+      "name": "find_comparisons",
+      "about": "What a function decides on: every compare or test with the conditional branch that follows it (which way it goes, and where to), every call to something that compares or validates, and the strings on the way — the static skeleton of validation logic, with no emulation and nothing run. It lists what is compared, not what the comparison means.",
+      "summary": [
+        "every compare with the branch that follows, calls that compare or validate, strings on the way."
+      ],
+      "takes": {
+        "example": "main",
+        "doc": "the function's name or address, a string"
+      },
+      "options": [
+        {
+          "name": "maxItems",
+          "default": 80,
+          "least": 1,
+          "most": 1000,
+          "doc": "at most this many of each list are shown"
+        }
+      ],
+      "steps": [
+        {
+          "read": "body",
+          "command": "pdfj",
+          "at": true
+        },
+        {
+          "derive": "functionBody"
+        },
+        {
+          "read": "strings",
+          "command": "izj"
+        },
+        {
+          "derive": "findComparisons"
+        }
+      ],
+      "title": "find_comparisons: {body.name/addr}",
+      "sections": [
+        {
+          "title": "Compares and the branches that follow: {decisions:n} {@body}",
+          "rows": "decisions",
+          "limit": "maxItems",
+          "row": "  {.op.offset:x|0x0}  {.op.disasm|}{? ; \"{.printable}\"}{?  ->  {.next.disasm|}: {.meaning}{?, to {.next.jump:x}}{?, else {.next.fail:x}}}",
+          "more": "comparisons"
+        },
+        {
+          "title": "Calls that compare or validate: {decidingCalls:n} {@body}",
+          "rows": "decidingCalls",
+          "limit": "maxItems",
+          "row": "  {.offset:x|0x0}  {.disasm|}",
+          "empty": "  none by name"
+        },
+        {
+          "title": "Strings on the way: {onTheWay:n} {@body} {@strings}",
+          "rows": "onTheWay",
+          "limit": "maxItems",
+          "row": "  {.offset:x}  refers to {.target:x}  {.text:line}",
+          "empty": "  none"
+        },
+        {
+          "lines": [
+            "This lists what is compared, not what the comparison means: which branch is the accepting one is for you to read from the code each leads to."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "find_crypto",
+      "about": "Where cryptographic material lies in the open binary: rizin's own search for keys and certificates, and a search for the published constants of common algorithms, each hit with its address and what refers to it. A constant's presence says the tables are linked in, not that they are used, nor on what; a four-byte constant can occur by chance and is marked weak.",
+      "summary": [
+        "rizin's key and certificate search, and where published constants of common algorithms lie."
+      ],
+      "options": [
+        {
+          "name": "references",
+          "default": true,
+          "doc": "say what refers to each hit"
+        }
+      ],
+      "steps": [
+        {
+          "read": "material",
+          "command": "/cmj"
+        },
+        {
+          "derive": "findCrypto"
+        }
+      ],
+      "title": "find_crypto: {hits:n} constant hit{hits:s}",
+      "sections": [
+        {
+          "title": "rizin's search for keys and certificates {@material}",
+          "rows": "material",
+          "limit": "cryptoMaterial",
+          "row": "  {.:json}",
+          "empty": "  nothing found"
+        },
+        {
+          "title": "Published constants",
+          "rows": "hits",
+          "limit": "cryptoHits",
+          "row": "  {.address:x}  {.algorithm} — {.what} {@.hit}{.weak? (weak: four bytes can occur by chance)|}",
+          "under": [
+            {
+              "when": ".traced",
+              "rows": ".places",
+              "limit": "cryptoReferences",
+              "line": "      referred to from {shown:commas} {@.places}",
+              "empty": "      no reference found by analysis {@.places} — reached by computed address, or unused"
+            }
+          ],
+          "empty": "  none of the constants in the table was found"
+        },
+        {
+          "lines": [
+            "A table's presence shows the algorithm is linked in. What it is used on, and with which key, is in the code that refers to it."
+          ]
+        }
+      ]
     }
   ]
 }

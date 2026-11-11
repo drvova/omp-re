@@ -1,161 +1,177 @@
 # Architecture
 
-omp-re is an [omp](https://omp.sh) extension that drives [rizin](https://rizin.re)
-for reverse engineering. It has **no third-party runtime dependencies** — an
-installed omp plugin can only resolve the host's own `@oh-my-pi/*` packages, so
-everything below is hand-rolled on top of them.
-
-## Process lifecycle (`runtime.ts`)
-
-A rizin process is a resource with a lifetime: spawn, respawn on death or
-branch change, close on shutdown. That used to be a `Map` of nullable fields
-with `.close()` calls sprinkled across the code. It is now a single
-`RizinBackend` (a process-wide singleton) that gives each omp session (keyed by
-`ctx.sessionManager.getSessionId()`) a small **teardown scope**:
-
-- Each process the session owns — the static analysis session (`rizin -q0 -N`)
-  and the opt-in debug session (`rizin -d`) — registers its `close()` on the
-  scope as an **effect** and gets back an idempotent **disposer**.
-- Calling one disposer closes exactly that process; disposing the whole scope
-  closes every process the session still owns (most-recent first).
-
-The consequences fall out for free:
-
-| Event | Mechanism |
-| --- | --- |
-| Respawn (process died / stale after a branch) | run the one rizin disposer, register a new effect |
-| `/tree` navigation to a branch with different annotations | run the disposer; the next tool call respawns and replays that branch's annotations |
-| `debug stop` | run just the debug disposer; the static session is untouched |
-| `session_shutdown` / `session_before_switch` | dispose the whole session scope — every registered teardown runs |
-
-`RzSession` (`rizin.ts`) stays the low-level transport: the `-q0` NUL-framed
-pipe, with abort, timeouts, and stderr capture. The scope owns *when a process
-lives and dies*, not how bytes move.
-
-`state.ts` is a thin facade over the backend (`getState`, `ensureRizin`,
-`spawnRizin`, `shutdownState`, `rekeyState`, `syncAnnotationsToBranch`,
-`startDebug`, `stopDebug`, `requireDebug`). `getState()` stays synchronous and
-returns a plain per-session record, so the many call sites that read and write
-counters and paths are unchanged; the scope attaches lazily on the first spawn.
-
-## Subsystem composition (`app.ts`)
-
-`composeApp(pi, subsystems)` is the extension's composition root, run once per
-extension load: it applies each subsystem in order, handing the omp host (`pi`)
-to each, and awaits every one — so the async subsystems (the triage / CLI
-probes that stat PATH) finish before init completes. Each subsystem needs only
-the host, which is always present, so a plain sequential `await` gives the
-ordering with nothing to resolve. (This was a cordis `Context` graph until the
-cordis dependency stopped the installed plugin from loading; see the
-`[0.3.0]` CHANGELOG entry.)
-
-The subsystems, in load order (`index.ts`):
+omp-re is one engine and two hosts.
 
 ```
-re:read-tools   re:mutate-tools  re:rizin-repl  re:rizin-cli
-re:triage-tools re:debugger      re:evidence    re:audit
-re:preserve     re:ui            re:shell
+                       engine/            ASDF system omp-re
+                 rizin, the read-only policy, the session record,
+                 evidence, annotations, findings, verify, report,
+                 carry, the debugger, /re, the views
+                    |  the surface: engine/engine.lisp
+                    |  the port:    engine/host.lisp
+        +-----------+-----------+
+        |                       |
+   nodecode/                 stdio/  +  extensions/re/
+   system nodecode-re        system omp-re-stdio, and a TypeScript shim
+   in the nodecode image     a child SBCL process beside omp
 ```
 
-Each subsystem's registration stays a plain `(pi) => …` function (see
-`tools-*.ts`, `evidence.ts`, `audit.ts`, `ui.ts`, `preserve.ts`, and
-`registerShell` in `index.ts`), so it is unit-testable in isolation; `app.ts`
-only sequences them.
+The engine is Common Lisp and runs on SBCL. It knows nothing of either host.
+There was once a second engine, in TypeScript, for omp; it is gone, and
+nothing in `extensions/re` decides anything about reverse engineering.
 
-## Presentation: `xd://` devices and `eval`
+## The engine (`engine/`, system `omp-re`)
 
-Every RE tool is registered with `loadMode: RE_LOAD_MODE` (`"discoverable"`,
-`render.ts`). omp mounts discoverable tools as `xd://<name>` devices instead of
-listing their schemas top-level, and its `eval` tool reaches every enabled tool
-— mounted ones included — through its tool bridge as `tool.<name>()`. omp-re
-therefore needs no code tool, dispatcher, or tool catalog of its own: the
-model discovers the tools with `read xd://…` and composes them in omp's own
-`eval` kernel, whose state persists for the session and whose `%load` keeps
-helper scripts across sessions.
+A **session** is the engine's state for one host session: the open binary, the
+rizin process analyzing it, and the session's **record** — an append-only list
+of entries (`re.binary`, `re.evidence`, `re.annotation`, `re.finding`, …). The
+record is the truth and the process is a cache of it. A rizin that died, a
+session closed for idleness and a host that restarted all come back the same
+way: rizin is started on the recorded binary and what the record says was done
+to it is replayed. A tool group says what it replays and in what order
+(`contribute` in `engine/session.lisp`): mapped files, then analysis passes,
+then signatures, then annotations.
 
-Every path into a tool — top-level, `write xd://…`, `tool.<name>()` from
-`eval` — goes through omp's tool wrapper, so the tool's approval tier applies
-and omp fires the `tool_call`/`tool_result` events `audit.ts` and
-`evidence.ts` hook. A call made from `eval` is recorded and tagged exactly
-like a top-level one (`test/extension-sdk.test.ts` drives that path).
+rizin is driven over `rizin -q0`: one NUL after every response, and a unique
+`echo` marker after each command so the stream cannot lose its place. The
+caller reads the pipe itself under the session's lock. A command whose caller
+gave up is left to finish and its output is skipped by the next command, so
+the process and its analysis survive; a timeout kills the process and the next
+call starts another.
 
-`/re off` is a gate rather than a change of presentation: a `tool_call`
-handler in `registerShell` blocks RE tools while the session's `toolsOff`
-flag is set. Turning tools off and on through `setActiveTools` would not round
-trip — re-selecting a tool through it pins the tool top-level, so `/re on`
-would undo omp's mounting.
+Every tool call, whoever makes it, goes through one function (`call-tool` in
+`engine/call.lisp`): the arguments are checked against the tool's declared
+parameters, `/re off` refuses, the audit line is written, the body runs, and
+for `rizin_command` the result is recorded as evidence. Code that composes
+reads (a recipe, `/re carry`, `adopt_finding`) makes each read a call in its
+own right or goes through the same gate; there is no second way to reach
+rizin.
 
-## Teardown, honestly
+What a host builds on is `engine/engine.lisp`: what tools and `/re`
+subcommands there are, calling one, running one `/re` line, and — for a host
+with a screen and sessions it starts and ends — views, the status band's
+facts, the lines to keep through a compaction, the approval gate's decision,
+restore, rekey and close. Each answers plain JSON data and none signals: a
+failure is an answer with `failed` true and the reason as its text.
 
-omp's `ExtensionAPI` returns no handle from `on()`, `registerTool()`,
-`registerCommand()`, `registerMessageRenderer()`, or `registerFlag()`, and
-exposes no extension-unload hook. So a listener or tool, once registered,
-cannot be removed — those subsystems are **register-once by the host's
-design** — with no unregister call, there is nothing to undo. The teardown
-that is real is the per-session process lifecycle above;
-`/re off` blocks calls on the `tool_call` event instead (see above). There is
-no host-level hot-unload — the host does not offer one.
+A tool is declared once (`define-tool`): its name, parameters, approval tier,
+the sentence an approval prompt shows, and how a transcript should draw its
+result. Both hosts read that declaration. Neither holds a list of tools.
 
-## Module map
+## The port (`engine/host.lisp`)
 
-| File | Responsibility |
-| --- | --- |
-| `index.ts` | Extension entry; `registerShell` (renderers, `open_binary`, `--binary`, session-lifecycle handlers, completions, the `/re` command); the `composeApp` call |
-| `app.ts` | Composition root (`composeApp`): applies each subsystem in order with the host |
-| `runtime.ts` | `RizinBackend`: per-session teardown scopes that own the rizin/debug process lifecycle |
-| `state.ts` | Thin facade over `RizinBackend` |
-| `rizin.ts` | `RzSession` transport (`-q0` pipe), spawn flags, validators, `rz-*` tool resolution |
-| `catalog.ts` | rizin's self-described command catalog (`?*j`) and the `rizin_command` policy |
-| `tools-mutate.ts` | The 15 write-tier annotation tools (rename, comment, prototype, types, flags, hints) — reads go through `rizin_command` |
-| `tools-rizin.ts` | `rizin_help` / `rizin_command` (the REPL bridge) |
-| `tools-rzcli.ts` | `rizin_cli` (the standalone `rz-*` tools) |
-| `tools-debug.ts` | `rizin_debug` (opt-in dynamic analysis) |
-| `tools-project.ts` | `export_project` (save the analysis as a rizin project) |
-| `tools-mapfile.ts` / `mapfiles.ts` | `map_file` (open a file into the session) and its respawn-replay |
-| `tools-triage.ts` | capa / floss / die / yara |
-| `output.ts` | The one confined directory omp-re writes artifacts to (dumps, traces, projects) |
-| `decompile.ts` | Extensible decompiler probe (`OMPRE_DECOMPILER`) |
-| `evidence.ts` | Content-addressed evidence store, `recordEvidence`, and the `tool_result` hook |
-| `verify.ts` / `audit-claims.ts` | `/re verify` (reproducibility) and the side-turn claim-support auditor |
-| `findings.ts` | `record_finding` / `retract_finding`: the model's conclusions as gated `re.finding` claims |
-| `carry.ts` / `anchor.ts` | `/re carry` (replay a manifest on another build, `--inherit`) and anchor fingerprints/relocation |
-| `audit.ts` | The RE tool-name sets (the audit gate) + signed audit log |
-| `preserve.ts` | Compaction preservation (`session.compacting`) |
-| `ui.ts` | Status band, overlay panels, evidence helpers |
-| `report.ts` / `annotations.ts` / `entries.ts` / `disasm.ts` / `format.ts` / `render.ts` | Report gate, annotation replay, branch entry helpers, disassembly, result formatting, tool renderers |
+A few things only the host can say or do: what the operator configured, who is
+calling, where a session's record is kept and which of it is on the current
+branch, how to tell the operator something, whom to ask a side question, where
+a result too large to send is kept. A host installs functions for these
+(`install-host`); every one is optional, and each has an answer for when no
+host is installed, so the engine also runs alone — which is how the Lisp suite
+tests it and what CI's "the engine loads alone" step holds.
 
-## A second engine: the nodecode cell (`nodecode/`)
+Settings are declared once, in `+settings+`: the member of nodecode's `re`
+section, the environment variable, or both. A setting only one host reads is
+declared by that host the same way (`audit_seconds`, in `nodecode/cell.lisp`).
+`nodecode/config.example.jsonc` is written from those tables and the suite
+checks they agree.
 
-`nodecode-re.asd` and `nodecode/*.lisp` are this engine again, in Common Lisp,
-for [nodecode](https://nodecode.ai) — whose extensions are Lisp cells and
-whose model has one tool, `eval`. It is a port, module for module (each Lisp
-file names the TypeScript it ports), not a wrapper: it needs rizin and nothing
-else. It keeps this document's shape — a session owns a rizin process and a
-record; the record is the truth and the process a cache of it; every tool
-call goes through one pipeline that audits it and records a read as evidence —
-and writes the same entries, blobs, audit lines and report manifest.
+The wording a host needs its own way (how to open a binary, how to switch the
+debugger on, the manual `rizin_command ""` answers) is a table of phrases
+(`+voice+`) a host may replace by key.
 
-Nothing under `extensions/re` depends on `nodecode/`. The dependency the other
-way is deliberate and narrow: `scripts/gen-nodecode-policy.ts` generates
-`nodecode/policy-data.lisp` from `catalog.ts`, so the read-only command policy
-has one source, and `test/nodecode-parity.test.ts` asks both engines the same
-questions and fails when they answer differently. **A change to the policy,
-the validators, the canonical output projection or a record's shape here must
-be made there too** — the generator and the parity test will say so for the
-first three. See [`nodecode.md`](nodecode.md).
+## The nodecode host (`nodecode/`, system `nodecode-re`)
+
+The engine is loaded into the nodecode organism's own image. The host is
+three files, and a nodecode name (`nlk:`, `nle:`) appears only in the first
+and the last:
+
+- `nodecode-host.lisp` makes the host's package and answers the record services: entries are stamped with
+  the turn they were written in, and a call reads those on the session's
+  branch.
+- `verbs.lisp` is the model's surface: functions in the `RE` package called
+  from `eval`, over the engine's surface. `RE` (`nodecode-re`) is this host's
+  own package: it uses what the engine's package exports
+  (`engine/package.lisp`) and nothing else of it.
+- `cell.lisp` declares the cell: the config section, the manual, `/re` and its
+  dialog, the side question a support audit asks, start and stop.
+
+The recipes (`recipes.lisp`, with `recipe-data.lisp` generated from
+`recipes/tables.json`) live here because they are verbs. See
+[`nodecode.md`](nodecode.md).
+
+## The omp host (`stdio/`, system `omp-re-stdio`; `extensions/re/`)
+
+omp is a TypeScript program, so the engine runs beside it as one SBCL child
+for the whole omp process — the main session and every task subagent are
+session ids on one pipe. `stdio/server.lisp` answers the port by asking omp
+over that pipe; `stdio/voice.lisp` holds omp's phrases and manual. Like the
+nodecode host, it is a package of its own (`omp-re-stdio`) that uses only what
+the engine's package exports.
+
+The conversation is described once, as data, in `stdio/protocol.json`: each
+method either way, its members and types, the version, the constants and keys
+both sides share. `stdio/protocol.lisp` loads it; the server finds each
+method's handler from it and refuses what it does not have, in and out.
+`scripts/gen-protocol.ts` writes omp's types from it
+(`extensions/re/protocol.ts`) and the tables of
+[`engine-protocol.md`](engine-protocol.md), which has the prose.
+
+`extensions/re` is the other end, and is thin on purpose:
+
+- `protocol.ts` is generated: the wire's types, methods, constants and keys.
+- `engine.ts` starts the child, frames messages, bounds how long it waits
+  (a start deadline, and the engine's silence while a request is under way)
+  and ends it. It does not know what a message means.
+- `host.ts` keeps the one engine of the process (on `globalThis`, because omp
+  imports an extension afresh for each session) and answers the engine's
+  requests: the session's record is omp's own session file, artifacts are
+  omp's, the side question is omp's `runEphemeralTurn`. It also carries each
+  session's `memory` — what the engine holds in no record, such as `/re off` —
+  back to an engine started after the first ended.
+- `index.ts` asks the engine what tools and subcommands exist and registers
+  exactly those with omp, forwards calls and the session's life, and fills an
+  approval sentence from the data the engine sent.
+- `ui.ts` and `render.ts` draw what the engine sends: the status band's
+  lines, the panels, the code view, a tool's transcript card. Neither knows a
+  record's shape.
+
+The engine is started while the extension's factory runs, not later: omp
+accepts tool registrations only then, and the tool list comes from the engine.
+That start is about a quarter of a second, or a few seconds the first time
+after an install or upgrade, when ASDF compiles the engine into the user's
+cache. If the child dies, the next call starts another and each session comes
+back from its record and the memory omp kept of it.
+
+Every RE tool is registered `discoverable`, so omp mounts it as an
+`xd://<name>` device and the model reaches it from omp's `eval` as
+`tool.<name>()`. Whichever way a call arrives, omp's tool wrapper applies the
+tool's approval tier and then runs the one `execute` that forwards to the
+engine. [`omp-eval.md`](omp-eval.md) is what the plugin relies on there.
+
+## Where a change lands
+
+| To change | Edit | Held by |
+| --- | --- | --- |
+| a tool, its parameters, its approval sentence, a refusal's words | the tool's `define-tool` in `engine/` | `test/nodecode/suite-*.lisp`; approval sentences also `test/shim.test.ts` |
+| what `rizin_command` may run | `engine/policy-data.lisp`, `engine/policy.lisp` | `suite-core`, `suite-debug` (the on-hit policy) |
+| a `/re` subcommand | its `define-slash` in `engine/` | the suites; `test/extension-sdk.test.ts` for omp's help and errors |
+| a setting | `+settings+` in `engine/host.lisp` | `suite-core` (the example file equals the declaration) |
+| what a panel or the code view shows | `engine/views.lisp` | `suite-views` |
+| how omp draws it | `extensions/re/ui.ts`, `render.ts` | `test/shim.test.ts` (the band, the overlays and a result card, drawn without colours); the tmux tiers by hand |
+| a key binding | `keys` in `stdio/protocol.json`, then `bun run gen:protocol` | `test/shim.test.ts`; `suite-stdio` (each names a view the engine has) |
+| a message between omp and the engine | `stdio/protocol.json`, then `bun run gen:protocol`; its handler in `stdio/server.lisp` or `extensions/re/host.ts`, its sender, and the prose of [`engine-protocol.md`](engine-protocol.md) | the type check (omp's side) and the server's load (a method with no handler); `suite-stdio` and `test/shim.test.ts`, whose stand-ins check every message against the same file |
+| a verb, the nodecode dialog, the primer | `nodecode/verbs.lisp`, `nodecode/cell.lisp` | `suite-core`, over a stand-in for nodecode's kernel |
+| a recipe's reads, wording or tables | `recipes/tables.json`, then `bun run gen:recipes` | `test/recipes-eval.test.ts` (three hosts, whole reports); `suite-recipes` |
+
+A new tool needs no TypeScript: the shim registers whatever `describe` lists.
 
 ## Data that outlives a process
 
-Evidence, annotations, and the open binary are persisted as omp **custom
-session entries** (`pi.appendEntry`), which live on the session branch and are
-**not** sent to the model. They survive respawns, resumes, branches, and
-compaction. On resume or branch change the evidence index is rebuilt and the
-branch's annotations are replayed into the fresh rizin process; on compaction,
-`preserve.ts` folds a snapshot of this state into the summary so the model's
-working memory stays grounded even though the entries themselves were never at
-risk.
+| What | Under omp | Under nodecode |
+| --- | --- | --- |
+| The session's record | custom entries (type `re.…`) in omp's own session file, on its branch | a file of entries under `state_dir`, each stamped with its turn |
+| Evidence blobs, the audit log | `<omp agent dir>/re/` | under `state_dir` |
+| A result too large to send | an omp session artifact, `artifact://<id>` | a file beside the record |
 
-## References
-
-- [omp](https://omp.sh) — the host agent
-- [rizin](https://rizin.re) — the reverse-engineering toolkit omp-re drives
+Record entries are never sent to the model. On compaction under omp the engine
+hands omp the lines to fold into the summary (the open binary, counts, recent
+evidence ids, live findings), so the model stays grounded.

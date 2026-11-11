@@ -4,7 +4,7 @@
  *
  * Looks at the commits in a range, decides whether they warrant a release and
  * at what level, and — if so — bumps the version in `package.json`,
- * `.omp-plugin/marketplace.json` and `nodecode-re.asd` (kept in lock-step) and stamps a dated
+ * `.omp-plugin/marketplace.json` and the three `.asd` files (kept in lock-step) and stamps a dated
  * section in `CHANGELOG.md`. It only edits files; the workflow does the git
  * commit / tag / push. Run it locally with `--dry-run` to preview a decision
  * without touching anything.
@@ -25,25 +25,42 @@
  * Usage:
  *   node scripts/release.mjs <baseRef> <headRef> [--dry-run]
  *   node scripts/release.mjs --dry-run            # preview: last tag..HEAD
+ *   node scripts/release.mjs --check-versions     # exit 1 unless all five files carry one version
  *
  * In CI, baseRef/headRef are the push event's `before` and `after` SHAs, so
  * the range is exactly the commits that just landed on main.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = join(ROOT, "package.json");
 const MARKET = join(ROOT, ".omp-plugin", "marketplace.json");
 const CHANGELOG = join(ROOT, "CHANGELOG.md");
-// The nodecode cell's system definition carries the same version (see docs/nodecode.md).
-const ASD = join(ROOT, "nodecode-re.asd");
+// The engine's system definition and its two hosts' carry the same version.
+const ASDS = [join(ROOT, "omp-re.asd"), join(ROOT, "omp-re-stdio.asd"), join(ROOT, "nodecode-re.asd")];
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
 const [base, head = "HEAD"] = argv.filter((a) => !a.startsWith("--"));
+
+// Nothing but this script writes the version, and a hand edit to one file would
+// ship an engine that answers `hello` with a version the plugin does not have.
+if (argv.includes("--check-versions")) {
+	const found = [
+		[PKG, JSON.parse(readFileSync(PKG, "utf8")).version],
+		[MARKET, JSON.parse(readFileSync(MARKET, "utf8")).plugins[0].version],
+		...ASDS.map((asd) => [asd, /^\s*:version\s+"([^"]*)"/m.exec(readFileSync(asd, "utf8"))?.[1]]),
+	];
+	for (const [file, version] of found) console.log(`${version ?? "(none)"}  ${relative(ROOT, file)}`);
+	if (found.some(([, version]) => !version || version !== found[0][1])) {
+		console.error("release: the versions above differ; scripts/release.mjs is what writes them.");
+		process.exit(1);
+	}
+	process.exit(0);
+}
 
 const LEVELS = ["none", "patch", "minor", "major"];
 const rank = (level) => LEVELS.indexOf(level);
@@ -145,7 +162,6 @@ function emit(outputs) {
 	writeFileSync(file, `${lines}\n`, { flag: "a" });
 }
 
-// --- decide -----------------------------------------------------------------
 
 const commits = resolveCommits();
 let level = "none";
@@ -177,11 +193,16 @@ if (dryRun) {
 	process.exit(0);
 }
 
-// --- apply -------------------------------------------------------------------
 
 writeFileSync(PKG, setJsonVersion(pkgRaw, next));
 writeFileSync(MARKET, setJsonVersion(readFileSync(MARKET, "utf8"), next));
-writeFileSync(ASD, readFileSync(ASD, "utf8").replace(/^(\s*:version\s+")[^"]*(")/m, `$1${next}$2`));
+for (const asd of ASDS) {
+	const before = readFileSync(asd, "utf8");
+	const after = before.replace(/^(\s*:version\s+")[^"]*(")/m, `$1${next}$2`);
+	// A system file with no version line to bump would silently fall out of step.
+	if (after === before && !before.includes(`:version "${next}"`)) throw new Error(`release: no :version line in ${asd}`);
+	writeFileSync(asd, after);
+}
 
 const date = new Date().toISOString().slice(0, 10);
 const changelog = readFileSync(CHANGELOG, "utf8");
@@ -191,5 +212,5 @@ if (changelog.includes("## [Unreleased]")) {
 	console.warn("CHANGELOG.md has no '## [Unreleased]' heading; left untouched.");
 }
 
-console.log(`Wrote ${next} to package.json, .omp-plugin/marketplace.json, CHANGELOG.md.`);
+console.log(`Wrote ${next} to package.json, .omp-plugin/marketplace.json, the three .asd files and CHANGELOG.md.`);
 emit({ released: "true", previous: current, version: next, level: eff });

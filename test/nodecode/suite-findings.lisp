@@ -3,96 +3,102 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; The first half needs no rizin: the gates read the record, so a record
-;;;; written by hand is enough to hold them to the TypeScript's own cases
-;;;; (test/findings.test.ts, report.test.ts, verify.test.ts). The second
-;;;; half runs the whole loop on the test binary through the verbs.
+;;;; written by hand is enough. The second half runs the whole loop on the
+;;;; test binary through the verbs.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun sha-of (char) (make-string 64 :initial-element char))
 
 (defun seeded-session (&key (sha (sha-of #\a)))
   "A fresh session whose record says a binary with hash SHA is open and
-holds one reproducible rizin_command record, as findings.test.ts's setup
-does. Nothing in it needs the binary to exist. => the session's id."
+holds one reproducible rizin_command record. Nothing in it needs the binary
+to exist. => the session's id."
   (let* ((id (fresh-session))
-         (session (re::find-session id)))
-    (re::append-entry "re.binary" (re::obj "path" "/bin/sample" "sha256" sha) session)
-    (re::append-entry "re.evidence"
-                      (re::obj "id" "11111111-aaaa-bbbb-cccc-000000000001"
+         (session (omp-re:find-session id)))
+    (omp-re::append-entry "re.binary" (omp-re:obj "path" "/bin/sample" "sha256" sha) session)
+    (omp-re::append-entry "re.evidence"
+                      (omp-re:obj "id" "11111111-aaaa-bbbb-cccc-000000000001"
                                "tool" "rizin_command"
-                               "args" (re::obj "command" "pdf" "addr" "sym.f")
+                               "args" (omp-re:obj "command" "pdf" "addr" "sym.f")
                                "commands" (vector "pdf @ sym.f")
                                "reproHash" (sha-of #\b)
                                "binarySha256" sha
                                "summary" "imul eax, eax, 0x21")
                       session)
-    (setf (re::session-binary-sha256 session) sha)
+    (setf (omp-re::session-binary-sha256 session) sha)
     id))
 
-(defun live (id) (re::live-findings (re::find-session id)))
+(defun live (id) (omp-re::live-findings (omp-re:find-session id)))
 
 (defun keys (object)
   (loop for key being the hash-keys of object collect key))
 
-(defmacro with-annotations ((&rest annotations) &body body)
-  "BODY with LIVE-ANNOTATIONS answering ANNOTATIONS, whatever annotation
-module is or is not loaded, and put back after."
-  (let ((had (gensym "HAD")))
-    `(let ((,had (and (fboundp 're::live-annotations) (fdefinition 're::live-annotations))))
-       (unwind-protect
-            (progn
-              (setf (fdefinition 're::live-annotations)
-                    (lambda (binary-path &optional session)
-                      (declare (ignore binary-path session))
-                      (list ,@annotations)))
-              ,@body)
-         (if ,had
-             (setf (fdefinition 're::live-annotations) ,had)
-             (fmakunbound 're::live-annotations))))))
+(defun annotate-record (session new-value evidence-id)
+  "Record a comment saying NEW-VALUE on the open binary, made on EVIDENCE-ID
+=> the entry's id, which TAKE-BACK undoes."
+  (gethash "id" (omp-re::append-entry "re.annotation"
+                                      (omp-re:obj "kind" "set_comment" "ea" "0x401000" "oldValue" ""
+                                                  "newValue" new-value "evidenceId" evidence-id)
+                                      session)))
 
-(defun annotation (new-value evidence-id)
-  (re::obj "kind" "comment" "ea" "0x401000" "oldValue" "" "newValue" new-value "evidenceId" evidence-id))
+(defun take-back (session &rest entry-ids)
+  (dolist (id entry-ids)
+    (omp-re::append-entry "re.undo" (omp-re:obj "undidEntryId" id) session)))
 
 ;;; --- the pieces ---------------------------------------------------------------------------
 
 (suite "report: indicators")
 (check "a URL is defanged: scheme, dots, and nothing else"
        (and (string= "hxxp://185[.]220[.]101[.]99/update[.]php"
-                     (re::defang-ioc "http://185.220.101.99/update.php"))
-            (string= "hxxps://evil[.]example/a" (re::defang-ioc "HTTPS://evil.example/a"))))
+                     (omp-re::defang-ioc "http://185.220.101.99/update.php"))
+            (string= "hxxps://evil[.]example/a" (omp-re::defang-ioc "HTTPS://evil.example/a"))))
 (check "an IPv4 literal and an address are defanged; a path and a registry key keep their separators"
-       (and (string= "10[.]0[.]0[.]1" (re::defang-ioc "10.0.0.1"))
-            (string= "/etc/cron.d/job" (re::defang-ioc "/etc/cron.d/job"))
-            (string= "HKLM\\Software.x" (re::defang-ioc "HKLM\\Software.x"))
-            (string= "a[@]b.c" (re::defang-ioc "a@b.c"))))
+       (and (string= "10[.]0[.]0[.]1" (omp-re::defang-ioc "10.0.0.1"))
+            (string= "/etc/cron.d/job" (omp-re::defang-ioc "/etc/cron.d/job"))
+            (string= "HKLM\\Software.x" (omp-re::defang-ioc "HKLM\\Software.x"))
+            (string= "a[@]b.c" (omp-re::defang-ioc "a@b.c"))))
 (check "indicators are found in prose and raw JSON, never ending mid-punctuation"
        (equal '("/usr/share/locale" "http://185.220.101.99/update.php" "185.220.101.99" "HKLM\\Software")
-              (re::iocs-in "{\"s\":\"/usr/share/locale\", \"u\":\"http://185.220.101.99/update.php\"}, HKLM\\Software;")))
+              (omp-re::iocs-in "{\"s\":\"/usr/share/locale\", \"u\":\"http://185.220.101.99/update.php\"}, HKLM\\Software;")))
 (check "a path needs three segments to be an indicator"
-       (null (re::iocs-in "/lib64/ld.so and 1.2.3")))
+       (null (omp-re::iocs-in "/lib64/ld.so and 1.2.3")))
 (check "claims are listed as localeCompare orders them (the order bun gives these)"
        (let ((ordered '("_x" "-x" ",x" ";x" ":x" "!x" "?x" ".x" "\"x" "(x" "[x" "{x" "@x" "*x" "/a/b/c" "\\x"
                         "&x" "#x" "%x" "`x" "^x" "+x" "<x" "=x" "|x" "~x" "$x" "0x" "10[.]0[.]0[.]1" "9x"
                         "a b" "a-b" "a.b" "a1" "aa" "ab" "alpha" "ax" "aX" "Ax" "beta" "Beta" "hxxp://x")))
-         (and (equal ordered (stable-sort (reverse ordered) #'re::locale-less-p))
-              (equal ordered (stable-sort (sort (copy-list ordered) #'string<) #'re::locale-less-p))
-              (not (re::locale-less-p "same" "same")))))
+         (and (equal ordered (stable-sort (reverse ordered) #'omp-re::locale-less-p))
+              (equal ordered (stable-sort (sort (copy-list ordered) #'string<) #'omp-re::locale-less-p))
+              (not (omp-re::locale-less-p "same" "same")))))
 
 (suite "verify: what a record says of itself")
-(check "a repro hash bound to a binary is reproducible"
-       (string= "reproducible"
-                (re::recorded-status (re::obj "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b)))))
+(check "a read with a repro hash, bound to a binary, is reproducible; another tool's record with one is not"
+       (and (string= "reproducible"
+                     (omp-re::evidence-status (omp-re:obj "tool" "rizin_command" "args" (omp-re:obj "command" "pdf")
+                                                          "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b))))
+            (string= "provenance-only"
+                     (omp-re::evidence-status (omp-re:obj "tool" "decompile" "commands" (vector "pdg @ main")
+                                                          "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b))))))
+(check "what the report says of a record and what /re verify and /re carry do with it are one decision"
+       (flet ((agree (record)
+                (eq (and (omp-re::evidence-rerun record) t)
+                    (and (member (omp-re::evidence-status record) '("reproducible") :test #'string=) t))))
+         (and (agree (omp-re:obj "tool" "rizin_command" "args" (omp-re:obj "command" "pdf")
+                                 "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b)))
+              (agree (omp-re:obj "tool" "decompile" "commands" (vector "pdg @ main")
+                                 "reproHash" (sha-of #\a) "binarySha256" (sha-of #\b)))
+              (agree (omp-re:obj "tool" "rizin_command" "args" (omp-re:obj "command" "pdf")))
+              (agree (omp-re:obj "tool" "list_imports")))))
 (check "a command but no repro hash is provenance-only"
        (string= "provenance-only"
-                (re::recorded-status (re::obj "tool" "get_function" "commands" (vector "afij @ 0x4da0")))))
+                (omp-re::evidence-status (omp-re:obj "tool" "get_function" "commands" (vector "afij @ 0x4da0")))))
 (check "neither is unverifiable (legacy)"
-       (string= "unverifiable (legacy)" (re::recorded-status (re::obj "tool" "list_imports"))))
+       (string= "unverifiable (legacy)" (omp-re::evidence-status (omp-re:obj "tool" "list_imports"))))
 (check "the command shown is the recorded line, else the recorded arguments as a line"
-       (and (string= "a ; b" (re::recorded-command (re::obj "commands" (vector "a" "b"))))
+       (and (string= "a ; b" (omp-re::evidence-command (omp-re:obj "commands" (vector "a" "b"))))
             (string= "pdf @ main"
-                     (re::recorded-command (re::obj "args" (re::obj "command" "pdf" "addr" "main"))))
-            (null (re::recorded-command (re::obj "args" (re::obj))))))
+                     (omp-re::evidence-command (omp-re:obj "args" (omp-re:obj "command" "pdf" "addr" "main"))))
+            (null (omp-re::evidence-command (omp-re:obj "args" (omp-re:obj))))))
 
 ;;; --- the gates, on a record written by hand ---------------------------------------------------
 
@@ -120,10 +126,10 @@ module is or is not loaded, and put back after."
                (and (has "record_finding: recorded " text)
                     (has "claim: f multiplies by 33." text)
                     (has "evidence: 1 of 1 machine-reproducible — this finding will carry to the next build (/re carry)" text)))
-        (check "with no side turn the support audit fails open: unaudited, in the TypeScript's words"
+        (check "with no side turn the support audit fails open: unaudited, word for word"
                (has "support audit: unaudited — no model / side turns unavailable" text)))
-      (let ((entry (car (last (re::entries-of "re.finding" (re::find-session id))))))
-        (check "the re.finding entry has the TypeScript's members, in its order"
+      (let ((entry (car (last (omp-re::entries-of "re.finding" (omp-re:find-session id))))))
+        (check "the re.finding entry has its members in the record's fixed order"
                (and (equal '("id" "claim" "evidenceIds" "addr" "confidence" "audit" "binarySha256") (keys entry))
                     (equalp #("11111111-aaaa-bbbb-cccc-000000000001") (gethash "evidenceIds" entry))
                     (equal "confirmed" (gethash "confidence" entry))
@@ -177,7 +183,9 @@ module is or is not loaded, and put back after."
                     (string= (format nil "finding ~a: second~%confidence: likely~%evidence: 11111111"
                                      (subseq second-id 0 8))
                              (re:slash (format nil "findings ~a" (subseq second-id 0 8))))
-                    (has "omp-re: no live finding with id nope"
+                    (has "omp-re: no live finding with id nopenope"
+                         (refusal (lambda () (re:slash "findings nopenope"))))
+                    (has "omp-re: finding id \"nope\" is too short"
                          (refusal (lambda () (re:slash "findings nope"))))))
         (check "retract_finding withdraws one, with the reason, and writes a re.finding.retract entry"
                (let ((text (re:call "retract_finding" :id second-id :reason "wrong function")))
@@ -186,42 +194,48 @@ module is or is not loaded, and put back after."
                                text)
                       (null (live id))
                       (equal '("id" "reason")
-                             (keys (first (re::entries-of "re.finding.retract" (re::find-session id)))))))))
+                             (keys (first (omp-re::entries-of "re.finding.retract" (omp-re:find-session id)))))))))
       (check "a retraction needs a reason"
              (has "reason must be 1 to 300 characters"
                   (refusal (lambda () (re:call "retract_finding" :id "11111111" :reason ""))))))
 
     (in-session (id)
-      (setf (re::session-binary-sha256 (re::find-session id)) (sha-of #\c))
+      (setf (omp-re::session-binary-sha256 (omp-re:find-session id)) (sha-of #\c))
       (check "evidence taken against a different binary than the one open is refused"
              (has "omp-re: record_finding: evidence 11111111 was taken against a different binary than the one open — re-gather it on this binary."
                   (refusal (lambda () (re:call "record_finding" :claim "x" :evidence '("11111111"))))))
       (check "adopt_finding refuses a finding made on another binary before anything runs"
              (has "omp-re: adopt_finding: the finding was made on binary eeeeeeeeeeee… but cccccccccccc… is open — open the same binary first."
-                  (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '("pdf @ sym.f")
+                  (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '((:command "pdf" :addr "sym.f"))
                                                                :expect-sha256 (sha-of #\e))))))
       (check "adopt_finding needs one to eight commands"
              (has "commands must hold 1 to 8 commands (was 9)"
                   (refusal (lambda () (re:call "adopt_finding" :claim "c"
-                                                               :commands (make-list 9 :initial-element "pdf"))))))))
+                                                               :commands (make-list 9 :initial-element '(:command "pdf")))))))))
 
-  (check "a finding's note carries inheritance, adoption and an audit override"
-         (string= "confidence: likely · at `sym.fibonacci` · inherited from `aaaaaaaaaaaa…`, re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd) · adopted from re-analyst, re-proven in this session · recorded over a support-audit \"overreach\" verdict — justification: it is djb2"
-                  (re::finding-note
-                   (re::obj "confidence" "likely" "addr" "sym.fibonacci"
-                            "inherited" (re::obj "fromBinarySha256" (sha-of #\a) "carryStatus" "relocated"
-                                                 "relocation" (re::obj "from" "sym.fib @ 0x11fd"
-                                                                       "to" "sym.fibonacci @ 0x11fd"))
-                            "adoptedFrom" "re-analyst"
-                            "audit" (re::obj "verdict" "overreach" "reason" "r" "override" "it is djb2")))))
+  (check "/re findings <id> says a finding's provenance: inheritance, adoption and an audit override"
+         (let ((id (fresh-session)))
+           (omp-re::append-entry
+            "re.finding"
+            (omp-re:obj "id" "note-finding-0001" "claim" "c" "evidenceIds" (vector)
+                        "confidence" "likely" "addr" "sym.fibonacci"
+                        "inherited" (omp-re:obj "fromBinarySha256" (sha-of #\a) "carryStatus" "relocated"
+                                                "relocation" (omp-re:obj "from" "sym.fib @ 0x11fd"
+                                                                         "to" "sym.fibonacci @ 0x11fd"))
+                        "adoptedFrom" "re-analyst"
+                        "audit" (omp-re:obj "verdict" "overreach" "reason" "r" "override" "it is djb2"))
+            (omp-re:find-session id))
+           (in-session (id)
+             (has (format nil "~%confidence: likely · at `sym.fibonacci` · inherited from `aaaaaaaaaaaa…`, re-verified on this build (relocated: sym.fib @ 0x11fd → sym.fibonacci @ 0x11fd) · adopted from re-analyst, re-proven in this session · recorded over a support-audit \"overreach\" verdict — justification: it is djb2~%")
+                  (re:slash "findings note-finding-0001")))))
   (let ((id (fresh-session)))
-    (let ((session (re::find-session id)))
-      (re::append-entry "re.finding" (re::obj "id" "a" "claim" "kept" "evidenceIds" (vector "e" 7)
+    (let ((session (omp-re:find-session id)))
+      (omp-re::append-entry "re.finding" (omp-re:obj "id" "a" "claim" "kept" "evidenceIds" (vector "e" 7)
                                               "confidence" "certain")
                         session)
-      (re::append-entry "re.finding" (re::obj "id" "b" "claim" "no evidence array") session)
-      (re::append-entry "re.finding" (re::obj "id" "c" "claim" "inherited" "evidenceIds" (vector)
-                                              "inherited" (re::obj "carryStatus" "holds"))
+      (omp-re::append-entry "re.finding" (omp-re:obj "id" "b" "claim" "no evidence array") session)
+      (omp-re::append-entry "re.finding" (omp-re:obj "id" "c" "claim" "inherited" "evidenceIds" (vector)
+                                              "inherited" (omp-re:obj "carryStatus" "holds"))
                         session))
     (check "a record read back keeps what is a finding, with a known confidence and string ids only"
            (let ((findings (live id)))
@@ -243,32 +257,28 @@ module is or is not loaded, and put back after."
                            (re:slash (format nil "report ~a" path)))
                   (string= (format nil "# Analysis Report — Session ~a~%~%## Conclusion~%~%This report was generated from an automated analysis session.~%"
                                    id)
-                           (re::read-text-file path))))
+                           (omp-re::read-text-file path))))
       (check "its manifest is the three members, binarySha256 null"
-             (let ((manifest (re::json-decode (re::read-text-file (format nil "~a.manifest.json" path)))))
+             (let ((manifest (omp-re:json-decode (omp-re::read-text-file (format nil "~a.manifest.json" path)))))
                (and (equal '("binarySha256" "findings" "entries") (keys manifest))
                     (eq :null (gethash "binarySha256" manifest))
                     (equalp #() (gethash "findings" manifest))
                     (equalp #() (gethash "entries" manifest)))))
-      (check "the title names a long session id by its last eight characters"
-             (string= "Analysis Report — Session 23456789"
-                      (re::built-report-title
-                       (re::build-report (re::make-session :id "session-0123456789")))))
       (check "a report that cannot be written says where and why, as a failure"
              (has "omp-re: could not write report to /nonexistent-dir/x.md: "
                   (refusal (lambda () (re:slash "report /nonexistent-dir/x.md")))))))
 
   (let* ((id (seeded-session))
-         (session (re::find-session id))
+         (session (omp-re:find-session id))
          (path (uiop:native-namestring (merge-pathnames "hand.md" *scratch*))))
     (in-session (id)
       (re:call "record_finding" :claim "f multiplies by 33." :evidence '("11111111")
                                 :addr "sym.f" :confidence "confirmed")
-      (re::append-entry "re.evidence"
-                        (re::obj "id" "ev-strings" "tool" "list_strings"
+      (omp-re::append-entry "re.evidence"
+                        (omp-re:obj "id" "ev-strings" "tool" "list_strings"
                                  "summary" "found string: http://185.220.101.99/update.php in .data section")
                         session)
-      (re::append-entry "re.evidence" (re::obj "id" "ev-nosummary" "tool" "list_strings") session)
+      (omp-re::append-entry "re.evidence" (omp-re:obj "id" "ev-nosummary" "tool" "list_strings") session)
       (let ((markdown (re:slash "report")))
         (check "with no path the report itself is the answer: findings with provenance and anchors"
                (and (has (format nil "## Findings~%~%- f multiplies by 33.~%  _confidence: confirmed · at `sym.f`_~%  **Evidence:** [rizin_command:11111111-aaaa-bbbb-cccc-000000000001]~%")
@@ -282,35 +292,35 @@ module is or is not loaded, and put back after."
                (and (has (format nil "Binary SHA-256: `~a`" (sha-of #\a)) markdown)
                     (has "| `11111111` | rizin_command | `pdf @ sym.f` | `bbbbbbbbbbbb…` | reproducible |" markdown)
                     (has "| `ev-strin` | list_strings | — | — | unverifiable (legacy) |" markdown)
-                    (re::ends-with (format nil "|~%") markdown)
-                    (not (re::ends-with (format nil "|~%~%") markdown)))))
+                    (ends (format nil "|~%") markdown)
+                    (not (ends (format nil "|~%~%") markdown)))))
       (check "--no-audit and --audit=off skip the audit, so no note; --audit=strict fails open and still writes"
              (and (not (has "support unaudited" (re:slash "report --no-audit")))
                   (not (has "support unaudited" (re:slash "report --audit=off")))
                   (has "support unaudited" (re:slash "report --audit"))
                   (has "support unaudited" (re:slash "report --audit=strict"))
                   (has "report written to" (re:slash (format nil "report --audit=strict ~a" path)))
-                  (has "support unaudited" (re::read-text-file path))))
+                  (has "support unaudited" (omp-re::read-text-file path))))
       (check "the flags are taken out wherever they stand and the rest is the path"
              (and (has (format nil "report written to ~a " path)
                        (re:slash (format nil "report ~a --no-audit" path)))
-                  (not (has "support unaudited" (re::read-text-file path)))))
-      (let* ((manifest (re::json-decode (re::read-text-file (format nil "~a.manifest.json" path))))
+                  (not (has "support unaudited" (omp-re::read-text-file path)))))
+      (let* ((manifest (omp-re:json-decode (omp-re::read-text-file (format nil "~a.manifest.json" path))))
              (entries (gethash "entries" manifest))
              (entry (aref entries 0)))
         (check "the manifest file is JSON.stringify(…, null, 2) and a newline"
-               (let ((text (re::read-text-file (format nil "~a.manifest.json" path))))
-                 (and (re::starts-with (format nil "{~%  \"binarySha256\": \"~a\",~%  \"findings\": [~%    {~%      \"id\": "
+               (let ((text (omp-re::read-text-file (format nil "~a.manifest.json" path))))
+                 (and (starts (format nil "{~%  \"binarySha256\": \"~a\",~%  \"findings\": [~%    {~%      \"id\": "
                                                (sha-of #\a))
                                        text)
-                      (re::ends-with (format nil "~%}~%") text))))
+                      (ends (format nil "~%}~%") text))))
         (check "its findings block is what /re carry --inherit re-proves"
                (let ((finding (aref (gethash "findings" manifest) 0)))
                  (and (equal '("id" "claim" "evidenceIds" "addr" "confidence") (keys finding))
                       (equal "f multiplies by 33." (gethash "claim" finding))
                       (equal "sym.f" (gethash "addr" finding))
                       (equal "confirmed" (gethash "confidence" finding)))))
-        (check "an entry has every member the TypeScript writes, in its order"
+        (check "a manifest entry has every member, in the manifest's fixed order"
                (equal '("evidenceId" "tool" "args" "command" "commands" "reproHash" "canonicalExcerpt"
                         "shiftHash" "anchor" "binarySha256" "status" "claims")
                       (keys entry)))
@@ -341,14 +351,14 @@ module is or is not loaded, and put back after."
                     (and (has "  UNVERIFIABLE ev-strin list_strings: legacy: no reproducible hash recorded" text)
                          ;; /bin/sample cannot be opened, so the re-run fails: unverifiable, never FAILED.
                          (has "  UNVERIFIABLE 11111111 rizin_command: re-run failed: " text)))))
-      (setf (re::session-binary-sha256 session) (sha-of #\c))
+      (setf (omp-re::session-binary-sha256 session) (sha-of #\c))
       (check "evidence bound to a different binary is unverifiable, not a false pass or fail"
              (has "UNVERIFIABLE 11111111 rizin_command: evidence was taken against a different binary — open sha aaaaaaaaaaaa… to verify"
                   (refusal (lambda () (re:slash "verify --strict")))))
-      (setf (re::session-binary-sha256 session) (sha-of #\a))
+      (setf (omp-re::session-binary-sha256 session) (sha-of #\a))
 
       ;; The write gate.
-      (re::append-entry "re.finding" (re::obj "id" "22222222-0000" "claim" "It beacons to a C2."
+      (omp-re::append-entry "re.finding" (omp-re:obj "id" "22222222-0000" "claim" "It beacons to a C2."
                                               "evidenceIds" (vector))
                         session)
       (let ((withheld (uiop:native-namestring (merge-pathnames "withheld.md" *scratch*))))
@@ -364,40 +374,42 @@ module is or is not loaded, and put back after."
         (check "retracting the ungrounded finding lets the report through again"
                (has "report written to" (re:slash (format nil "report ~a" withheld)))))
 
-      ;; Annotations, as annotate.lisp's LIVE-ANNOTATIONS answers them for the open binary.
-      (setf (re::session-binary-path session) "/bin/sample")
-      (with-annotations ((annotation "http://evil-test.example/payload" ""))
+      ;; Annotations in effect on the binary the record has open.
+      (let ((ungrounded (annotate-record session "http://evil-test.example/payload" "")))
         (check "an IOC in an annotation made on no evidence withholds the report"
                (let ((text (refusal (lambda () (re:slash "report")))))
                  (and (has "omp-re: report withheld — 1 claim(s) without evidence:" text)
-                      (has "  - hxxp://evil-test[.]example/payload" text)))))
-      (with-annotations ((annotation "http://evil-test.example/payload" "ann-evidence")
-                         (annotation "see http://185.220.101.99/update.php" "11111111-aaaa-bbbb-cccc-000000000001")
-                         (re::obj "kind" "comment"))
+                      (has "  - hxxp://evil-test[.]example/payload" text))))
+        (take-back session ungrounded))
+      (let ((made (list (annotate-record session "http://evil-test.example/payload" "ann-evidence")
+                        (annotate-record session "see http://185.220.101.99/update.php"
+                                         "11111111-aaaa-bbbb-cccc-000000000001"))))
+        ;; One that says no address is no annotation.
+        (omp-re::append-entry "re.annotation" (omp-re:obj "kind" "set_comment") session)
         (let ((markdown (re:slash "report")))
           (check "an annotation's IOC is anchored to the evidence it was made on"
                  (and (has (format nil "- hxxp://evil-test[.]example/payload~%  **Evidence:** [annotation:ann-evidence]") markdown)
                       (has "| `ann-evid` | annotation | — | — | unverifiable (legacy) |" markdown)))
           (check "one indicator seen twice is one claim on both pieces of evidence"
                  (has (format nil "- hxxp://185[.]220[.]101[.]99/update[.]php~%  **Evidence:** [list_strings:ev-strings] [rizin_command:11111111-aaaa-bbbb-cccc-000000000001]")
-                      markdown))))
-      (check "with the annotations gone the report is as it was"
+                      markdown)))
+        (apply #'take-back session made))
+      (check "with the annotations undone the report is as it was"
              (not (has "evil-test" (re:slash "report"))))
-      (setf (re::session-binary-path session) nil)
 
       ;; capa's capabilities, from the blob its record points at.
-      (re::append-entry
+      (omp-re::append-entry
        "re.evidence"
-       (re::obj "id" "ev-capa" "tool" "triage_capa" "summary" "capa: 2 rules"
+       (omp-re:obj "id" "ev-capa" "tool" "triage_capa" "summary" "capa: 2 rules"
                 "outputHash"
-                (re::write-blob
+                (omp-re::write-blob
                  (format nil "capa: 2 rules~%~a"
-                         (re::json-encode
-                          (vector (re::obj "name" "encrypt data using RC4"
-                                           "meta" (re::obj "attack" (vector (re::obj "id" "T1027" "technique" "Obfuscated Files"
+                         (omp-re:json-encode
+                          (vector (omp-re:obj "name" "encrypt data using RC4"
+                                           "meta" (omp-re:obj "attack" (vector (omp-re:obj "id" "T1027" "technique" "Obfuscated Files"
                                                                                      "subtechnique" "Packing")
                                                                             "T1059")))
-                                  (re::obj "meta" (re::obj "name" " create process " "attack" (vector "T9999"))))))))
+                                  (omp-re:obj "meta" (omp-re:obj "name" " create process " "attack" (vector "T9999"))))))))
        session)
       (let ((markdown (re:slash "report --no-audit")))
         (check "capa evidence gives a summary and an anchored capabilities and ATT&CK section"
@@ -427,16 +439,16 @@ module is or is not loaded, and put back after."
        (in-session (id)
          (re:open *binary*)
          (let* ((info-evidence (nth-value 1 (re:json "iIj")))
-                (entry-evidence (re::evidence-id-of (re:cmd "pd 4" "entry0")))
-                (session (re::find-session id))
-                (sha (re::session-binary-sha256 session)))
+                (entry-evidence (tagged-evidence (re:cmd "pd 4" "entry0")))
+                (session (omp-re:find-session id))
+                (sha (omp-re::session-binary-sha256 session)))
            (let ((text (re:call "record_finding" :claim "The binary is a 64-bit ELF."
                                                  :evidence (list info-evidence) :confidence "confirmed")))
              (check "a finding citing the evidence id of a real read is recorded and will carry"
                     (and (has "record_finding: recorded " text)
                          (has "evidence: 1 of 1 machine-reproducible" text)
                          (equal sha (gethash "binarySha256" (first (live id))))
-                         (re::starts-with info-evidence
+                         (starts info-evidence
                                           (aref (gethash "evidenceIds" (first (live id))) 0)))))
            (check "one citing an unknown id is refused, and one citing none"
                   (and (has "evidence not found — no id starting \"0badc0de\" on this branch"
@@ -451,16 +463,16 @@ module is or is not loaded, and put back after."
                     (= 1 (length (gethash "evidenceIds" (second (live id)))))))
 
            ;; adopt_finding: re-prove on this binary, then gate like record_finding.
-           (let* ((before (length (re::evidence-records session)))
+           (let* ((before (length (omp-re::evidence-records session)))
                   (text (re:call "adopt_finding" :claim "entry0 begins with endbr64."
-                                                 :commands '("pd 2 @ entry0" "{\"command\":\"iej\"}")
+                                                 :commands '((:command "pd 2" :addr "entry0") (:command "iej"))
                                                  :addr "entry0" :confidence "possible" :source "re-analyst"
                                                  :expect-sha256 (string-upcase sha)))
                   (finding (third (live id)))
-                  (records (mapcar (lambda (evidence-id) (re::find-evidence evidence-id session))
+                  (records (mapcar (lambda (evidence-id) (omp-re::find-evidence evidence-id session))
                                    (coerce (gethash "evidenceIds" finding) 'list))))
              (check "adopt_finding re-runs each command here and records it as this session's evidence"
-                    (and (= (+ before 2) (length (re::evidence-records session)))
+                    (and (= (+ before 2) (length (omp-re::evidence-records session)))
                          (equal '("rizin_command" "rizin_command")
                                 (mapcar (lambda (record) (gethash "tool" record)) records))
                          (equal '("command" "addr") (keys (gethash "args" (first records))))
@@ -487,16 +499,16 @@ module is or is not loaded, and put back after."
                   (let ((findings (length (live id))))
                     (and (has "omp-re: adopt_finding: `pdf @ sym.no_such_function` failed here: rizin> pdf @ sym.no_such_function"
                               (refusal (lambda () (re:call "adopt_finding" :claim "c"
-                                                                           :commands '("pdf @ sym.no_such_function")))))
+                                                                           :commands '((:command "pdf" :addr "sym.no_such_function"))))))
                          (has "not available here"
-                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '("wx 90 @ entry0")))))
+                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '((:command "wx 90" :addr "entry0"))))))
                          (has "open the same binary first"
-                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '("iIj")
+                              (refusal (lambda () (re:call "adopt_finding" :claim "c" :commands '((:command "iIj"))
                                                                            :expect-sha256 (sha-of #\e)))))
                          (= findings (length (live id))))))
            (check "with no source the finding is adopted from an external analysis"
                   (has "adopted from an external analysis: re-proven"
-                       (re:call "adopt_finding" :claim "It has imports." :commands '("iij"))))
+                       (re:call "adopt_finding" :claim "It has imports." :commands '((:command "iij")))))
 
            ;; supersede and retract.
            (let ((external (fourth (live id))))
@@ -513,18 +525,18 @@ module is or is not loaded, and put back after."
                        (has "findings on this branch: 3" (re:status))))
 
            ;; verify.
-           (let ((count (length (re::evidence-records session))))
+           (let ((count (length (omp-re::evidence-records session))))
              (check "/re verify re-runs every record against the binary and finds them reproducible"
                     (string= (format nil "omp-re: verify — ~d reproducible, 0 FAILED, 0 unverifiable (of ~d evidence record(s))"
                                      count count)
                              (re:slash "verify")))
              (check "verifying recorded no new evidence"
-                    (= count (length (re::evidence-records session))))
+                    (= count (length (omp-re::evidence-records session))))
              (check "and --strict has nothing to add while all of it reproduces"
                     (has "0 FAILED, 0 unverifiable" (re:slash "verify --strict")))
              ;; A record from before the reproducibility fields existed.
-             (re::append-entry "re.evidence" (re::obj "id" "1e9ac100-legacy" "tool" "rizin_command"
-                                                      "args" (re::obj "command" "iIj") "summary" "old")
+             (omp-re::append-entry "re.evidence" (omp-re:obj "id" "1e9ac100-legacy" "tool" "rizin_command"
+                                                      "args" (omp-re:obj "command" "iIj") "summary" "old")
                                session)
              (check "a legacy record lacking the reproducibility fields is unverifiable, and does not fail the line"
                     (string= (format nil "omp-re: verify — ~d reproducible, 0 FAILED, 1 unverifiable (of ~d evidence record(s))"
@@ -535,7 +547,7 @@ module is or is not loaded, and put back after."
                       (and (has "0 FAILED, 1 unverifiable" text)
                            (has "  UNVERIFIABLE 1e9ac100 rizin_command: legacy: no reproducible hash recorded" text))))
              ;; Tamper with what the record says the read answered.
-             (let* ((record (re::find-evidence entry-evidence session))
+             (let* ((record (omp-re::find-evidence entry-evidence session))
                     (true-hash (gethash "reproHash" record)))
                (setf (gethash "reproHash" record) (sha-of #\0))
                (check "a tampered repro hash makes /re verify FAIL, naming the record, its command and both hashes"
@@ -553,7 +565,7 @@ module is or is not loaded, and put back after."
            ;; report.
            (let ((markdown (re:slash "report")))
              (check "/re report with no path answers the report: title, findings, provenance, anchors"
-                    (and (re::starts-with (format nil "# Analysis Report — Session ~a~%~%## Findings~%~%- The binary is a 64-bit ELF.~%  _confidence: confirmed_~%  **Evidence:** [rizin_command:~a"
+                    (and (starts (format nil "# Analysis Report — Session ~a~%~%## Findings~%~%- The binary is a 64-bit ELF.~%  _confidence: confirmed_~%  **Evidence:** [rizin_command:~a"
                                                   id info-evidence)
                                           markdown)
                          (has "  _confidence: likely · at `entry0`_" markdown)
@@ -570,18 +582,18 @@ module is or is not loaded, and put back after."
            (check "/re report <path> writes the report and its manifest beside it"
                   (and (string= (format nil "omp-re: report written to ~a (+ ~a.manifest.json)" path path)
                                 (re:slash (format nil "report ~a" path)))
-                       (string= (re:slash "report") (re::read-text-file path))))
+                       (string= (re:slash "report") (omp-re::read-text-file path))))
            (check "a relative path is read against the process's directory"
                   (uiop:with-current-directory (*scratch*)
                     (and (string= "omp-re: report written to rel.md (+ rel.md.manifest.json)"
                                   (re:slash "report rel.md"))
                          (probe-file (merge-pathnames "rel.md" *scratch*))
                          (probe-file (merge-pathnames "rel.md.manifest.json" *scratch*)))))
-           (let* ((manifest (re::json-decode (re::read-text-file (format nil "~a.manifest.json" path))))
+           (let* ((manifest (omp-re:json-decode (omp-re::read-text-file (format nil "~a.manifest.json" path))))
                   (entries (coerce (gethash "entries" manifest) 'list))
-                  (pinned (find-if (lambda (entry) (re::starts-with entry-evidence (gethash "evidenceId" entry)))
+                  (pinned (find-if (lambda (entry) (starts entry-evidence (gethash "evidenceId" entry)))
                                    entries))
-                  (unpinned (find-if (lambda (entry) (re::starts-with info-evidence (gethash "evidenceId" entry)))
+                  (unpinned (find-if (lambda (entry) (starts info-evidence (gethash "evidenceId" entry)))
                                      entries)))
              (check "the manifest: the binary's hash, the live findings, one entry for each cited read"
                     (and (equal '("binarySha256" "findings" "entries") (keys manifest))
@@ -609,7 +621,7 @@ module is or is not loaded, and put back after."
                       (and (equal '("anchor" "function" "offset" "delta" "size" "nbbs" "mnemonics") (keys anchor))
                            (equal "entry0" (gethash "anchor" anchor))
                            (equal "entry0" (gethash "function" anchor))
-                           (re::starts-with "0x" (gethash "offset" anchor))
+                           (starts "0x" (gethash "offset" anchor))
                            (eql 0 (gethash "delta" anchor))
                            (plusp (gethash "size" anchor))
                            (plusp (gethash "nbbs" anchor))
@@ -619,7 +631,7 @@ module is or is not loaded, and put back after."
                            (equal "pd 4 @ entry0" (gethash "command" pinned))))))
 
            ;; The gate, on the real record.
-           (re::append-entry "re.finding" (re::obj "id" "33333333-0000" "claim" "It is ransomware."
+           (omp-re::append-entry "re.finding" (omp-re:obj "id" "33333333-0000" "claim" "It is ransomware."
                                                    "evidenceIds" (vector))
                              session)
            (check "a finding with nothing under it withholds the report"
@@ -629,7 +641,7 @@ module is or is not loaded, and put back after."
 
            ;; The engine forgets the session; the record is the truth.
            (let ((before (mapcar (lambda (finding) (gethash "id" finding)) (live id))))
-             (re::shutdown-sessions)
+             (omp-re:shutdown-sessions)
              (check "findings survive the engine forgetting the session: the same ones, in order"
                     (and (equal before (mapcar (lambda (finding) (gethash "id" finding)) (live id)))
                          (has "findings on this branch: 3" (re:status))
@@ -641,7 +653,7 @@ module is or is not loaded, and put back after."
              (check "and the report is written from the record alone, on a rizin started for its anchors"
                     (and (has "## Findings" (re:slash "report"))
                          (has "report written to" (re:slash (format nil "report ~a" path)))
-                         (let ((manifest (re::json-decode (re::read-text-file (format nil "~a.manifest.json" path)))))
+                         (let ((manifest (omp-re:json-decode (omp-re::read-text-file (format nil "~a.manifest.json" path)))))
                            (and (= 3 (length (gethash "findings" manifest)))
                                 (some (lambda (entry) (hash-table-p (gethash "anchor" entry)))
                                       (gethash "entries" manifest)))))))))))))

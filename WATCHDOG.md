@@ -1,10 +1,10 @@
 # RE grounding review priorities
 
-Review priorities for an advisor watching an RE-mode session (see the suite README for the `WATCHDOG.yml` roster entry that wires this file in). These carry the rules the ported package's linter used to enforce mechanically; the advisor now applies them as judgment, not as a hard gate.
+Review priorities for an advisor watching an RE-mode session (see `docs/workflow.md` for the `WATCHDOG.yml` roster entry that wires this file in). The advisor applies them as judgment, not as a hard gate.
 
 ## Flag
 
-- An address, constant, API/import name, ATT&CK technique, or verdict ("this is ransomware", "this exfiltrates data") asserted in the analyst's response without a matching `re.evidence` record from this session backing it. "Matching" means: the tool call that would produce that fact actually ran, and its recorded output actually contains it — not merely that some tool ran at some point.
+- An address, constant, API/import name, ATT&CK technique, or verdict ("this is ransomware", "this exfiltrates data") asserted in the analyst's response without a matching `re.evidence` record from this session backing it. "Matching" means: the `rizin_command` read that would produce that fact actually ran, and its recorded output actually contains it — not merely that some tool ran at some point. Only `rizin_command` reads are recorded as evidence.
 - An address carried over from a different function, a different binary, or computed by hand rather than quoted from a tool's `ea` field.
 - A claim stated more strongly than its evidence supports — e.g. treating one string match or one import as proof of a capability the decompiled logic doesn't corroborate.
 - Silent reliance on disassembly-only output (a `pdf` fallback when no decompiler plugin is installed) to support a behavioral claim that would normally need decompiled logic to justify.

@@ -1,143 +1,31 @@
 /**
  * Loads extensions/re through omp's real SDK and extension runner — the same
- * loader, tool wrappers (approval, tool_call/tool_result events), and command
- * dispatch an interactive session uses — instead of a stub ExtensionAPI.
- * Nothing here calls a model: slash commands are handled locally and tools
- * are executed straight from the session's tool registry.
+ * loader, tool wrappers (approval and tool events), and command dispatch an
+ * interactive session uses — with the real engine behind it: an SBCL child
+ * the extension starts, and, in the second half, a real rizin. Nothing here
+ * calls a model: slash commands are handled locally and tools are executed
+ * straight from the session's tool registry.
  *
- * This is the suite that catches host API drift (e.g. omp 18 changing
- * getAllTools() from names to ToolInfo objects broke `/re on` while every
- * stub-based test stayed green). The rizin-free half runs in CI.
+ * This is the suite that catches host API drift, and that the extension and
+ * the engine still agree on the wire between them.
  *
  * Every RE tool is `discoverable` (render.ts `RE_LOAD_MODE`), so omp mounts it
  * as an `xd://` device rather than listing it top-level, and the model drives
  * it from omp's own `eval` tool as `await tool.<name>({ ... })`. These tests go
  * through that same path.
  */
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { RE_ALL_TOOL_NAMES, RE_ANALYZE_TOOL_NAMES, RE_EMULATE_TOOL_NAMES, RE_MUTATE_TOOL_NAMES, RE_RIZIN_TOOL_NAMES, RE_SESSION_TOOL_NAMES, RE_SIGNATURE_TOOL_NAMES } from "../extensions/re/audit.ts";
-import { REQUIRED_COMMANDS } from "../extensions/re/catalog.ts";
-import { canRunRizin, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
+import { join } from "node:path";
+import { engine, outside } from "../extensions/re/host.ts";
+import { activeRe, boot, canRunRizin, caught, evalJs, logSkip, mountedRe, reTools, type SdkHarness, scratchAgentDir, TEST_BINARY } from "./helpers.ts";
 
 logSkip("extension-sdk rizin tests");
 
-const EXTENSION = resolve(import.meta.dir, "../extensions/re");
-/** The tools registered unconditionally in every session. Triage, rizin_cli, and debug are conditional (binary on PATH / env opt-in), so they are excluded here. */
-const ALWAYS_REGISTERED = [
-	// The read-tier wrappers are no longer registered (one-tool design): reads go through rizin_command.
-	...Object.keys(RE_MUTATE_TOOL_NAMES),
-	...Object.keys(RE_RIZIN_TOOL_NAMES),
-	...Object.keys(RE_EMULATE_TOOL_NAMES),
-	...Object.keys(RE_SIGNATURE_TOOL_NAMES),
-	...Object.keys(RE_ANALYZE_TOOL_NAMES),
-	...Object.keys(RE_SESSION_TOOL_NAMES),
-];
-
-interface Harness {
-	session: AgentSession;
-	notes: string[];
-	editor: () => string;
-	shutdown: () => Promise<void>;
-}
-
-/** A minimal ExtensionUIContext: records what the extension tells the user, renders nothing. */
-function makeUi(notes: string[], editor: { text: string }) {
-	const noop = () => {};
-	return {
-		notify: (message: string, type?: string) => notes.push(`[${type ?? "info"}] ${message}`),
-		setStatus: noop,
-		setWidget: noop,
-		setWorkingMessage: noop,
-		setEditorText: (text: string) => {
-			editor.text = text;
-		},
-		getEditorText: () => editor.text,
-		custom: async () => undefined,
-		select: async () => undefined,
-		confirm: async () => true,
-		input: async () => undefined,
-		onTerminalInput: () => noop,
-		setFooter: noop,
-		setHeader: noop,
-		setTitle: noop,
-		pasteToEditor: noop,
-		editor: async () => undefined,
-		addAutocompleteProvider: noop,
-		setEditorComponent: noop,
-		getAllThemes: async () => [],
-		getTheme: async () => undefined,
-		setTheme: async () => ({ success: true }),
-		getToolsExpanded: () => false,
-		setToolsExpanded: noop,
-	};
-}
-
-/**
- * Boot a session with the extension loaded. `headless` boots without a UI, as `omp -p` runs; `flags` sets
- * extension flags (like `--binary`) before session_start fires.
- */
-async function boot(sessionManager: unknown, options: { headless?: boolean; flags?: Record<string, string> } = {}): Promise<Harness> {
-	const sdk = await import("@oh-my-pi/pi-coding-agent");
-	const { initializeExtensions } = await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
-	const notes: string[] = [];
-	const editor = { text: "" };
-	const ui = makeUi(notes, editor);
-	const { session, extensionsResult, setToolUIContext } = await sdk.createAgentSession({
-		cwd: tmpdir(),
-		additionalExtensionPaths: [EXTENSION],
-		disableExtensionDiscovery: true,
-		sessionManager: sessionManager as never,
-	});
-	expect(extensionsResult.errors).toEqual([]);
-	for (const [name, value] of Object.entries(options.flags ?? {})) session.extensionRunner!.setFlagValue(name, value);
-	if (!options.headless) setToolUIContext(ui as never, false);
-	await initializeExtensions(session, {
-		reportSendError: () => {},
-		reportRuntimeError: (error: { error: string }) => notes.push(`[runtime] ${error.error}`),
-		...(options.headless ? {} : { uiContext: ui as never }),
-	});
-	return {
-		session,
-		notes,
-		editor: () => editor.text,
-		shutdown: () => session.dispose(),
-	};
-}
-
-const activeRe = (session: AgentSession) => session.getActiveToolNames().filter((name) => RE_ALL_TOOL_NAMES[name]);
-const mountedRe = (session: AgentSession) => session.getMountedXdevToolNames().filter((name) => RE_ALL_TOOL_NAMES[name]);
-
-/** Run one JavaScript cell through omp's own `eval` tool, as the model does. Returns its text output (an error the cell threw comes back as its output, with isError). */
-async function evalJs(session: AgentSession, code: string): Promise<{ text: string; isError: boolean }> {
-	const result = await session.getToolByName("eval")!.execute(`t-eval-${Math.random().toString(36).slice(2)}`, { language: "js", code } as never);
-	const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
-	return { text, isError: (result as { isError?: boolean }).isError === true };
-}
-
-/** A cell that returns the message of whatever `body` throws, or "ok". */
-const caught = (body: string) => `let m = "ok"; try { ${body} } catch (e) { m = e.message }; m`;
-
-let agentDir: string;
-let originalAgentDir: string;
-
-beforeAll(async () => {
-	originalAgentDir = getAgentDir();
-	agentDir = await mkdtemp(join(tmpdir(), "omp-re-sdk-test-"));
-	setAgentDir(agentDir);
-});
-
-afterAll(async () => {
-	setAgentDir(originalAgentDir);
-	rmDirSafe(agentDir);
-});
+const agentDir = scratchAgentDir("sdk-test");
 
 describe("loaded by omp's SDK (no rizin needed)", () => {
-	let h: Harness;
+	let h: SdkHarness;
 
 	beforeAll(async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
@@ -148,10 +36,13 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 		await h.shutdown();
 	});
 
-	test("registers every non-triage RE tool as an xd:// device — none in the top-level tool list", () => {
-		for (const name of ALWAYS_REGISTERED) expect(h.session.getToolByName(name)).toBeDefined();
+	test("registers exactly the tools the engine describes, each as an xd:// device — none in the top-level tool list", async () => {
+		const described = (await engine().request("describe", {})).tools.map((tool) => tool.name).sort();
+		// The ones every session has, whatever is installed: a sample, so an engine that describes nothing does not pass.
+		expect(described).toEqual(expect.arrayContaining(["open_binary", "rizin_command", "rizin_help", "record_finding", "rename_function"]));
+		expect(reTools(h.session).map((tool) => tool.definition.name).sort()).toEqual(described);
+		expect(mountedRe(h.session).sort()).toEqual(described);
 		expect(activeRe(h.session)).toEqual([]);
-		expect(mountedRe(h.session).sort()).toEqual(expect.arrayContaining(ALWAYS_REGISTERED.sort()));
 	});
 
 	test("omp's eval reaches an RE tool as tool.<name>(), and its error is catchable in the cell", async () => {
@@ -169,7 +60,7 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 	test("/re off refuses RE tool calls from eval while the devices stay mounted, and /re on lifts it", async () => {
 		await h.session.prompt("/re off");
 		expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toBe("omp-re: RE tools are off for this session — the user can re-enable them with /re on");
-		expect(mountedRe(h.session).sort()).toEqual(expect.arrayContaining(ALWAYS_REGISTERED.sort()));
+		expect(mountedRe(h.session)).toContain("rizin_command");
 		await h.session.prompt("/re on");
 		expect(h.notes.at(-1)).toBe("[info] omp-re: RE tools enabled for this session");
 		expect((await evalJs(h.session, caught('await tool.rizin_command({ command: "aflj" })'))).text).toContain("omp-re: no binary open");
@@ -186,7 +77,8 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 
 	test("bare /re shows help, an unknown subcommand is an error, and undo with nothing open says so", async () => {
 		await h.session.prompt("/re");
-		expect(h.notes.at(-1)).toContain("/re open <path>      open a binary");
+		expect(h.notes.at(-1)).toContain("/re open <path>            open a binary and analyze it with rizin");
+		expect(h.notes.at(-1)).toContain("alt+g functions");
 		await h.session.prompt("/re bogus");
 		expect(h.notes.at(-1)).toBe('[error] omp-re: unknown /re subcommand "bogus" — try /re help');
 		await h.session.prompt("/re undo");
@@ -196,21 +88,18 @@ describe("loaded by omp's SDK (no rizin needed)", () => {
 	test("headless (omp -p), a /re error goes to stderr with a non-zero exit code instead of vanishing", async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 		const headless = await boot(SessionManager.inMemory(), { headless: true });
-		const errors: string[] = [];
-		const logs: string[] = [];
-		const error = spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")));
-		const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")));
-		const exitCode = process.exitCode;
+		// What a headless run writes for a pipeline, taken here instead of this test run's own output and exit status.
+		const { print, printError, failExit } = outside;
+		const said: string[] = [];
+		outside.print = (text) => void said.push(`stdout: ${text}`);
+		outside.printError = (text) => void said.push(`stderr: ${text}`);
+		outside.failExit = () => void said.push("exit status: failing");
 		try {
 			await headless.session.prompt("/re bogus");
-			expect(errors).toContain('omp-re: unknown /re subcommand "bogus" — try /re help');
-			expect(process.exitCode).toBe(1);
 			await headless.session.prompt("/re on");
-			expect(logs).toContain("omp-re: RE tools enabled for this session");
+			expect(said).toEqual(['stderr: omp-re: unknown /re subcommand "bogus" — try /re help', "exit status: failing", "stdout: omp-re: RE tools enabled for this session"]);
 		} finally {
-			error.mockRestore();
-			log.mockRestore();
-			process.exitCode = exitCode; // this test's deliberate failure must not fail the test run
+			Object.assign(outside, { print, printError, failExit });
 			await headless.shutdown();
 		}
 	});
@@ -226,7 +115,7 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 	// few seconds, so the default 5s budget is too tight.
 	test("open, annotate, and resume through eval: the reopened session replays the annotation into a fresh rizin", async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		const sessionDir = join(agentDir, "sessions");
+		const sessionDir = join(agentDir(), "sessions");
 		const first = await boot(SessionManager.create(tmpdir(), sessionDir));
 		await first.session.sessionManager.ensureOnDisk();
 
@@ -237,18 +126,22 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 
 		const second = await boot(await SessionManager.open(file));
 		try {
-			// A call made from eval goes through omp's tool wrapper, so the evidence hook records it and tags what the cell gets
-			// back. A tool with details comes back to the cell as { text, details }.
-			const result = await evalJs(second.session, '(await tool.rizin_command({ command: "afij", addr: "omp_re_sdk_main" })).text');
-			expect(result.text.startsWith("rizin> afij @ omp_re_sdk_main\n")).toBe(true);
-			expect(result.text).toContain("omp_re_sdk_main"); // the replayed rename shows in rizin's own output
-			const tag = result.text.match(/\[evidence ([0-9a-f]{8}) — cite it in record_finding\]/);
-			expect(tag).not.toBeNull();
+			// The engine records a read as evidence and says so twice: the id of the record as data, in the details a cell
+			// gets beside the text, and for the model a last line of the text that shows the id's start.
+			// (What a cell returns is cut for a model's eyes, so the cell answers the few things compared.)
+			const result = await evalJs(
+				second.session,
+				'const r = await tool.rizin_command({ command: "afij", addr: "omp_re_sdk_main" }); const lines = r.text.split("\\n"); JSON.stringify({ id: r.details.evidenceId, first: lines[0], last: lines.at(-1), renamed: lines.slice(1, -1).join("").includes("omp_re_sdk_main") })',
+			);
+			const { id, first, last, renamed } = JSON.parse(result.text) as { id: string; first: string; last: string; renamed: boolean };
+			expect(first).toBe("rizin> afij @ omp_re_sdk_main");
+			expect(renamed).toBe(true); // the replayed rename shows in rizin's own output
+			expect(last).toBe(`[evidence ${id.slice(0, 8)} — cite it in record_finding]`);
 			const recorded = second.session.sessionManager
 				.getEntries()
 				.filter((e) => e.type === "custom" && (e as { customType?: string }).customType === "re.evidence")
 				.map((e) => (e as { data?: { id: string; tool: string } }).data!);
-			expect(recorded).toContainEqual(expect.objectContaining({ tool: "rizin_command", id: expect.stringMatching(new RegExp(`^${tag![1]}`)) }));
+			expect(recorded).toContainEqual(expect.objectContaining({ tool: "rizin_command", id }));
 			// A read's text is header line, JSON body, then the [evidence] tag line: drop the first and last to parse
 			// the body. Use a bounded command (afij = one function) so the size cap never truncates it to invalid JSON.
 			const rows = await evalJs(second.session, 'const t = (await tool.rizin_command({ command: "afij", addr: "omp_re_sdk_main" })).text; JSON.parse(t.split("\\n").slice(1, -1).join("\\n")).length >= 1');
@@ -278,9 +171,8 @@ describe.skipIf(!canRunRizin)("loaded by omp's SDK, against rizin", () => {
 		try {
 			await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`);
 			await h.session.prompt("/re status");
-			// The count is REQUIRED_COMMANDS.length, which grows as tool families
-			// are added; assert the shape, not a frozen number.
-			expect(h.notes.at(-1)).toContain(`rizin commands: all ${REQUIRED_COMMANDS.length} omp-re sends are present`);
+			// How many commands the engine sends grows as tool families are added: the shape, not a frozen number.
+			expect(h.notes.at(-1)).toMatch(/rizin commands: all \d+ omp-re sends are present/);
 			const result = await evalJs(h.session, '(await tool.rizin_command({ command: "pdsf", addr: "main" })).text');
 			expect(result.text.startsWith("rizin> pdsf @ main\n")).toBe(true);
 			// rizin_cli registers through the real runner when the rz-* tools are present (they ship with rizin).

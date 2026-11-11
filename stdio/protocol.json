@@ -1,0 +1,253 @@
+{
+  "version": 2,
+  "constants": {
+    "entryPrefix": "re.",
+    "environmentPrefix": "OMPRE_",
+    "completedEvidence": 200,
+    "judgeSeconds": 30,
+    "aliveSeconds": 5
+  },
+  "keys": {
+    "views": [
+      { "key": "alt+g", "view": "functions" },
+      { "key": "alt+s", "view": "strings" },
+      { "key": "alt+i", "view": "imports" }
+    ],
+    "code": [
+      { "key": "d", "action": "decompile", "short": "decomp", "long": "toggle decompile" },
+      { "key": "x", "action": "xrefs", "short": "xrefs", "long": "follow xrefs" },
+      { "key": "a", "action": "ask", "short": "ask", "long": "ask the model" }
+    ]
+  },
+  "types": {
+    "session": {
+      "members": { "id": "string", "cwd": "string", "hasUI": "boolean", "memory?": "object" }
+    },
+    "level": { "enum": ["info", "warning", "error"] },
+    "state": {
+      "members": {
+        "band": { "oneOf": [{ "array": "string" }, "null"] },
+        "evidence": { "array": { "tuple": ["string", "string"] } },
+        "memory": "object"
+      }
+    },
+    "entry": {
+      "members": { "id": "string", "customType": "string", "data": "json" }
+    },
+    "details": {
+      "members": {
+        "ea?": "string",
+        "truncated?": "boolean",
+        "artifactId?": "string",
+        "artifactPath?": "string",
+        "commands?": { "array": "string" },
+        "reproHash?": "string",
+        "canonicalExcerpt?": "string",
+        "shiftHash?": "string",
+        "evidenceId?": "string"
+      }
+    },
+    "reasonCase": {
+      "members": {
+        "when?": { "array": { "members": { "arg": "string", "equals?": "json", "type?": { "enum": ["string", "number"] } } } },
+        "parts": {
+          "array": {
+            "oneOf": [
+              "string",
+              {
+                "members": {
+                  "pieces": { "array": { "members": { "arg": "string", "prefix?": "string", "missing?": "string" } } },
+                  "quote?": "boolean",
+                  "clip?": "integer"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "render": {
+      "members": { "title": "string", "subject?": "string", "body": { "enum": ["text", "json", "none"] } }
+    },
+    "tool": {
+      "members": {
+        "name": "string",
+        "label?": "string",
+        "description": "string",
+        "parameters": "object",
+        "approval": { "enum": ["read", "write", "exec"] },
+        "approvalReason?": { "array": "@reasonCase" },
+        "render?": "@render"
+      }
+    },
+    "command": {
+      "members": {
+        "name": "string",
+        "usage?": "string",
+        "description": "string",
+        "view?": "boolean",
+        "completes?": { "enum": ["evidence"] }
+      }
+    },
+    "viewRequest": {
+      "members": { "kind": "string", "arg?": "object" }
+    },
+    "row": {
+      "members": {
+        "value": "string",
+        "label": "string",
+        "description?": "string",
+        "enter": { "oneOf": [{ "members": { "draft": "string" } }, { "members": { "view": "@viewRequest" } }] }
+      }
+    },
+    "view": {
+      "oneOf": [
+        { "members": { "type": { "enum": ["notice"] }, "text": "string", "level": "@level" } },
+        { "members": { "type": { "enum": ["panel"] }, "title": "string", "hint": "string", "rows": { "array": "@row" } } },
+        {
+          "members": {
+            "type": { "enum": ["code"] },
+            "title": "string",
+            "disasm": { "array": "string" },
+            "decompile?": {
+              "members": { "label": "string", "note": "string", "tone": { "enum": ["dim", "warning"] }, "code": "string", "language?": "string" }
+            },
+            "noDecompile": "string",
+            "ask": "string",
+            "xrefs": "@viewRequest"
+          }
+        }
+      ]
+    }
+  },
+  "toEngine": {
+    "hello": {
+      "kind": "request",
+      "ordered": true,
+      "params": { "protocol": "integer", "variables": { "map": "string" }, "stateDir": "string" },
+      "result": { "members": { "protocol": "integer", "version": "string" } }
+    },
+    "environment": {
+      "kind": "notification",
+      "ordered": true,
+      "params": { "variables": { "map": "string" }, "stateDir": "string" }
+    },
+    "describe": {
+      "kind": "request",
+      "params": {},
+      "result": { "members": { "tools": { "array": "@tool" }, "commands": { "array": "@command" } } }
+    },
+    "call": {
+      "kind": "request",
+      "params": { "session": "@session", "name": "string", "arguments": "object", "callId": "string" },
+      "result": {
+        "members": { "text": "string", "failed": "boolean", "refused?": "boolean", "details?": "@details", "state": "@state" }
+      }
+    },
+    "command": {
+      "kind": "request",
+      "params": { "session": "@session", "line": "string" },
+      "result": {
+        "members": {
+          "text": "string",
+          "failed": "boolean",
+          "level": "@level",
+          "draft?": { "members": { "text": "string", "notice": "string" } },
+          "userMessage?": "string",
+          "state": "@state"
+        }
+      }
+    },
+    "view": {
+      "kind": "request",
+      "params": { "session": "@session", "kind": "string", "arg?": "object" },
+      "result": "@view"
+    },
+    "preserved": {
+      "kind": "request",
+      "params": { "session": "@session" },
+      "result": { "members": { "lines": { "array": "string" } } }
+    },
+    "approval": {
+      "kind": "request",
+      "params": { "session": "@session", "callId": "string", "tool": "string", "approved": "boolean", "reason?": "string" },
+      "result": { "members": {} }
+    },
+    "event": {
+      "kind": "request",
+      "params": {
+        "session": "@session",
+        "kind": { "enum": ["start", "switch", "tree", "branch", "before-switch", "shutdown"] },
+        "previous?": "string",
+        "binary?": "string"
+      },
+      "result": { "members": { "state?": "@state" } }
+    },
+    "cancel": {
+      "kind": "notification",
+      "ordered": true,
+      "params": { "id": "integer" }
+    },
+    "shutdown": {
+      "kind": "notification",
+      "ordered": true,
+      "params": {}
+    }
+  },
+  "toHost": {
+    "entries": {
+      "kind": "request",
+      "params": { "session": "string", "after": { "oneOf": ["string", "null"] }, "count": "integer" },
+      "result": { "oneOf": [{ "members": { "append": { "array": "@entry" } } }, { "members": { "all": { "array": "@entry" } } }] }
+    },
+    "append": {
+      "kind": "request",
+      "params": { "session": "string", "type": "string", "data": "json" },
+      "result": { "members": { "id": "string" } }
+    },
+    "judge": {
+      "kind": "request",
+      "params": { "session": "string", "prompt": "string", "seconds": "number" },
+      "result": { "members": { "text?": "string", "reason?": "string" } }
+    },
+    "saveArtifact": {
+      "kind": "request",
+      "params": { "session": "string", "content": "string", "label": "string" },
+      "result": { "members": { "id?": "string" } }
+    },
+    "readArtifact": {
+      "kind": "request",
+      "params": { "session": "string", "id": "string" },
+      "result": { "members": { "text?": "string" } }
+    },
+    "keepSession": {
+      "kind": "request",
+      "params": { "session": "string", "name": "string" },
+      "result": { "members": {} }
+    },
+    "notify": {
+      "kind": "notification",
+      "params": { "session": "string", "text": "string", "level": "@level" }
+    },
+    "tell": {
+      "kind": "notification",
+      "params": { "session": "string", "text": "string", "level": "@level" }
+    },
+    "progress": {
+      "kind": "notification",
+      "params": { "session": "string", "request": { "oneOf": ["integer", "null"] }, "text": { "oneOf": ["string", "null"] } }
+    },
+    "transcript": {
+      "kind": "notification",
+      "params": { "session": "string", "type": { "enum": ["re.binary"] }, "text": "string", "details": "json" }
+    },
+    "state": {
+      "kind": "notification",
+      "params": { "session": "string", "state": "@state" }
+    },
+    "alive": {
+      "kind": "notification",
+      "params": { "serving": { "array": "integer" } }
+    }
+  }
+}

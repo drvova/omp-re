@@ -1,5 +1,131 @@
 # Install
 
+omp-re needs three things it does not ship: **SBCL**, the **cl-ppcre** library,
+and **rizin**. Under omp all three are yours to install. Under nodecode the
+engine is loaded into nodecode's own Lisp image, so the SBCL steps below do
+not apply there; see [`nodecode.md`](nodecode.md#install) for cl-ppcre.
+
+| | Required | Found by |
+| --- | --- | --- |
+| SBCL | yes (omp) | `sbcl` on `PATH`, or `OMPRE_SBCL_PATH` |
+| cl-ppcre | yes | ASDF's default places, or (omp) Quicklisp in `~/quicklisp/` |
+| rizin (tested with 0.9.1) | yes | `rizin` on `PATH`, or `OMPRE_RIZIN_PATH`, or the common install locations |
+| rz-ghidra or jsdec | no | rizin's plugin directory |
+| capa, floss, diec, yara | no | `PATH` |
+
+Linux is where this is developed and tested. The Windows and macOS steps below
+are what the code looks for, written from the code; the authors had not run
+the engine on either system when this was written.
+
+## SBCL and cl-ppcre
+
+The engine is Common Lisp. Under omp the extension starts it as
+
+```
+sbcl --noinform --no-sysinit --no-userinit --disable-debugger --load <plugin>/stdio/serve.lisp
+```
+
+Two things follow from that command line. SBCL is started without a shell and
+by the name `sbcl`, so it must be on the `PATH` omp was started with — or set
+`OMPRE_SBCL_PATH` to the executable. And `--no-userinit` means your
+`~/.sbclrc` is **not** read, so a library path or a Quicklisp location that
+only `~/.sbclrc` sets up is not seen. cl-ppcre is looked for in exactly these
+places:
+
+1. wherever ASDF looks by default: the system's Common Lisp source directory
+   (`/usr/share/common-lisp/source/` on Debian and Ubuntu, which is where the
+   `cl-ppcre` package installs), `~/common-lisp/`, and
+   `~/.local/share/common-lisp/source/`, plus anything your ASDF configuration
+   files or `CL_SOURCE_REGISTRY` add;
+2. Quicklisp, when `~/quicklisp/setup.lisp` exists. It is loaded for this, so
+   a cl-ppcre that Quicklisp has already installed is found. Nothing is
+   downloaded at start: run `(ql:quickload "cl-ppcre")` once yourself.
+
+### Debian, Ubuntu
+
+```bash
+sudo apt install sbcl cl-ppcre
+```
+
+This is what CI and the authors use.
+
+### Other Linux distributions
+
+Install `sbcl` with your package manager. If it has no cl-ppcre package, use
+one of the two ways under macOS.
+
+### macOS
+
+```bash
+brew install sbcl
+```
+
+Then cl-ppcre, either through Quicklisp:
+
+```bash
+curl -O https://beta.quicklisp.org/quicklisp.lisp
+sbcl --non-interactive --load quicklisp.lisp \
+     --eval '(quicklisp-quickstart:install)' \
+     --eval '(ql:quickload "cl-ppcre")'
+```
+
+(that installs Quicklisp to `~/quicklisp/`, the one location omp-re checks), or
+as a plain checkout where ASDF looks:
+
+```bash
+git clone --depth 1 https://github.com/edicl/cl-ppcre ~/common-lisp/cl-ppcre
+```
+
+A desktop launch of omp may not have Homebrew's directory on its `PATH`. rizin
+is looked for in the usual install locations as well; **SBCL is not**. If omp
+says SBCL was not found although `sbcl` works in your terminal, set
+`OMPRE_SBCL_PATH="$(which sbcl)"`.
+
+### Windows
+
+Install SBCL with the installer from [sbcl.org](https://www.sbcl.org/platform-table.html)
+(or `choco install sbcl`), and make sure `sbcl.exe` is on `PATH` or set
+`OMPRE_SBCL_PATH` to its full path. Name the executable itself: the engine is
+started without a shell, so a `.cmd` or `.bat` wrapper cannot be run and is
+reported as SBCL not found. Then put cl-ppcre under your user
+directory, where ASDF looks:
+
+```powershell
+git clone --depth 1 https://github.com/edicl/cl-ppcre "$HOME\common-lisp\cl-ppcre"
+```
+
+That is what the Windows leg of this repository's CI does. Quicklisp installed
+to `%USERPROFILE%\quicklisp\` works too.
+
+### Verify
+
+From a checkout of this repository:
+
+```bash
+sbcl --noinform --no-sysinit --no-userinit --disable-debugger --load stdio/serve.lisp < /dev/null
+```
+
+(`< NUL` in `cmd.exe`.) It prints `{"ready":1}` and exits when the engine
+loaded, or `{"fatal":"…"}` with what to install. Inside omp, a missing SBCL or
+cl-ppcre shows as the extension failing to load, with a message that names
+what is missing and how to install it.
+
+### The first start compiles
+
+The first omp start after installing or upgrading omp-re compiles the engine
+(and cl-ppcre, if it was never compiled): a few seconds — about 3 s on the
+machine it was measured on. The compiled files go to ASDF's cache in your home
+directory (`~/.cache/common-lisp/` on Linux), and later starts take a fraction
+of a second. That cache must be writable. The cost is once per omp process,
+not per session.
+
+A start is given two minutes. One that takes longer is ended, and the error
+says what to check: that the SBCL named answers `--version`, that
+`~/quicklisp/setup.lisp` (loaded when it exists, to find cl-ppcre) asks
+nothing, and that the cache can be written. Whatever the engine writes to its
+standard error, then and later, goes to omp's log as `omp-re engine: …`; the
+end of it is quoted in the error when the engine process ends unasked.
+
 ## rizin
 
 omp-re **does not ship rizin**. It spawns whatever `rizin` is on your `PATH`
@@ -10,8 +136,7 @@ your package manager updates it (rizin parses hostile files, so security
 fixes matter), the plugins you already installed keep working, and the plugin
 stays small and platform-independent.
 
-It is tested against **rizin 0.9.1**, the latest release; older releases are
-untested. Prefer your OS package manager or an official release build; build
+It is tested against **rizin 0.9.1**; older releases are untested. Prefer your OS package manager or an official release build; build
 from source only when neither has a current version.
 
 ### macOS
@@ -139,7 +264,7 @@ allowed). Only ever enable this inside a disposable VM or container — see
 
 ## Optional triage binaries
 
-Each is independently probed on PATH when the plugin loads, and its tool is
+Each is independently probed on PATH when a session starts, and its tool is
 simply not registered if the binary is absent — no configuration needed
 either way.
 
@@ -182,11 +307,13 @@ rejects are listed in a warning rather than silently dropped.
 ## Verify the full stack
 
 ```bash
+sbcl --version                          # SBCL present
 rizin -v                                # rizin present
 rizin -qc 'aaa; pdg @ main' /bin/ls     # rz-ghidra producing typed C
 omp plugin list                         # omp-re installed
 ```
 
-Then inside omp: `/re open /bin/ls`, `/re status`, `alt+g`, open `main`,
+Then inside omp: `/re status` (it answers only if the engine started, and says
+which rizin and decompiler it found), `/re open /bin/ls`, `alt+g`, open `main`,
 press `d`. If the decompiled view's title reads `decompile` (not
 `decompile (disassembly only)`), the full stack is working.
