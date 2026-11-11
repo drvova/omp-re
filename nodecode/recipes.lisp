@@ -44,7 +44,6 @@
 ;;; --- rizin's JSON, as JavaScript would read it ---------------------------------------------
 
 (defun rows (data)
-  "A decoded JSON array as a list; anything else as no rows."
   (if (json-array-p data) (coerce data 'list) '()))
 
 (defun vec (list)
@@ -113,11 +112,9 @@ when it does not open that way."
   (if count (subseq list 0 (min count (length list))) list))
 
 (defun unique-first (list &key (key #'identity))
-  "Without duplicates, keeping each value where it first stood."
   (remove-duplicates list :key key :test #'equal :from-end t))
 
 (defun unique-last (list &key (key #'identity))
-  "Without duplicates, keeping each value where it last stood."
   (remove-duplicates list :key key :test #'equal))
 
 (defun bounded (value default least most)
@@ -291,7 +288,6 @@ fortified libc adds are taken off, by the data's rules in their order."
   (find bare (gethash "names" row) :test #'string=))
 
 (defun risky-import (bare)
-  "The table's row for the risky import BARE, or NIL."
   (find-if (lambda (row) (names-it row bare)) (table "riskyImports")))
 
 (defun import-capabilities (bare)
@@ -341,7 +337,6 @@ traced with."
   (find (jstring op "type") (table "opTypes" kind) :test #'equal))
 
 (defun op-targets (op)
-  "Every address an instruction refers to."
   (remove nil (append (list (num op "ptr") (num op "jump"))
                       (mapcar (lambda (reference) (num reference "addr"))
                               (append (jlist op "xrefs_from") (jlist op "refs"))))))

@@ -61,7 +61,6 @@ bound."
   nil)
 
 (defun drain-stderr (rz)
-  "Take whatever RZ's stderr holds, without waiting."
   (let ((stream (rz-errors rz)))
     (when stream
       (let ((text (with-output-to-string (out)

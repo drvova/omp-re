@@ -35,7 +35,6 @@
   (remove-if (lambda (command) (nth-value 1 (gethash command catalog))) +required-commands+))
 
 (defun runnable-p (name)
-  "Whether rizin_command would run the command NAME."
   (or (gethash name *read-only-extras*)
       (gethash name *noarg-duals*)
       (and (ppcre:scan *entropy-scanner* name) t)

@@ -8,7 +8,7 @@
 ;;;; process dies — the behaviours the TypeScript engine's own tests held
 ;;;; before the Lisp engine was the only one.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun record-of (&rest entries)
   "A session, outside the table, whose record holds ENTRIES, each (TYPE . DATA)."

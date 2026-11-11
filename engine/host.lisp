@@ -59,7 +59,6 @@ environment holds; otherwise it is this process's."
       (uiop:getenv name)))
 
 (defun env (name)
-  "The environment variable NAME, trimmed, or NIL when unset or blank."
   (let ((value (getenv name)))
     (and value (not (blank-p value)) (trimmed value))))
 

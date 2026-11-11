@@ -7,7 +7,7 @@
 ;;;; docs/engine-protocol.md: it keeps each session's record, answers what
 ;;;; the engine asks, and notes what it is told.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defstruct (omp (:copier nil))
   process

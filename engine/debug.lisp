@@ -47,13 +47,11 @@ miss that a real process started.")
 ;;; --- what may reach rizin's pipe -------------------------------------------------------
 
 (defun validate-reg-name (reg)
-  "A register name for `dr <reg>=...'."
   (unless (plain-name-p reg)
     (fail "omp-re: debug: bad register name ~a" (js-string reg)))
   reg)
 
 (defun validate-reg-value (value)
-  "A register value for `dr <reg>=<value>': decimal or 0x hex."
   (unless (number-text-p value)
     (fail "omp-re: debug: bad register value ~a — use decimal or 0x hex" (js-string value)))
   value)
@@ -311,7 +309,6 @@ dump at what was read, which the caller reports."
     (if present object :absent)))
 
 (defun debug-start (arguments)
-  "Action `start': launch the open binary under the debugger, or attach."
   (let ((existing (session-dbg *session*)))
     (if (rz-alive-p existing)
         (plain-result (format nil "debug: already running~%~a" (program-counter existing)))
@@ -338,7 +335,6 @@ dump at what was read, which the caller reports."
                                      (text-or pc nil)))))))))
 
 (defun debug-stop ()
-  "Action `stop': kill the debuggee, then end the debug rizin."
   (kill-debuggee (session-dbg *session*))
   (plain-result (if (stop-debug)
                     "debug: stopped — process killed and debug session closed"
@@ -388,7 +384,6 @@ names, or T."
                        clauses)))))
 
 (defun debug-action (action arguments dbg)
-  "Every action but start and stop, against the running debug rizin DBG."
   (let* ((seconds (dynamic-seconds))
          (addr (jstring arguments "addr"))
          (ea (and addr (validate-addr addr)))

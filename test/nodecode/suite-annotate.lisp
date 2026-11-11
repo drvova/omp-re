@@ -7,7 +7,7 @@
 ;;;; the read verb, so a wrong command template fails here even where a
 ;;;; tool's own check agreed with it.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun ann-commands (&rest arguments)
   (apply #'omp-re::annotation-commands arguments))

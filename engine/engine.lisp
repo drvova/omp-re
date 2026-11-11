@@ -200,12 +200,10 @@ something: a failure, or what would not be put back."
          "level" (string-downcase (if failed :error (or level :info))))))
 
 (defun engine-rekey (from to)
-  "The session FROM goes on as TO, its rizin with it."
   (rekey-session from to)
   t)
 
 (defun engine-close (session)
-  "SESSION is over: end what runs for it."
   (close-session session))
 
 (defun engine-hold (session thunk)

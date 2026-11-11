@@ -55,7 +55,6 @@ when there is no such file. A file outside the allow-list is a refusal."
          (uiop:native-namestring (assert-path-allowed file)))))
 
 (defun resolve-binary-path (input)
-  "INPUT resolved to an absolute, existing, readable file the operator allows."
   (or (resolve-readable-file input)
       (fail "omp-re: no such binary: ~a" input)))
 
@@ -102,7 +101,6 @@ literally — a `~' in a Windows short name is otherwise its grep operator."
   (rz-quote (to-rizin-path path)))
 
 (defun prepare-output-path (basename)
-  "The native path for BASENAME inside the output directory, which is created."
   (let ((full (merge-pathnames (safe-basename basename) (output-directory))))
     (ensure-directories-exist full)
     (uiop:native-namestring full)))

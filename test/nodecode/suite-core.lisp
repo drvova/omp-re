@@ -3,7 +3,7 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 ;;; --- primitives --------------------------------------------------------------------
 

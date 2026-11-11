@@ -273,7 +273,6 @@ there are none; with ONE, a single reference is shown as its code at once."
                             rows)))))
 
 (defun view (kind argument)
-  "The view KIND for the JSON object ARGUMENT, in the running session."
   (let ((addr (jstring argument "addr"))
         (depth (or (jnumber argument "depth") 0)))
     (cond

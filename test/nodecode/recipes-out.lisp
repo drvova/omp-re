@@ -15,7 +15,7 @@
 ;;;; refusals are compared too.
 
 (load (merge-pathnames "harness.lisp" (or *load-truename* *default-pathname-defaults*)))
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun answer (thunk)
   "What THUNK returns, or the refusal it signals as {\"error\": text}."

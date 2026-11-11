@@ -358,7 +358,6 @@ answers the function containing an address, which may start earlier."
   (trimmed (rz-cmd rz (format nil "afc @ ~a" ea))))
 
 (defun flag-at (rz ea)
-  "The name of the flag at EA, or the empty string."
   (or (jstring (rz-cmdj rz (format nil "fdj @ ~a" ea)) "name") ""))
 
 (defun hints-at (rz ea)
@@ -368,7 +367,8 @@ type?, size?, jump?, ret?}]): the first row, or NIL when there is none."
     (and (hash-table-p row) row)))
 
 (defun js-number (number)
-  "NUMBER as JavaScript prints it: an integral value has no fraction."
+  "NUMBER as the engine's records and messages write one: an integral value
+has no fraction, so 4.0 is 4."
   (cond ((integerp number) (format nil "~d" number))
         ((= number (ffloor number)) (format nil "~d" (round number)))
         (t (string-downcase (format nil "~f" number)))))
@@ -387,7 +387,6 @@ empty string when it is unset."
           (t (json-encode raw)))))
 
 (defun global-named (rz name)
-  "The global variable called NAME as `avglj' lists it, or NIL."
   (let ((global (find name (jlist (rz-cmdj rz "avglj"))
                       :key (lambda (global) (jstring global "name")) :test #'equal)))
     (and global (jstring global "type") global)))

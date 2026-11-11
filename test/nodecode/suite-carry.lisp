@@ -10,7 +10,7 @@
 ;;;; manifests written by hand around what rizin really prints. No binary is
 ;;;; ever run.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun carry-sha (char) (make-string 64 :initial-element char))
 

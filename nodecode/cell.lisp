@@ -330,7 +330,6 @@ every session's process closed on stop."
                                   (getf options :doc) (getf options :env))))))
 
 (defun config-example ()
-  "config.example.jsonc, written from the declarations."
   (with-output-to-string (out)
     (format out "// The section ~~/.nodecode/config.jsonc may carry for this cell —~%")
     (format out "// documentation, not config: the folder gets pushed and holds no secret.~%")

@@ -6,7 +6,7 @@
 ;;;; written by hand is enough. The second half runs the whole loop on the
 ;;;; test binary through the verbs.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun sha-of (char) (make-string 64 :initial-element char))
 

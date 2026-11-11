@@ -12,7 +12,7 @@
 ;;;; that each read is a real, audited, re-runnable record, that a finding
 ;;;; can cite it, that `/re off' stops a recipe, the bounds and the refusals.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun cited-ids (text)
   "Every evidence id TEXT cites, in order, without duplicates."

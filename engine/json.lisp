@@ -227,7 +227,6 @@ leaves an absent member out."
   (or (apply #'jstring object path) :absent))
 
 (defun jstrings (object &rest path)
-  "The strings of the array at PATH, as a list."
   (remove-if-not #'stringp (apply #'jlist object path)))
 
 (defun jnumber (object &rest path)
@@ -235,11 +234,9 @@ leaves an absent member out."
     (and (realp value) value)))
 
 (defun json-array-p (value)
-  "Whether VALUE is a decoded JSON array: a vector that is not a string."
   (and (vectorp value) (not (stringp value))))
 
 (defun jlist (object &rest path)
-  "The member at PATH when it is an array, as a list; else NIL."
   (let ((value (apply #'jget object path)))
     (and (json-array-p value) (coerce value 'list))))
 

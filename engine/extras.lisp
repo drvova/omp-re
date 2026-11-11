@@ -21,7 +21,6 @@
 ;;; --- small things several tools share ------------------------------------------------------
 
 (defun file-octets (path)
-  "The size of the file at PATH in octets, or NIL when there is no such file."
   (ignore-errors
    (with-open-file (in (uiop:parse-native-namestring path) :element-type '(unsigned-byte 8))
      (file-length in))))
@@ -59,7 +58,6 @@ the mapped region allows, not a file write mode."
   perm)
 
 (defun map-file-command (path addr &optional perm)
-  "The `o <file> <addr> [<perm>]' line that maps PATH at ADDR."
   (format nil "o ~a ~a~@[ ~a~]" (rz-quote path) (validate-addr addr)
           (and perm (validate-map-perm perm))))
 
@@ -480,7 +478,6 @@ minimal build may lack some. Asked each time, so one installed later is seen."
                  'simple-vector))))
 
 (defun floss-findings (parsed)
-  "The decoded, stack and static strings themselves."
   (let ((strings (and (hash-table-p parsed) (gethash "strings" parsed))))
     (and (hash-table-p strings)
          (let ((found (obj)))

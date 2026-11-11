@@ -63,7 +63,6 @@ where the host keeps artifacts, else the file's path."
       (uiop:native-namestring (artifact-path id session))))
 
 (defun read-artifact (id &optional (session *session*))
-  "The whole text kept under the artifact ID, or NIL when it cannot be read."
   (ignore-errors
    (if (host-service :read-artifact)
        (ask-host :read-artifact session id)

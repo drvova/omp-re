@@ -62,9 +62,8 @@ command — the start plus the recorded delta (\"addr\") — and the
 
 The function list is first cut to sizes within half the recorded size and
 block counts within half (and 2) of the recorded count, ranked by how close
-both are, and only the nearest are scored by mnemonics: mnemonics, never
-operands, because a rebuild changes addresses and registers long before it
-changes the instruction mix. A tie goes to the function with the recorded name."
+both are, and only the nearest are scored by mnemonics. A tie goes to the
+function with the recorded name."
   (ignore-errors
    (let* ((size (jnumber fingerprint "size"))
           (nbbs (jnumber fingerprint "nbbs"))

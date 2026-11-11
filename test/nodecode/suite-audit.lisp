@@ -10,7 +10,7 @@
 ;;;; so what is proven is what the cell asks for and what it makes of each
 ;;;; way a turn can end, never nodecode's side of it.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun audit-evidence (&rest members)
   (apply #'omp-re:obj members))

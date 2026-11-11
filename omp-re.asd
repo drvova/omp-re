@@ -9,9 +9,10 @@
 ;;;;
 ;;;;   sbcl --eval '(asdf:load-asd "omp-re.asd")' --eval '(asdf:load-system "omp-re")'
 ;;;;
-;;;; A host installs what the engine asks of it (engine/host.lisp) and builds
-;;;; on the four functions of engine/engine.lisp. nodecode-re.asd is the
-;;;; nodecode host.
+;;;; A host is a system of its own over this one: it installs what the engine
+;;;; asks of it (engine/host.lisp) and builds on the surface engine/engine.lisp
+;;;; defines and engine/package.lisp exports. nodecode-re.asd is the nodecode
+;;;; host, omp-re-stdio.asd the omp host.
 ;;;;
 ;;;; cl-ppcre is named because the read-only command policy is a set of
 ;;;; regular expressions (engine/policy-data.lisp).

@@ -40,7 +40,6 @@
   (logand #xffffffff (logior (ash x (- n)) (ash x (- 32 n)))))
 
 (defun sha256-compress (state block)
-  "Fold the 64 octets of BLOCK into STATE."
   (declare (type (simple-array (unsigned-byte 32) (8)) state) (type octets block)
            (optimize (speed 3) (safety 1)))
   (let ((w (make-array 64 :element-type '(unsigned-byte 32))))
@@ -76,7 +75,6 @@
   state)
 
 (defun sha256-update (digest octets &key (start 0) (end (length octets)))
-  "Feed OCTETS, or the stretch of them from START to END, into DIGEST."
   (declare (type sha256 digest) (type octets octets) (type fixnum start end))
   (let ((block (sha256-block digest)))
     (incf (sha256-length digest) (- end start))
@@ -91,7 +89,6 @@
   digest)
 
 (defun sha256-finish (digest)
-  "Close DIGEST => its 32 octets."
   (let* ((bits (* 8 (sha256-length digest)))
          (pad (let ((rest (mod (+ (sha256-length digest) 1 8) 64)))
                 (if (zerop rest) 0 (- 64 rest))))
@@ -117,11 +114,9 @@
     (loop for octet across octets do (format out "~(~2,'0x~)" octet))))
 
 (defun sha256-hex (string)
-  "The SHA-256 of STRING's UTF-8 bytes, as lowercase hex."
   (hex (sha256-octets (utf-8 string))))
 
 (defun sha256-file (path)
-  "The SHA-256 of the file at PATH, as lowercase hex, read in pieces."
   (with-open-file (in path :element-type '(unsigned-byte 8))
     (let ((digest (%make-sha256))
           (buffer (make-array 65536 :element-type '(unsigned-byte 8))))
@@ -131,7 +126,6 @@
       (hex (sha256-finish digest)))))
 
 (defun hmac-sha256 (key message)
-  "HMAC-SHA256 of the octets MESSAGE under the octets KEY, as 32 octets."
   (let* ((key (if (> (length key) 64) (sha256-octets key) key))
          (inner (make-array 64 :element-type '(unsigned-byte 8) :initial-element #x36))
          (outer (make-array 64 :element-type '(unsigned-byte 8) :initial-element #x5c)))

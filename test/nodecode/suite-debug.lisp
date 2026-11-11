@@ -12,7 +12,7 @@
 ;;;; a debugger. Last, one real session launches the test binary — /bin/ls or /bin/true only —
 ;;;; under rizin's debugger, stopped at its entry, and stops it again.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defparameter +launch-warning+
   "⚠ The target is now RUNNING under a debugger on this machine. Only debug untrusted samples in an isolated, disposable VM or container."

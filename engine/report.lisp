@@ -68,7 +68,6 @@ line."
   (findings '()))
 
 (defun report-annotations (&optional (session *session*))
-  "The annotations in effect on the open binary, as the report reads them."
   (let ((binary-path (session-binary-path session)))
     (remove-if-not
      (lambda (annotation)
@@ -152,7 +151,6 @@ indicators, not just the summary.")
   (member (string-downcase (jstring record "tool")) tools :test #'string=))
 
 (defun json-strings (value)
-  "Every string anywhere in the decoded JSON VALUE, in document order."
   (cond ((stringp value) (list value))
         ((vectorp value) (loop for item across value append (json-strings item)))
         ((hash-table-p value) (loop for item being the hash-values of value append (json-strings item)))
@@ -298,11 +296,9 @@ each claim with the ids it rests on."
     report))
 
 (defun report-claims (report)
-  "Every claim of REPORT, in the order rendered."
   (loop for section in (built-report-sections report) append (report-section-claims section)))
 
 (defun cited-ids (report)
-  "Each distinct id a claim of REPORT cites, in the order first cited."
   (remove-duplicates (loop for claim in (report-claims report) append (report-claim-evidence-ids claim))
                      :test #'equal :from-end t))
 

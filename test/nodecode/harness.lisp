@@ -34,11 +34,11 @@
 
 (load (merge-pathnames "kernel-stub.lisp" (or *load-truename* *default-pathname-defaults*)))
 
-(defpackage #:nodecode-re-test
+(defpackage #:omp-re-test
   (:use #:cl)
   (:export #:suite #:check #:refusal #:has #:with-cell #:*rizin* #:*binary* #:*scratch* #:*root*
            #:fresh-session #:in-session #:*checks* #:*failures*))
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defparameter *root*
   (uiop:pathname-parent-directory-pathname

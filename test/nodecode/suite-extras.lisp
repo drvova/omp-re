@@ -11,7 +11,7 @@
 ;;;; restart and reads the scanner's output as the engine says it does. The
 ;;;; stand-ins print fixed text; nothing under analysis is ever run.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun extras-cli-refusal (tool &rest arguments)
   "Why the rz-* policy refuses ARGUMENTS for TOOL, or NIL when it allows them."

@@ -93,7 +93,6 @@ already there is left alone."
     hash))
 
 (defun read-blob (hash)
-  "The blob stored under HASH, or NIL when it is missing."
   (and (stringp hash) (>= (length hash) 4) (read-text-file (blob-path hash))))
 
 (defun evidence-tag (id)

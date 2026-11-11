@@ -71,7 +71,6 @@ empty array is #()."
     (engine-call (turn-session-id) name (wire-arguments arguments (and tool (jget tool "parameters"))))))
 
 (defun first-sentence (text)
-  "TEXT up to its first full stop, on one line."
   (let* ((text (substitute #\Space #\Newline (or text "")))
          (stop (search ". " text)))
     (if stop (subseq text 0 (1+ stop)) text)))

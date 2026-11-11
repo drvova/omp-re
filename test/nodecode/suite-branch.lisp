@@ -8,7 +8,7 @@
 ;;;; sessions it was forked from (nlk:*stub-lineage*) and which turn is
 ;;;; running (nle:*stub-turn*), which is all the cell reads of the tree.
 
-(in-package #:nodecode-re-test)
+(in-package #:omp-re-test)
 
 (defun branch (session-id &rest turns)
   "Say that SESSION-ID's branch is exactly TURNS."

@@ -118,19 +118,16 @@ the record on first use."
 ;;; --- the record, as the session's branch sees it -------------------------------------------
 
 (defun session-entries (session)
-  "SESSION's record as its current branch sees it, a vector, oldest first."
   (if (host-service :entries)
       (or (ask-host :entries session) (vector))
       (session-file-entries session)))
 
 (defun append-entry (type data &optional (session *session*))
-  "Record one entry of TYPE carrying the JSON object DATA => the entry."
   (if (host-service :append-entry)
       (ask-host :append-entry session type data)
       (file-append-entry session type data)))
 
 (defun entries-of (type &optional (session *session*))
-  "The data of every entry of TYPE, in the order recorded."
   (loop for entry across (session-entries session)
         when (equal type (jstring entry "customType"))
           collect (jget entry "data")))

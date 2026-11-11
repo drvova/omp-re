@@ -42,7 +42,6 @@ file's name is part of the name."
     (if slash (subseq path (1+ slash)) path)))
 
 (defun words (text)
-  "TEXT split on blanks, empty pieces dropped."
   (remove "" (uiop:split-string (or text "") :separator '(#\Space #\Tab #\Newline #\Return))
           :test #'string=))
 
@@ -85,7 +84,6 @@ from the system."
     octets))
 
 (defun uuid ()
-  "A random (version 4) UUID, as text."
   (let ((octets (random-octets 16)))
     (setf (aref octets 6) (logior #x40 (logand #x0f (aref octets 6)))
           (aref octets 8) (logior #x80 (logand #x3f (aref octets 8))))
@@ -179,7 +177,6 @@ lowercased as written."
                 (t (concatenate 'string "0x" digits)))))))
 
 (defun validate-ident (key value)
-  "VALUE when it is an identifier a rename may use."
   (unless (and (stringp value) (js-scan "^[A-Za-z_][A-Za-z0-9_.]*$" value))
     (fail "omp-re: invalid ~a: ~a" key (js-string value)))
   value)
@@ -310,7 +307,6 @@ blank lines dropped, and the binary's own path redacted to <BINARY>."
     (join-lines lines)))
 
 (defun canonical-hash (raw &optional binary-path)
-  "The reproducibility key: SHA-256 of RAW's canonical form."
   (sha256-hex (canonicalize-rizin-output raw binary-path)))
 
 (defun mask-addresses (canonical)
