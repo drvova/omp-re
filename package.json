@@ -28,6 +28,8 @@
     "test:engine": "sbcl --non-interactive --load test/nodecode/run.lisp",
     "gen:recipes": "bun scripts/gen-recipes.ts",
     "check:recipes": "bun scripts/gen-recipes.ts --check",
+    "gen:protocol": "bun scripts/gen-protocol.ts",
+    "check:protocol": "bun scripts/gen-protocol.ts --check",
     "check:versions": "node scripts/release.mjs --check-versions",
     "test:tui": "bash test/tui.sh",
     "test:tui:carry": "bash test/tui-carry.sh",
@@ -35,7 +37,6 @@
     "qa:tui": "bash test/tui-qa.sh"
   },
   "devDependencies": {
-    "@oh-my-pi/omptype": "^18.11.1",
     "@oh-my-pi/pi-coding-agent": "^18.11.1",
     "@oh-my-pi/pi-tui": "^18.11.1",
     "@oh-my-pi/pi-utils": "^18.11.1",

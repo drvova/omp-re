@@ -18,33 +18,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { AgentSession, ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { rmDirSafe } from "./helpers.ts";
+import { boot as bootSession, type Cell, caught, pythonKernel, rmDirSafe, ROOT, runCell, scratchAgentDir, SKILLS } from "./helpers.ts";
 
-const ROOT = resolve(import.meta.dir, "..");
-const SKILLS = join(ROOT, "skills");
 const RECIPES = join(SKILLS, "re-triage", "recipes.js");
 const RECIPES_PY = join(SKILLS, "re-triage", "recipes.py");
 
-/**
- * Whether omp can start its Python kernel here, by omp's own probe (eval/py/kernel.ts): a project
- * or active virtualenv, then its managed environment, then `python` or `python3` on PATH — the
- * first that runs. Forced, because under `bun test` omp answers "available" without looking.
- */
-const python = await (async () => {
-	const { checkPythonKernelAvailability } = await import("@oh-my-pi/pi-coding-agent/eval/py/kernel");
-	const home = getAgentDir();
-	const scratchHome = await mkdtemp(join(tmpdir(), "omp-re-contract-python-probe-"));
-	setAgentDir(scratchHome);
-	try {
-		return await checkPythonKernelAvailability(tmpdir(), undefined, { forceProbe: true });
-	} finally {
-		setAgentDir(home);
-		rmDirSafe(scratchHome);
-	}
-})();
+const python = await pythonKernel();
 if (!python.ok) console.log(`omp-re: SKIPPING the Python-kernel contract tests — omp reports its Python backend unavailable here: ${python.reason ?? "no reason given"}`);
 
 /** omp's own bound on a tool result's text: `tools.artifactSpillThreshold`, 50 KB by default. */
@@ -132,53 +113,20 @@ function probe(pi: ExtensionAPI): void {
 
 // --- the harness ----------------------------------------------------------------------------
 
-interface Cell {
-	text: string;
-	isError: boolean;
-	/** The tool threw instead of answering: a refusal before any code ran (schema, `%load`, approval). The agent loop shows the model either as an error result. */
-	thrown: boolean;
-	details: Record<string, unknown> | undefined;
-}
-
-let agentDir: string;
-let originalAgentDir: string;
+const agentDir = scratchAgentDir("contract");
 /** The sessions' working directory: where a relative `%load` path is looked up. */
 let work: string;
 
-async function boot(sessionManager: unknown, settings?: Record<string, unknown>, skills?: unknown[]): Promise<AgentSession> {
-	const sdk = await import("@oh-my-pi/pi-coding-agent");
-	const { initializeExtensions } = await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
-	const loaded = skills ?? (await sdk.loadSkillsFromDir({ dir: SKILLS, source: "omp-re:user" })).skills;
-	const { session, extensionsResult } = await sdk.createAgentSession({
-		cwd: work,
-		disableExtensionDiscovery: true,
-		extensions: [probe],
-		sessionManager: sessionManager as never,
-		skills: loaded as never,
-		...(settings ? { settings: (sdk as unknown as { Settings: { isolated(overrides: Record<string, unknown>): never } }).Settings.isolated(settings) } : {}),
-	});
-	expect(extensionsResult.errors).toEqual([]);
-	await initializeExtensions(session, { reportSendError: () => {}, reportRuntimeError: () => {} });
-	return session;
-}
+/** A headless session with the probe extension in place of this plugin's, and the plugin's skills (or `skills`). */
+const boot = async (sessionManager: unknown, settings?: Record<string, unknown>, skills?: unknown[]): Promise<AgentSession> =>
+	(await bootSession(sessionManager, { headless: true, extensions: [probe], skills: skills ?? true, settings, cwd: work })).session;
 
-/** Run one cell through omp's own `eval` tool, as the model does. */
-async function cell(session: AgentSession, code: string, more: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Cell> {
-	try {
-		const result = await session.getToolByName("eval")!.execute(`t-eval-${Math.random().toString(36).slice(2)}`, { language: "js", code, ...more } as never, signal);
-		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
-		return { text, isError: (result as { isError?: boolean }).isError === true, thrown: false, details: result.details as Record<string, unknown> | undefined };
-	} catch (error) {
-		return { text: error instanceof Error ? error.message : String(error), isError: true, thrown: true, details: undefined };
-	}
-}
+const cell = (session: AgentSession, code: string, more: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Cell> => runCell(session, "js", code, more, signal);
 const out = async (session: AgentSession, code: string): Promise<string> => {
 	const result = await cell(session, code);
 	expect({ code, isError: result.isError }).toEqual({ code, isError: false });
 	return result.text;
 };
-/** A cell that answers the message of whatever `body` throws, or "ok". */
-const caught = (body: string) => `let m = "ok"; try { ${body} } catch (e) { m = e.message }; m`;
 /** A cell's value as JSON, written to a file: what a cell returns is cut for a model's eyes (see the output tests), and these are compared whole. */
 async function value<T>(session: AgentSession, expression: string): Promise<T> {
 	const file = join(work, `value-${Math.random().toString(36).slice(2)}.json`);
@@ -191,19 +139,14 @@ const eventsOf = (name: string): SeenEvent[] => seen.filter((event) => event.too
 let h: AgentSession;
 
 beforeAll(async () => {
-	originalAgentDir = getAgentDir();
-	agentDir = await mkdtemp(join(tmpdir(), "omp-re-contract-"));
 	work = await mkdtemp(join(tmpdir(), "omp-re-contract-cwd-"));
-	setAgentDir(agentDir);
 	const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-	h = await boot(SessionManager.create(work, join(agentDir, "sessions")));
+	h = await boot(SessionManager.create(work, join(agentDir(), "sessions")));
 	await h.sessionManager.ensureOnDisk();
 });
 
 afterAll(async () => {
 	await h.dispose();
-	setAgentDir(originalAgentDir);
-	rmDirSafe(agentDir);
 	rmDirSafe(work);
 });
 

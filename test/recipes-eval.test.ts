@@ -3,8 +3,7 @@
  * eval, one script for each of its kernels — driven through omp's REAL eval
  * tool, loaded the way a session loads them (`%load skill://re-triage/recipes.js`
  * in a JavaScript cell, `…/recipes.py` in a Python one), with the extension
- * booted by the SDK as test/extension-sdk.test.ts boots it. Nothing here calls
- * a model.
+ * booted by the suites' one harness (helpers.ts). Nothing here calls a model.
  *
  * Three groups for the JavaScript script:
  *  1. no rizin: the script loads, defines `re` and nothing else, registers no
@@ -33,16 +32,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import { canRunRizin, isReTool, logSkip, rmDirSafe, TEST_BINARY } from "./helpers.ts";
+import { boot as bootSession, canRunRizin, caught, evalJs, evalPy, logSkip, pythonKernel, rmDirSafe, ROOT, scratchAgentDir, type SdkHarness as Harness, SKILLS, TEST_BINARY } from "./helpers.ts";
 
 logSkip("recipes-eval rizin tests");
 
-const ROOT = resolve(import.meta.dir, "..");
-const EXTENSION = join(ROOT, "extensions", "re");
-const SKILLS = join(ROOT, "skills");
 const RECIPES = join(SKILLS, "re-triage", "recipes.js");
 /** How the skill tells the model to load the script: omp resolves `skill://<name>/<path>` inside the skill's own directory, wherever the plugin is installed. */
 const LOAD = "%load skill://re-triage/recipes.js";
@@ -50,25 +45,7 @@ const RECIPES_PY = join(SKILLS, "re-triage", "recipes.py");
 /** The same, for a `language: "py"` cell. */
 const LOAD_PY = "%load skill://re-triage/recipes.py";
 
-/**
- * Whether omp can start its Python kernel here, asked of omp: the probe `eval` itself makes
- * before a Python cell (a project or active virtualenv, then omp's managed environment, then
- * `python` or `python3` on PATH — the first that runs `import sys`). Under `bun test` omp skips
- * that probe and reports the backend available regardless, so it is forced. The agent directory
- * is a scratch one for the question, as it is for every session below.
- */
-const python = await (async () => {
-	const { checkPythonKernelAvailability } = await import("@oh-my-pi/pi-coding-agent/eval/py/kernel");
-	const home = getAgentDir();
-	const scratchHome = await mkdtemp(join(tmpdir(), "omp-re-recipes-python-probe-"));
-	setAgentDir(scratchHome);
-	try {
-		return await checkPythonKernelAvailability(tmpdir(), undefined, { forceProbe: true });
-	} finally {
-		setAgentDir(home);
-		rmDirSafe(scratchHome);
-	}
-})();
+const python = await pythonKernel();
 const canRunPython = python.ok;
 if (!canRunPython) console.log(`omp-re: SKIPPING every recipes.py test — omp reports its Python backend unavailable here: ${python.reason ?? "no reason given"}`);
 
@@ -79,40 +56,8 @@ const canRunLisp = (() => {
 })();
 if (canRunRizin && !canRunLisp) console.log("omp-re: SKIPPING the recipes parity comparison with nodecode/recipes.lisp — needs sbcl and cl-ppcre");
 
-interface Harness {
-	session: AgentSession;
-	shutdown: () => Promise<void>;
-}
-
 /** Boot a session with the extension and the plugin's skills loaded, headless, as `omp -p` runs. */
-async function boot(sessionManager: unknown): Promise<Harness> {
-	const sdk = await import("@oh-my-pi/pi-coding-agent");
-	const { initializeExtensions } = await import("@oh-my-pi/pi-coding-agent/modes/runtime-init");
-	const { skills } = await sdk.loadSkillsFromDir({ dir: SKILLS, source: "omp-re:user" });
-	expect(skills.map((skill) => skill.name)).toContain("re-triage");
-	const { session, extensionsResult } = await sdk.createAgentSession({
-		cwd: tmpdir(),
-		additionalExtensionPaths: [EXTENSION],
-		disableExtensionDiscovery: true,
-		sessionManager: sessionManager as never,
-		skills,
-	});
-	expect(extensionsResult.errors).toEqual([]);
-	await initializeExtensions(session, { reportSendError: () => {}, reportRuntimeError: () => {} });
-	return { session, shutdown: () => session.dispose() };
-}
-
-/** Run one cell through omp's own `eval` tool, as the model does. An error the cell threw comes back as its output, with isError. */
-async function evalCell(session: AgentSession, language: "js" | "py", code: string): Promise<{ text: string; isError: boolean }> {
-	const result = await session.getToolByName("eval")!.execute(`t-eval-${Math.random().toString(36).slice(2)}`, { language, code } as never);
-	const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
-	return { text, isError: (result as { isError?: boolean }).isError === true };
-}
-const evalJs = (session: AgentSession, code: string) => evalCell(session, "js", code);
-const evalPy = (session: AgentSession, code: string) => evalCell(session, "py", code);
-
-/** A cell that returns the message of whatever `body` throws, or "ok". */
-const caught = (body: string) => `let m = "ok"; try { ${body} } catch (e) { m = e.message }; m`;
+const boot = (sessionManager: unknown) => bootSession(sessionManager, { headless: true, skills: true });
 
 type Answers = Record<string, string | { error: string }>;
 
@@ -127,7 +72,7 @@ async function answers(session: AgentSession, dir: string, calls: Record<string,
 		.map(([name, call]) => `try { out[${JSON.stringify(name)}] = await ${call}; } catch (e) { out[${JSON.stringify(name)}] = { error: e.message }; }`)
 		.join("\n");
 	const cell = await evalJs(session, `const out = {};\n${body}\nawait Bun.write(${JSON.stringify(out)}, JSON.stringify(out));\n"written"`);
-	expect(cell).toEqual({ text: "written", isError: false });
+	expect(cell).toMatchObject({ text: "written", isError: false });
 	return JSON.parse(await readFile(out, "utf8")) as Answers;
 }
 
@@ -142,7 +87,7 @@ async function answersPy(session: AgentSession, dir: string, calls: Record<strin
 		.join("\n");
 	// In a function, so that the test leaves no names of its own in the kernel; `json` and `Path` are omp's.
 	const cell = await evalPy(session, `def answers():\n    out = {}\n${body}\n    Path(${JSON.stringify(out)}).write_text(json.dumps(out), encoding="utf-8")\nanswers()\ndel answers\nprint("written")`);
-	expect(cell).toEqual({ text: "written", isError: false });
+	expect(cell).toMatchObject({ text: "written", isError: false });
 	return JSON.parse(await readFile(out, "utf8")) as Answers;
 }
 
@@ -205,22 +150,14 @@ const REPORTS = [
 	"blobFindCryptoNoReferences",
 ];
 
-let agentDir: string;
-let originalAgentDir: string;
+const agentDir = scratchAgentDir("recipes-test");
 let scratch: string;
 
 beforeAll(async () => {
-	originalAgentDir = getAgentDir();
-	agentDir = await mkdtemp(join(tmpdir(), "omp-re-recipes-test-"));
 	scratch = await mkdtemp(join(tmpdir(), "omp-re-recipes-out-"));
-	setAgentDir(agentDir);
 });
 
-afterAll(async () => {
-	setAgentDir(originalAgentDir);
-	rmDirSafe(agentDir);
-	rmDirSafe(scratch);
-});
+afterAll(() => rmDirSafe(scratch));
 
 describe("recipes.js in omp's eval (no rizin needed)", () => {
 	let h: Harness;
@@ -263,7 +200,6 @@ describe("recipes.js in omp's eval (no rizin needed)", () => {
 		// Recipes are code in eval, not tools: the session's tool set is what it was.
 		expect(h.session.getAllToolNames().sort()).toEqual(tools);
 		for (const name of ["triage", "scan_imports", "inspect_function", "find_comparisons", "find_crypto"]) {
-			expect(isReTool(name)).toBe(false);
 			expect(h.session.getToolByName(name)).toBeUndefined();
 		}
 	});
@@ -329,7 +265,7 @@ describe.skipIf(!canRunPython)("recipes.py in omp's Python kernel (no rizin need
 		const tools = h.session.getAllToolNames().sort();
 
 		const loaded = await evalPy(h.session, LOAD_PY);
-		expect(loaded).toEqual({
+		expect(loaded).toMatchObject({
 			isError: false,
 			text: "omp-re recipes loaded: omp_re.triage, omp_re.scan_imports, omp_re.inspect_function, omp_re.find_comparisons, omp_re.find_crypto — print(omp_re.help()) says what each answers.",
 		});
@@ -419,7 +355,7 @@ describe.skipIf(!canRunRizin)("recipes.js in omp's eval, against rizin", () => {
 	beforeAll(async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
 		// On disk, so a read past the size cap has a session artifact store to spill its whole output to.
-		h = await boot(SessionManager.create(tmpdir(), join(agentDir, "sessions")));
+		h = await boot(SessionManager.create(tmpdir(), join(agentDir(), "sessions")));
 		await h.session.sessionManager.ensureOnDisk();
 		blob = join(scratch, "tables.bin");
 		await writeFile(blob, constantsBlob());
@@ -709,7 +645,7 @@ describe.skipIf(!canRunRizin)("a long read through omp's eval is cut once", () =
 
 	beforeAll(async () => {
 		const { SessionManager } = await import("@oh-my-pi/pi-coding-agent");
-		h = await boot(SessionManager.create(tmpdir(), join(agentDir, "sessions-long-read")));
+		h = await boot(SessionManager.create(tmpdir(), join(agentDir(), "sessions-long-read")));
 		await h.session.sessionManager.ensureOnDisk();
 		expect((await evalJs(h.session, `await tool.open_binary({ path: ${JSON.stringify(TEST_BINARY)} })`)).isError).toBe(false);
 	}, 120_000);
@@ -721,7 +657,7 @@ describe.skipIf(!canRunRizin)("a long read through omp's eval is cut once", () =
 	test("the engine's own cut stays under omp's limit, so omp cuts no second hole in it", async () => {
 		// Regression: a body cut to exactly omp's 50 KB tool-result limit, plus the header line, the truncation note and the
 		// evidence tag, landed just over it. omp then elided the middle of what the engine had kept and named a second
-		// artifact holding the already-cut text. format.ts now leaves headroom; docs/omp-eval.md has the mechanism.
+		// artifact holding the already-cut text. The engine now leaves headroom (engine/util.lisp, +MAX-OCTETS+); docs/omp-eval.md has the mechanism.
 		const out = await evalJs(
 			h.session,
 			'const r = await tool.rizin_command({ command: "pd 3000", addr: "entry0" }); print("NOTES=" + (r.text.match(/\\[Output truncated/g) || []).length + " HOLE=" + /elided|\\[Showing lines/.test(r.text) + " BYTES=" + new TextEncoder().encode(r.text).length + " TAG=" + /\\[evidence [0-9a-f]{8}/.test(r.text.split("\\n").at(-1)));',

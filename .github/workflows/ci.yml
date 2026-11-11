@@ -52,6 +52,8 @@ jobs:
         run: node scripts/release.mjs --check-versions
       - name: The recipes' generated blocks are current with recipes/tables.json
         run: bun scripts/gen-recipes.ts --check
+      - name: The shim's types and the protocol document's tables are current with stdio/protocol.json
+        run: bun scripts/gen-protocol.ts --check
       # The engine must need nothing of either host: system omp-re, in a plain SBCL.
       - name: The engine loads alone
         run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames "omp-re.asd" (uiop:getcwd)))' --eval '(asdf:load-system "omp-re")'
