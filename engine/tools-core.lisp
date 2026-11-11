@@ -3,7 +3,8 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; open_binary, rizin_help and rizin_command. rizin_command is the one way
-;;;; to read the binary, and the one tool whose results are evidence.
+;;;; to read the binary, and the one tool whose results are evidence
+;;;; (evidence.lisp, +READ-TOOL+).
 
 (in-package #:omp-re)
 
@@ -25,9 +26,9 @@ none were given and rizin should autodetect from the header."
 (defun open-binary (path &key load (session *session*))
   "Open the binary at PATH for SESSION: hash its bytes, spawn and analyze a
 fresh rizin, replay what the record holds for this binary, and record the
-choice so a later start restores it => (values TEXT FAILURES): the text
-that says what happened, and how many things the record holds for this
-binary would not go back."
+choice so a later start restores it => (values TEXT FAILURES APPLIED): the
+text that says what happened, and how many things the record holds for this
+binary would not go back and how many did."
   (let* ((resolved (resolve-binary-path path))
          ;; Bound into every evidence record taken from here on, so /re verify
          ;; knows it re-runs against the same bytes. A file that cannot be
@@ -41,27 +42,25 @@ binary would not go back."
     (let ((opened (obj "path" resolved "load" (or load :absent) "sha256" (or sha256 :absent))))
       (append-entry "re.binary" opened session)
       (ask-host :transcript session "re.binary" (format nil "[re: opened ~a]" resolved) opened))
-    (flet ((could-not (failures)
-             (mapcar (lambda (failure) (format nil "  could not re-apply ~a" failure)) failures)))
-      (values
-       (join-lines
-       (append (list (format nil "Binary opened: ~a" resolved))
-               (when load
-                 (list (format nil "Loaded with forced settings (~{~a~^, ~})."
-                               (loop for key being the hash-keys of load using (hash-value value)
-                                     collect (format nil "~a=~a" key value)))))
-               ;; A group that counts what it re-applied says so, of its own
-               ;; things alone, with its own failures under the line.
-               (loop for (contribution failures applied) in replayed
-                     when (and applied (plusp (+ applied (length failures))))
-                       append (cons (format nil "Re-applied ~d of ~d ~a recorded earlier for this binary."
-                                            applied (+ applied (length failures))
-                                            (contribution-noun contribution))
-                                    (could-not failures)))
-               (loop for (nil failures applied) in replayed
-                     unless applied append (could-not failures))
-               (when missing (list (missing-commands-warning missing)))))
-       (loop for (nil failures) in replayed sum (length failures))))))
+    (values
+     (join-lines
+      (append (list (format nil "Binary opened: ~a" resolved))
+              (when load
+                (list (format nil "Loaded with forced settings (~{~a~^, ~})."
+                              (loop for key being the hash-keys of load using (hash-value value)
+                                    collect (format nil "~a=~a" key value)))))
+              ;; Each group says what it put back, of its own things alone,
+              ;; with its own failures under the line.
+              (loop for (contribution failures applied) in replayed
+                    when (plusp (+ applied (length failures)))
+                      append (cons (format nil "Re-applied ~d of ~d ~a recorded earlier for this binary."
+                                           applied (+ applied (length failures))
+                                           (contribution-noun contribution))
+                                   (mapcar (lambda (failure) (format nil "  could not re-apply ~a" failure))
+                                           failures)))
+              (when missing (list (missing-commands-warning missing)))))
+     (loop for (nil failures) in replayed sum (length failures))
+     (loop for (nil nil applied) in replayed sum applied))))
 
 (define-tool "open_binary"
     (:label "Open binary" :tier :read
@@ -82,9 +81,47 @@ binary would not go back."
 
 (defun manual ()
   "What rizin_command answers for an empty command, usable before any binary
-is open: the host's own manual, which says how its model reaches the tools."
-  (or (voice :manual)
-      "omp-re — reverse engineering with rizin. Open a binary with open_binary, look a command up with rizin_help, and read the binary with rizin_command (prefer the JSON *j forms). Every read is recorded as evidence; cite its [evidence …] id in record_finding."))
+is open. One text: which commands read what, which tools there are and what
+evidence is are the engine's to say; how the model calls a tool, how a
+result reads and where the settings are differ by host, and are the host's
+(host.lisp, +VOICE+)."
+  (flet ((line (text) (format nil (voice :slash) text)))
+    (format nil "~a
+
+Reading the binary (prefer the JSON `*j` forms; they canonicalize for /re verify)
+  functions   aflj            one function  afij  @ <fn>     decompile  pdg  @ <fn>  (or pdd)
+  disassemble pdfj  @ <fn>     xrefs to      axtj @ <addr>   xrefs from axfj @ <addr>
+  strings     izj              imports       iij             exports    iEj
+  symbols     isj              sections      iSj             headers    iHj
+  types       tsj              entropy       ph entropy      hexdump    px <n> @ <addr>
+  search      /xj <hex>  /Rj (ROP)  /vj (value)             info       ij
+  il lift     aoj @ <addr>  (esil+rzil)  esil calc  ae <rpn>  (ae 0x41,0x13,^)
+  Anything else: rizin_help first, then rizin_command. Read-only; writes are refused here.
+  Driving the RzIL VM (stateful) is the separate rizin_emulate tool.
+
+~a
+
+~a
+  open_binary, map_file, export_project            — session: open/overlay/save.
+  rename_function, rename_variable, set_comment, set_prototype, set_variable_type,
+  define_function, define_global, set_flag, set_calling_convention, set_arch_hint, …
+                                                   — annotate; recorded and REPLAYED on restart.
+  apply_signatures, create_signature               — FLIRT.        analyze — extra recovery passes.
+  record_finding, adopt_finding, retract_finding   — gate report claims on evidence ids.
+  rizin_cli                                        — the rz-* programs (rz-bin, rz-diff, rz-hash, …).
+  triage_capa/floss/die/yara                       — external triage (present only when installed).
+  rizin_debug (opt-in, executes the sample), rizin_emulate (RzIL)  — dynamic analysis.
+
+Evidence & reports
+  Every rizin_command read is recorded as evidence (~a).
+  Cite its [evidence xxxxxxxx] id in record_finding to gate a claim.
+  ~a writes the evidence-gated report.
+  ~a re-runs cited commands to confirm they still reproduce.
+
+~a"
+            (voice :manual-start) (voice :manual-results) (voice :manual-tools)
+            (line "evidence") (line "report") (line "verify")
+            (voice :manual-config))))
 
 (defun clean-stderr (stderr)
   "rizin's stderr with terminal control sequences removed: a search redraws a
@@ -118,7 +155,7 @@ reads RAW-OUTPUT, which is whole where the result's text may be cut."
             ;; the binary's path, so /re verify can re-run this exact line and
             ;; compare; what the model reads is still the trimmed, cut text.
             (values (text-result header (string-right-trim '(#\Newline) output)
-                                 :ea ea :tool "rizin_command" :commands (list line)
+                                 :ea ea :commands (list line)
                                  :repro-hash (canonical-hash output binary-path)
                                  :canonical-excerpt (canonical-excerpt output binary-path)
                                  :shift-hash (shift-hash output binary-path))
@@ -131,9 +168,19 @@ reads RAW-OUTPUT, which is whole where the result's text may be cut."
     (("query" :string :required t :doc "A command or prefix (`pd`, `afv`, `/R`, `ph`) for its usage and arguments, or keywords (`entropy`, `rop gadgets`, `call graph`) to find commands."))
     (arguments)
   (multiple-value-bind (header lines) (search-catalog (load-catalog) (jstring arguments "query"))
-    (text-result header (join-lines lines) :tool "rizin_help")))
+    (text-result header (join-lines lines))))
 
-(define-tool "rizin_command"
+(defun observe-read (command addr &optional (session *session*))
+  "One read of the binary made on behalf of something that composes reads —
+a finding adopted, a finding inherited from an earlier build: a
+rizin_command call like any other, with its line in the audit log and its
+evidence record => (values RESULT EVIDENCE-ID)."
+  (multiple-value-bind (result raw id)
+      (run-tool +read-tool+ (obj "command" command "addr" (or addr :absent)) :session session)
+    (declare (ignore raw))
+    (values result id)))
+
+(define-tool +read-tool+
     (:label "rizin command" :tier :exec :evidence t
      :reason (list "Run the rizin command "
                    (approval-slot '(("command" :missing "?") ("addr" :prefix " @ ")) :clip 120)

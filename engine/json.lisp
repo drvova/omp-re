@@ -234,18 +234,18 @@ leaves an absent member out."
   (let ((value (apply #'jget object path)))
     (and (realp value) value)))
 
-(defun jlist (object &rest path)
-  "The member at PATH when it is an array, as a list; else NIL."
-  (let ((value (apply #'jget object path)))
-    (and (vectorp value) (not (stringp value)) (coerce value 'list))))
-
 (defun json-array-p (value)
   "Whether VALUE is a decoded JSON array: a vector that is not a string."
   (and (vectorp value) (not (stringp value))))
 
+(defun jlist (object &rest path)
+  "The member at PATH when it is an array, as a list; else NIL."
+  (let ((value (apply #'jget object path)))
+    (and (json-array-p value) (coerce value 'list))))
+
 (defun format-json (data)
   "JSON for a model's context: an array is one compact row a line, anything
 else is pretty-printed. Both are valid JSON."
-  (cond ((not (and (vectorp data) (not (stringp data)))) (json-encode data :indent 2))
+  (cond ((not (json-array-p data)) (json-encode data :indent 2))
         ((zerop (length data)) "[]")
         (t (format nil "[~%~{  ~a~^,~%~}~%]" (map 'list #'json-encode data)))))

@@ -18,29 +18,41 @@
 
 ;;; --- the open binary's facts ---------------------------------------------------------------
 
-(defun binary-information (session rz)
-  "What `ij' and `iej' say of the binary RZ analyzes => (values INFO ENTRY).
-They hold for the life of the process, so they are asked once of each."
-  (let ((held (session-held session "binary information")))
-    (unless (eq (first held) rz)
-      (let* ((entries (coerce (or (ignore-errors (rz-cmdj rz "iej")) #()) 'list))
-             (program (or (find "program" entries :key (lambda (entry) (jstring entry "type")) :test #'equal)
-                          (first entries))))
-        (setf held (list rz (ignore-errors (rz-cmdj rz "ij")) (and program (jnumber program "vaddr")))
-              (session-held session "binary information") held)))
-    (values (second held) (third held))))
+;;; A band is drawn beside whatever call holds the session, so it may not
+;;; ask rizin anything: the pipe answers one command at a time, and behind a
+;;; long one a band would wait minutes. What it shows of the analysis is
+;;; kept on the session by the call that changed it.
+
+(defun keep-analysis-facts (session rz)
+  "Keep what a band shows of RZ's analysis: what `ij' and `iej' say of the
+binary, which holds for the life of the process and is asked once of each,
+and how many functions rizin knows now."
+  (let* ((held (session-held session "analysis facts"))
+         (same (eq (first held) rz))
+         (entries (and (not same) (jlist (ignore-errors (rz-cmdj rz "iej")))))
+         (program (or (find "program" entries :key (lambda (entry) (jstring entry "type")) :test #'equal)
+                      (first entries))))
+    (setf (session-held session "analysis facts")
+          (list rz
+                (if same (second held) (ignore-errors (rz-cmdj rz "ij")))
+                (if same (third held) (and program (jnumber program "vaddr")))
+                (function-count rz)))))
+
+(contribute "status band" :analyzed #'keep-analysis-facts)
 
 (defun session-facts (&optional (session *session*))
   "The facts a status band shows of SESSION's binary =>
   {name, path?, size?, format?, arch?, os?, entry?, prot, fnCount, findings,
    evidence}
-Only a rizin that is already running is asked: a band never starts one."
+from what the session holds: nothing is asked of rizin, and none is started.
+A session whose rizin is not running shows the binary's name and no more."
   (let* ((path (session-binary-path session))
          (rz (session-rz session))
-         (live (rz-alive-p rz)))
-    (multiple-value-bind (info entry) (if live (binary-information session rz) (values nil nil))
+         (held (session-held session "analysis facts"))
+         (live (and (rz-alive-p rz) (eq rz (first held)))))
+    (destructuring-bind (&optional info entry (functions 0)) (and live (rest held))
       (let ((bin (jget info "bin")))
-        (obj "name" (if path (file-namestring path) "no binary")
+        (obj "name" (if path (path-basename path) "no binary")
              "path" (or path :absent)
              "size" (or (jnumber info "core" "size") :absent)
              "format" (or (jstring bin "class") :absent)
@@ -53,7 +65,7 @@ Only a rizin that is already running is asked: a band never starts one."
                                                           ("pie" "pie") ("nx" "nx") ("canary" "canary"))
                                   when (eq t (jget bin member)) collect name)
                             'simple-vector)
-             "fnCount" (if live (function-count rz) 0)
+             "fnCount" functions
              "findings" (length (live-findings session))
              "evidence" (length (evidence-records session)))))))
 
@@ -80,7 +92,7 @@ it established does not."
        (list "omp-re reverse-engineering session (preserve — the model must not lose this):"
              (format nil "- Open binary: ~a"
                      (if path
-                         (format nil "~a (~a)" (file-namestring path) path)
+                         (format nil "~a (~a)" (path-basename path) path)
                          "none currently open — reopen with open_binary before using other RE tools"))
              (format nil "- Recorded: ~d evidence item(s), ~d annotation(s) in effect. They persist on the session branch; list them with `/re evidence` and recall one with `/re cite <id>`."
                      (length evidence) (if path (length (live-annotations path session)) 0)))
@@ -120,22 +132,18 @@ it established does not."
      (sb-ext:octets-to-string (coerce octets '(simple-array (unsigned-byte 8) (*)))
                               :external-format '(:utf-8 :replacement #\?)))))
 
-(defun offset-of (object)
-  "The address a rizin JSON row is at: `addr', or `offset' as older rows say it."
-  (or (jnumber object "addr") (jnumber object "offset")))
-
 (defun disassembly-lines (op)
   "One `pdfj' op as its lines: the flags at its address, when it has any,
 then the instruction, its comment (base64 in rizin's JSON) and the
 references to it folded in after a semicolon."
-  (let ((addr (offset-of op)))
+  (let ((addr (row-address op)))
     (when addr
       (let* ((flags (jstrings op "flags"))
              (comment (let ((decoded (and (jstring op "comment") (base64-text (jstring op "comment")))))
                         (and decoded (plusp (length (trimmed decoded))) (trimmed decoded))))
              (xrefs (loop for xref in (jlist op "xrefs_to")
-                          when (offset-of xref)
-                            collect (format nil "~a ~a" (jstring xref "type") (ea-from-offset (offset-of xref)))))
+                          when (row-address xref)
+                            collect (format nil "~a ~a" (jstring xref "type") (ea-from-offset (row-address xref)))))
              (notes (append (and comment (list comment))
                             (and xrefs (list (format nil "xrefs: ~{~a~^, ~}" xrefs))))))
         (append (and flags (list (format nil "~{~a~^, ~}:" flags)))
@@ -152,34 +160,16 @@ no function there."
   "A real decompile — rz-ghidra's especially — runs far longer than a plain command.")
 
 (defparameter +disassembly-only+ "(disassembly only — no decompiler plugin available)"
-  "Said over disassembly shown in place of decompiled code. The re-triage
-skill and WATCHDOG.md quote it, so the model and an advisor can tell a
-fallback from a decompile.")
+  "Said over disassembly shown in place of decompiled code, so nobody reads
+a fallback as a decompile.")
 
 (defparameter +decompiler-silent+ "(disassembly only — the decompiler produced no output for this function)")
 
-(defun session-decompiler (session rz)
-  "The decompiler command RZ has, OMPRE_DECOMPILER's first, or NIL. rizin
-ships none: rz-ghidra (pdg) and jsdec (pdd) are plugins, and a command whose
-plugin is not loaded answers its own help with nothing. Asked once of each
-process; an answer that could not be had is not kept."
-  (let ((held (session-held session "decompiler")))
-    (if (eq (car held) rz)
-        (cdr held)
-        (let ((kind (find-if (lambda (command)
-                               (let ((reply (trimmed (rz-cmd rz (format nil "~a?" command)))))
-                                 (and (plusp (length reply))
-                                      (not (search "does not exist" reply))
-                                      (not (uiop:string-prefix-p "ERROR" reply)))))
-                             (decompiler-commands))))
-          (setf (session-held session "decompiler") (cons rz kind))
-          kind))))
-
-(defun decompile-at (session rz ea)
+(defun decompile-at (rz ea)
   "The function at EA decompiled => (values KIND CODE): the decompiler
 command and its output, or NIL and NIL when no decompiler is loaded or it
 said nothing — KIND then being :SILENT for one that is loaded."
-  (let ((kind (session-decompiler session rz)))
+  (let ((kind (first (available-decompilers (load-catalog)))))
     (if kind
         (let ((code (string-left-trim '(#\Newline)
                                       (rz-cmd rz (format nil "~a @ ~a" kind ea) :seconds +decompile-seconds+))))
@@ -221,17 +211,13 @@ said nothing — KIND then being :SILENT for one that is loaded."
   "A row for each place that refers to EA, named by the function it is in.
 rizin's `axtj' names none, so each is asked — for the first 64; past that a
 row keeps its bare address."
-  (loop for row in (coerce (or (rz-cmdj rz (format nil "axtj @ ~a" ea)) #()) 'list)
+  (loop for row in (jlist (rz-cmdj rz (format nil "axtj @ ~a" ea)))
         for index from 0
         for from = (jnumber row "from")
         when from
           collect (let* ((site (ea-from-offset from))
                          (name (and (< index 64)
-                                    (jstring (first (coerce (or (ignore-errors
-                                                                 (rz-cmdj rz (format nil "afij @ ~a" site)))
-                                                                #())
-                                                            'list))
-                                             "name")))
+                                    (jstring (ignore-errors (function-row-at rz site)) "name")))
                          (label (if name (format nil "~a (~a)" name site) site)))
                     (obj "value" site "label" label "description" (jstring row "type")
                          "enter" (code-request site label depth)))))
@@ -242,14 +228,14 @@ there are none; with ONE, a single reference is shown as its code at once."
   (let ((rows (reference-rows rz ea depth)))
     (cond ((null rows) none)
           ((and one (null (rest rows))) (code-view rz (jstring (first rows) "value") nil depth))
-          (t (panel-view title "enter open · esc back" rows)))))
+          (t (panel-view title (voice :references-hint) rows)))))
 
 (defun code-view (rz ea name depth)
   (if (> depth +view-depth+)
       (notice-view :info "omp-re: xref chain too deep — stopping to avoid an unbounded loop")
       (let ((disasm (ignore-errors (disassemble-at rz ea)))
             (shown (or name ea)))
-        (multiple-value-bind (kind code) (handler-case (decompile-at *session* rz ea)
+        (multiple-value-bind (kind code) (handler-case (decompile-at rz ea)
                                            (error () (values nil nil)))
           (if (and (null disasm) (null code))
               (notice-view :error "omp-re: no code at ~a" ea)
@@ -273,79 +259,25 @@ there are none; with ONE, a single reference is shown as its code at once."
                                  shown ea)
                    "xrefs" (jget (view-request "xrefs" "addr" ea "name" shown "depth" (1+ depth)) "view")))))))
 
-(defun list-view (kind)
-  (flet ((rows (command row)
-           (loop for item in (coerce (or (rz-cmdj (ensure-rizin) command) #()) 'list)
-                 for made = (funcall row item)
-                 when made collect made)))
-    (cond
-      ((string= kind "functions")
-       (panel-view "omp-re: functions" "enter open · type to filter · esc close"
-                   (rows "aflj"
-                         (lambda (function)
-                           (let ((addr (offset-of function))
-                                 (size (or (jnumber function "realsz") (jnumber function "size"))))
-                             (when addr
-                               (let ((ea (ea-from-offset addr)))
-                                 (obj "value" ea "label" (jstring function "name")
-                                      "description" (format nil "~a~@[ · ~db~]" ea size)
-                                      "enter" (code-request ea (jstring function "name"))))))))))
-      ((string= kind "strings")
-       (panel-view "omp-re: strings" "enter open · type to filter · esc close"
-                   (rows "izj"
-                         (lambda (entry)
-                           (when (jnumber entry "vaddr")
-                             (let ((ea (ea-from-offset (jnumber entry "vaddr"))))
-                               (obj "value" ea "label" (jstring entry "string") "description" ea
-                                    "enter" (view-request "string-xrefs" "addr" ea
-                                                          "label" (jstring entry "string")))))))))
-      ((string= kind "imports")
-       (panel-view "omp-re: imports" "enter open · type to filter · esc close"
-                   (rows "iij"
-                         (lambda (entry)
-                           (let ((ea (and (jnumber entry "plt") (plusp (jnumber entry "plt"))
-                                          (ea-from-offset (jnumber entry "plt")))))
-                             (obj "value" (or ea "") "label" (jstring entry "name")
-                                  "description" (or ea "(no PLT)")
-                                  "enter" (view-request "import-callers" "addr" (or ea "")
-                                                        "name" (jstring entry "name"))))))))
-      ((string= kind "evidence")
-       (panel-view "omp-re: evidence" "enter cite · type to filter · esc close"
-                   (mapcar (lambda (record)
-                             (obj "value" (jstring record "id")
-                                  "label" (format nil "[~a] ~a @ ~a" (shown-id (jstring record "id"))
-                                                  (jstring record "tool") (or (jstring record "ea") "?"))
-                                  "description" (let ((line (or (first (split-lines (jstring record "summary"))) "")))
-                                                  (subseq line 0 (min 80 (length line))))
-                                  "enter" (obj "draft" (format nil "~a~%~%" (cite-text record)))))
-                           (evidence-records))))
-      ((string= kind "findings")
-       (let ((findings (live-findings)))
-         (if (null findings)
-             (notice-view :info "omp-re: no findings on this branch yet — the model records them with record_finding")
-             (panel-view "omp-re: findings" "enter discuss · type to filter · esc close"
-                         (mapcar (lambda (finding)
-                                   (obj "value" (jstring finding "id")
-                                        "label" (format nil "[~a] ~a" (shown-id (jstring finding "id"))
-                                                        (jstring finding "claim"))
-                                        "description" (format nil "~a~:[~; · inherited~]~@[ · ~a~]"
-                                                              (jstring finding "confidence")
-                                                              (jget finding "inherited")
-                                                              (let ((addr (jstring finding "addr")))
-                                                                (and (plusp (length addr)) addr)))
-                                        "enter" (obj "draft" (format nil "Re: ~a~%~%" (finding-detail finding)))))
-                                 findings))))))))
-
-(defparameter +list-views+ '("functions" "strings" "imports" "evidence" "findings")
-  "The lists a host may open by name; each is also a /re subcommand, whose
-line answers the same list as text where there is no screen.")
+(defun list-view (slash)
+  "The list the subcommand SLASH prints, as a panel to pick from."
+  (let* ((listing (slash-listing slash))
+         (rows (funcall (listing-rows listing))))
+    (if (and (null rows) (listing-none listing))
+        (notice-view :info "~a" (listing-none listing))
+        (panel-view (list-title slash) (format nil (voice :list-hint) (listing-enter listing))
+                    (mapcar (lambda (row)
+                              (obj "value" (list-row-value row) "label" (list-row-label row)
+                                   "description" (or (list-row-description row) :absent)
+                                   "enter" (list-row-enter row)))
+                            rows)))))
 
 (defun view (kind argument)
   "The view KIND for the JSON object ARGUMENT, in the running session."
   (let ((addr (jstring argument "addr"))
         (depth (or (jnumber argument "depth") 0)))
     (cond
-      ((member kind +list-views+ :test #'string=) (list-view kind))
+      ((find-list kind) (list-view (find-list kind)))
       ((string= kind "code")
        (code-view (ensure-rizin) (validate-addr addr) (jstring argument "name") depth))
       ((string= kind "xrefs")

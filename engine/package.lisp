@@ -1,17 +1,34 @@
-;;;; package.lisp --- the engine's package, and its one condition.
+;;;; package.lisp --- the engine's package, what a host may use of it, and its one condition.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; Every refusal is RE-ERROR, carrying the engine's own words. The engine
 ;;;; needs SBCL, UIOP, cl-ppcre and rizin, and nothing of any host.
 ;;;;
-;;;; OPEN is shadowed here although the engine defines no OPEN: the nodecode
-;;;; host makes it a verb of this package (re:open), and a symbol can only be
-;;;; shadowed before anything is read into the package.
+;;;; A host is a package of its own that uses this one, and what it may use
+;;;; is what is exported here: the surface (engine.lisp), the port it
+;;;; answers (host.lisp), the record file it may keep a branch view over
+;;;; (session.lisp), and the JSON and text helpers the surface's answers are
+;;;; read with. Nothing else of the engine is a host's to name.
 
 (defpackage #:omp-re
   (:use #:cl)
-  (:shadow #:open))
+  (:export
+   ;; the surface
+   #:engine-tools #:engine-call #:engine-commands #:engine-command
+   #:engine-view #:engine-facts #:engine-evidence #:engine-preserved #:engine-approval
+   #:engine-restore #:engine-rekey #:engine-close #:engine-hold #:shutdown-sessions
+   #:engine-name #:shown-id #:re-error
+   ;; the port
+   #:install-host #:clear-host #:with-host-service #:notify #:check-cancelled
+   #:+settings+ #:setting-value #:+voice+ #:+default-session+ #:turn-session-id
+   ;; the record's own file, for a host that keeps a branch view over it
+   #:find-session #:session-id #:session-held #:session-file-entries #:file-append-entry
+   ;; JSON as the surface answers it
+   #:obj #:jget #:jstring #:jnumber #:jlist #:json-array-p
+   #:json-encode #:json-decode #:json-parse #:json-refusal
+   ;; text
+   #:trimmed #:blank-p #:split-lines #:join-lines #:js-scan #:ea-from-offset))
 
 (in-package #:omp-re)
 

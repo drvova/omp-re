@@ -36,17 +36,16 @@
 ;;;; the code, tables and wording here are this project's own, written
 ;;;; against rizin's JSON.
 
-(in-package #:omp-re)
+(in-package #:nodecode-re)
 
 (defun table (&rest path)
-  "The member of the recipes' data at PATH."
   (apply #'jget *recipe-tables* path))
 
 ;;; --- rizin's JSON, as JavaScript would read it ---------------------------------------------
 
 (defun rows (data)
   "A decoded JSON array as a list; anything else as no rows."
-  (if (and (vectorp data) (not (stringp data))) (coerce data 'list) '()))
+  (if (json-array-p data) (coerce data 'list) '()))
 
 (defun vec (list)
   "LIST as a JSON array, so that an empty one is still a list and not false."
@@ -211,7 +210,6 @@ or comes out empty."
     (if (or (eq text :missing) (string= text "")) '() (list text))))
 
 (defun section-lines (section facts &optional row)
-  "The lines of one section."
   (flet ((each (key function) (loop for item in (rows (gethash key section)) append (funcall function item)))
          (one (key) (and (gethash key section) (written (gethash key section) facts row))))
     (when (and (gethash "when" section) (not (there (lookup (gethash "when" section) facts row))))
@@ -252,13 +250,13 @@ or comes out empty."
   "One rizin_command call — the same gate, audit line and evidence record as
 any other — answering its whole output => (values RAW EVIDENCE-ID). RAW is
 \"\" when rizin printed nothing; a refused or failed read is RE-ERROR."
-  (multiple-value-bind (text failed raw evidence-id)
-      (call-tool *session* "rizin_command" (obj "command" command "addr" (or addr :absent)))
-    (when failed (fail "~a" text))
-    (let ((id (and evidence-id (shown-id evidence-id))))
-      (when id
-        (push (obj "label" (if addr (format nil "~a @ ~a" command addr) command) "id" id) *recipe-evidence*))
-      (values (or raw "") id))))
+  (let* ((answer (engine-call (turn-session-id) "rizin_command"
+                              (obj "command" command "addr" (or addr :absent))))
+         (id (and (jstring answer "evidenceId") (shown-id (jstring answer "evidenceId")))))
+    (answer-text answer)
+    (when id
+      (push (obj "label" (if addr (format nil "~a @ ~a" command addr) command) "id" id) *recipe-evidence*))
+    (values (or (jstring answer "raw") "") id)))
 
 (defun observe-json (command &optional addr)
   "OBSERVE for a *j command => (values DATA EVIDENCE-ID), DATA being NIL when
@@ -539,8 +537,8 @@ traced with."
 (an alist by option name), its steps taken in order — a read, or a fact
 worked out above — and its title and sections filled from what those left,
 over the list of the reads it took, so every line can be traced and cited.
-It runs with the session's lock held, so the reads are one sequence no other
-call cuts into."
+It runs holding the session, so the reads are one sequence no other call
+cuts into."
   (let ((recipe (find name (table "recipes") :key (lambda (recipe) (gethash "name" recipe)) :test #'string=))
         (facts (obj "recipe" name "listFunctions" (table "host" "listFunctions"))))
     (maphash (lambda (limit value) (setf (gethash limit facts) value)) (table "limits"))
@@ -558,29 +556,31 @@ call cuts into."
                    (if (gethash "flag" option)
                        (not (member value '(nil :false)))
                        (bounded value (gethash "default" option) (gethash "least" option) (gethash "most" option)))))
-    (multiple-value-bind (text failed)
-        (in-session ((turn-session-id) name)
-        (let ((*recipe-evidence* '())
-              (*recipe-functions* :unread))
-          (loop for step across (gethash "steps" recipe)
-                do (if (gethash "derive" step)
-                       (funcall (cdr (assoc (gethash "derive" step) *fact-steps* :test #'string=)) facts)
-                       (multiple-value-bind (data id)
-                           (observe-json (gethash "command" step) (and (gethash "at" step) addr))
-                         (set-facts facts (gethash "read" step) data
-                                    (format nil "@~a" (gethash "read" step)) id))))
-          (join-lines
-           (append (written (gethash "title" recipe) facts)
-                   (loop for section across (gethash "sections" recipe)
-                         append (cons "" (section-lines section facts)))
-                   (list "" (table "text" "evidenceTaken"))
-                   (loop for read in (reverse *recipe-evidence*)
-                         append (written (table "text" "evidenceRow") facts read))))))
-      (if failed (fail "~a" text) text))))
+    (flet ((run ()
+             (let ((*recipe-evidence* '())
+                   (*recipe-functions* :unread))
+               (loop for step across (gethash "steps" recipe)
+                     do (if (gethash "derive" step)
+                            (funcall (cdr (assoc (gethash "derive" step) *fact-steps* :test #'string=)) facts)
+                            (multiple-value-bind (data id)
+                                (observe-json (gethash "command" step) (and (gethash "at" step) addr))
+                              (set-facts facts (gethash "read" step) data
+                                         (format nil "@~a" (gethash "read" step)) id))))
+               (join-lines
+                (append (written (gethash "title" recipe) facts)
+                        (loop for section across (gethash "sections" recipe)
+                              append (cons "" (section-lines section facts)))
+                        (list "" (table "text" "evidenceTaken"))
+                        (loop for read in (reverse *recipe-evidence*)
+                              append (written (table "text" "evidenceRow") facts read)))))))
+      ;; The engine's own refusal — the session could not be had — is said
+      ;; as this host says every refusal.
+      (handler-case (engine-hold (turn-session-id) #'run)
+        (omp-re:re-error (condition) (fail "~a" condition))))))
 
 (defmacro define-recipes ()
   "A verb for each recipe in the data, with the options it lists as keywords."
-  (flet ((name (text) (intern text '#:omp-re)))
+  (flet ((name (text) (intern text '#:nodecode-re)))
     `(progn
        ,@(loop for recipe across (jget *recipe-tables* "recipes")
                for options = (coerce (gethash "options" recipe) 'list)

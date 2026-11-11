@@ -10,19 +10,19 @@
 (in-package #:nodecode-re-test)
 
 (defun ann-commands (&rest arguments)
-  (apply #'re::annotation-commands arguments))
+  (apply #'omp-re::annotation-commands arguments))
 
 (defun ann-refused (&rest arguments)
-  (refusal (lambda () (apply #'re::annotation-commands arguments))))
+  (refusal (lambda () (apply #'omp-re::annotation-commands arguments))))
 
 (defun ann-entry (customtype data &optional (id (format nil "e~d" (random 1000000))))
-  (re::obj "type" "custom" "id" id "customType" customtype "data" data))
+  (omp-re:obj "type" "custom" "id" id "customType" customtype "data" data))
 
 (defun ann-record (&rest entries)
   "A session nothing has stored, holding ENTRIES."
-  (let ((session (re::make-session :id "annotate-pure")))
+  (let ((session (omp-re::make-session :id "annotate-pure")))
     (dolist (entry entries session)
-      (vector-push-extend entry (re::session-entries session)))))
+      (vector-push-extend entry (omp-re::session-entries session)))))
 
 ;;; --- the commands an annotation is --------------------------------------------------
 
@@ -143,51 +143,51 @@
 ;;; --- what is in effect ---------------------------------------------------------------
 
 (suite "annotations: what is in effect")
-(let* ((first (re::obj "kind" "rename_function" "ea" "0x10" "oldValue" "main" "newValue" "a"))
+(let* ((first (omp-re:obj "kind" "rename_function" "ea" "0x10" "oldValue" "main" "newValue" "a"))
        (session (ann-record
-                 (ann-entry "re.binary" (re::obj "path" "/a") "b1")
+                 (ann-entry "re.binary" (omp-re:obj "path" "/a") "b1")
                  (ann-entry "re.annotation" first "n1")
-                 (ann-entry "re.annotation" (re::obj "kind" "set_comment" "ea" "0x20" "newValue" "c") "n2")
-                 (ann-entry "re.binary" (re::obj "path" "/b") "b2")
-                 (ann-entry "re.annotation" (re::obj "kind" "set_flag" "ea" "0x30" "oldValue" "" "newValue" "f") "n3")
-                 (ann-entry "re.annotation" (re::obj "kind" "nameless") "n4")
-                 (ann-entry "re.binary" (re::obj "path" "/a") "b3")
-                 (ann-entry "re.annotation" (re::obj "kind" "set_hint" "ea" "0x40" "oldValue" "" "newValue" "16"
+                 (ann-entry "re.annotation" (omp-re:obj "kind" "set_comment" "ea" "0x20" "newValue" "c") "n2")
+                 (ann-entry "re.binary" (omp-re:obj "path" "/b") "b2")
+                 (ann-entry "re.annotation" (omp-re:obj "kind" "set_flag" "ea" "0x30" "oldValue" "" "newValue" "f") "n3")
+                 (ann-entry "re.annotation" (omp-re:obj "kind" "nameless") "n4")
+                 (ann-entry "re.binary" (omp-re:obj "path" "/a") "b3")
+                 (ann-entry "re.annotation" (omp-re:obj "kind" "set_hint" "ea" "0x40" "oldValue" "" "newValue" "16"
                                                      "target" "immediate_base" "evidenceId" "ev" "ungrounded" nil)
                             "n5")
-                 (ann-entry "re.undo" (re::obj "undidEntryId" "n2") "u1"))))
+                 (ann-entry "re.undo" (omp-re:obj "undidEntryId" "n2") "u1"))))
   (check "an annotation belongs to the binary opened last before it, across a reopen"
          (and (equal '("0x10" "0x40")
-                     (mapcar (lambda (data) (gethash "ea" data)) (re::live-annotations "/a" session)))
-              (equal '("0x30") (mapcar (lambda (data) (gethash "ea" data)) (re::live-annotations "/b" session)))
-              (null (re::live-annotations "/c" session))))
+                     (mapcar (lambda (data) (gethash "ea" data)) (omp-re::live-annotations "/a" session)))
+              (equal '("0x30") (mapcar (lambda (data) (gethash "ea" data)) (omp-re::live-annotations "/b" session)))
+              (null (omp-re::live-annotations "/c" session))))
   (check "an undone annotation is not in effect, and one with no address never was"
          (notany (lambda (data) (member (gethash "ea" data) '("0x20" nil) :test #'equal))
-                 (append (re::live-annotations "/a" session) (re::live-annotations "/b" session))))
+                 (append (omp-re::live-annotations "/a" session) (omp-re::live-annotations "/b" session))))
   (check "the data keeps its fields, with a missing value read as empty"
          (and (string= "{\"kind\":\"set_hint\",\"ea\":\"0x40\",\"oldValue\":\"\",\"newValue\":\"16\",\"target\":\"immediate_base\",\"evidenceId\":\"ev\",\"ungrounded\":false}"
-                       (re::json-encode (second (re::live-annotations "/a" session))))
+                       (omp-re:json-encode (second (omp-re::live-annotations "/a" session))))
               (string= "{\"kind\":\"rename_function\",\"ea\":\"0x10\",\"oldValue\":\"main\",\"newValue\":\"a\"}"
-                       (re::json-encode (first (re::live-annotations "/a" session))))))
+                       (omp-re:json-encode (first (omp-re::live-annotations "/a" session))))))
   (check "the fingerprint is the ids of the entries in effect"
-         (and (string= "n1,n5" (re::annotation-fingerprint session "/a"))
-              (string= "n3" (re::annotation-fingerprint session "/b"))
-              (string= "" (re::annotation-fingerprint session "/c"))))
+         (and (string= "n1,n5" (omp-re::annotation-fingerprint session "/a"))
+              (string= "n3" (omp-re::annotation-fingerprint session "/b"))
+              (string= "" (omp-re::annotation-fingerprint session "/c"))))
   (check "an annotation that no longer applies is a failure line, and does not stop the replay"
          (let ((session (ann-record
-                         (ann-entry "re.binary" (re::obj "path" "/a"))
-                         (ann-entry "re.annotation" (re::obj "kind" "patch_bytes" "ea" "0x10" "newValue" "90"))
-                         (ann-entry "re.annotation" (re::obj "kind" "set_flag" "ea" "0x20" "newValue" "a b")))))
+                         (ann-entry "re.binary" (omp-re:obj "path" "/a"))
+                         (ann-entry "re.annotation" (omp-re:obj "kind" "patch_bytes" "ea" "0x10" "newValue" "90"))
+                         (ann-entry "re.annotation" (omp-re:obj "kind" "set_flag" "ea" "0x20" "newValue" "a b")))))
            ;; Both are refused before a command is built, so no process is needed.
            (equal '("patch_bytes @ 0x10: omp-re: unknown annotation kind: patch_bytes"
                     "set_flag @ 0x20: omp-re: invalid flag: \"a b\"")
-                  (re::replay-annotations session nil "/a")))))
+                  (omp-re::replay-annotations session nil "/a")))))
 
 ;;; --- against rizin --------------------------------------------------------------------
 
 (defun ann-data (id type)
   "The data of the last entry of TYPE in the session ID's record."
-  (car (last (re::entries-of type (re::find-session id)))))
+  (car (last (omp-re::entries-of type (omp-re:find-session id)))))
 
 (defun ann-function (addr)
   (aref (re:json "afij" addr) 0))
@@ -206,7 +206,7 @@
 there is none. A hint deleted by its own letter can leave a row holding only
 the address, so a test asks for the key, not for the row."
   (let ((rows (ignore-errors (re:json "ahl.j" addr))))
-    (if (and (vectorp rows) (plusp (length rows))) (aref rows 0) (re::obj))))
+    (if (and (vectorp rows) (plusp (length rows))) (aref rows 0) (omp-re:obj))))
 
 (defun ann-unhinted-p (addr)
   (notany (lambda (key) (gethash key (ann-hints addr))) '("arch" "bits" "immbase" "type" "size" "jump" "ret")))
@@ -221,14 +221,14 @@ the address, so a test asks for the key, not for the row."
   (or (ignore-errors (gethash "name" (re:json "fdj" addr))) ""))
 
 (defun ann-count (id)
-  (let ((session (re::find-session id)))
-    (length (re::live-annotations (re::session-binary-path session) session))))
+  (let ((session (omp-re:find-session id)))
+    (length (omp-re::live-annotations (omp-re::session-binary-path session) session))))
 
 (defun ann-in-step-p (id)
   "Whether the session says its rizin holds exactly the record's annotations."
-  (let ((session (re::find-session id)))
-    (string= (re::applied-fingerprint session "annotations")
-             (re::annotation-fingerprint session (re::session-binary-path session)))))
+  (let ((session (omp-re:find-session id)))
+    (string= (omp-re::applied-fingerprint session "annotations")
+             (omp-re::annotation-fingerprint session (omp-re::session-binary-path session)))))
 
 (if (not *rizin*)
     (format t "~&annotations against rizin: SKIPPED (no rizin, or no ~a)~%" *binary*)
@@ -275,7 +275,7 @@ the address, so a test asks for the key, not for the row."
                    (zerop (ann-count id)))
             (let* ((renamed (re:call "rename_function" :addr "main" :new "omp_re_main"))
                    (main (subseq renamed (+ 3 (search " @ " renamed))))
-                   (session (re::find-session id)))
+                   (session (omp-re:find-session id)))
               (check "rename_function says what it replaced, keyed on the function's start"
                      (and (equal (format nil "rename_function: \"main\" -> \"omp_re_main\" @ ~a" main) renamed)
                           (starts "0x" main)))
@@ -284,16 +284,16 @@ the address, so a test asks for the key, not for the row."
               (check "the re.annotation entry has the engine's fields, ungrounded with no evidence there"
                      (equal (format nil "{\"kind\":\"rename_function\",\"ea\":~s,\"oldValue\":\"main\",\"newValue\":\"omp_re_main\",\"evidenceId\":\"\",\"ungrounded\":true}"
                                     main)
-                            (re::json-encode (ann-data id "re.annotation"))))
+                            (omp-re:json-encode (ann-data id "re.annotation"))))
               (check "the entry is on disk, not only in memory"
-                     (has "\"customType\":\"re.annotation\"" (re::read-text-file (re::record-path session))))
+                     (has "\"customType\":\"re.annotation\"" (omp-re::read-text-file (omp-re::record-path session))))
               (check "the session says its rizin holds the record's annotations"
-                     (and (ann-in-step-p id) (plusp (length (re::applied-fingerprint session "annotations")))))
+                     (and (ann-in-step-p id) (plusp (length (omp-re::applied-fingerprint session "annotations")))))
               (check "status counts it"
                      (has "annotations in effect: 1" (re:status)))
 
               ;; --- set_comment
-              (let ((evidence (re::evidence-id-at main session)))
+              (let ((evidence (omp-re::evidence-id-at main session)))
                 (check "set_comment stores `; !id' as text, and rizin runs none of it"
                        (and (equal (format nil "set_comment: \"\" -> \"x; !id\" @ ~a" main)
                                    (re:call "set_comment" :addr main :text "x; !id"))
@@ -304,7 +304,7 @@ the address, so a test asks for the key, not for the row."
                          (and evidence
                               (equal evidence (gethash "evidenceId" data))
                               (null (gethash "ungrounded" data))
-                              (has "\"ungrounded\":false" (re::json-encode data))))))
+                              (has "\"ungrounded\":false" (omp-re:json-encode data))))))
               (check "every rizin metacharacter in a comment is stored literally"
                      (let ((text "y; echo INJECTED @ 0x0 ~ | > out `z` $(w) # 'q' \\"))
                        (re:call "set_comment" :addr main :text text)
@@ -335,7 +335,7 @@ the address, so a test asks for the key, not for the row."
               (check "the re.undo entry names the entry it took back"
                      (let ((marker (ann-data id "re.undo")))
                        (and (equal '("undidEntryId") (loop for key being the hash-keys of marker collect key))
-                            (find (gethash "undidEntryId" marker) (re::session-entries session)
+                            (find (gethash "undidEntryId" marker) (omp-re::session-entries session)
                                   :key (lambda (entry) (gethash "id" entry)) :test #'equal)
                             (ann-in-step-p id))))
 
@@ -359,7 +359,7 @@ the address, so a test asks for the key, not for the row."
                                    (not (member name names :test #'equal))))))
                 (check "set_variable_type lands, and its entry carries the variable as target"
                        (and (equal (format nil "set_variable_type: omp_re_var: ~a -> \"char *\" @ ~a"
-                                           (re::js-string (cdr variable)) main)
+                                           (omp-re::js-string (cdr variable)) main)
                                    (re:call "set_variable_type" :addr main :var "omp_re_var" :type "char *"))
                             (equal "char *" (cdr (assoc "omp_re_var" (ann-variables main) :test #'equal)))
                             (let ((data (ann-data id "re.annotation")))
@@ -442,7 +442,7 @@ the address, so a test asks for the key, not for the row."
 
                 (let ((old (ann-flag flag-ea)))
                   (check "set_flag names the address, replacing the flag that was there"
-                         (and (equal (format nil "set_flag: ~a -> \"omp_re.label\" @ ~a" (re::js-string old) flag-ea)
+                         (and (equal (format nil "set_flag: ~a -> \"omp_re.label\" @ ~a" (omp-re::js-string old) flag-ea)
                                      (re:call "set_flag" :addr flag-ea :name "omp_re.label"))
                               (equal "omp_re.label" (ann-flag flag-ea))
                               ;; rizin now resolves the name, which is the point of a flag
@@ -543,9 +543,9 @@ the address, so a test asks for the key, not for the row."
                          (equal (format nil "omp-re: define_function: a function already begins at ~a (\"omp_re_main\"); nothing to define"
                                         main)
                                 (refusal (lambda () (re:call "define_function" :addr main)))))
-                  (re::rz-cmd (re::session-rz session) (format nil "af- @ ~a" victim))
+                  (omp-re::rz-cmd (omp-re::session-rz session) (format nil "af- @ ~a" victim))
                   (check "define_function defines one where rizin has none, and names it in the entry"
-                         (and (not (re::function-starting-at (re::session-rz session) victim))
+                         (and (not (omp-re::function-starting-at (omp-re::session-rz session) victim))
                               (has (format nil "define_function: \"\" -> \"fcn.") (re:call "define_function" :addr victim))
                               (eql (parse-integer victim :start 2 :radix 16)
                                    (gethash "offset" (ann-function victim)))
@@ -553,7 +553,7 @@ the address, so a test asks for the key, not for the row."
                   (check "/re undo undefines it again"
                          (and (equal (format nil "omp-re: undid define_function @ ~a (restored \"\")" victim)
                                      (re:slash "undo"))
-                              (not (re::function-starting-at (re::session-rz session) victim)))))
+                              (not (omp-re::function-starting-at (omp-re::session-rz session) victim)))))
 
                 ;; --- one more made and taken back, to be absent after a respawn
                 (re:call "set_comment" :addr doomed-ea :text "doomed")
@@ -596,22 +596,22 @@ the address, so a test asks for the key, not for the row."
                          (and (everything-holds) (undone-stay-undone)))
 
                   ;; The process dies; the record is the truth.
-                  (let ((old (re::session-rz session))
+                  (let ((old (omp-re::session-rz session))
                         (count (ann-count id)))
                     (kill-rizin id)
                     (check "a killed rizin comes back with every annotation replayed"
                            (and (everything-holds)
-                                (not (eq old (re::session-rz session)))))
+                                (not (eq old (omp-re::session-rz session)))))
                     (check "and with the undone ones not replayed"
                            (undone-stay-undone))
                     (check "the fresh process is in step with the record"
                            (and (ann-in-step-p id) (= count (ann-count id))))
                     (check "the replay of this record has no failure line"
-                           (null (re::replay-annotations session (re::session-rz session)
-                                                         (re::session-binary-path session))))
+                           (null (omp-re::replay-annotations session (omp-re::session-rz session)
+                                                         (omp-re::session-binary-path session))))
 
                     ;; The engine forgets the session; the record brings it back.
-                    (re::shutdown-sessions)
+                    (omp-re:shutdown-sessions)
                     (check "a forgotten session still counts its annotations, from the record alone"
                            (let ((status (re:status)))
                              (and (has "not running" status)
@@ -655,9 +655,9 @@ the address, so a test asks for the key, not for the row."
                                         (ann-variables main)))))
                   (check "and a rizin started from that record has nothing put back into it"
                          ;; The session was forgotten above: this is the one restored since.
-                         (let* ((session (re::find-session id))
-                                (old (re::session-rz session)))
+                         (let* ((session (omp-re:find-session id))
+                                (old (omp-re::session-rz session)))
                            (kill-rizin id)
                            (and (equal "main" (gethash "name" (ann-function main)))
-                                (not (eq old (re::session-rz session)))
-                                (string= "" (re::applied-fingerprint session "annotations")))))))))))))
+                                (not (eq old (omp-re::session-rz session)))
+                                (string= "" (omp-re::applied-fingerprint session "annotations")))))))))))))

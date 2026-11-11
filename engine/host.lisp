@@ -2,19 +2,20 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; The engine runs inside a host — a nodecode organism (cell.lisp), omp
-;;;; through a stdio server — and a few things only the host can say or do:
-;;;; what the operator configured, who is calling, where a session's record
-;;;; is kept and which of it is on the current branch, how to tell the
-;;;; operator something, whom to ask a side question. All of that is here and
-;;;; nowhere else, so a second host is written without touching the core.
+;;;; The engine runs inside a host — a nodecode organism (nodecode/), omp
+;;;; through a stdio server (stdio/) — and a few things only the host can
+;;;; say or do: what the operator configured, who is calling, where a
+;;;; session's record is kept and which of it is on the current branch, how
+;;;; to tell the operator something, whom to ask a side question. All of
+;;;; that is here and nowhere else, so a second host is written without
+;;;; touching the core.
 ;;;;
-;;;; A setting is declared once, in +SETTINGS+, and read through
-;;;; SETTING-VALUE; a host's own declaration of the section and
-;;;; config.example.jsonc are written from that table. The services are
-;;;; installed by the host at start (INSTALL-HOST), cleared at stop, and
-;;;; asked through ASK-HOST. Each has an answer for when no host is
-;;;; installed, so the core runs alone under a test.
+;;;; A setting the engine reads is declared once, in +SETTINGS+, and read
+;;;; through SETTING-VALUE; a host that has a config file declares its
+;;;; section from that table. The services are installed by the host at
+;;;; start (INSTALL-HOST), cleared at stop, and asked through ASK-HOST. Each
+;;;; has an answer for when no host is installed, so the core runs alone
+;;;; (test/nodecode/suite-core.lisp loads it so).
 
 (in-package #:omp-re)
 
@@ -33,8 +34,6 @@
      :doc "close the rizin process of a session unused this long; its next call restores it")
     (:audit :key "audit" :type :boolean :default t
      :doc "ask the model, in a side question that costs tokens, whether a finding's or a report claim's evidence supports it; off records them unaudited")
-    (:audit-seconds :key "audit_seconds" :type :integer :default 120 :min 1
-     :doc "how long a support audit waits for its answer before the claim goes unaudited")
     (:rizin-path-64 :type :path :env "OMPRE_RIZIN_PATH_64")
     (:rizin-path-32 :type :path :env "OMPRE_RIZIN_PATH_32")
     (:load-user-config :type :boolean :default nil :env "OMPRE_RIZIN_LOAD_USER_CONFIG")
@@ -111,38 +110,11 @@ section is taken over OMPRE_RIZIN_PATH. With no host there is no section."
               ((and env (environment-value type env)))
               (t default))))))
 
-(defun section-fields ()
-  "The members of the `re' section as a nodecode cell declares them:
-(KEY TYPE :default FORM [:min N] :doc TEXT)."
-  (loop for (nil . options) in +settings+
-        when (getf options :key)
-          collect `(,(getf options :key) ,(getf options :type)
-                    :default ,(getf options :default)
-                    ,@(when (getf options :min) (list :min (getf options :min)))
-                    :doc ,(format nil "~a~@[ (the engine's ~a)~]"
-                                  (getf options :doc) (getf options :env)))))
-
-(defun config-example ()
-  "config.example.jsonc, written from the declaration."
-  (with-output-to-string (out)
-    (format out "// The section ~~/.nodecode/config.jsonc may carry for this cell —~%")
-    (format out "// documentation, not config: the folder gets pushed and holds no secret.~%")
-    (format out "// Written from the declaration in engine/host.lisp, and the Lisp suite~%")
-    (format out "// checks the two agree. A present section is enabled; \"enabled\": false~%")
-    (format out "// vetoes it. Every member is optional. Where a member names an environment~%")
-    (format out "// variable, that variable is read while the member is left at its default.~%")
-    (format out "{~%  \"re\": {~%    \"enabled\": true")
-    (loop for (nil . options) in +settings+
-          for doc = (getf options :doc)
-          when (getf options :key)
-            do (format out ",~%    // ~a~a.~@[ Environment: ~a.~]~%    ~a: ~a"
-                       (char-upcase (char doc 0)) (subseq doc 1) (getf options :env)
-                       (json-encode (getf options :key))
-                       (ecase (getf options :type)
-                         (:list (json-encode (coerce (getf options :default) 'simple-vector)))
-                         (:boolean (if (getf options :default) "true" "false"))
-                         ((:path :directory :integer) (json-encode (getf options :default))))))
-    (format out "~%  }~%}~%")))
+(defun setting-variable (name)
+  "The environment variable the setting NAME is read from, for a line that
+tells the operator what to set."
+  (or (getf (rest (assoc name +settings+)) :env)
+      (error "omp-re: the setting ~s has no environment variable" name)))
 
 ;;; --- services ---------------------------------------------------------------------------
 
@@ -157,9 +129,8 @@ start and cleared at stop. Every one is optional.
   :VOICE         (KEY)         the host's own words for the phrase KEY (see
                                +VOICE+), or NIL for the engine's
   :HOME          ()            the directory a relative state_dir is under
-  :TURN          ()            who is calling on this thread, a plist of
-                               :SESSION-ID and :TURN-ID (the turn or leaf an
-                               entry written now belongs to)
+  :TURN          ()            who is calling on this thread, a plist: the
+                               engine reads its :SESSION-ID
   :DIRECTORY     (SESSION-ID)  the directory that session works in: what a
                                relative path in an argument is read against
   :ENTRIES       (SESSION)     the record store: SESSION's entries as its
@@ -201,16 +172,29 @@ start and cleared at stop. Every one is optional.
                                process even if no model turn follows: write
                                the session now, and call it NAME where nobody
                                is watching and it has no name
-With none installed — the engine alone under a test — nothing is configured,
+With none installed — the engine alone — nothing is configured,
 there is no turn, the record is the session's own file with every entry on
 the branch, a notice is a line on the log, an artifact is a file beside the
 record, nobody is watching and there is nobody to ask.")
 
 (defun install-host (&rest services)
-  (setf *host* services))
+  "Make SERVICES — a plist as *HOST* describes — the host, and start what
+the engine does for every host by itself: closing idle sessions' processes."
+  (setf *host* services)
+  (start-idle-reaper))
 
 (defun clear-host ()
+  (stop-idle-reaper)
   (setf *host* '()))
+
+(defmacro with-host-service ((service function) &body body)
+  "BODY with the host's SERVICE answered by FUNCTION, and the host as it was
+after. Set, not bound: a thread BODY starts asks the same host."
+  (let ((host (gensym "HOST")))
+    `(let ((,host *host*))
+       (setf *host* (list* ,service ,function ,host))
+       (unwind-protect (progn ,@body)
+         (setf *host* ,host)))))
 
 (defun host-service (service)
   (getf *host* service))
@@ -234,13 +218,11 @@ of its own handles it."
 (defun turn-session-id ()
   (or (getf (ask-host :turn) :session-id) +default-session+))
 
-(defun current-turn-id ()
-  (getf (ask-host :turn) :turn-id))
-
 (defun notify (level control &rest arguments)
-  "Tell the operator something they should not miss, at LEVEL — :INFO,
-:WARNING or :ERROR. Without a host, or with one that could not be told, it
-is a warning on the process's log."
+  "Tell the operator something outside any answer, at LEVEL — :INFO for what
+is no fault, :WARNING, :ERROR. The one way the engine does: how loudly each
+level is said is the host's. Without a host, or with one that could not be
+told, it is a warning on the process's log."
   (let ((text (apply #'format nil control arguments)))
     (unless (and (host-service :notify)
                  (handler-case (progn (ask-host :notify text level) t)
@@ -250,8 +232,10 @@ is a warning on the process's log."
 
 ;;; --- the host's words ---------------------------------------------------------------------
 ;;; A few phrases name what only a host has: how its operator switches the
-;;; debugger on, where a path to rizin is set, how eval reaches a tool. The
-;;; engine's text is otherwise one text; these are said in the host's voice.
+;;; debugger on, where a path to rizin is set, how eval reaches a tool, which
+;;; keys a list answers to. The engine's text is otherwise one text; these
+;;; are said in the host's voice, and a host says only the ones it says
+;;; differently.
 
 (defparameter +voice+
   '((:open-first . "use /re open <path> or the open_binary tool first")
@@ -264,7 +248,19 @@ is a warning on the process's log."
     (:launcher . "A program launched from a desktop")
     (:open-binary-note . "")
     (:help-keys . nil)
-    (:manual . nil))
+    (:list-hint . "~a")
+    (:references-hint . "open")
+    (:next-prompt . nil)
+    (:slash . "/re ~a")
+    (:manual-start . "omp-re — reverse engineering with rizin. Open a binary with open_binary, look a
+command up with rizin_help, and read the binary with rizin_command.")
+    (:manual-results . "How a result reads
+  A read is recorded as evidence, so its text is: the header line (rizin> <cmd>),
+  the body (JSON for a *j command), then a trailing [evidence …] tag line.")
+    (:manual-tools . "The other (stateful) tools")
+    (:manual-config . "Config
+  OMPRE_RIZIN_PATH (rizin if not on PATH) · OMPRE_DECOMPILER (pdg/pdd order) ·
+  OMPRE_ENABLE_DEBUGGER · OMPRE_AUDIT_HMAC_KEY.  Run /re status for live state."))
   "The phrases a host may say its own way, each with the engine's words for
 it when no host does:
   :OPEN-FIRST        what to do when no binary is open
@@ -277,7 +273,20 @@ it when no host does:
   :LAUNCHER          what, started from a desktop, may not see the shell's PATH
   :OPEN-BINARY-NOTE  a sentence added to open_binary's description
   :HELP-KEYS         a last line of /re help: the keys the host binds
-  :MANUAL            the manual rizin_command answers for an empty command")
+  :LIST-HINT         under a list on a screen, the keys it answers to; ~a
+                     is what choosing a row does (open, cite, discuss)
+  :REFERENCES-HINT   the same under a list of references
+  :NEXT-PROMPT       where nobody is watching, how an agenda is passed on as
+                     the next prompt: an example in brackets, or nothing
+  :SLASH             how a /re line is run from where the model is; ~a is
+                     the line
+  :MANUAL-START      the manual rizin_command answers for an empty command
+                     is the engine's (tools-core.lisp, MANUAL) around four
+                     parts in the host's words. This one opens it: how the
+                     model calls a tool here
+  :MANUAL-RESULTS    its part on how a result reads here
+  :MANUAL-TOOLS      the line over its list of the other tools
+  :MANUAL-CONFIG     its last part: where the operator's settings are")
 
 (defun voice (key)
   (or (and (host-service :voice) (ask-host :voice key))

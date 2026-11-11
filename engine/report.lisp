@@ -109,21 +109,11 @@ becomes `[@]'."
                   out)))
     (replace-all out "@" "[@]")))
 
-(defun json-strings (value)
-  "Every string anywhere in the decoded JSON VALUE, in document order."
-  (cond ((stringp value) (list value))
-        ((vectorp value) (loop for item across value append (json-strings item)))
-        ((hash-table-p value) (loop for item being the hash-values of value append (json-strings item)))
-        (t '())))
-
-(defparameter +string-tools+ '("floss" "strings" "triage_floss" "list_strings")
-  "The tools whose whole output is strings worth scanning, not just the summary.")
-
 (defun ioc-claims (evidence annotations)
   "One claim for each distinct indicator found in the EVIDENCE summaries
-(and, for the string tools, their whole output) and in the ANNOTATIONS'
-values, each grounded on where it was seen — an annotation made with no
-evidence under it grounds nothing, and that is what the gate catches."
+and in the ANNOTATIONS' values, each grounded on where it was seen — an
+annotation made with no evidence under it grounds nothing, and that is what
+the gate catches."
   (let ((claims '()))                   ; (text . ids), first seen first
     (flet ((note (ioc ids)
              (let* ((text (defang-ioc ioc))
@@ -132,15 +122,9 @@ evidence under it grounds nothing, and that is what the gate catches."
                    (setf (cdr held) (remove-duplicates (append (cdr held) ids) :test #'equal :from-end t))
                    (setf claims (append claims (list (cons text (copy-list ids)))))))))
       (dolist (record evidence)
-        (let ((texts (list (jstring record "summary"))))
-          (when (member (string-downcase (jstring record "tool")) +string-tools+ :test #'string=)
-            (let ((raw (evidence-output record)))
-              (when (plusp (length raw))
-                (multiple-value-bind (data parsed) (evidence-json raw)
-                  (setf texts (append texts (if parsed (json-strings data) (list raw))))))))
-          (dolist (text texts)
-            (dolist (ioc (iocs-in text))
-              (note ioc (list (jstring record "id")))))))
+        (dolist (text (cons (jstring record "summary") (old-string-texts record)))
+          (dolist (ioc (iocs-in text))
+            (note ioc (list (jstring record "id"))))))
       (dolist (annotation annotations)
         (let ((evidence-id (jstring annotation "evidenceId")))
           (dolist (text (list (or (jstring annotation "oldValue") "") (or (jstring annotation "newValue") "")))
@@ -149,7 +133,39 @@ evidence under it grounds nothing, and that is what the gate catches."
     (mapcar (lambda (claim) (make-report-claim :text (car claim) :evidence-ids (cdr claim)))
             (stable-sort claims #'locale-less-p :key #'car))))
 
-;;; --- capa's capabilities -----------------------------------------------------------------------
+;;; --- records of versions up to 0.10 ----------------------------------------------------------
+;;; Up to 0.10 the triage tools' results were evidence too, and a report
+;;; drew claims from them: capa's rule matches as capabilities and ATT&CK
+;;; techniques, and the indicators in everything a string tool printed. No
+;;; tool records such evidence now — rizin_command is the one tool that does
+;;; — but sessions written then hold those records, and a report of one must
+;;; still say what they hold. This section is all that reads them; it is to
+;;; go when such sessions need no more reports, and nothing new belongs in it.
+
+(defparameter +old-string-tools+ '("floss" "strings" "triage_floss" "list_strings")
+  "The tools of those versions whose whole output was strings to scan for
+indicators, not just the summary.")
+
+(defparameter +old-capa-tools+ '("capa" "triage_capa"))
+
+(defun old-record-of-p (record tools)
+  (member (string-downcase (jstring record "tool")) tools :test #'string=))
+
+(defun json-strings (value)
+  "Every string anywhere in the decoded JSON VALUE, in document order."
+  (cond ((stringp value) (list value))
+        ((vectorp value) (loop for item across value append (json-strings item)))
+        ((hash-table-p value) (loop for item being the hash-values of value append (json-strings item)))
+        (t '())))
+
+(defun old-string-texts (record)
+  "The strings an old string tool's RECORD printed, each a text to scan;
+none for any other record."
+  (when (old-record-of-p record +old-string-tools+)
+    (let ((raw (evidence-output record)))
+      (when (plusp (length raw))
+        (multiple-value-bind (data parsed) (evidence-json raw)
+          (if parsed (json-strings data) (list raw)))))))
 
 (defparameter +mitre-attack+
   '(("T1059" . "Command and Scripting Interpreter")
@@ -188,7 +204,7 @@ report. The latest record to name a capability is the one it is anchored to."
       (let* ((raw (evidence-output record))
              (rules (and (plusp (length raw)) (evidence-json raw)))
              (id (jstring record "id")))
-        (when (and (vectorp rules) (not (stringp rules)))
+        (when (json-array-p rules)
           (loop for rule across rules
                 do (let ((name (find-if (lambda (name) (plusp (length name)))
                                         (list (trimmed (jstring rule "meta" "name"))
@@ -219,6 +235,20 @@ report. The latest record to name a capability is the one it is anchored to."
                   :evidence-ids (list (gethash attack attacks))))
                (sorted-keys attacks))))))
 
+(defun old-capability-sections (evidence)
+  "The Summary and the capability section a report opens with when EVIDENCE
+holds capa records, as a list; none otherwise."
+  (let ((capa (remove-if-not (lambda (record) (old-record-of-p record +old-capa-tools+)) evidence)))
+    (when capa
+      (multiple-value-bind (capabilities attacks) (capability-claims capa)
+        (cons (make-report-section
+               :title "Summary"
+               :intro (format nil "Analysis performed using **capa** on the provided sample: ~d capability rule(s) matched~@[ mapping to ~d ATT&CK technique(s)~]. See Capabilities & MITRE ATT&CK Mapping below for the full, evidence-anchored list."
+                              (length capabilities) (and attacks (length attacks))))
+              (when (or capabilities attacks)
+                (list (make-report-section :title "Capabilities & MITRE ATT&CK Mapping"
+                                           :claims (append capabilities attacks)))))))))
+
 ;;; --- building it --------------------------------------------------------------------------------
 
 (defun last-recorded-binary-sha256 (&optional (session *session*))
@@ -227,8 +257,8 @@ report. The latest record to name a capability is the one it is anchored to."
       (when (jstring binary "sha256") (setf last (jstring binary "sha256"))))))
 
 (defun build-report (&optional (session *session*))
-  "Read the record into a report: capa's capabilities, the model's findings,
-the indicators, each claim with the ids it rests on."
+  "Read the record into a report: the model's findings and the indicators,
+each claim with the ids it rests on."
   (let* ((evidence (evidence-records session))
          (annotations (report-annotations session))
          (findings (live-findings session))
@@ -239,7 +269,7 @@ the indicators, each claim with the ids it rests on."
                   :binary-sha256 (last-recorded-binary-sha256 session)
                   :findings findings))
          (tool-by-id (built-report-tool-by-id report))
-         (sections '()))
+         (sections (reverse (old-capability-sections evidence))))
     (dolist (record evidence)
       (setf (gethash (jstring record "id") tool-by-id) (jstring record "tool")
             (gethash (jstring record "id") (built-report-evidence-by-id report)) record))
@@ -247,21 +277,6 @@ the indicators, each claim with the ids it rests on."
       (let ((id (jstring annotation "evidenceId")))
         (when (and (plusp (length id)) (not (gethash id tool-by-id)))
           (setf (gethash id tool-by-id) "annotation"))))
-    (let ((capa (remove-if-not (lambda (record)
-                                 (member (string-downcase (jstring record "tool")) '("capa" "triage_capa")
-                                         :test #'string=))
-                               evidence)))
-      (when capa
-        (multiple-value-bind (capabilities attacks) (capability-claims capa)
-          (push (make-report-section
-                 :title "Summary"
-                 :intro (format nil "Analysis performed using **capa** on the provided sample: ~d capability rule(s) matched~@[ mapping to ~d ATT&CK technique(s)~]. See Capabilities & MITRE ATT&CK Mapping below for the full, evidence-anchored list."
-                                (length capabilities) (and attacks (length attacks))))
-                sections)
-          (when (or capabilities attacks)
-            (push (make-report-section :title "Capabilities & MITRE ATT&CK Mapping"
-                                       :claims (append capabilities attacks))
-                  sections)))))
     ;; The model's own conclusions: gated when they were recorded, and gated
     ;; again here like every other claim.
     (when findings
@@ -372,7 +387,7 @@ not see it."
                            (if (plusp (length repro))
                                (format nil "`~a…`" (shown-hash repro))
                                "—")
-                           (if record (evidence-status record) "unverifiable (legacy)"))))
+                           (if record (evidence-status record) +unknown-evidence-status+))))
                cited)
        (list "")))))
 
@@ -412,22 +427,21 @@ says so under its evidence, and a note under the claims sums it up."
 ;;; --- the manifest beside it ----------------------------------------------------------------------
 
 (defun collect-anchors (report &optional (session *session*))
-  "A fingerprint for every cited, address-pinned rizin_command record — but
-only while the binary that evidence was taken against is the one open, since
-a fingerprint of any other build would point /re carry at the wrong code.
-Best effort: with no rizin the manifest is complete, just without them."
+  "A fingerprint for every cited read pinned to an address — but only while
+the binary that evidence was taken against is the one open, since a
+fingerprint of any other build would point /re carry at the wrong code.
+Best effort, anchor by anchor: with no rizin the manifest is complete, just
+without them."
   (let ((anchors (make-hash-table :test #'equal))
         (open-sha (session-binary-sha256 session)))
     (when (and (session-binary-path session) open-sha)
-      (ignore-errors
-       (dolist (id (cited-ids report))
-         (let* ((record (gethash id (built-report-evidence-by-id report)))
-                (addr (and record
-                           (equal (jstring record "binarySha256") open-sha)
-                           (jstring (evidence-read record) "addr"))))
-           (when addr
-             (let ((fingerprint (anchor-fingerprint (ensure-rizin session) addr)))
-               (when fingerprint (setf (gethash id anchors) fingerprint))))))))
+      (dolist (id (cited-ids report))
+        (let* ((record (gethash id (built-report-evidence-by-id report)))
+               (addr (and record
+                          (equal (jstring record "binarySha256") open-sha)
+                          (jstring (evidence-read record) "addr")))
+               (fingerprint (and addr (ignore-errors (anchor-fingerprint (ensure-rizin session) addr)))))
+          (when fingerprint (setf (gethash id anchors) fingerprint)))))
     anchors))
 
 (defun recorded-commands-array (record)
@@ -471,7 +485,7 @@ index these members by name."
                                  "shiftHash" (or (and record (jstring record "shiftHash")) :null)
                                  "anchor" (or (gethash id anchors) :null)
                                  "binarySha256" (or (and record (jstring record "binarySha256")) :null)
-                                 "status" (if record (evidence-status record) "unverifiable (legacy)")
+                                 "status" (if record (evidence-status record) +unknown-evidence-status+)
                                  "claims" (coerce (gethash id claims-by-id) 'simple-vector))))
                         (nreverse ids)))))
 
@@ -496,9 +510,8 @@ deterministic gates block in every mode."
         (values (format nil "omp-re: report withheld — ~d claim(s) without evidence:~%~{  - ~a~^~%~}"
                         (length ungrounded) (mapcar #'report-claim-text ungrounded))
                 t)))
-    (let* ((judge (and (not (equal audit "off")) (host-service :judge)))
-           (outcome (audit-claims (and (not (equal audit "off")) (audit-inputs report (and judge t)))
-                                  audit judge))
+    (let* ((outcome (audit-claims (audit-inputs report (and (not (equal audit "off")) (audit-judge-p)))
+                                  audit))
            (flagged (and (equal audit "strict") (flagged-verdicts outcome)))
            (markdown (and (null flagged) (format-markdown report outcome))))
       (when flagged

@@ -2,9 +2,10 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; These functions are the whole surface a host builds on, each answering
-;;;; plain JSON data (objects as OBJ makes them, arrays as vectors), so a host
-;;;; in this image reads them directly and one across a pipe writes them out:
+;;;; These functions are the surface a host builds on (engine/package.lisp
+;;;; exports them, with the port of host.lisp), each answering plain JSON
+;;;; data (objects as OBJ makes them, arrays as vectors), so a host in this
+;;;; image reads them directly and one across a pipe writes them out:
 ;;;;
 ;;;;   (engine-tools)                        what tools there are
 ;;;;   (engine-call SESSION NAME ARGUMENTS)  call one
@@ -15,16 +16,19 @@
 ;;;;
 ;;;;   (engine-view SESSION KIND ARGUMENT)   a list to pick from, a function's code
 ;;;;   (engine-facts SESSION)                the open binary, for a status band
+;;;;   (engine-evidence SESSION LIMIT)       the newest evidence, to complete an id from
 ;;;;   (engine-preserved SESSION)            lines to keep through a compaction
 ;;;;   (engine-approval SESSION CALL-ID TOOL APPROVED REASON)
 ;;;;                                         what the host's gate decided of a call
 ;;;;   (engine-restore SESSION &key open)    bring rizin up when a session starts
 ;;;;   (engine-rekey FROM TO)                a session goes on under a new id
 ;;;;   (engine-close SESSION)                a session is over
+;;;;   (engine-hold SESSION THUNK)           several of the above as one sequence
 ;;;;
 ;;;; SESSION is the host's id for the session, a string. None of them
-;;;; signals: a failure is an answer with "failed" true and the reason as
-;;;; its text. What the engine in turn asks of the host is in host.lisp.
+;;;; signals, but ENGINE-HOLD: a failure is an answer with "failed" true and
+;;;; the reason as its text. What the engine in turn asks of the host is in
+;;;; host.lisp.
 
 (in-package #:omp-re)
 
@@ -94,7 +98,7 @@ with it; any other runs the subcommand as it is. Rows are shown by POSITION."
          (obj "name" (slash-name slash)
               "usage" (or (slash-usage slash) :absent)
               "description" (slash-description slash)
-              "view" (if (member (slash-name slash) +list-views+ :test #'string=) t :absent)
+              "view" (if (slash-listing slash) t :absent)
               "completes" (if (slash-completes slash) (string-downcase (slash-completes slash)) :absent)
               "row" (if (slash-row slash)
                         (destructuring-bind (position label &key detail ask placeholder verb)
@@ -141,10 +145,23 @@ a notice at level \"error\"."
 (defun engine-facts (session)
   "The facts of SESSION's open binary, for a status band (views.lisp,
 SESSION-FACTS) — as the session stands: a call that holds it is not waited
-for, and no rizin is started. NIL when they could not be had."
+for, rizin is asked nothing and none is started. NIL when they could not be
+had."
   (multiple-value-bind (answer failed) (in-session (session "the status band" :wait nil)
                                          (session-facts))
     (and (not failed) answer)))
+
+(defun engine-evidence (session limit)
+  "The newest LIMIT evidence records of SESSION, newest first => a vector of
+[id, \"tool @ address\"], for a host that completes an evidence id as it is
+typed. As the session stands, like ENGINE-FACTS; empty when it could not be
+read."
+  (multiple-value-bind (answer failed)
+      (in-session (session "listing evidence" :wait nil)
+        (map 'simple-vector
+             (lambda (record) (vector (jstring record "id") (evidence-place record)))
+             (reverse (last (evidence-records) limit))))
+    (if failed (vector) answer)))
 
 (defun engine-preserved (session)
   "The lines to fold into a summary of SESSION's conversation when the host
@@ -188,5 +205,13 @@ something: a failure, or what would not be put back."
   t)
 
 (defun engine-close (session)
-  "SESSION is over: end what runs for it. Its record stays."
+  "SESSION is over: end what runs for it."
   (close-session session))
+
+(defun engine-hold (session thunk)
+  "Call THUNK holding SESSION, so the calls it makes for that session are
+one sequence no other call cuts into => THUNK's values. What THUNK signals
+passes through, and so does the engine's RE-ERROR when the session cannot
+be had: the caller gave up while waiting for it, or its record could not be
+read."
+  (hold-session (find-session session) thunk))

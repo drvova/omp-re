@@ -2,15 +2,28 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Under omp the operator's settings are environment variables, a binary can
-;;;; be named on the command line (--binary), and the model reaches a tool
-;;;; from omp's eval as `await tool.<name>({...})'. The keys are the engine's
-;;;; (engine/host.lisp, +VOICE+).
+;;;; Under omp the operator's settings are environment variables — which is
+;;;; how the engine says them itself — a binary can be named on the command
+;;;; line (--binary), and the model reaches a tool from omp's eval as `await
+;;;; tool.<name>({...})'. The keys are the engine's (engine/host.lisp,
+;;;; +VOICE+); only what omp says differently is here. This file also makes
+;;;; the host's package.
 
-(in-package #:omp-re)
+(defpackage #:omp-re-stdio
+  (:use #:cl #:omp-re)
+  (:export #:serve #:+protocol+))
 
-(defparameter +omp-manual+
-  "omp-re — reverse engineering with rizin, driven from code.
+(in-package #:omp-re-stdio)
+
+(defparameter +omp-voice+
+  '((:open-first . "use /re open <path>, open_binary, or --binary <path> first")
+    (:launcher . "A desktop launch of omp")
+    (:open-binary-note . ", especially in a task subagent, which starts with no binary open")
+    (:help-keys . "keys: alt+g functions · alt+s strings · alt+i imports; in a code view: d toggle decompile · x follow xrefs · a ask the model")
+    (:list-hint . "enter ~a · type to filter · esc close")
+    (:references-hint . "enter open · esc back")
+    (:next-prompt . "(e.g. omp -c -p \"<agenda>\")")
+    (:manual-start . "omp-re — reverse engineering with rizin, driven from code.
 
 You observe the binary by running rizin's own commands through this one tool,
 `rizin_command`, and composing them in omp's `eval` as
@@ -23,20 +36,8 @@ Start here
   2. await tool.rizin_help({ query: \"<prefix or keywords>\" })  — find the command
      (e.g. \"entropy\", \"call graph\", \"pdf\") and its exact arguments for THIS rizin.
   3. await tool.rizin_command({ command: \"aflj\" })  — run it. Put an address in
-     `addr` (sent as `@ addr`), never `@` in the command.
-
-Reading the binary (prefer the JSON `*j` forms; they canonicalize for /re verify)
-  functions   aflj            one function  afij  @ <fn>     decompile  pdg  @ <fn>  (or pdd)
-  disassemble pdfj  @ <fn>     xrefs to      axtj @ <addr>   xrefs from axfj @ <addr>
-  strings     izj              imports       iij             exports    iEj
-  symbols     isj              sections      iSj             headers    iHj
-  types       tsj              entropy       ph entropy      hexdump    px <n> @ <addr>
-  search      /xj <hex>  /Rj (ROP)  /vj (value)             info       ij
-  il lift     aoj @ <addr>  (esil+rzil)  esil calc  ae <rpn>  (ae 0x41,0x13,^)
-  Anything else: rizin_help first, then rizin_command. Read-only; writes are refused here.
-  Driving the RzIL VM (stateful) is the separate rizin_emulate tool.
-
-Render in eval (display vs print)
+     `addr` (sent as `@ addr`), never `@` in the command.")
+    (:manual-results . "Render in eval (display vs print)
   A call returns { text, details } to your code — not a card. display(value) shows a
   highlighted block, print(x) monospace text. A read is recorded as evidence, so its
   `.text` is: the header line, the JSON (`*j`) body, then a trailing [evidence …] tag
@@ -46,37 +47,6 @@ Render in eval (display vs print)
     show(await tool.rizin_command({ command: \"afij\", addr: \"main\" }));   // highlighted JSON
     print((await tool.rizin_command({ command: \"pdg\", addr: \"main\" })).text);   // C/text
   A big list (aflj, izj on a large binary) is cut at the size cap and ends with
-  [Output truncated … artifact://N]: read that artifact, or run a narrower command.
+  [Output truncated … artifact://N]: read that artifact, or run a narrower command.")
+    (:manual-tools . "The other (stateful) tools — reach them the same way, await tool.<name>({…})")))
 
-The other (stateful) tools — reach them the same way, await tool.<name>({…})
-  open_binary, map_file, export_project            — session: open/overlay/save.
-  rename_function, rename_variable, set_comment, set_prototype, set_variable_type,
-  define_function, define_global, set_flag, set_calling_convention, set_arch_hint, …
-                                                   — annotate; recorded and REPLAYED on resume.
-  apply_signatures, create_signature               — FLIRT.        analyze — extra recovery passes.
-  record_finding, adopt_finding, retract_finding   — gate report claims on evidence ids.
-  rizin_cli                                        — the rz-* programs (rz-bin, rz-diff, rz-hash, …).
-  triage_capa/floss/die/yara                       — external triage (present only when installed).
-  rizin_debug (opt-in, executes the sample), rizin_emulate (RzIL)  — dynamic analysis.
-
-Evidence & reports
-  Every rizin_command read is recorded as evidence (/re evidence); cite its
-  [evidence xxxxxxxx] id in record_finding to gate a claim. /re report writes the
-  evidence-gated report; /re verify re-runs cited commands to confirm they still reproduce.
-
-Config
-  OMPRE_RIZIN_PATH (rizin if not on PATH) · OMPRE_DECOMPILER (pdg/pdd order) ·
-  OMPRE_ENABLE_DEBUGGER · OMPRE_AUDIT_HMAC_KEY.  Run /re status for live state.")
-
-(defparameter +omp-voice+
-  `((:open-first . "use /re open <path>, open_binary, or --binary <path> first")
-    (:list-tools . "")
-    (:read-more . "read the rest with rizin_command")
-    (:debugger-switch . "OMPRE_ENABLE_DEBUGGER")
-    (:debugger-enable . "set OMPRE_ENABLE_DEBUGGER")
-    (:allowed-dirs . "OMPRE_ALLOWED_DIRS")
-    (:rizin-path . "set OMPRE_RIZIN_PATH")
-    (:launcher . "A desktop launch of omp")
-    (:open-binary-note . ", especially in a task subagent, which starts with no binary open")
-    (:help-keys . "keys: alt+g functions · alt+s strings · alt+i imports; in a code view: d toggle decompile · x follow xrefs · a ask the model")
-    (:manual . ,+omp-manual+)))

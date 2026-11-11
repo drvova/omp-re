@@ -30,6 +30,17 @@ an empty last line."
 (defun join-lines (lines)
   (format nil "~{~a~^~%~}" lines))
 
+(defun unix-lines (text)
+  "TEXT with each CRLF as one line feed: rizin and its sibling programs end
+lines with CRLF on Windows."
+  (ppcre:regex-replace-all "\\r\\n" text (string #\Newline)))
+
+(defun path-basename (path)
+  "The last component of the native PATH, read as text: a `*' or `[' in a
+file's name is part of the name."
+  (let ((slash (position-if (lambda (char) (find char "/\\")) path :from-end t)))
+    (if slash (subseq path (1+ slash)) path)))
+
 (defun words (text)
   "TEXT split on blanks, empty pieces dropped."
   (remove "" (uiop:split-string (or text "") :separator '(#\Space #\Tab #\Newline #\Return))
@@ -61,14 +72,16 @@ an empty last line."
               year month day hour minute second (floor microseconds 1000)))))
 
 (defun random-octets (count)
+  "COUNT octets for an id: the kernel's where it offers a device, else — on
+Windows, and where the device cannot be read — SBCL's own generator seeded
+from the system."
   (let ((octets (make-array count :element-type '(unsigned-byte 8))))
-    (handler-case
-        (with-open-file (in "/dev/urandom" :element-type '(unsigned-byte 8))
-          (read-sequence octets in))
-      (error ()
-        ;; No /dev/urandom (Windows): SBCL's own generator, seeded from the system.
-        (let ((state (sb-ext:seed-random-state t)))
-          (dotimes (i count) (setf (aref octets i) (random 256 state))))))
+    (unless #+win32 nil
+            #-win32 (ignore-errors
+                     (with-open-file (in "/dev/urandom" :element-type '(unsigned-byte 8))
+                       (= count (read-sequence octets in))))
+      (let ((state (sb-ext:seed-random-state t)))
+        (dotimes (i count) (setf (aref octets i) (random 256 state)))))
     octets))
 
 (defun uuid ()
@@ -81,7 +94,8 @@ an empty last line."
               (subseq text 16 20) (subseq text 20)))))
 
 (defun file-safe (name)
-  "NAME as a file name: the safe characters kept, the rest replaced."
+  "NAME as a file name of at most 128 characters: letters, digits, `.', `_'
+and `-' kept, anything else an underscore."
   (let ((safe (map 'string (lambda (char)
                              (if (or (alphanumericp char) (find char "._-")) char #\_))
                    (subseq name 0 (min 128 (length name))))))
@@ -200,7 +214,6 @@ model-supplied comment or signature can end the command and start another."
       (fail "omp-re: invalid ~a: forbidden character ~a" key (js-string (string char))))))
 
 (defun validate-text (value)
-  "VALUE when it has no line break or NUL."
   (when (ends-pipe-line-p value)
     (fail "omp-re: invalid text: contains forbidden character"))
   value)
@@ -216,6 +229,14 @@ letters, digits and underscores."
   "Whether TEXT is a decimal or 0x hex number, the two forms rizin's
 assignments take."
   (js-scan "^0x[0-9a-fA-F]+$|^[0-9]+$" text))
+
+(defun hex-octets (text)
+  "TEXT as the lowercase hex digits of whole octets — an optional 0x taken
+off, blanks between octets dropped — or NIL when it is not that."
+  (let* ((packed (ppcre:regex-replace-all "\\s+" text ""))
+         (hex (if (js-scan "^0[xX]" packed) (subseq packed 2) packed)))
+    (and (plusp (length hex)) (evenp (length hex)) (js-scan "^[0-9a-fA-F]+$" hex)
+         (string-downcase hex))))
 
 (defun clamped-count (value fallback most)
   "VALUE as a whole number between 1 and MOST; FALLBACK when none was given."
@@ -279,7 +300,7 @@ evidence tag never push a result past it.")
 print it: escapes stripped, line ends folded, lines right-trimmed, trailing
 blank lines dropped, and the binary's own path redacted to <BINARY>."
   (let* ((text (ppcre:regex-replace-all +ansi-escape+ raw ""))
-         (text (ppcre:regex-replace-all "\\r\\n?" text (string #\Newline)))
+         (text (substitute #\Newline #\Return (unix-lines text)))
          (text (if (and binary-path (plusp (length binary-path)))
                    (replace-all text binary-path "<BINARY>")
                    text))
@@ -318,9 +339,8 @@ differ only in where the code sits."
 (defparameter +excerpt-characters+ 1024
   "An excerpt this long was cut, mid-line.")
 
-(defun canonical-excerpt (raw &optional binary-path (max-lines +excerpt-lines+)
-                                                    (max-characters +excerpt-characters+))
+(defun canonical-excerpt (raw &optional binary-path)
   "The first lines of the canonical output, kept for a human to diff."
   (let* ((lines (split-lines (canonicalize-rizin-output raw binary-path)))
-         (head (join-lines (subseq lines 0 (min max-lines (length lines))))))
-    (if (<= (length head) max-characters) head (subseq head 0 max-characters))))
+         (head (join-lines (subseq lines 0 (min +excerpt-lines+ (length lines))))))
+    (if (<= (length head) +excerpt-characters+) head (subseq head 0 +excerpt-characters+))))

@@ -1,6 +1,9 @@
 ;;;; slash-lines.lisp --- /re help, open, on, off, status, the lists, evidence, cite.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
+;;;;
+;;;; What a row of a list does when it is chosen on a screen is a view
+;;;; (views.lisp), named here by the request for it.
 
 (in-package #:omp-re)
 
@@ -29,21 +32,11 @@
 
 ;;; --- /re status --------------------------------------------------------------------------------
 
-(defun decompiler-commands ()
-  "The decompiler commands to look for, OMPRE_DECOMPILER's first."
-  (remove-duplicates
-   (append (remove-if-not (lambda (name) (js-scan "^[a-zA-Z][a-zA-Z0-9]*$" name))
-                          (mapcar #'trimmed
-                                  (uiop:split-string (or (setting-value :decompiler) "")
-                                                     :separator '(#\,))))
-           (list "pdg" "pdd"))
-   :test #'string= :from-end t))
-
 (defun decompiler-label (kind)
   (cond ((equal kind "pdg") "rz-ghidra (pdg)")
         ((equal kind "pdd") "jsdec (pdd)")
         (kind (format nil "~a (plugin)" kind))
-        (t "none — pdg/pdd fall back to labeled disassembly")))
+        (t "none — pdg and pdd need a decompiler plugin (rz-ghidra, jsdec)")))
 
 (defun rizin-status-lines ()
   (let ((version (rizin-version))
@@ -52,8 +45,7 @@
     (cons (format nil "rizin: ~a" (or version (format nil "not found (~a)" (resolve-rizin-path))))
           (when catalog
             (let ((missing (missing-required-commands catalog))
-                  (present (remove-if-not (lambda (command) (nth-value 1 (gethash command catalog)))
-                                          (decompiler-commands))))
+                  (present (available-decompilers catalog)))
               (append
                (list (if missing
                          (missing-commands-warning missing)
@@ -61,8 +53,9 @@
                                  (length +required-commands+) (hash-table-count catalog)))
                      (format nil "decompiler: ~a" (decompiler-label (first present))))
                (when (rest present)
-                 (list (format nil "  also available: ~{~a~^, ~} (reorder with OMPRE_DECOMPILER)"
-                               (mapcar #'decompiler-label (rest present)))))))))))
+                 (list (format nil "  also available: ~{~a~^, ~} (reorder with ~a)"
+                               (mapcar #'decompiler-label (rest present))
+                               (setting-variable :decompiler))))))))))
 
 (defun binary-status-lines (session)
   (if (session-binary-path session)
@@ -92,41 +85,39 @@
 
 ;;; --- lists -------------------------------------------------------------------------------------
 
-(defparameter +list-characters+ 4000 "How much of a list a notice can carry.")
+(defun rizin-rows (command)
+  "The rows of the JSON array COMMAND prints on the session's rizin."
+  (jlist (rz-cmdj (ensure-rizin) command)))
 
-(defun clip-list (title lines)
-  (let ((text (format nil "~a~%~a" title (if lines (join-lines lines) "(nothing to show)"))))
-    (if (> (length text) +list-characters+)
-        (format nil "~a~%… cut at ~d characters; ~a"
-                (subseq text 0 +list-characters+) +list-characters+ (voice :read-more))
-        text)))
+(define-list "functions" (:description "the functions rizin found, with address and size" :order 20
+                          :row (30 "Functions") :enter "open")
+  (loop for function in (rizin-rows "aflj")
+        for addr = (row-address function)
+        for size = (or (jnumber function "realsz") (jnumber function "size"))
+        when addr
+          collect (let ((ea (ea-from-offset addr)))
+                    (list-row ea (jstring function "name")
+                              :description (format nil "~a~@[ · ~db~]" ea size)
+                              :enter (code-request ea (jstring function "name"))))))
 
-(define-slash "functions" (:description "the functions rizin found, with address and size" :order 20
-                           :row (30 "Functions"))
-    (words)
-  (clip-list "omp-re: functions"
-             (loop for function in (coerce (or (rz-cmdj (ensure-rizin) "aflj") #()) 'list)
-                   for addr = (or (jnumber function "addr") (jnumber function "offset"))
-                   for size = (or (jnumber function "realsz") (jnumber function "size"))
-                   when addr
-                     collect (format nil "~a  ~a~@[ · ~db~]" (jstring function "name")
-                                     (ea-from-offset addr) size))))
+(define-list "strings" (:description "the strings rizin found, with address" :order 30
+                        :row (40 "Strings") :enter "open")
+  (loop for entry in (rizin-rows "izj")
+        when (jnumber entry "vaddr")
+          collect (let ((ea (ea-from-offset (jnumber entry "vaddr"))))
+                    (list-row ea (jstring entry "string") :description ea
+                              :line (format nil "~a  ~a" ea (jstring entry "string"))
+                              :enter (view-request "string-xrefs" "addr" ea "label" (jstring entry "string"))))))
 
-(define-slash "strings" (:description "the strings rizin found, with address" :order 30
-                         :row (40 "Strings"))
-    (words)
-  (clip-list "omp-re: strings"
-             (loop for entry in (coerce (or (rz-cmdj (ensure-rizin) "izj") #()) 'list)
-                   when (jnumber entry "vaddr")
-                     collect (format nil "~a  ~a" (ea-from-offset (jnumber entry "vaddr"))
-                                     (jstring entry "string")))))
-
-(define-slash "imports" (:description "the imports, with address" :order 40 :row (50 "Imports"))
-    (words)
-  (clip-list "omp-re: imports"
-             (loop for entry in (coerce (or (rz-cmdj (ensure-rizin) "iij") #()) 'list)
-                   collect (format nil "~a~@[  ~a~]" (jstring entry "name")
-                                   (and (jnumber entry "plt") (ea-from-offset (jnumber entry "plt")))))))
+(define-list "imports" (:description "the imports, with address" :order 40 :row (50 "Imports") :enter "open")
+  (loop for entry in (rizin-rows "iij")
+        ;; An import that is bound at load time has no stub of its own.
+        collect (let ((ea (and (jnumber entry "plt") (plusp (jnumber entry "plt"))
+                               (ea-from-offset (jnumber entry "plt")))))
+                  (list-row (or ea "") (jstring entry "name") :description (or ea "(no PLT)")
+                            :line (format nil "~a~@[  ~a~]" (jstring entry "name") ea)
+                            :enter (view-request "import-callers" "addr" (or ea "")
+                                                 "name" (jstring entry "name"))))))
 
 ;;; --- evidence ----------------------------------------------------------------------------------
 
@@ -143,23 +134,22 @@
           (jstring record "tool") (or (jstring record "ea") "?") (jstring record "summary")
           (and (jstring record "artifactId") (locate-artifact (jstring record "artifactId")))))
 
-(define-slash "evidence" (:usage "[id]" :description "evidence recorded on this branch" :order 50
-                          :completes :evidence
-                          :row (60 "Evidence" :detail "what has been observed on this branch"))
-    (words)
-  (if words
-      (multiple-value-bind (record why-not) (named-evidence (first words))
-        (if record
-            (evidence-detail record)
-            (values why-not t)))
-      (clip-list "omp-re: evidence"
-                 (mapcar (lambda (record)
-                           (format nil "[~a] ~a @ ~a~@[  ~a~]"
-                                   (shown-id (jstring record "id")) (jstring record "tool")
-                                   (or (jstring record "ea") "?")
-                                   (let ((line (first (split-lines (jstring record "summary")))))
-                                     (and line (subseq line 0 (min 80 (length line)))))))
-                         (evidence-records)))))
+(define-list "evidence" (:description "evidence recorded on this branch" :order 50
+                         :completes :evidence
+                         :row (60 "Evidence" :detail "what has been observed on this branch")
+                         :enter "cite"
+                         :one (lambda (id)
+                                (multiple-value-bind (record why-not) (named-evidence id)
+                                  (if record
+                                      (evidence-detail record)
+                                      (values why-not t)))))
+  (mapcar (lambda (record)
+            (list-row (jstring record "id")
+                      (format nil "[~a] ~a" (shown-id (jstring record "id")) (evidence-place record))
+                      :description (let ((line (or (first (split-lines (jstring record "summary"))) "")))
+                                     (subseq line 0 (min 80 (length line))))
+                      :enter (obj "draft" (format nil "~a~%~%" (cite-text record)))))
+          (evidence-records)))
 
 (define-slash "cite" (:usage "<id>" :description "cite an evidence entry in your next message" :order 60
                       :completes :evidence

@@ -113,7 +113,7 @@ call starts clean. WHAT names the command for that message."
                  (sb-sys:wait-until-fd-usable fd :input (min remaining 0.05))))
               ((char= char #\Nul)
                ;; rizin on Windows ends lines with CRLF; the frame delimiter is the NUL.
-               (let ((text (ppcre:regex-replace-all "\\r\\n" (copy-seq frame) (string #\Newline))))
+               (let ((text (unix-lines (copy-seq frame))))
                  (setf (fill-pointer frame) 0)
                  (return (coerce text 'simple-string)))))))))
 
@@ -174,6 +174,16 @@ an invalid address or an unknown command) and for anything that is not JSON."
     (and (plusp (length raw))
          (find (char raw 0) "{[")
          (json-parse raw))))
+
+(defun row-address (row)
+  "The address a row of rizin's JSON is at. rizin 0.9 calls it `offset' in
+the rows read here (aflj, afij, pdfj's ops); `addr' is read first, for the
+rows and the builds that say that."
+  (or (jnumber row "addr") (jnumber row "offset")))
+
+(defun function-row-at (rz ea)
+  "The `afij' row of the function containing EA, or NIL when there is none."
+  (first (jlist (rz-cmdj rz (format nil "afij @ ~a" ea)))))
 
 (defun resolve-numeric-addr (rz addr)
   "ADDR resolved to a number through rizin's `%v', which never errors on an
@@ -263,7 +273,7 @@ shared flags (the debugger's launch)."
               #+win32 t))))
 
 (defun find-on-path (name)
-  "NAME resolved against PATH => its full path, or NIL."
+  "NAME resolved against the host's PATH => its full path, or NIL."
   (dolist (directory (uiop:split-string (or (getenv "PATH") "")
                                         :separator #+win32 '(#\;) #-win32 '(#\:)))
     (when (plusp (length directory))
@@ -319,13 +329,17 @@ the bare name when none is found, so the not-found refusal fires."
               when (executable-p path) return path)
         "rizin")))
 
+(defun program-path (program)
+  "The file that runs PROGRAM: itself when it is a path to an executable,
+else where the host's PATH has it; NIL when it cannot be run. What is
+offered and what is started both ask here, so they agree — the engine's own
+process may have another PATH than its host (stdio/server.lisp)."
+  (if (find-if (lambda (char) (find char "/\\")) program)
+      (and (executable-p program) program)
+      (find-on-path program)))
+
 (defun program-available-p (program)
-  "Whether PROGRAM can be run: an executable file when it is a path, else
-found on PATH."
-  (and (if (find-if (lambda (char) (find char "/\\")) program)
-           (executable-p program)
-           (find-on-path program))
-       t))
+  (and (program-path program) t))
 
 (defun assert-rizin-available ()
   (unless (program-available-p (resolve-rizin-path))
@@ -347,7 +361,8 @@ configured rizin when that is a path, else the bare name for PATH."
 code or :TIMEOUT. A program that cannot be started answers status 127 with
 the reason as its stderr."
   (handler-case
-      (multiple-value-bind (out err status) (run-bounded argv seconds)
+      (multiple-value-bind (out err status)
+          (run-bounded (cons (or (program-path (first argv)) (first argv)) (rest argv)) seconds)
         (values (or out "") (or err "") status))
     (error (condition)
       (values "" (princ-to-string condition) 127))))
@@ -390,8 +405,8 @@ target's bits, or NIL when they match or either side is unknown."
   (let ((build (rizin-build-bits (resolve-rizin-path binary-path)))
         (target (read-binary-bits binary-path)))
     (when (and build target (/= build target))
-      (format nil "rizin build is ~d-bit but the target is ~d-bit — debugger and emulator results will follow the build's arch, not the target's. Set OMPRE_RIZIN_PATH_~d to a matching build."
-              build target target))))
+      (format nil "rizin build is ~d-bit but the target is ~d-bit — debugger and emulator results will follow the build's arch, not the target's. Set ~a to a matching build."
+              build target (setting-variable (if (= target 64) :rizin-path-64 :rizin-path-32))))))
 
 ;;; --- rizin's own catalog of commands --------------------------------------------------
 
@@ -415,6 +430,23 @@ target's bits, or NIL when they match or either side is unknown."
                            (gethash command catalog) spec)))
                  parsed)
         catalog))))
+
+(defun decompiler-commands ()
+  "The decompiler commands to look for, the operator's choice first."
+  (remove-duplicates
+   (append (remove-if-not (lambda (name) (js-scan "^[a-zA-Z][a-zA-Z0-9]*$" name))
+                          (mapcar #'trimmed
+                                  (uiop:split-string (or (setting-value :decompiler) "")
+                                                     :separator '(#\,))))
+           (list "pdg" "pdd"))
+   :test #'string= :from-end t))
+
+(defun available-decompilers (catalog)
+  "The decompiler commands this rizin has, in the order to try them. rizin
+ships none: rz-ghidra (pdg) and jsdec (pdd) are plugins, and a plugin that
+is loaded is in the catalog. /re status and a code view both ask here."
+  (remove-if-not (lambda (command) (nth-value 1 (gethash command catalog)))
+                 (decompiler-commands)))
 
 (defun load-catalog (&optional (rizin-path (resolve-rizin-path)))
   "The catalog of the rizin at RIZIN-PATH. A failed read is not kept, so

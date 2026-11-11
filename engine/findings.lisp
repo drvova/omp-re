@@ -2,10 +2,10 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; A report's other claims come from machinery — capa's capability lines,
-;;;; IOC strings mined from evidence. The conclusions that matter in reverse
-;;;; engineering ("checksum is djb2") would otherwise live only in chat,
-;;;; outside every gate. A finding puts one into the record:
+;;;; A report's other claims come from machinery — indicators mined from
+;;;; evidence. The conclusions that matter in reverse engineering ("checksum
+;;;; is djb2") would otherwise live only in chat, outside every gate. A
+;;;; finding puts one into the record:
 ;;;;
 ;;;; - record_finding takes a claim and the evidence ids it rests on. It is
 ;;;;   gated at record time, while the model can still act on the answer:
@@ -15,8 +15,9 @@
 ;;;;   unsupported or overreaching claim is refused with the auditor's
 ;;;;   reason unless the model overrides it with a written justification,
 ;;;;   which is kept and shown.
-;;;; - adopt_finding re-proves a finding made elsewhere by re-running its
-;;;;   commands here, so the claim rests on evidence this session observed.
+;;;; - adopt_finding re-proves a finding made elsewhere by making its reads
+;;;;   here (OBSERVE-READ), so the claim rests on evidence this session
+;;;;   observed.
 ;;;; - retract_finding withdraws one; `supersedes' revises one.
 ;;;;
 ;;;; Findings are re.finding / re.finding.retract entries of the record, read
@@ -28,16 +29,21 @@
 
 (defparameter +confidences+ '("confirmed" "likely" "speculative"))
 
+(defparameter +confidence-aliases+ '(("possible" . "speculative"))
+  "What a confidence said elsewhere is here: the re-analyst subagent's
+findings say `possible'.")
+
 (defun known-confidence (confidence)
-  "CONFIDENCE when it is one the engine knows, else the middle one."
-  (if (member confidence +confidences+ :test #'equal) confidence "likely"))
+  "CONFIDENCE as the engine says it, or the middle one when it says no such."
+  (let ((confidence (or (cdr (assoc confidence +confidence-aliases+ :test #'equal)) confidence)))
+    (if (member confidence +confidences+ :test #'equal) confidence "likely")))
 
 (defun normalized-finding (data)
   "One re.finding entry's DATA as a finding, or NIL when it is not one: only
 the members a finding has, a confidence the engine knows."
   (let ((ids (and (hash-table-p data) (gethash "evidenceIds" data))))
     (when (and (hash-table-p data) (jstring data "id") (jstring data "claim")
-               (vectorp ids) (not (stringp ids)))
+               (json-array-p ids))
       (obj "id" (jstring data "id")
            "claim" (jstring data "claim")
            "evidenceIds" (coerce (remove-if-not #'stringp ids) 'simple-vector)
@@ -64,7 +70,7 @@ finding superseded or a re.finding.retract withdrew."
                       (let ((finding (normalized-finding data)))
                         (when finding
                           (when (jstring finding "supersedes") (drop (jstring finding "supersedes")))
-                          ;; An id recorded twice keeps its first place, as a Map's set does.
+                          ;; An id recorded twice keeps its first place.
                           (let ((held (assoc (jstring finding "id") live :test #'equal)))
                             (if held
                                 (setf (cdr held) finding)
@@ -86,7 +92,7 @@ confidence, inheritance, and any audit override."
                       (if (plusp (length from))
                           (format nil "`~a…`" (shown-hash from))
                           "an earlier build")
-                      (or (jget inherited "carryStatus") "undefined")
+                      (or (jget inherited "carryStatus") "status not recorded")
                       (if relocation
                           (format nil ": ~a → ~a" (jget relocation "from") (jget relocation "to"))
                           ""))
@@ -140,7 +146,9 @@ engine uses for the rest."
 the support audit — refused on unsupported or overreach unless
 OVERRIDE-AUDIT justifies it; fails open to `unaudited' — then the re.finding
 entry and a result that says whether the finding can carry. Shared by
-record_finding and adopt_finding, so the two can never gate differently."
+record_finding and adopt_finding, so the two can never gate differently.
+ADOPTED-FROM says the evidence was taken just now for this claim: a refusal
+then says it stays on the record."
   (let* ((outcome (audit-claims
                    (list (make-audit-item
                           :index 0
@@ -162,14 +170,14 @@ record_finding and adopt_finding, so the two can never gate differently."
         (failed-result
          (format nil "~a: NOT recorded — the support auditor judged this claim ~a: ~a~%Narrow the claim to what the evidence shows, cite evidence that establishes it, or (only if the auditor is wrong) pass override_audit with a one-line justification.~@[~%The re-run evidence was recorded (~a); cite it in record_finding to record a narrower claim.~]"
                  tool (claim-audit-verdict verdict) (claim-audit-reason verdict)
-                 (and (string= tool "adopt_finding") evidence-list)))))
+                 (and adopted-from evidence-list)))))
     (let* ((audit (if verdict
                       (obj "verdict" (claim-audit-verdict verdict)
                            "reason" (claim-audit-reason verdict)
                            "override" (if refused override :absent))
                       (obj "verdict" "unaudited"
                            "reason" (or (audit-outcome-unaudited-reason outcome) "side turn unavailable"))))
-           (reproducible (count "reproducible" resolved :key #'evidence-status :test #'equal))
+           (reproducible (count-if #'evidence-rerun resolved))
            (id (record-finding :claim claim
                                :evidence-ids (mapcar (lambda (record) (jstring record "id")) resolved)
                                :addr addr :confidence confidence :supersedes supersedes
@@ -272,31 +280,23 @@ record_finding and adopt_finding, so the two can never gate differently."
     (when (and (plusp (length expected)) open-sha (string/= (string-downcase expected) open-sha))
       (fail "omp-re: adopt_finding: the finding was made on binary ~a… but ~a… is open — open the same binary first."
             (shown-hash expected) (shown-hash open-sha)))
-    ;; Re-prove: every command runs through rizin_command's own read-only gate
-    ;; and is recorded exactly as a live rizin_command result, bound to the
-    ;; open binary. A claim is adopted only on evidence this session observed
-    ;; itself — and that evidence stays in the record whatever becomes of the claim.
+    ;; Re-prove: a claim is adopted only on evidence this session observed
+    ;; itself — and that evidence stays in the record whatever becomes of the
+    ;; claim.
     (dolist (given commands)
       (let ((command (jstring given "command"))
-            (addr (jstring given "addr")))
-        (let* ((addr (and (plusp (length addr)) addr))
-               (result (run-rizin-command command addr)))
+            (addr (and (plusp (length (jstring given "addr"))) (jstring given "addr"))))
+        (multiple-value-bind (result id) (observe-read command addr)
           (when (result-failed result)
             (let ((said (result-text result)))
               (fail "omp-re: adopt_finding: `~a~@[ @ ~a~]` failed here: ~a"
                     command addr (subseq said 0 (min 300 (length said))))))
-          (let* ((id (record-evidence "rizin_command"
-                                      (obj "command" command "addr" (or addr :absent))
-                                      (result-text result) (result-details result)))
-                 (record (find id (evidence-records) :key (lambda (record) (jstring record "id"))
-                                                       :test #'equal)))
+          (let ((record (and id (find-evidence id))))
             (when record (push record resolved))))))
     (gate-and-record "adopt_finding" (nreverse resolved)
                      :claim (jstring arguments "claim")
                      :addr (jstring arguments "addr")
-                     :confidence (if (equal (jstring arguments "confidence") "possible")
-                                     "speculative"
-                                     (jstring arguments "confidence"))
+                     :confidence (jstring arguments "confidence")
                      :adopted-from (or (jstring arguments "source") "an external analysis")
                      :override-audit (jstring arguments "override_audit"))))
 
@@ -324,23 +324,27 @@ record_finding and adopt_finding, so the two can never gate differently."
           (shown-id (jstring finding "id")) (jstring finding "claim") (finding-note finding)
           (mapcar #'shown-id (jlist finding "evidenceIds"))))
 
-(define-slash "findings" (:usage "[id]" :description "findings the model recorded on this branch" :order 70
-                          :row (80 "Findings" :detail "the conclusions recorded, each on its evidence"))
-    (words)
-  (let ((all (live-findings))
-        (id (first words)))
-    (cond (id
-           (multiple-value-bind (match reason why) (find-by-id all id)
-             (cond (match (finding-detail match))
-                   ((eq why :missing) (values (format nil "omp-re: no live finding with id ~a" id) t))
-                   (t (values (format nil "omp-re: finding id ~a" reason) t)))))
-          ((null all)
-           "omp-re: no findings on this branch yet — the model records them with record_finding")
-          (t
-           (clip-list "omp-re: findings"
-                      (mapcar (lambda (finding)
-                                (format nil "[~a] ~a" (shown-id (jstring finding "id")) (jstring finding "claim")))
-                              all))))))
+(define-list "findings" (:description "findings the model recorded on this branch" :order 70
+                         :row (80 "Findings" :detail "the conclusions recorded, each on its evidence")
+                         :enter "discuss"
+                         :none "omp-re: no findings on this branch yet — the model records them with record_finding"
+                         :one (lambda (id)
+                                (multiple-value-bind (match reason why) (find-by-id (live-findings) id)
+                                  (cond (match (finding-detail match))
+                                        ((eq why :missing)
+                                         (values (format nil "omp-re: no live finding with id ~a" id) t))
+                                        (t (values (format nil "omp-re: finding id ~a" reason) t))))))
+  (mapcar (lambda (finding)
+            (list-row (jstring finding "id")
+                      (format nil "[~a] ~a" (shown-id (jstring finding "id")) (jstring finding "claim"))
+                      :line (format nil "[~a] ~a" (shown-id (jstring finding "id")) (jstring finding "claim"))
+                      :description (format nil "~a~:[~; · inherited~]~@[ · ~a~]"
+                                           (jstring finding "confidence")
+                                           (jget finding "inherited")
+                                           (let ((addr (jstring finding "addr")))
+                                             (and (plusp (length addr)) addr)))
+                      :enter (obj "draft" (format nil "Re: ~a~%~%" (finding-detail finding)))))
+          (live-findings)))
 
 (contribute "findings" :order 70
   :status (lambda (session)

@@ -17,8 +17,11 @@
 ;;;;
 ;;;; What is replayed, what a status says of it and what else must be closed
 ;;;; with a session is not known here: a tool group says so by name
-;;;; (CONTRIBUTE). IN-SESSION is the one way to act in a session, whoever
-;;;; asks — a tool call, a /re line, a recipe composing reads.
+;;;; (CONTRIBUTE, and CONTRIBUTE-RECORDED for a group whose every act is one
+;;;; entry put back as it stands). IN-SESSION is the one way to act in a
+;;;; session, whoever asks — a tool call, a /re line, a recipe composing
+;;;; reads. A session nothing has called for idle_minutes loses its
+;;;; processes, under every host, from the moment one is installed.
 
 (in-package #:omp-re)
 
@@ -39,7 +42,7 @@
   (applied '())                         ; ((CONTRIBUTION-NAME . FINGERPRINT) ...) of what the live rizin carries
   (kept '())                            ; ((NAME . VALUE) ...): what a tool group or a host keeps for the session
   (tools-off nil)
-  (audit-warned nil)
+  (audit-warned nil)                    ; the operator was told this session's audit log is unsigned
   (calls 0)
   (artifacts 0)
   (last-used (get-universal-time)))
@@ -57,7 +60,9 @@
   (let ((entry (assoc name (session-kept session) :test #'equal)))
     (if entry
         (setf (cdr entry) value)
-        (push (cons name value) (session-kept session)))
+        ;; A status band reads a session beside the call that holds it, and
+        ;; each may keep something: neither push may lose the other's.
+        (sb-ext:atomic-push (cons name value) (session-kept session)))
     value))
 
 (defun session-directory (session)
@@ -152,35 +157,48 @@ binary they were made on when a session opens another."
 (defstruct (contribution (:copier nil))
   (name "" :type string)
   (order 100)
-  noun replay fingerprint status close)
+  noun replay fingerprint status close analyzed
+  entry key)                            ; of a group CONTRIBUTE-RECORDED declared
 
 (defvar *contributions* '()
   "What the tool groups have said of themselves, in ORDER.")
 
-(defun contribute (name &key (order 100) noun replay fingerprint status close)
+(defun contribute (name &key (order 100) noun replay fingerprint status close analyzed entry key)
   "Say, in one call, what the tool group NAME adds to a session. All of it
 is optional:
   REPLAY       (SESSION RZ BINARY-PATH) puts back into a fresh rizin what the
                record says the group did to this binary => (values FAILURES
                APPLIED): a line for each thing that would not go back, and
-               how many did. A group that answers no APPLIED is not counted
-               when a binary is opened, only its failures are listed.
+               how many did.
   NOUN         what one replayed thing is called: \"annotation(s)\".
   FINGERPRINT  (SESSION BINARY-PATH) a string naming what of the group's the
                record has in effect: when it is no longer what the live rizin
-               was given, that rizin is dropped and the next call replays.
+               was given — the branch moved — that rizin is dropped and the
+               next call replays. A group that replays must say one: without
+               it a branch that never did the thing would keep it.
   STATUS       (SESSION) the group's lines of /re status.
   CLOSE        (SESSION) end whatever else the group runs for the session.
+  ANALYZED     (SESSION RZ) called in the call that holds the session each
+               time RZ's analysis changed — a fresh process after its replay,
+               one thing applied: where a group keeps what it must be able
+               to say of rizin beside a running call, without the pipe.
 ORDER places it among the others — in the replay, where a later layer may
 name what an earlier one recovered, and in the status. Saying a NAME again
 replaces what it said."
+  (when (and replay (not fingerprint))
+    (error "omp-re: the group ~a replays and says no fingerprint" name))
   (setf *contributions*
         (stable-sort (append (remove name *contributions* :key #'contribution-name :test #'string=)
                              (list (make-contribution :name name :order order :noun noun
                                                       :replay replay :fingerprint fingerprint
-                                                      :status status :close close)))
+                                                      :status status :close close :analyzed analyzed
+                                                      :entry entry :key key)))
                      #'< :key #'contribution-order))
   name)
+
+(defun find-contribution (name)
+  (or (find name *contributions* :key #'contribution-name :test #'string=)
+      (error "omp-re: no tool group is called ~a" name)))
 
 (defun applied-fingerprint (session name)
   (or (cdr (assoc name (session-applied session) :test #'string=)) ""))
@@ -192,13 +210,23 @@ replaces what it said."
         (push (cons name fingerprint) (session-applied session)))
     fingerprint))
 
+(defun analysis-changed (&optional (session *session*))
+  "Tell every group that keeps something of SESSION's rizin that its
+analysis changed. Never signals: what is kept is for a status band."
+  (let ((rz (session-rz session)))
+    (when (rz-alive-p rz)
+      (dolist (contribution *contributions*)
+        (when (contribution-analyzed contribution)
+          (ignore-errors (funcall (contribution-analyzed contribution) session rz)))))))
+
 (defun mark-applied (name &optional (session *session*))
   "Say that SESSION's rizin now holds exactly what the record has in effect
 of the group NAME: a tool has just applied the one thing that changed."
-  (let ((contribution (find name *contributions* :key #'contribution-name :test #'string=)))
-    (when (and contribution (contribution-fingerprint contribution) (session-binary-path session))
+  (let ((contribution (find-contribution name)))
+    (when (and (contribution-fingerprint contribution) (session-binary-path session))
       (setf (applied-fingerprint session name)
-            (funcall (contribution-fingerprint contribution) session (session-binary-path session))))))
+            (funcall (contribution-fingerprint contribution) session (session-binary-path session)))))
+  (analysis-changed session))
 
 (defun applied-in-step-p (session)
   (loop for contribution in *contributions*
@@ -206,6 +234,58 @@ of the group NAME: a tool has just applied the one thing that changed."
         always (or (null fingerprint)
                    (string= (funcall fingerprint session (session-binary-path session))
                             (applied-fingerprint session (contribution-name contribution))))))
+
+;;; --- a group whose every act is one entry ---------------------------------------------------
+;;; A mapped file, an analysis pass, a signature file: each is one thing done
+;;; to rizin, recorded as one entry and put back by doing it again. What
+;;; counts as the same thing, the replay, its count and the fingerprint that
+;;; rolls it back when the branch moves are all derived here from the group's
+;;; own two functions, so a new group of the kind cannot leave one out.
+
+(defun recorded (name binary-path &optional (session *session*))
+  "What the record holds of the group NAME for BINARY-PATH: the data of each
+of its entries, once by the group's key, in the order first recorded. An
+entry the key cannot read is passed over."
+  (let ((contribution (find-contribution name))
+        (seen '())
+        (kept '()))
+    (dolist (data (binary-entries (contribution-entry contribution) binary-path session) (nreverse kept))
+      (let ((key (funcall (contribution-key contribution) data)))
+        (when (and key (not (member key seen :test #'equal)))
+          (push key seen)
+          (push data kept))))))
+
+(defun record-once (name data &optional (session *session*))
+  "Record DATA as one more thing the group NAME did to the open binary,
+unless the record already holds it, and say the live rizin carries what the
+record has."
+  (let* ((contribution (find-contribution name))
+         (key (contribution-key contribution)))
+    (unless (member (funcall key data)
+                    (mapcar key (recorded name (session-binary-path session) session))
+                    :test #'equal)
+      (append-entry (contribution-entry contribution) data session))
+    (mark-applied name session)))
+
+(defun contribute-recorded (name &key order noun entry key apply describe)
+  "The tool group NAME does one kind of thing to rizin, each recorded as an
+entry of type ENTRY and put back by doing it again:
+  KEY       (DATA) what makes two entries the same thing — a string or a
+            list of strings — or NIL for an entry that is not one
+  APPLY     (RZ DATA) do it to RZ; an error is that one's failure line
+  DESCRIBE  (DATA) how a failure line names it
+RECORDED answers what the record holds of it, RECORD-ONCE writes one."
+  (contribute name :order order :noun noun :entry entry :key key
+    :replay (lambda (session rz binary-path)
+              (let ((failures '())
+                    (applied 0))
+                (dolist (data (recorded name binary-path session))
+                  (handler-case (progn (funcall apply rz data) (incf applied))
+                    (error (condition)
+                      (push (format nil "~a: ~a" (funcall describe data) condition) failures))))
+                (values (nreverse failures) applied)))
+    :fingerprint (lambda (session binary-path)
+                   (format nil "~{~s~^ ~}" (mapcar key (recorded name binary-path session))))))
 
 ;;; --- the rizin process a session owns ------------------------------------------------------
 
@@ -224,7 +304,7 @@ replaces is closed only once the new one is analyzed and live."
     (let* ((load (or load (session-load-options session)))
            (rz (unwind-protect
                     (progn
-                      (report-progress (format nil "rizin: analyzing ~a…" (file-namestring binary-path)))
+                      (report-progress (format nil "rizin: analyzing ~a…" (path-basename binary-path)))
                       (spawn-rz (resolve-rizin-path binary-path (and load (jget load "bits")))
                                 binary-path :load load))
                  (report-progress nil)))
@@ -245,7 +325,10 @@ replaces is closed only once the new one is analyzed and live."
         (setf (session-rz session) rz
               (session-applied session) '())
         (dolist (contribution *contributions*)
-          (mark-applied (contribution-name contribution) session))
+          (when (contribution-fingerprint contribution)
+            (setf (applied-fingerprint session (contribution-name contribution))
+                  (funcall (contribution-fingerprint contribution) session binary-path))))
+        (analysis-changed session)
         (when (and previous (not (eq previous rz)))
           (rz-close previous))
         (values rz replayed)))))
@@ -307,7 +390,8 @@ started here."
       (ignore-errors (funcall (contribution-close contribution) session)))))
 
 (defun shutdown-sessions ()
-  "Close every session's processes and forget the sessions; their records stay."
+  "Close every session's processes and forget the sessions. A record is
+never deleted: a session comes back from its own."
   (let ((sessions (sb-thread:with-mutex (*sessions-lock*)
                     (prog1 (loop for session being the hash-values of *sessions* collect session)
                       (clrhash *sessions*)))))
@@ -326,15 +410,32 @@ Nothing is lost: the record is kept and the next call restores from it."
           (unwind-protect (close-session-processes session)
             (sb-thread:release-mutex (session-lock session))))))))
 
+(defvar *idle-reaper* nil
+  "While a host is installed: (THREAD . WAKE) of the thread that reaps.")
+
 (defun start-idle-reaper ()
-  "Reap, once a minute, the sessions unused for idle_minutes => a function
-that stops doing so."
-  (let* ((idle (* 60 (setting-value :idle-minutes)))
-         (worker (start-worker "omp-re idle sessions" (lambda () (reap-idle-sessions idle)) 60)))
-    (lambda () (stop-worker worker))))
+  "Reap, once a minute, the sessions unused for idle_minutes, as the setting
+stands at that minute. INSTALL-HOST starts it, so every host has it."
+  (unless *idle-reaper*
+    (let ((wake (sb-thread:make-semaphore)))
+      (setf *idle-reaper*
+            (cons (sb-thread:make-thread
+                   (lambda ()
+                     (loop until (sb-thread:wait-on-semaphore wake :timeout 60)
+                           do (handler-case (reap-idle-sessions (* 60 (setting-value :idle-minutes)))
+                                (error (condition)
+                                  (notify :info "omp-re: closing idle sessions failed: ~a" condition)))))
+                   :name "omp-re idle sessions")
+                  wake)))))
+
+(defun stop-idle-reaper ()
+  (let ((reaper (shiftf *idle-reaper* nil)))
+    (when reaper
+      (sb-thread:signal-semaphore (cdr reaper))
+      (sb-thread:join-thread (car reaper) :default nil :timeout 5))))
 
 (defun close-session (id)
-  "End what runs for the session ID and forget the session; its record stays."
+  "End what runs for the session ID and forget the session."
   (let ((session (sb-thread:with-mutex (*sessions-lock*)
                    (prog1 (gethash id *sessions*) (remhash id *sessions*)))))
     (when session (close-session-processes session))

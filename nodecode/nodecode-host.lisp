@@ -2,29 +2,34 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; This file, verbs.lisp and cell.lisp are the nodecode host: the only
-;;;; places a name of nodecode's kernel (nlk:) or of its evolved layer (nle:)
-;;;; appears. Here is what the engine's port (host.lisp) asks about a
-;;;; session's record, answered for nodecode.
+;;;; The nodecode host is this folder: the only place a name of nodecode's
+;;;; kernel (nlk:) or of its evolved layer (nle:) appears. It is a package of
+;;;; its own over the engine's exports (engine/package.lisp). Here: the
+;;;; package, and what the engine's port (host.lisp) asks about a session's
+;;;; record, answered for nodecode.
 
-(in-package #:omp-re)
+;;; The package is named for the cell's system, which is how nodecode's
+;;; folder loader finds START-CELL in it, and nicknamed RE, so an eval form
+;;; reads (re:cmd "aflj"). The verbs are its exports; it is meant to be used
+;;; qualified only. OPEN is a verb, so CL's is shadowed. RE-ERROR and FAIL
+;;; are shadowed because this package has its own, below.
+(defpackage #:nodecode-re
+  (:use #:cl #:omp-re)
+  (:nicknames #:re)
+  (:shadow #:open #:re-error)
+  (:export #:open #:cmd #:json #:call #:tools #:doc #:slash #:status
+           #:triage #:scan-imports #:inspect-function #:find-comparisons #:find-crypto
+           #:re-error))
 
-;;; Under nodecode the engine's package answers to two more names: the cell's
-;;; system's, which is how the folder loader finds START-CELL in it, and RE,
-;;; so an eval form reads (re:cmd "aflj"). The verbs are its exports; it is
-;;; meant to be used qualified only.
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (rename-package '#:omp-re '#:omp-re '(#:nodecode-re #:re))
-  (export '(open cmd json call tools doc slash status
-            triage scan-imports inspect-function find-comparisons find-crypto
-            re-error)
-          '#:omp-re))
+(in-package #:nodecode-re)
 
-;;; RE-ERROR and FAIL as nodecode makes every peripheral's, in place of the
-;;; engine's own, so eval renders a refusal as it renders any other; *RE*,
-;;; RUNNING-SETTINGS and DEFINE-VERB. FAIL is unbound first because it is
-;;; being replaced on purpose, which SBCL would otherwise remark on at load.
-(fmakunbound 'fail)
+;;; RE-ERROR and FAIL as nodecode makes every peripheral's, so eval renders
+;;; a refusal here as it renders any other; *RE*, RUNNING-SETTINGS and
+;;; DEFINE-VERB. The engine signals its own condition (OMP-RE:RE-ERROR) and
+;;; knows nothing of this one. Its surface answers a failure as data, which
+;;; a verb turns into this RE-ERROR (verbs.lisp, ANSWER-TEXT); where the
+;;; engine's condition can still reach a verb — holding a session for a
+;;; recipe — it is translated there.
 (nlk:define-peripheral re :not-running t)
 
 ;;; --- the branch a session is on ----------------------------------------------------------

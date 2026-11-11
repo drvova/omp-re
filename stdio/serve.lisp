@@ -69,8 +69,8 @@
       (fatal "omp-re: the engine could not be loaded by ~a ~a: ~a"
              (lisp-implementation-type) (lisp-implementation-version) condition))))
 
-(format *wire* "{\"ready\":~d}~%" (symbol-value (find-symbol "+PROTOCOL+" '#:omp-re)))
+(format *wire* "{\"ready\":~d}~%" (symbol-value (find-symbol "+PROTOCOL+" '#:omp-re-stdio)))
 (finish-output *wire*)
 
-(uiop:symbol-call '#:omp-re '#:serve *wire-in* *wire*)
+(uiop:symbol-call '#:omp-re-stdio '#:serve *wire-in* *wire*)
 (sb-ext:exit :code 0 :abort t)

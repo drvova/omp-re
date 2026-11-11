@@ -586,7 +586,7 @@ const lispFile = `;;;; recipe-data.lisp --- GENERATED from recipes/tables.json. 
 ;;;; and recipes.py) say the same thing. recipes.lisp is the code over it;
 ;;;; scripts/gen-recipes.ts says what each part means.
 
-(in-package #:omp-re)
+(in-package #:nodecode-re)
 
 (defparameter *recipe-tables*
   ${written(lisp, hostTables("lisp"), "  ")}

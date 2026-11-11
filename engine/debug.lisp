@@ -59,12 +59,9 @@ miss that a real process started.")
   value)
 
 (defun validate-debug-hex (bytes)
-  "Hex bytes for `wx <bytes>': an even number of hex digits, blanks dropped."
-  (let ((hex (ppcre:regex-replace-all "\\s+" bytes "")))
-    (unless (and (js-scan "^[0-9a-fA-F]+$" hex) (evenp (length hex)))
+  (or (hex-octets bytes)
       (fail "omp-re: debug: bad hex bytes ~a — an even number of hex digits, e.g. 9090 or 4889e5"
-            (js-string bytes)))
-    hex))
+            (js-string bytes))))
 
 (defun validate-symbol-query (name)
   "A library or symbol name for `dmi': the dots and versions of a name like
@@ -242,8 +239,9 @@ is the one place the engine drives a live process."
           (unless target
             ;; The debugger executes the process: a build of the wrong bits
             ;; gives wrong-arch semantics, which must not pass as results.
+            ;; The operator is told; the model reads it in the result.
             (let ((mismatch (rizin-bits-mismatch binary-path)))
-              (when mismatch (warn "omp-re: ~a" mismatch))))
+              (when mismatch (notify :warning "omp-re: ~a" mismatch))))
           (when existing (rz-close existing))
           ;; Light `aa', not `aaa': symbols resolve and the launch stays quick.
           (setf (session-dbg session)
@@ -334,8 +332,6 @@ dump at what was read, which the caller reports."
                   (text-result (format nil "debug: ~a" how)
                                (format nil "~a~%Controlling the live process (~a), symbols from ~a.~@[~%~a~]~%Set breakpoints (break_add), then continue or step."
                                        +debug-launch-warning+ how binary (text-or pc nil))))
-                ;; START-DEBUG already warned of a bits mismatch; said again
-                ;; here so the text the model reads carries it.
                 (text-result (format nil "debug: started ~a" binary)
                              (format nil "~a~%Stopped at entry.~@[ Target env: ~{~a~^, ~}.~]~@[~%~a~]~@[~%~a~]~%Set breakpoints (break_add), then continue or step."
                                      +debug-launch-warning+ directives (rizin-bits-mismatch binary)
@@ -404,7 +400,7 @@ names, or T."
              (need-addr ()
                (or ea (fail "omp-re: debug ~a needs addr" action)))
              (named (header body)
-               (text-result header body :tool "rizin_debug"))
+               (text-result header body))
              (breakpoints (header &optional (empty "(no breakpoints)"))
                (named header (text-or (run "dblj") empty)))
              (resumed (header command)

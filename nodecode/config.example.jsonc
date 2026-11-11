@@ -1,9 +1,10 @@
 // The section ~/.nodecode/config.jsonc may carry for this cell —
 // documentation, not config: the folder gets pushed and holds no secret.
-// Written from the declaration in engine/host.lisp, and the Lisp suite
-// checks the two agree. A present section is enabled; "enabled": false
-// vetoes it. Every member is optional. Where a member names an environment
-// variable, that variable is read while the member is left at its default.
+// Written from the declarations in engine/host.lisp and nodecode/cell.lisp,
+// and the Lisp suite checks they agree. A present section is enabled;
+// "enabled": false vetoes it. Every member is optional. Where a member names
+// an environment variable, that variable is read while the member is left at
+// its default.
 {
   "re": {
     "enabled": true,

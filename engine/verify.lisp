@@ -10,12 +10,11 @@
 ;;;; tampered with or drifted FAILS the line, the same loud signal the report
 ;;;; gate gives for an ungrounded claim.
 ;;;;
-;;;; Only rizin_command evidence is machine-verified: its recorded arguments
-;;;; fully re-run the line and its hash is over the raw rizin output.
+;;;; Which records can be re-run is EVIDENCE-RERUN's to say (evidence.lisp).
 ;;;;
 ;;;; Read-only and without side effects: a command goes through the same
 ;;;; policy gate and the session's live rizin, and is sent to the process
-;;;; directly, never through CALL-TOOL, so verifying records no new evidence.
+;;;; directly, not as a tool call, so verifying records no new evidence.
 
 (in-package #:omp-re)
 
@@ -26,15 +25,13 @@
        "status" status
        "detail" detail))
 
-(defun rerun-evidence (record binary-path)
-  "Re-run RECORD's command on the open binary and compare the canonical hash
-=> a row. Never signals: anything that goes wrong leaves the record
-unverifiable, which is not a failure."
-  (let ((command (jstring record "args" "command"))
-        (addr (jstring record "args" "addr"))
-        (recorded (jstring record "reproHash")))
+(defun rerun-evidence (record read binary-path)
+  "Take READ — RECORD's own, as EVIDENCE-RERUN answered it — again on the
+open binary and compare the canonical hash => a row. Never signals: anything
+that goes wrong leaves the record unverifiable, which is not a failure."
+  (let ((recorded (jstring record "reproHash")))
     (handler-case
-        (let ((line (handler-case (gate-read command addr)
+        (let ((line (handler-case (gate-read (jstring read "command") (jstring read "addr"))
                       (re-error (condition)
                         (return-from rerun-evidence
                           (verify-row record "unverifiable"
@@ -59,14 +56,10 @@ record is really re-runnable."
          (current-sha (or (session-binary-sha256 session)
                           (and binary-path (ignore-errors (sha256-file binary-path))))))
     (loop for record in (evidence-records session)
-          for repro-hash = (jstring record "reproHash")
+          for (read why) = (multiple-value-list (evidence-rerun record))
           for bound-sha = (jstring record "binarySha256")
-          collect (cond ((or (string/= (jstring record "tool") "rizin_command")
-                             (zerop (length repro-hash)))
-                         (verify-row record "unverifiable"
-                                     (if (evidence-command-lines record)
-                                         "provenance-only: tool ran multiple internal commands; re-run manually"
-                                         "legacy: no reproducible hash recorded")))
+          collect (cond ((null read)
+                         (verify-row record "unverifiable" (rerun-refusal why)))
                         ((zerop (length bound-sha))
                          (verify-row record "unverifiable" "legacy: evidence not bound to a binary hash"))
                         ((null current-sha)
@@ -75,9 +68,7 @@ record is really re-runnable."
                          (verify-row record "unverifiable"
                                      (format nil "evidence was taken against a different binary — open sha ~a… to verify"
                                              (shown-hash bound-sha))))
-                        ((null (jstring record "args" "command"))
-                         (verify-row record "unverifiable" "recorded args carry no command to re-run"))
-                        (t (rerun-evidence record binary-path))))))
+                        (t (rerun-evidence record read binary-path))))))
 
 (defun verify-evidence (&key strict (session *session*))
   "Run BUILD-VERIFICATION and say what it found => (values TEXT FAILED-P ROWS).

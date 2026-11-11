@@ -29,7 +29,7 @@ same function.")
 there — which is not the same as a function with no instructions."
   (let* ((listing (rz-cmdj rz (format nil "pdfj @ ~a" (ea-from-offset offset))))
          (ops (and (hash-table-p listing) (gethash "ops" listing))))
-    (if (and (vectorp ops) (not (stringp ops)))
+    (if (json-array-p ops)
         (let ((mnemonics (loop for op across ops
                                for text = (jstring op "disasm")
                                when (and text (not (equal (jget op "type") "invalid")))
@@ -70,14 +70,14 @@ changes the instruction mix. A tie goes to the function with the recorded name."
           (nbbs (jnumber fingerprint "nbbs"))
           (name (jstring fingerprint "function"))
           (wanted (jlist fingerprint "mnemonics"))
-          (functions (rz-cmdj rz "aflj"))
+          (functions (jlist (rz-cmdj rz "aflj")))
           (near (remove-if-not
                  (lambda (function)
                    (and (hash-table-p function)
                         (jnumber function "offset") (jnumber function "size") (jnumber function "nbbs")
                         (<= (abs (- (jnumber function "size") size)) (* size 1/2))
                         (<= (abs (- (jnumber function "nbbs") nbbs)) (+ (* nbbs 1/2) 2))))
-                 (and (vectorp functions) (not (stringp functions)) (coerce functions 'list))))
+                 functions))
           (ranked (stable-sort near #'<
                                :key (lambda (function)
                                       (+ (if (zerop size)
@@ -99,7 +99,7 @@ changes the instruction mix. A tie goes to the function with the recorded name."
          (obj "function" (or (jstring best "name") "")
               "offset" (ea-from-offset (jnumber best "offset"))
               "addr" (ea-from-offset (+ (jnumber best "offset") (jnumber fingerprint "delta")))
-              ;; Three places, and a whole number written as one, as JavaScript prints it.
+              ;; Three places, and a whole number written as one: manifests hold 1, not 1.0.
               "similarity" (if (zerop (mod thousandths 1000))
                                (/ thousandths 1000)
                                (/ thousandths 1000d0))))))))
@@ -110,8 +110,7 @@ start, size, block count, the anchor's offset into it and its mnemonics.
 NIL when the anchor is in no function or does not resolve; never signals."
   (ignore-errors
    (let* ((at (resolve-numeric-addr rz anchor))
-          (functions (rz-cmdj rz (format nil "afij @ ~a" (ea-from-offset at))))
-          (function (and (json-array-p functions) (plusp (length functions)) (aref functions 0)))
+          (function (function-row-at rz (ea-from-offset at)))
           (start (and function (jnumber function "offset")))
           (mnemonics (and start (mnemonics-at rz start))))
      (when mnemonics

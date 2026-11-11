@@ -1,4 +1,4 @@
-;;;; os.lisp --- child processes, bounded runs, atomic writes, a periodic worker.
+;;;; os.lisp --- child processes, bounded runs, atomic writes.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
@@ -100,32 +100,3 @@ rename, so a reader never sees half of it."
     (write-text-file temporary content)
     (rename-file temporary (merge-pathnames path))
     path))
-
-;;; --- a periodic worker ---------------------------------------------------------------
-
-(defstruct (worker (:copier nil))
-  thread
-  (stopping nil)
-  (wake (sb-thread:make-semaphore)))
-
-(defun start-worker (name step seconds)
-  "A thread NAME calling STEP every SECONDS until STOP-WORKER. A STEP that
-signals is a warning on the log, and the next one still runs."
-  (let ((worker (make-worker)))
-    (setf (worker-thread worker)
-          (sb-thread:make-thread
-           (lambda ()
-             (loop
-               (sb-thread:wait-on-semaphore (worker-wake worker) :timeout seconds)
-               (when (worker-stopping worker) (return))
-               (handler-case (funcall step)
-                 (error (condition) (warn "~a: ~a" name condition)))))
-           :name name))
-    worker))
-
-(defun stop-worker (worker)
-  (when worker
-    (setf (worker-stopping worker) t)
-    (sb-thread:signal-semaphore (worker-wake worker))
-    (sb-thread:join-thread (worker-thread worker) :default nil :timeout 5))
-  nil)

@@ -15,7 +15,7 @@
 
 (defun extras-cli-refusal (tool &rest arguments)
   "Why the rz-* policy refuses ARGUMENTS for TOOL, or NIL when it allows them."
-  (re::check-rz-cli (find tool re::+rz-cli-tools+ :key #'re::rz-cli-tool :test #'string=) arguments))
+  (omp-re::check-rz-cli (find tool omp-re::+rz-cli-tools+ :key #'omp-re::rz-cli-tool :test #'string=) arguments))
 
 (defun extras-replay-warnings (thunk)
   "Run THUNK => the replay failures the engine reported while it ran. A
@@ -32,7 +32,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
           (remhash "nodecode-re" nle:*notices*)))))
 
 (defun extras-entries (kind id)
-  (re::entries-of kind (re::find-session id)))
+  (omp-re::entries-of kind (omp-re:find-session id)))
 
 (defun extras-write (path text)
   (with-open-file (out path :direction :output :if-exists :supersede :external-format :utf-8)
@@ -101,63 +101,63 @@ notice, which the model reads; the notice standing before THUNK is put back."
 
 (suite "extras: validators and parsers")
 (check "a map permission is r, w, x characters and nothing else"
-       (and (string= "rwx" (re::validate-map-perm "rwx"))
-            (has "invalid permission \"bad\"" (refusal (lambda () (re::validate-map-perm "bad"))))
-            (refusal (lambda () (re::validate-map-perm "")))))
+       (and (string= "rwx" (omp-re::validate-map-perm "rwx"))
+            (has "invalid permission \"bad\"" (refusal (lambda () (omp-re::validate-map-perm "bad"))))
+            (refusal (lambda () (omp-re::validate-map-perm "")))))
 (check "the map line quotes the path, so no path can start a second command"
-       (and (string= "o '/tmp/a b; !id' 0x50000 rw" (re::map-file-command "/tmp/a b; !id" "0x50000" "rw"))
-            (string= "o '/x' 0x1000" (re::map-file-command "/x" "0x1000"))
-            (refusal (lambda () (re::map-file-command "/x" "0x1000;!id")))))
+       (and (string= "o '/tmp/a b; !id' 0x50000 rw" (omp-re::map-file-command "/tmp/a b; !id" "0x50000" "rw"))
+            (string= "o '/x' 0x1000" (omp-re::map-file-command "/x" "0x1000"))
+            (refusal (lambda () (omp-re::map-file-command "/x" "0x1000;!id")))))
 (check "the thirteen passes, each with its rizin command"
        (equal '(("calls" . "aac") ("xrefs" . "aar") ("pointers" . "aav") ("preludes" . "aap")
                 ("all_functions" . "aaf") ("data_refs" . "aad") ("autoname" . "aan") ("types" . "aaft")
                 ("struct_offsets" . "aat") ("golang" . "aalg") ("objc" . "aalor") ("rtti_classes" . "avrr")
                 ("emulate_functions" . "aaef"))
-              re::+analysis-passes+))
+              omp-re::+analysis-passes+))
 (check "a signature path is quoted, and one that cannot cross the pipe is refused"
-       (and (string= "Fs '/tmp/my sigs/a.pat'" (re::signature-apply-command "/tmp/my sigs/a.pat"))
-            (has "line break or NUL" (refusal (lambda () (re::signature-apply-command (format nil "a~%b")))))
-            (has "empty path" (refusal (lambda () (re::signature-apply-command "  "))))))
+       (and (string= "Fs '/tmp/my sigs/a.pat'" (omp-re::signature-apply-command "/tmp/my sigs/a.pat"))
+            (has "line break or NUL" (refusal (lambda () (omp-re::signature-apply-command (format nil "a~%b")))))
+            (has "empty path" (refusal (lambda () (omp-re::signature-apply-command "  "))))))
 (check "the applied count is read from rizin's own sentence"
-       (and (eql 4 (re::parse-applied-count "Found 4 FLIRT signatures via /x.pat"))
-            (eql 1 (re::parse-applied-count "found 1 flirt signature via x"))
-            (null (re::parse-applied-count "nothing"))))
+       (and (eql 4 (omp-re::parse-applied-count "Found 4 FLIRT signatures via /x.pat"))
+            (eql 1 (omp-re::parse-applied-count "found 1 flirt signature via x"))
+            (null (omp-re::parse-applied-count "nothing"))))
 (check "the emulator's own validators say what a good value looks like"
-       (and (string= "41424344" (re::validate-emulate-hex "0x41424344"))
-            (string= "ab" (re::validate-emulate-hex "AB"))
-            (has "even number of hex digits" (refusal (lambda () (re::validate-emulate-hex "abc"))))
-            (refusal (lambda () (re::validate-emulate-hex "0x")))
-            (refusal (lambda () (re::validate-emulate-hex "zz")))
-            (has "bad variable name" (refusal (lambda () (re::validate-vm-variable "rax;!id"))))
-            (has "bad value" (refusal (lambda () (re::validate-vm-value "1+1"))))
-            (string= "0x10" (re::validate-vm-value "0x10"))))
+       (and (string= "41424344" (omp-re::validate-emulate-hex "0x41424344"))
+            (string= "ab" (omp-re::validate-emulate-hex "AB"))
+            (has "even number of hex digits" (refusal (lambda () (omp-re::validate-emulate-hex "abc"))))
+            (refusal (lambda () (omp-re::validate-emulate-hex "0x")))
+            (refusal (lambda () (omp-re::validate-emulate-hex "zz")))
+            (has "bad variable name" (refusal (lambda () (omp-re::validate-vm-variable "rax;!id"))))
+            (has "bad value" (refusal (lambda () (omp-re::validate-vm-value "1+1"))))
+            (string= "0x10" (omp-re::validate-vm-value "0x10"))))
 (check "a build's width is read from rizin -v's first line"
        (equal '(64 64 32 32 64 nil)
-              (mapcar #'re::parse-rizin-version-arch
+              (mapcar #'omp-re::parse-rizin-version-arch
                       '("rizin 0.9.1 @ linux-x86-64" "rizin 0.9.1 @ darwin-arm64" "rizin 0.9.1 @ windows-x86-32"
                         "rizin 0.9.1 @ linux-arm" "rizin 0.9.1 @ linux-aarch64" "rizin 0.9.1 @ plan9-mips"))))
 (check "capa's rule map becomes a list of names with their meta"
        (string= "[{\"name\":\"a\",\"meta\":{\"att&ck\":[]}},{\"name\":\"b\"}]"
-                (re::json-encode (re::capa-findings (re::json-decode "{\"rules\":{\"a\":{\"meta\":{\"att&ck\":[]}},\"b\":{}}}")))))
+                (omp-re:json-encode (omp-re::capa-findings (omp-re:json-decode "{\"rules\":{\"a\":{\"meta\":{\"att&ck\":[]}},\"b\":{}}}")))))
 (check "floss keeps the three string lists and die its scans; another shape is not findings"
        (and (string= "{\"stack_strings\":[\"s\"],\"static_strings\":[]}"
-                     (re::json-encode (re::floss-findings
-                                       (re::json-decode "{\"strings\":{\"stack_strings\":[\"s\"],\"other\":1,\"static_strings\":[]}}"))))
-            (equalp #() (re::die-findings (re::json-decode "{\"scans\":[]}")))
-            (null (re::die-findings (re::json-decode "{\"scans\":{}}")))
-            (null (re::capa-findings (re::json-decode "[1]")))
-            (null (re::floss-findings (re::json-decode "{\"strings\":3}")))))
+                     (omp-re:json-encode (omp-re::floss-findings
+                                       (omp-re:json-decode "{\"strings\":{\"stack_strings\":[\"s\"],\"other\":1,\"static_strings\":[]}}"))))
+            (equalp #() (omp-re::die-findings (omp-re:json-decode "{\"scans\":[]}")))
+            (null (omp-re::die-findings (omp-re:json-decode "{\"scans\":{}}")))
+            (null (omp-re::capa-findings (omp-re:json-decode "[1]")))
+            (null (omp-re::floss-findings (omp-re:json-decode "{\"strings\":3}")))))
 (check "yara's lines are rule and file; a line with no space is skipped"
        (string= "[{\"rule\":\"r1\",\"file\":\"/bin/a b\"},{\"rule\":\"r2\",\"file\":\"/x\"}]"
-                (re::json-encode (re::parse-yara-matches (format nil "r1 /bin/a b~%warning~%~%  r2 /x  ~%")))))
+                (omp-re:json-encode (omp-re::parse-yara-matches (format nil "r1 /bin/a b~%warning~%~%  r2 /x  ~%")))))
 
 ;;; --- the record's readers and the order of the replays -----------------------------------
 
 (suite "extras: the record, scoped to the binary")
-(let ((session (re::make-session :id "extras-record")))
+(let ((session (omp-re::make-session :id "extras-record")))
   (flet ((entry (kind &rest data)
-           (vector-push-extend (re::obj "type" "custom" "customType" kind "data" (apply #'re::obj data))
-                               (re::session-entries session))))
+           (vector-push-extend (omp-re:obj "type" "custom" "customType" kind "data" (apply #'omp-re:obj data))
+                               (omp-re::session-entries session))))
     (entry "re.mapfile" "path" "/early" "addr" "0x1")          ; before any binary: belongs to none
     (entry "re.binary" "path" "/a")
     (entry "re.mapfile" "path" "/m" "addr" "0x1000")
@@ -174,14 +174,33 @@ notice, which the model reads; the notice standing before THUNK is put back."
     (entry "re.binary" "path" "/a")
     (entry "re.signature" "path" "/s3.pat"))
   (check "mapped files are once per path and address, in first-map order, with the perm first recorded"
-         (equal '(("/m" "0x1000" nil) ("/m" "0x2000" "rx")) (re::recorded-map-files "/a" session)))
+         (equal '(("/m" "0x1000" nil) ("/m" "0x2000" "rx"))
+                (mapcar (lambda (data)
+                          (list (gethash "path" data) (gethash "addr" data) (gethash "perm" data)))
+                        (omp-re::recorded "mapped files" "/a" session))))
   (check "passes are de-duplicated in first-run order"
-         (and (equal '("preludes" "calls") (re::recorded-analysis-passes "/a" session))
-              (equal '("golang") (re::recorded-analysis-passes "/b" session))))
+         (flet ((passes (binary)
+                  (mapcar (lambda (data) (gethash "pass" data))
+                          (omp-re::recorded "analysis passes" binary session))))
+           (and (equal '("preludes" "calls") (passes "/a"))
+                (equal '("golang") (passes "/b")))))
   (check "signatures follow the binary they were applied to across a reopen"
-         (and (equal '("/s1.pat" "/s3.pat") (re::recorded-signatures "/a" session))
-              (equal '("/s2.pat") (re::recorded-signatures "/b" session))
-              (null (re::recorded-signatures "/c" session)))))
+         (flet ((signatures (binary)
+                  (mapcar (lambda (data) (gethash "path" data))
+                          (omp-re::recorded "signatures" binary session))))
+           (and (equal '("/s1.pat" "/s3.pat") (signatures "/a"))
+                (equal '("/s2.pat") (signatures "/b"))
+                (null (signatures "/c")))))
+  (check "what is in effect has a fingerprint, so a branch without one of them has another"
+         (flet ((fingerprint (group binary)
+                  (funcall (omp-re::contribution-fingerprint (omp-re::find-contribution group)) session binary)))
+           (and (string/= (fingerprint "mapped files" "/a") (fingerprint "mapped files" "/b"))
+                (string/= (fingerprint "analysis passes" "/a") (fingerprint "analysis passes" "/b"))
+                (string/= (fingerprint "signatures" "/a") (fingerprint "signatures" "/b")))))
+  (check "a group that replays and says no fingerprint is refused where it is declared"
+         (has "says no fingerprint"
+              (refusal (lambda () (omp-re::contribute "test: no fingerprint"
+                                    :replay (lambda (session rz binary) (declare (ignore session rz binary)) nil)))))))
 ;;; --- with the cell, and with rizin --------------------------------------------------------
 
 (suite "extras: what is offered")
@@ -190,16 +209,16 @@ notice, which the model reads; the notice standing before THUNK is put back."
          (every (lambda (name)
                   ;; Not through the engine's surface, which lists what is
                   ;; offered: the triage tools are there only when installed.
-                  (let ((tool (find name re::*tools* :key #'re::tool-name :test #'string=)))
-                    (and tool (not (re::tool-evidence tool)) (eq :exec (re::tool-tier tool)))))
+                  (let ((tool (find name omp-re::*tools* :key #'omp-re::tool-name :test #'string=)))
+                    (and tool (not (omp-re::tool-evidence tool)) (eq :exec (omp-re::tool-tier tool)))))
                 '("map_file" "analyze" "apply_signatures" "create_signature" "export_project" "rizin_cli"
                   "triage_capa" "triage_floss" "triage_die" "triage_yara" "rizin_emulate")))
   (check "analyze's schema names exactly the thirteen passes"
          (let ((text (re:doc "analyze")))
-           (every (lambda (pass) (has (car pass) text)) re::+analysis-passes+)))
+           (every (lambda (pass) (has (car pass) text)) omp-re::+analysis-passes+)))
   (dolist (scanner '(("triage_capa" . "capa") ("triage_floss" . "floss") ("triage_die" . "diec")
                      ("triage_yara" . "yara")))
-    (if (re::find-on-path (cdr scanner))
+    (if (omp-re::find-on-path (cdr scanner))
         (check (format nil "~a is offered: ~a is installed here" (car scanner) (cdr scanner))
                (has (car scanner) (re:tools)))
         (check (format nil "~a is not offered while ~a is absent, and a call says there is no such tool"
@@ -232,12 +251,12 @@ notice, which the model reads; the notice standing before THUNK is put back."
             (let ((id (fresh-session)))
               (in-session (id)
                 (re:open *binary*)
-                (let ((binary (re::session-binary-path (re::find-session id))))
+                (let ((binary (omp-re::session-binary-path (omp-re:find-session id))))
 
                   ;; --- rizin_cli ---------------------------------------------------------
                   (suite "extras: rizin_cli")
                   (cond
-                    ((not (re::available-rz-cli-tools))
+                    ((not (omp-re::available-rz-cli-tools))
                      (check "rizin_cli is not offered: no rz-* program is installed"
                             (and (not (has "rizin_cli" (re:tools)))
                                  (has "no tool named" (refusal (lambda () (re:call "rizin_cli" :tool "rz-ax" :args '("1"))))))))
@@ -263,7 +282,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
                      (check "@binary is substituted in place for a program that takes its files"
                             (let ((text (re:call "rizin_cli" :tool "rz-hash" :args '("-a" "sha256" "@binary"))))
                               (and (has (format nil "rz-hash -a sha256 ~a" binary) text)
-                                   (has (format nil "sha256: ~a" (re::sha256-file binary)) text))))
+                                   (has (format nil "sha256: ~a" (omp-re::sha256-file binary)) text))))
                      (check "rz-asm disassembles a string of hex pairs"
                             (has "mov rbp, rsp"
                                  (re:call "rizin_cli" :tool "rz-asm" :args '("-a" "x86" "-b" "64" "-d" "4889e5"))))
@@ -318,8 +337,8 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                 (has "Re-applied automatically on resume/respawn" text)
                                 (has overlay-hex (re:cmd "p8 16" "0x50000")))))
                   (check "it is recorded as re.mapfile {path, addr}, by resolved path"
-                         (equal (list (format nil "{\"path\":~a,\"addr\":\"0x50000\"}" (re::js-string overlay)))
-                                (mapcar #'re::json-encode (extras-entries "re.mapfile" id))))
+                         (equal (list (format nil "{\"path\":~a,\"addr\":\"0x50000\"}" (omp-re::js-string overlay)))
+                                (mapcar #'omp-re:json-encode (extras-entries "re.mapfile" id))))
                   (check "a permission is said in the result and kept on the entry"
                          (and (has "at 0x70000 (rw); first bytes"
                                    (re:call "map_file" :path overlay :addr "0x70000" :perm "rw"))
@@ -338,20 +357,20 @@ notice, which the model reads; the notice standing before THUNK is put back."
                               (has "addr is required" (refusal (lambda () (re:call "map_file" :path overlay))))
                               (= 2 (length (extras-entries "re.mapfile" id)))))
                   (check "the mapped file is opened read-only: its bytes on disk are as written"
-                         (string= "MAPFILETOOLDATA7" (re::read-text-file overlay)))
+                         (string= "MAPFILETOOLDATA7" (omp-re::read-text-file overlay)))
 
                   ;; --- rizin_emulate -----------------------------------------------------
                   (suite "extras: rizin_emulate")
                   (check "vars before init says to init first"
                          (string= (format nil "emulate: vars~%(no VM state — init first)")
                                   (re:call "rizin_emulate" :action "vars")))
-                  (let* ((rz (re::session-rz (re::find-session id)))
-                         (seek (re::rz-cmd rz "s")))
+                  (let* ((rz (omp-re::session-rz (omp-re:find-session id)))
+                         (seek (omp-re::rz-cmd rz "s")))
                     (check "init starts the VM at the address and answers its state"
                            (let ((text (re:call "rizin_emulate" :action "init" :addr "main")))
                              (and (has "emulate: VM initialized at main" text) (has "\"PC\"" text) (has "\"rsp\"" text))))
                     (check "init does not move the session's seek"
-                           (string= seek (re::rz-cmd rz "s"))))
+                           (string= seek (omp-re::rz-cmd rz "s"))))
                   (check "step answers the change events, one instruction by default"
                          (let ((text (re:call "rizin_emulate" :action "step")))
                            (and (has "emulate: step 1" text) (has "pc_write" text))))
@@ -367,7 +386,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
                          (and (string= (format nil "emulate: set_mem 4 byte(s) @ 0x70000~%[65,66,67,68]")
                                        (re:call "rizin_emulate" :action "set_mem" :addr "0x70000" :bytes "0x41424344"))
                               (has "41424344" (re:cmd "p8 4" "0x70000"))
-                              (string= "MAPFILETOOLDATA7" (re::read-text-file overlay))))
+                              (string= "MAPFILETOOLDATA7" (omp-re::read-text-file overlay))))
                   (check "step_until runs to an address"
                          (progn (re:call "rizin_emulate" :action "init" :addr "main")
                                 (let ((text (re:call "rizin_emulate" :action "step_until" :addr "main+4")))
@@ -411,21 +430,29 @@ notice, which the model reads; the notice standing before THUNK is put back."
                          (and (has "pass must be one of" (refusal (lambda () (re:call "analyze" :pass "aaa"))))
                               (has "pass must be one of" (refusal (lambda () (re:call "analyze" :pass "calls;!id"))))
                               (has "pass is required" (refusal (lambda () (re:call "analyze"))))))
-                  (let* ((before (parse-integer (second (re::split-lines (re:cmd "aflc")))))
-                         (text (re:call "analyze" :pass "preludes"))
-                         (after (parse-integer (second (re::split-lines (re:cmd "aflc"))))))
+                  ;; The record is checked on a pass that finds functions in the
+                  ;; test binary; which of these two does depends on the binary.
+                  (let* ((before (parse-integer (second (omp-re:split-lines (re:cmd "aflc")))))
+                         (pass "preludes")
+                         (text (re:call "analyze" :pass pass))
+                         (after (parse-integer (second (omp-re:split-lines (re:cmd "aflc"))))))
+                    (when (= after before)
+                      (setf pass "data_refs"
+                            text (re:call "analyze" :pass pass)
+                            after (parse-integer (second (omp-re:split-lines (re:cmd "aflc"))))))
                     (check "a pass that found functions says how many, and is recorded as re.analysis {pass}"
-                           (and (has (format nil "aap: functions ~d -> ~d" before after) text)
-                                (or (= after before)
-                                    (and (has (format nil "(+~d)" (- after before)) text)
-                                         (equal '("{\"pass\":\"preludes\"}")
-                                                (mapcar #'re::json-encode
-                                                        (remove-if-not (lambda (data) (equal "preludes" (gethash "pass" data)))
-                                                                       (extras-entries "re.analysis" id))))))))
+                           (and (> after before)
+                                (has (format nil "~a: functions ~d -> ~d (+~d)"
+                                             (if (string= pass "preludes") "aap" "aad") before after (- after before))
+                                     text)
+                                (equal (list (format nil "{\"pass\":\"~a\"}" pass))
+                                       (mapcar #'omp-re:json-encode
+                                               (remove-if-not (lambda (data) (equal pass (gethash "pass" data)))
+                                                              (extras-entries "re.analysis" id))))))
                     (check "running it again records it no second time"
-                           (progn (re:call "analyze" :pass "preludes")
-                                  (>= 1 (count "preludes" (extras-entries "re.analysis" id)
-                                               :key (lambda (data) (gethash "pass" data)) :test #'equal))))
+                           (progn (re:call "analyze" :pass pass)
+                                  (= 1 (count pass (extras-entries "re.analysis" id)
+                                              :key (lambda (data) (gethash "pass" data)) :test #'equal))))
 
                     ;; --- signatures -------------------------------------------------------
                     (suite "extras: apply_signatures and create_signature")
@@ -435,7 +462,7 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                 (null (extras-entries "re.signature" id))))
                     ;; A minimal FLIRT .pat matching main's first 16 bytes:
                     ;; <32 nibbles> <crc-len> <crc16> <len> :<off> <name>.
-                    (let* ((bytes (string-upcase (second (re::split-lines (re:cmd "p8 32" "main")))))
+                    (let* ((bytes (string-upcase (second (omp-re:split-lines (re:cmd "p8 32" "main")))))
                            (pattern (extras-write (merge-pathnames "extras fixture.pat" *scratch*)
                                                   (format nil "~a 00 0000 0020 :0000 omp_re_sig_main~%---~%"
                                                           (subseq bytes 0 32)))))
@@ -448,12 +475,26 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                     (flirt-flag-p)))
                         (check "it is recorded as re.signature {path}, once however often it is applied"
                                (progn (re:call "apply_signatures" :source "file" :path pattern)
-                                      (equal (list (format nil "{\"path\":~a}" (re::js-string pattern)))
-                                             (mapcar #'re::json-encode (extras-entries "re.signature" id)))))
+                                      (equal (list (format nil "{\"path\":~a}" (omp-re::js-string pattern)))
+                                             (mapcar #'omp-re:json-encode (extras-entries "re.signature" id)))))
                         (check "a file that matched nothing is not recorded"
                                (and (has "Applied 0 FLIRT signature(s)"
-                                         (re:call "apply_signatures" :source "file" :path "/nonexistent/x.pat"))
+                                         (re:call "apply_signatures" :source "file"
+                                                  :path (extras-write (merge-pathnames "extras-none.pat" *scratch*)
+                                                                      (format nil "~a 00 0000 0020 :0000 omp_re_sig_none~%---~%"
+                                                                              (make-string 32 :initial-element #\F)))))
                                     (= 1 (length (extras-entries "re.signature" id)))))
+                        (check "a signature file is read like every input file: one that is not there is refused, a relative path is read against the session's directory, and the allow-list holds it"
+                               (and (string= "omp-re: apply_signatures: no such signature file: /nonexistent/x.pat"
+                                             (refusal (lambda () (re:call "apply_signatures" :source "file"
+                                                                                               :path "/nonexistent/x.pat"))))
+                                    (has "FLIRT signature(s) from "
+                                         (re:call "apply_signatures" :source "file" :path "extras fixture.pat"))
+                                    (with-environment ("OMPRE_ALLOWED_DIRS" (uiop:native-namestring
+                                                                           (merge-pathnames "nowhere/" *scratch*)))
+                                      (has "is outside the directories files may be opened from"
+                                           (refusal (lambda () (re:call "apply_signatures" :source "file"
+                                                                                             :path pattern)))))))
                         (check "source file without a path, a blank path and a path with a line break are refused"
                                (and (string= "omp-re: apply_signatures: source 'file' needs a path"
                                              (refusal (lambda () (re:call "apply_signatures" :source "file"))))
@@ -468,8 +509,8 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                      (path (uiop:native-namestring (merge-pathnames "fixture.pat" out))))
                                  (and (has "create_signature: fixture.pat" text)
                                       (ppcre:scan "wrote [1-9]\\d* function signature\\(s\\) to " text)
-                                      (has (format nil "to ~a (~d bytes)" path (re::file-octets path)) text)
-                                      (plusp (re::file-octets path)))))
+                                      (has (format nil "to ~a (~d bytes)" path (omp-re::file-octets path)) text)
+                                      (plusp (omp-re::file-octets path)))))
                         (check "what it wrote is a FLIRT file the apply path takes"
                                (ppcre:scan "Applied [1-9]\\d* FLIRT signature"
                                            (re:call "apply_signatures" :source "file"
@@ -486,9 +527,9 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                (let ((text (re:call "export_project" :file "handoff"))
                                      (path (uiop:native-namestring (merge-pathnames "handoff.rzdb" out))))
                                  (and (has "export_project: handoff.rzdb" text)
-                                      (has (format nil "wrote the analysis to ~a (~d bytes)" path (re::file-octets path)) text)
+                                      (has (format nil "wrote the analysis to ~a (~d bytes)" path (omp-re::file-octets path)) text)
                                       (has (format nil "Po ~a" path) text)
-                                      (plusp (re::file-octets path)))))
+                                      (plusp (omp-re::file-octets path)))))
                         (check "with no name it derives one from the binary's, and does not double the ending"
                                (and (has (format nil "export_project: ~a.rzdb" (file-namestring binary))
                                          (re:call "export_project"))
@@ -514,8 +555,8 @@ notice, which the model reads; the notice standing before THUNK is put back."
                                     (not (probe-file "/tmp/abs.pat")) (not (probe-file "/tmp/abs.rzdb"))
                                     (null (uiop:subdirectories out))))
                         (check "the sample itself is unchanged by all of it"
-                               (string= (re::sha256-file binary)
-                                        (re::session-binary-sha256 (re::find-session id))))
+                               (string= (omp-re::sha256-file binary)
+                                        (omp-re::session-binary-sha256 (omp-re:find-session id))))
 
                         ;; --- replay -----------------------------------------------------------
                         (suite "extras: the record is put back on a fresh rizin")
@@ -525,57 +566,50 @@ notice, which the model reads; the notice standing before THUNK is put back."
                           (setf warnings (extras-replay-warnings
                                           (lambda () (setf text (re:cmd "p8 16" "0x50000")))))
                           (check "after rizin is killed the next read starts another, with no replay failure"
-                                 (and (not (eq old (re::session-rz (re::find-session id)))) (null warnings)))
+                                 (and (not (eq old (omp-re::session-rz (omp-re:find-session id)))) (null warnings)))
                           (check "the mapped file is there again, with the file's own bytes"
                                  (and (has overlay-hex text)
                                       (has overlay-hex (re:cmd "p8 16" "0x70000"))))
                           (check "the analysis pass was re-run: the functions it found are back"
-                                 (= after (parse-integer (second (re::split-lines (re:cmd "aflc"))))))
+                                 (= after (parse-integer (second (omp-re:split-lines (re:cmd "aflc"))))))
                           (check "the custom signature file was re-applied: its name is back"
                                  (flirt-flag-p)))
-                        (re::shutdown-sessions)
+                        (omp-re:shutdown-sessions)
                         (check "a forgotten session comes back from its record the same way"
                                (let ((warnings (extras-replay-warnings
                                                 (lambda () (re:cmd "p8 16" "0x50000")))))
                                  (and (null warnings)
                                       (has overlay-hex (re:cmd "p8 16" "0x50000"))
-                                      (= after (parse-integer (second (re::split-lines (re:cmd "aflc")))))
+                                      (= after (parse-integer (second (omp-re:split-lines (re:cmd "aflc")))))
                                       (flirt-flag-p))))
                         (check "a recorded pass this engine does not know is a failure line, and the rest still replays"
                                (progn
-                                 (re::append-entry "re.analysis" (re::obj "pass" "bogus") (re::find-session id))
+                                 (omp-re::append-entry "re.analysis" (omp-re:obj "pass" "bogus") (omp-re:find-session id))
                                  (kill-rizin id)
                                  (let ((warnings (extras-replay-warnings (lambda () (re:cmd "aflc")))))
                                    (and (= 1 (length warnings))
                                         (has "analysis pass bogus: unknown" (first warnings))
                                         (has overlay-hex (re:cmd "p8 16" "0x50000"))
                                         (flirt-flag-p)))))
-                        (check "the replays answer no failure for a live process and the record as it stands"
-                               (let* ((session (re::find-session id))
-                                      (rz (re::session-rz session)))
-                                 (and (null (re::replay-map-files session rz binary))
-                                      (equal '("analysis pass bogus: unknown")
-                                             (re::replay-analysis-passes session rz binary))
-                                      (null (re::replay-signatures session rz binary)))))
-                        (check "another binary opened in the session inherits none of it"
+                        (check "opening the binary again says what went back, group by group, with the pass that could not"
+                               (let ((opened (re:open binary)))
+                                 (and (has "Re-applied 2 of 2 mapped file(s) recorded earlier for this binary." opened)
+                                      (has "Re-applied 1 of 2 analysis pass(es) recorded earlier for this binary." opened)
+                                      (has "  could not re-apply analysis pass bogus: unknown" opened)
+                                      (has "Re-applied 2 of 2 signature file(s) recorded earlier for this binary." opened))))
+                        (check "another binary opened in the session inherits none of it, and the first still has its own"
                                (let ((copy (uiop:native-namestring (merge-pathnames "extras-sample.bin" *scratch*))))
                                  (uiop:copy-file binary copy)
-                                 (re:open copy)
-                                 (let ((session (re::find-session id))
-                                       (path (re::session-binary-path (re::find-session id))))
-                                   (and (null (re::recorded-map-files path session))
-                                        (null (re::recorded-analysis-passes path session))
-                                        (null (re::recorded-signatures path session))
-                                        (not (has overlay-hex (re:cmd "p8 16" "0x50000")))
-                                        (not (flirt-flag-p))
-                                        ;; and the first binary still has its own
-                                        (= 2 (length (re::recorded-map-files binary session))))))))))
+                                 (and (not (has "Re-applied" (re:open copy)))
+                                      (not (has overlay-hex (re:cmd "p8 16" "0x50000")))
+                                      (not (flirt-flag-p))
+                                      (has "Re-applied 2 of 2 mapped file(s)" (re:open binary))))))))
 
                   ;; --- triage, with stand-in scanners ---------------------------------------
                   (suite "extras: triage (stand-in scanners on PATH)")
                   (let ((bin (ensure-directories-exist (merge-pathnames "extras-bin/" *scratch*)))
                         (rules (extras-write (merge-pathnames "extras-rules.yar" *scratch*) "rule r1 { condition: true }"))
-                        (open-binary (re::session-binary-path (re::find-session id))))
+                        (open-binary (omp-re::session-binary-path (omp-re:find-session id))))
                     (setf (uiop:getenv "PATH")
                           (format nil "~a:~a" (string-right-trim "/" (uiop:native-namestring bin)) previous-path))
                     (extras-stand-in bin "capa" "echo '{\"rules\":{\"create process\":{\"meta\":{\"attack\":[\"T1106\"]}},\"bare\":{}}}'")
@@ -599,8 +633,8 @@ notice, which the model reads; the notice standing before THUNK is put back."
                              (and (has "die: 1 finding group(s)" text) (has "\"gcc\"" text))))
                     (check "triage_yara runs `yara <rules> <binary>' and answers rule and file"
                            (let ((text (re:call "triage_yara" :rules-path rules)))
-                             (and (has "yara: 2 rule(s) matched" text) (has (format nil "{\"rule\":\"r1\",\"file\":~a}" (re::js-string open-binary)) text)
-                                  (has (format nil "{\"rule\":\"r2\",\"file\":~a}" (re::js-string open-binary)) text))))
+                             (and (has "yara: 2 rule(s) matched" text) (has (format nil "{\"rule\":\"r1\",\"file\":~a}" (omp-re::js-string open-binary)) text)
+                                  (has (format nil "{\"rule\":\"r2\",\"file\":~a}" (omp-re::js-string open-binary)) text))))
                     (check "triage_yara refuses a blank or missing rules file before running anything"
                            (and (string= "omp-re: yara: rules_path argument is required (no default ruleset ships)"
                                          (refusal (lambda () (re:call "triage_yara" :rules-path "  "))))
@@ -631,11 +665,11 @@ notice, which the model reads; the notice standing before THUNK is put back."
                     (check "taken off PATH again, the scanner is no longer offered"
                            (progn
                              (setf (uiop:getenv "PATH") previous-path)
-                             (or (re::find-on-path "capa")
+                             (or (omp-re::find-on-path "capa")
                                  (and (not (has "triage_capa" (re:tools)))
                                       (has "no tool named" (refusal (lambda () (re:call "triage_capa"))))))))
                     (check "no triage call is evidence"
                            (notany (lambda (record) (starts "triage_" (gethash "tool" record)))
-                                   (re::evidence-records (re::find-session id)))))))))
+                                   (omp-re::evidence-records (omp-re:find-session id)))))))))
        (setf (uiop:getenv "PATH") previous-path)
        (setf (uiop:getenv "OMPRE_OUTPUT_DIR") (or previous-output ""))))))

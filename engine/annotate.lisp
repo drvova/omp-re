@@ -70,7 +70,7 @@ not at rizin."
           ((string= kind "opcode_size") (int-arg "opcode_size" v))
           ((string= kind "jump_target") (validate-addr v))
           ((string= kind "return_value")
-           (unless (full-match-p "0x[0-9a-fA-F]+|[0-9]+" v)
+           (unless (number-text-p v)
              (fail "omp-re: invalid return_value: ~a — a decimal or 0x-hex integer" (js-string value)))
            v)
           (t (fail "omp-re: unknown hint kind: ~a" kind)))))
@@ -105,7 +105,7 @@ reaches rizin unquoted, so it is held to a charset with no separator in it."
               ((equal key "bits")
                (unless (member value '("8" "16" "32" "64") :test #'equal)
                  (fail "omp-re: invalid arch hint bits: ~a — one of 8, 16, 32, 64"
-                       (if value (js-string value) "undefined")))
+                       (if value (js-string value) "none given")))
                (push (format nil "ahb ~a ~a" value at) commands))
               (t (fail "omp-re: invalid arch hint ~a — use arch=<name> and/or bits=<n>" (js-string part))))))
     (unless commands
@@ -312,20 +312,13 @@ fails does not stop the rest."
 
 ;;; --- reading rizin's side ------------------------------------------------------------------
 
-(defun row-offset (row)
-  "The address in a rizin JSON ROW: most say `offset', a few `addr'."
-  (or (jnumber row "addr") (jnumber row "offset")))
-
-(defun first-row (value)
-  (and (vectorp value) (not (stringp value)) (plusp (length value)) (aref value 0)))
-
 (defun function-at (rz addr)
   "The function containing ADDR => (values START-EA NAME). An annotation
 keys on the start address, so it stays addressable after the name it was
 asked by is gone: a rename can retire the old flag."
   (let* ((numeric (ea-from-offset (resolve-numeric-addr rz (validate-addr addr))))
-         (row (first-row (rz-cmdj rz (format nil "afij @ ~a" numeric))))
-         (start (and row (row-offset row)))
+         (row (function-row-at rz numeric))
+         (start (and row (row-address row)))
          (name (and row (jstring row "name"))))
     (unless (and start name)
       (fail "omp-re: no function at ~a" addr))
@@ -340,7 +333,7 @@ asked by is gone: a rename can retire the old flag."
   (let ((grouped (rz-cmdj rz (format nil "afvlj @ ~a" ea))))
     (when (hash-table-p grouped)
       (loop for group being the hash-values of grouped
-            when (and (vectorp group) (not (stringp group)))
+            when (json-array-p group)
               append (remove-if-not (lambda (variable)
                                       (and (jstring variable "name") (jstring variable "type")))
                                     (coerce group 'list))))))
@@ -355,10 +348,10 @@ asked by is gone: a rename can retire the old flag."
 (defun function-starting-at (rz ea)
   "The `afij' row of the function that starts exactly at EA, or NIL: `afij'
 answers the function containing an address, which may start earlier."
-  (let ((row (first-row (rz-cmdj rz (format nil "afij @ ~a" ea)))))
+  (let ((row (function-row-at rz ea)))
     (and row
-         (row-offset row)
-         (string= ea (ea-from-offset (row-offset row)))
+         (row-address row)
+         (string= ea (ea-from-offset (row-address row)))
          row)))
 
 (defun calling-convention-at (rz ea)
@@ -371,7 +364,7 @@ answers the function containing an address, which may start earlier."
 (defun hints-at (rz ea)
   "The hints at EA as `ahl.j' lists them ([{addr, arch?, bits?, immbase?,
 type?, size?, jump?, ret?}]): the first row, or NIL when there is none."
-  (let ((row (first-row (rz-cmdj rz (format nil "ahl.j @ ~a" ea)))))
+  (let ((row (first (jlist (rz-cmdj rz (format nil "ahl.j @ ~a" ea))))))
     (and (hash-table-p row) row)))
 
 (defun js-number (number)
@@ -456,7 +449,7 @@ may spell one (4 or 4.0); a refusal in TOOL's name otherwise."
          (new-name (validate-ident "new" (jstring arguments "new"))))
     (multiple-value-bind (ea name) (function-at rz (jstring arguments "addr"))
       (apply-commands rz (annotation-commands "rename_function" ea new-name name))
-      (let ((landed (jstring (first-row (rz-cmdj rz (format nil "afij @ ~a" ea))) "name")))
+      (let ((landed (jstring (function-row-at rz ea) "name")))
         (unless (equal landed new-name)
           (fail "omp-re: rename_function: mutation did not land: expected ~a, rizin has ~a"
                 (js-string new-name) (js-or-null landed)))

@@ -151,7 +151,7 @@ sees it too."
 
 (defun begin-suite-file (name)
   (ignore-errors (stop-running-cell))
-  (re::shutdown-sessions)
+  (omp-re:shutdown-sessions)
   (clrhash nlk:*stub-visible*)
   (clrhash nlk:*stub-lineage*)
   (clrhash nle:*notices*)
@@ -177,7 +177,7 @@ scratch home => its native path."
   (let ((path (scratch-path name)))
     (ensure-directories-exist path)
     (if (stringp content)
-        (re::write-text-file path content)
+        (omp-re::write-text-file path content)
         (with-open-file (out path :direction :output :if-exists :supersede
                                   :element-type '(unsigned-byte 8))
           (write-sequence (coerce content '(vector (unsigned-byte 8))) out)))
@@ -188,11 +188,7 @@ scratch home => its native path."
 (defmacro with-service ((service function) &body body)
   "BODY with the host's SERVICE answered by FUNCTION — the judge a claim is
 put to, a record store that fails — and the host as it was after."
-  (let ((host (gensym "HOST")))
-    `(let ((,host re::*host*))
-       (setf re::*host* (list* ,service ,function ,host))
-       (unwind-protect (progn ,@body)
-         (setf re::*host* ,host)))))
+  `(omp-re:with-host-service (,service ,function) ,@body))
 
 (defun typed (line &optional (session-id nle:*stub-session*))
   "What the operator's own /re LINE answers, typed in the session SESSION-ID."
@@ -200,7 +196,7 @@ put to, a record store that fails — and the host as it was after."
 
 (defun described-tool (name)
   "The engine's description of the tool NAME, as a host is given it, or NIL."
-  (find name (re::engine-tools) :key (lambda (tool) (gethash "name" tool)) :test #'string=))
+  (find name (omp-re:engine-tools) :key (lambda (tool) (gethash "name" tool)) :test #'string=))
 
 (defvar *session-counter* 0)
 (defun fresh-session ()
@@ -216,12 +212,12 @@ put to, a record store that fails — and the host as it was after."
 holds one reproducible rizin_command record with the id EVIDENCE. Nothing in
 it needs the binary to exist => the session's id."
   (let ((id (fresh-session)))
-    (re::in-session (id "seeding a test session")
-      (re::append-entry "re.binary" (re::obj "path" "/bin/sample" "sha256" sha))
-      (re::append-entry "re.evidence"
-                        (re::obj "id" evidence
+    (omp-re::in-session (id "seeding a test session")
+      (omp-re::append-entry "re.binary" (omp-re:obj "path" "/bin/sample" "sha256" sha))
+      (omp-re::append-entry "re.evidence"
+                        (omp-re:obj "id" evidence
                                  "tool" "rizin_command"
-                                 "args" (re::obj "command" "pdf" "addr" "sym.f")
+                                 "args" (omp-re:obj "command" "pdf" "addr" "sym.f")
                                  "commands" (vector "pdf @ sym.f")
                                  "reproHash" (make-string 64 :initial-element #\b)
                                  "binarySha256" sha
@@ -229,13 +225,13 @@ it needs the binary to exist => the session's id."
     id))
 
 (defun rizin-pid (rz)
-  (sb-ext:process-pid (re::rz-process rz)))
+  (sb-ext:process-pid (omp-re::rz-process rz)))
 
 (defun kill-rizin (id)
   "Kill the rizin of the session called ID, as a crash would, and wait until
 the engine sees it gone => the dead process."
-  (let* ((rz (re::session-rz (re::find-session id)))
-         (process (re::rz-process rz)))
+  (let* ((rz (omp-re::session-rz (omp-re:find-session id)))
+         (process (omp-re::rz-process rz)))
     (sb-ext:process-kill process 9)
     (sb-ext:process-wait process)
     rz))

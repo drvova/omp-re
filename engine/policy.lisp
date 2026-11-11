@@ -160,7 +160,9 @@ letters, and between two names that differ only by case the lowercase first."
           (jstring spec "cmd") (or (jstring spec "args_str") "") (or (jstring spec "summary") "")
           (if (runnable-p (jstring spec "cmd")) "" "  [not runnable via rizin_command]")))
 
-(defun search-catalog (catalog query &optional (limit 60))
+(defparameter +help-lines+ 60 "The most commands one rizin_help answer lists.")
+
+(defun search-catalog (catalog query &aux (limit +help-lines+))
   "Answer a help QUERY from CATALOG => (values HEADER LINES). A query naming
 a command or prefix lists that family, with full argument detail for an exact
 match; anything else is a keyword search over summaries and descriptions."

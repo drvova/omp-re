@@ -13,7 +13,9 @@
 ;;;; written. There is no structured-output path for it, so the prompt asks
 ;;;; for JSON in prose and the reply is parsed defensively — a fenced block,
 ;;;; then a balanced scan. Everything here is model-agnostic given the
-;;;; host's :JUDGE service (host.lisp), which a test installs its own.
+;;;; host's :JUDGE service (host.lisp), which a test installs its own. The
+;;;; operator's `audit' setting switches the question off: claims then go
+;;;; unaudited, as they do under a host with nobody to ask.
 ;;;;
 ;;;; Fail-open by design: whenever the side question cannot be asked or its
 ;;;; reply cannot be read, the audit degrades to "unaudited" and never blocks
@@ -24,10 +26,10 @@
 (in-package #:omp-re)
 
 (defparameter +no-judge-reason+ "no model / side turns unavailable"
-  "auditClaims' reason when there is no judge to ask.")
+  "Why claims went unaudited when there is no judge to ask.")
 
 (defparameter +no-verdict-reason+ "the audit side turn returned no usable verdict"
-  "auditClaims' reason when the judge was asked and nothing usable came back.")
+  "Why claims went unaudited when the judge was asked and nothing usable came back.")
 
 (defparameter +excerpt-max+ 800
   "The most of one piece of evidence's output quoted to the judge.")
@@ -52,15 +54,13 @@
 (defstruct (audit-outcome (:copier nil))
   (audited nil)
   (unaudited-reason nil)
-  ;; The verdicts, in the order a Map would hold them: the judge's own
-  ;; order, then the claims it left out.
+  ;; The verdicts: in the judge's own order, then the claims it left out.
   (by-index '())
   ;; How many evidence-backed claims were put to the audit. None means
   ;; there was nothing to audit, and no note is rendered.
   (item-count 0))
 
 (defun outcome-verdict (outcome index)
-  "The verdict OUTCOME holds for the claim at INDEX, or NIL."
   (find index (audit-outcome-by-index outcome) :key #'claim-audit-index :test #'=))
 
 (defun flagged-p (audit)
@@ -151,17 +151,26 @@ does not know reads as unaudited."
 
 ;;; --- the audit ----------------------------------------------------------------------------------
 
-(defun audit-claims (items mode &optional (judge (host-service :judge)))
-  "Put ITEMS to JUDGE and assemble the outcome. Nothing to audit — MODE
-\"off\", no items, no judge — is unaudited. A judge that cannot ask, signals
-or answers nothing readable is unaudited with the reason. A readable reply
-is audited, each claim the judge left out marked unaudited by itself."
+(defun audit-judge-p ()
+  "Whether there is a judge to put a claim to: the operator left audits on
+and the host has one."
+  (and (setting-value :audit) (host-service :judge) t))
+
+(defun audit-claims (items mode)
+  "Put ITEMS to the host's judge and assemble the outcome. MODE \"off\" audits
+nothing and says nothing. No items and no judge are unaudited; a judge that
+cannot ask, signals or answers nothing readable is unaudited with the
+reason. A readable reply is audited, each claim the judge left out marked
+unaudited by itself."
   (flet ((unaudited (reason)
            (make-audit-outcome :audited nil :unaudited-reason reason :item-count (length items))))
-    (if (or (equal mode "off") (null items) (null judge))
-        (unaudited (if judge nil +no-judge-reason+))
+    (cond
+      ((equal mode "off") (make-audit-outcome))
+      ((not (audit-judge-p)) (unaudited +no-judge-reason+))
+      ((null items) (unaudited nil))
+      (t
         (multiple-value-bind (reply why)
-            (handler-case (funcall judge (build-audit-prompt items))
+            (handler-case (ask-host :judge (build-audit-prompt items))
               (error () (values nil +no-verdict-reason+)))
           (if (not (stringp reply))
               (unaudited (if (plusp (length why)) why +no-judge-reason+))
@@ -169,8 +178,7 @@ is audited, each claim the judge left out marked unaudited by itself."
                 (if (not parsed)
                     (unaudited +no-verdict-reason+)
                     (let ((by-index '()))
-                      ;; As Map.set does: a second verdict for an index
-                      ;; takes the first one's place.
+                      ;; A second verdict for an index takes the first one's place.
                       (dolist (verdict verdicts)
                         (let ((held (member (claim-audit-index verdict) by-index
                                             :key #'claim-audit-index :test #'=)))
@@ -185,7 +193,7 @@ is audited, each claim the judge left out marked unaudited by itself."
                                                                 :verdict "unaudited"
                                                                 :reason "not returned by the auditor"))))))
                       (make-audit-outcome :audited t :by-index by-index
-                                          :item-count (length items))))))))))
+                                          :item-count (length items)))))))))))
 
 (defun flagged-verdicts (outcome)
   "The claims a strict audit must withhold on: an explicit unsupported or

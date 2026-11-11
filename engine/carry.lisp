@@ -26,9 +26,10 @@
 ;;;; A claim takes the worst status among its checked evidence. Read-only
 ;;;; like /re verify: the manifest is untrusted input, so every command goes
 ;;;; back through the policy gate and every address through VALIDATE-ADDR, and
-;;;; a line is sent to the process directly, never through CALL-TOOL, so
-;;;; carrying records nothing — until --inherit, which re-proves the findings
-;;;; that held and records them here as rizin_command itself would.
+;;;; a line is sent to the process directly, not as a tool call, so carrying
+;;;; records nothing — until --inherit, which re-proves the findings that
+;;;; held by making their reads again as rizin_command calls (OBSERVE-READ),
+;;;; audited and recorded here like any other.
 ;;;;
 ;;;; The summary and, under it, the agenda are the answer, and a broken claim
 ;;;; fails the line — which is what makes a report a regression test for the
@@ -36,9 +37,12 @@
 
 (in-package #:omp-re)
 
-(defparameter +max-diff-lines+ 40
-  "The most diff lines shown for one drifted record. An excerpt is at most
-20 lines a side, so this only bites on a total rewrite.")
+(defparameter +max-diff-lines+ (* 2 +excerpt-lines+)
+  "The most diff lines shown for one drifted record: both excerpts whole,
+so this only bites on a total rewrite.")
+
+(defparameter +diff-context+ 2
+  "How many unchanged lines a shown diff keeps around each change.")
 
 ;;; --- reading a manifest --------------------------------------------------------------------------
 
@@ -47,9 +51,9 @@
 missing: a manifest is untrusted, and may be older than a member."
   (evidence-id "" :type string)
   (tool "unknown" :type string)
-  (args nil)                            ; {command, addr?} or NIL
-  (command nil)
-  (commands '())                        ; the recorded lines, as a list
+  (read nil)                            ; {command, addr?} to re-run, as EVIDENCE-RERUN answers it,
+  (unrunnable nil)                      ; or why it cannot be
+  (command nil)                         ; the recorded line, for display
   (repro-hash nil)
   (canonical-excerpt nil)
   (shift-hash nil)
@@ -93,17 +97,13 @@ member that is missing is read as absent."
      :entries
      (loop for row across (gethash "entries" raw)
            when (and (hash-table-p row) (jstring row "evidenceId"))
-             collect (let ((args (gethash "args" row)))
+             collect (multiple-value-bind (read why) (evidence-rerun row)
                        (make-manifest-entry
                         :evidence-id (jstring row "evidenceId")
                         :tool (or (jstring row "tool") "unknown")
-                        :args (and (hash-table-p args) (jstring args "command")
-                                   (obj "command" (jstring args "command")
-                                        "addr" (if (plusp (length (jstring args "addr")))
-                                                   (jstring args "addr")
-                                                   :absent)))
+                        :read read
+                        :unrunnable why
                         :command (jstring row "command")
-                        :commands (jstrings row "commands")
                         :repro-hash (jstring row "reproHash")
                         :canonical-excerpt (jstring row "canonicalExcerpt")
                         :shift-hash (jstring row "shiftHash")
@@ -121,24 +121,6 @@ member that is missing is read as absent."
                         :evidence-ids (jstrings row "evidenceIds")
                         :addr (jstring row "addr")
                         :confidence (known-confidence (gethash "confidence" row))))))))
-
-(defun entry-request (entry)
-  "The {command, addr} to re-run for ENTRY, or NIL when it recorded nothing
-re-runnable. The structured args win (every manifest since carry shipped);
-failing those the recorded line is split at its trailing ` @ <addr>' — what
-the policy gate appends — leaving `@!<blocksize>' alone, since that is part
-of the command and not a seek."
-  (or (manifest-entry-args entry)
-      (let ((line (if (= 1 (length (manifest-entry-commands entry)))
-                      (first (manifest-entry-commands entry))
-                      (manifest-entry-command entry))))
-        (when (plusp (length line))
-          (let ((line (trimmed line)))
-            (multiple-value-bind (matched parts)
-                (ppcre:scan-to-strings (js-scanner "^(.*\\S)\\s+@\\s+([^!\\s]\\S*)$") line)
-              (if matched
-                  (obj "command" (aref parts 0) "addr" (aref parts 1))
-                  (obj "command" line))))))))
 
 ;;; --- a diff a person can start from --------------------------------------------------------------
 
@@ -180,10 +162,11 @@ shows as unchanged, in its new form."
              (incf j))
     (nreverse out)))
 
-(defun compact-diff (diff &optional (context 2))
-  "DIFF cut to its changed lines and CONTEXT unchanged lines around each,
-the rest elided as `  …': a hunk view of a LINE-DIFF."
-  (let* ((diff (coerce diff 'simple-vector))
+(defun compact-diff (diff)
+  "DIFF cut to its changed lines and +DIFF-CONTEXT+ unchanged lines around
+each, the rest elided as `  …': a hunk view of a LINE-DIFF."
+  (let* ((context +diff-context+)
+         (diff (coerce diff 'simple-vector))
          (changed (map 'simple-vector (lambda (line) (not (uiop:string-prefix-p "  " line))) diff))
          (out '()))
     (dotimes (i (length diff) (nreverse out))
@@ -198,7 +181,8 @@ the rest elided as `  …': a hunk view of a LINE-DIFF."
   "One evidence row of a carry: a JSON object, since `--out' writes the
 rows as they stand. COMMAND is the exact line re-run, or that would have
 been. RELOCATION is set when the anchor was found again elsewhere by its
-fingerprint; RERUN, on a row that reproduced, is the {command, addr} that
+fingerprint: where it was and is, as `from' and `to' for a reader and
+member by member for --inherit to follow; RERUN, on a row that reproduced, is the {command, addr} that
 did — what --inherit runs to record fresh evidence; DIFF, on a drifted row,
 is the recorded excerpt against the new one."
   (obj "evidenceId" (manifest-entry-evidence-id entry)
@@ -262,6 +246,8 @@ pure rename compares equal."
              (similarity (js-number (gethash "similarity" found)))
              (relocation (obj "from" (format nil "~a @ ~a" old-name old-offset)
                               "to" (format nil "~a @ ~a" new-name new-offset)
+                              "fromName" old-name "fromOffset" old-offset
+                              "toName" new-name "toOffset" new-offset
                               "addr" (jstring found "addr")
                               "similarity" (gethash "similarity" found)))
              (where (format nil "~a ~a (code similarity ~a)" old-name
@@ -277,25 +263,23 @@ pure rename compares equal."
                        :rerun (obj "command" (jstring request "command") "addr" (jstring found "addr")))
             (let ((diff (excerpt-diff (or (manifest-entry-canonical-excerpt entry) "") folded binary-path)))
               (carry-row entry "drifted"
-                         (format nil "~a; output changed~:[ beyond the recorded 20-line excerpt~;~]" where diff)
+                         (format nil "~a; output changed~:[ beyond the recorded ~d-line excerpt~;~]"
+                                 where diff +excerpt-lines+)
                          :command line :relocation relocation :diff diff)))))))
 
 (defun carry-entry (entry binary-path)
   "Re-run ENTRY on the open binary and classify it => a row. Never signals:
 whatever goes wrong with one entry leaves that entry unchecked (the engine's
 trouble) or broken (the anchor is gone)."
-  (let* ((request (and (string= (manifest-entry-tool entry) "rizin_command") (entry-request entry)))
+  (let* ((request (manifest-entry-read entry))
          (command (jstring request "command"))
          (addr (jstring request "addr"))
          (fingerprint (manifest-entry-anchor entry))
          (recorded-excerpt (or (manifest-entry-canonical-excerpt entry) ""))
          (line nil))
-    (when (or (null request) (zerop (length (manifest-entry-repro-hash entry))))
+    (when (null request)
       (return-from carry-entry
-        (carry-row entry "unchecked"
-                   (if (manifest-entry-commands entry)
-                       "provenance-only: no reproducible hash to compare (re-run by hand)"
-                       "legacy: no reproducible hash recorded")
+        (carry-row entry "unchecked" (rerun-refusal (manifest-entry-unrunnable entry))
                    :command (manifest-entry-command entry))))
     (handler-case
         (setf line (gate-read command addr))
@@ -306,7 +290,7 @@ trouble) or broken (the anchor is gone)."
         (let ((rz (ensure-rizin))
               ;; A numeric anchor always "resolves", so it is judged by its
               ;; output, and relocated by fingerprint when that output changed.
-              (numeric (and addr (js-scan "(?i)^(0x[0-9a-f]+|\\d+)$" addr))))
+              (numeric (and addr (number-text-p addr))))
           (flet ((relocated ()
                    (and fingerprint (try-relocated rz entry request fingerprint binary-path))))
             ;; A symbolic anchor (sym.decrypt_config, a flag) that no longer
@@ -347,7 +331,8 @@ trouble) or broken (the anchor is gone)."
                            (format nil "~a~@[; ~a~]"
                                    (if diff
                                        "output changed"
-                                       "output changed beyond the recorded 20-line excerpt (re-run to see it)")
+                                       (format nil "output changed beyond the recorded ~d-line excerpt (re-run to see it)"
+                                               +excerpt-lines+))
                                    (and numeric
                                         (format nil "pinned to numeric address ~a~:[ — the code it named may have moved in this build~;; no function matching its fingerprint was found elsewhere~]"
                                                 addr fingerprint)))
@@ -490,26 +475,17 @@ evidence with what became of it and, where it drifted, the diff."
 (defun follow-relocation (addr relocation)
   "ADDR mapped through RELOCATION: the old function's name becomes the new
 name, its old start the new start; anything else is left where it was (NIL)."
-  (flet ((halves (text)
-           (let ((at (search " @ " text)))
-             (if at
-                 (values (subseq text 0 at)
-                         (let ((rest (subseq text (+ at 3))))
-                           (subseq rest 0 (or (search " @ " rest) (length rest)))))
-                 (values text nil)))))
-    (multiple-value-bind (from-name from-offset) (halves (jstring relocation "from"))
-      (multiple-value-bind (to-name to-offset) (halves (jstring relocation "to"))
-        (cond ((and (string= addr from-name) (plusp (length to-name))) to-name)
-              ((and (plusp (length from-offset)) (plusp (length to-offset))
-                    (string= (normalize-addr addr) (normalize-addr from-offset)))
-               to-offset))))))
+  (let ((to-name (jstring relocation "toName")))
+    (cond ((and (equal addr (jstring relocation "fromName")) (plusp (length to-name))) to-name)
+          ((string= (normalize-addr addr) (normalize-addr (jstring relocation "fromOffset")))
+           (jstring relocation "toOffset")))))
 
 (defun inherit-findings (manifest result &optional (session *session*))
   "Turn the carry into this build's starting point => the outcome object.
 For each finding of MANIFEST whose claim holds or relocated, every evidence
-row that reproduced is run again through rizin_command's own body and
-recorded as fresh evidence bound to THIS binary — never copied from the
-manifest — and the finding is recorded citing only that evidence, with where
+row that reproduced is read again as a rizin_command call and so recorded
+as fresh evidence bound to THIS binary — never copied from the manifest —
+and the finding is recorded citing only that evidence, with where
 it came from. A finding with nothing reproduced, or one that drifted or
 broke, goes on the agenda instead. A claim already live here is not
 inherited twice."
@@ -545,10 +521,9 @@ inherited twice."
              (let ((new-evidence
                      (loop for row in reproduced
                            for rerun = (jget row "rerun")
-                           for run = (run-rizin-command (jstring rerun "command") (jstring rerun "addr") session)
-                           unless (result-failed run)
-                             collect (record-evidence "rizin_command" rerun (result-text run)
-                                                      (result-details run) session))))
+                           for id = (nth-value 1 (observe-read (jstring rerun "command")
+                                                               (jstring rerun "addr") session))
+                           when id collect id)))
                (if (null new-evidence)
                    (put-on-agenda "unchecked")
                    ;; An address the finding was about follows its evidence's
@@ -610,22 +585,16 @@ as written, with what became of its evidence under it."
   "The text of the manifest at PATH — the user's own path — or a refusal
 that names it."
   (let ((file (session-file path)))
-    (flet ((refuse (why)
-             (fail "omp-re: carry: could not read manifest ~a: ~a" path why)))
-      (cond ((uiop:directory-exists-p (uiop:ensure-directory-pathname file))
-             (refuse "EISDIR: illegal operation on a directory, read"))
-            ((not (uiop:file-exists-p file))
-             (refuse (format nil "ENOENT: no such file or directory, open '~a'" path)))
-            (t
-             (handler-case
-                 (with-open-file (in file :external-format '(:utf-8 :replacement #\?))
-                   (let ((text (make-string (file-length in))))
-                     (subseq text 0 (read-sequence text in))))
-               (error (condition) (refuse condition))))))))
+    (or (and (not (uiop:directory-exists-p (uiop:ensure-directory-pathname file)))
+             (read-text-file file))
+        (fail "omp-re: carry: could not read manifest ~a: ~a" path
+              (cond ((uiop:directory-exists-p (uiop:ensure-directory-pathname file)) "it is a directory")
+                    ((not (uiop:file-exists-p file)) "no such file")
+                    (t "the file cannot be read"))))))
 
 (defun carry-manifest-file (manifest-path &key strict out inherit resolve (session *session*))
   "Carry the manifest at MANIFEST-PATH onto the open binary and say what
-became of its claims => (values TEXT FAILED-P RESULT REPLY), REPLY what
+became of its claims => (values TEXT FAILED-P REPLY), REPLY what
 else a /re line's answer carries (DEFINE-SLASH). A broken claim fails; under
 STRICT so does a relocated, drifted or unchecked one. OUT also writes the
 markdown carry report and, beside it, `<out>.json' with the whole result.
@@ -654,11 +623,13 @@ next prompt."
         ;; Findings recorded by a line, with no model turn to follow: a host
         ;; that writes a session lazily is asked to write this one now.
         (when (jlist outcome "inherited")
-          (ignore-errors
-           (ask-host :keep-session session
-                     (format nil "re carry ~a~@[ → ~a~]" (file-namestring manifest-path)
-                             (and (session-binary-path session)
-                                  (file-namestring (session-binary-path session)))))))
+          (handler-case
+              (ask-host :keep-session session
+                        (format nil "re carry ~a~@[ → ~a~]" (path-basename manifest-path)
+                                (and (session-binary-path session)
+                                     (path-basename (session-binary-path session)))))
+            (re-error (condition)
+              (notify :warning "omp-re: carry: the inherited findings are recorded, but ~a" condition))))
         (push (format nil "inherit: ~d finding(s) re-proven on this build and recorded, ~d need another look~[~:;, ~:*~d already present~]~:[~; (this manifest has no findings — record them with record_finding before /re report)~]"
                       (length (jlist outcome "inherited")) agenda already-present
                       (null (carry-manifest-findings manifest)))
@@ -685,15 +656,14 @@ next prompt."
                            (length (jlist result "inheritance" "agenda")))
                    lines))
             (resolving
-             (push (format nil "resolve: a headless run cannot start a model turn from a command — the agenda for ~d finding(s) follows; pass it to the model as the next prompt (e.g. omp -c -p \"<agenda>\")"
-                           (length (jlist result "inheritance" "agenda")))
+             (push (format nil "resolve: a headless run cannot start a model turn from a command — the agenda for ~d finding(s) follows; pass it to the model as the next prompt~@[ ~a~]"
+                           (length (jlist result "inheritance" "agenda")) (voice :next-prompt))
                    lines)))
       (let ((summary (join-lines (reverse lines))))
         (values (if (and agenda-prompt (not watched))
                     (format nil "~a~%~a" summary agenda-prompt)
                     summary)
                 (and failed t)
-                result
                 (append (list :level level)
                         (cond ((and resolving watched) (list :user-message agenda-prompt))
                               ((and agenda-prompt watched)
@@ -708,17 +678,17 @@ next prompt."
     (if (zerop (length path))
         (values "Usage: /re carry <report.md.manifest.json> [--against <binary>] [--inherit | --resolve] [--strict] [--out <path>]"
                 t)
-        ;; The open says something only when it put something back;
-        ;; otherwise the carry's own lines are the answer.
-        (let ((opened (and (getf flags :--against) (open-binary (getf flags :--against)))))
-          (multiple-value-bind (text failed result reply)
+        ;; The open says something only when the record had something to
+        ;; put back; otherwise the carry's own lines are the answer.
+        (multiple-value-bind (opened failures applied)
+            (if (getf flags :--against) (open-binary (getf flags :--against)) (values nil 0 0))
+          (multiple-value-bind (text failed reply)
               ;; --resolve implies --inherit: re-prove what holds, then hand over the rest.
               (carry-manifest-file path
                                    :strict (getf flags :--strict) :out (getf flags :--out)
                                    :inherit (or (getf flags :--inherit) (getf flags :--resolve))
                                    :resolve (getf flags :--resolve))
-            (declare (ignore result))
-            (values (if (and opened (search "Re-applied " opened))
+            (values (if (plusp (+ failures applied))
                         (format nil "~a~%~a" opened text)
                         text)
                     failed

@@ -9,8 +9,9 @@
 ;;;; canonical output and the hash of the bytes it was taken against. A
 ;;;; finding cites these by id, the report lists them, /re verify and /re
 ;;;; carry read them again. What a record is, how an id written by hand finds
-;;;; one, what a record says of its own verifiability and how its command is
-;;;; run again are all here, once.
+;;;; one, whether and how a record can be re-run (EVIDENCE-RERUN, which the
+;;;; report's status, /re verify and /re carry all ask) and how a read
+;;;; reaches rizin are all here, once.
 
 (in-package #:omp-re)
 
@@ -61,7 +62,6 @@ an id, a tool and a summary: nothing may rest on less."
                  (entries-of "re.evidence" session)))
 
 (defun find-evidence (id &optional (session *session*))
-  "The evidence record ID names => as FIND-BY-ID answers."
   (find-by-id (evidence-records session) id))
 
 (defun evidence-id-at (ea &optional (session *session*))
@@ -127,12 +127,21 @@ whose reproducibility fields are what /re verify later re-runs."
                   session)
     id))
 
+(defun evidence-place (record)
+  "RECORD in a few words, wherever a list names one: its tool and where it read."
+  (format nil "~a @ ~a" (jstring record "tool") (or (jstring record "ea") "?")))
+
 (defun cite-text (record)
   "RECORD as the start of a message about it: what /re cite drafts."
-  (format nil "Re: evidence ~a (~a @ ~a)~%~%~a" (shown-id (jstring record "id")) (jstring record "tool")
-          (or (jstring record "ea") "?") (jstring record "summary")))
+  (format nil "Re: evidence ~a (~a)~%~%~a" (shown-id (jstring record "id")) (evidence-place record)
+          (jstring record "summary")))
 
 ;;; --- what a record says of itself ----------------------------------------------------------------
+
+(defparameter +read-tool+ "rizin_command"
+  "The one tool whose results are evidence, and so the one whose records can
+be re-run: its arguments are the whole read and its hash is over rizin's raw
+output.")
 
 (defun evidence-command-lines (record)
   "RECORD's commands when they are a non-empty array of strings, as a list."
@@ -150,24 +159,58 @@ recorded arguments rendered as a line; else NIL."
           (command (format nil "~a~@[ @ ~a~]" command (and (plusp (length addr)) addr))))))
 
 (defun evidence-read (record)
-  "The read RECORD can be taken again by — a rizin_command record's
-{command, addr} — or NIL for any other tool's record or a malformed one."
-  (let ((command (jstring record "args" "command"))
-        (addr (jstring record "args" "addr")))
-    (and (equal (jstring record "tool") "rizin_command")
-         command
-         (obj "command" command "addr" (if (plusp (length addr)) addr :absent)))))
+  "The read RECORD — an evidence record, or a manifest's entry for one,
+which has the same members — was taken by, {command, addr?}; NIL for any
+other tool's record and for one that says no command. The recorded
+arguments are the read. A manifest written before it carried them has only
+the line that was sent, `<command> @ <addr>' as the policy gate joins them:
+that line is split back at its last ` @ ', leaving `@!<blocksize>', which
+is part of a command and not a seek, alone."
+  (when (equal (jstring record "tool") +read-tool+)
+    (let ((command (jstring record "args" "command"))
+          (addr (jstring record "args" "addr"))
+          (lines (evidence-command-lines record)))
+      (if command
+          (obj "command" command "addr" (if (plusp (length addr)) addr :absent))
+          (let ((line (trimmed (if (= 1 (length lines)) (first lines) (jstring record "command")))))
+            (when (plusp (length line))
+              (multiple-value-bind (matched parts)
+                  (ppcre:scan-to-strings (js-scanner "^(.*\\S)\\s+@\\s+([^!\\s]\\S*)$") line)
+                (if matched
+                    (obj "command" (aref parts 0) "addr" (aref parts 1))
+                    (obj "command" line)))))))))
+
+(defun evidence-rerun (record)
+  "Whether RECORD — a record, or a manifest's entry for one — can be re-run
+and its output compared => (values READ NIL), READ as EVIDENCE-READ answers
+it, or (values NIL WHY): :PROVENANCE-ONLY for a record that names its
+commands but is another tool's or carries no hash to compare with, :LEGACY
+for one from before either was recorded. Decided from the record alone,
+with nothing run. The one place this is decided."
+  (let ((read (evidence-read record)))
+    (cond ((and read (plusp (length (jstring record "reproHash")))) (values read nil))
+          ((evidence-command-lines record) (values nil :provenance-only))
+          (t (values nil :legacy)))))
+
+(defun rerun-refusal (why)
+  "What is said of a record EVIDENCE-RERUN answered WHY for."
+  (ecase why
+    (:provenance-only "provenance-only: no reproducible hash to compare (re-run by hand)")
+    (:legacy "legacy: no reproducible hash recorded")))
+
+(defparameter +unknown-evidence-status+ "unverifiable (legacy)"
+  "The status of a cited id no evidence record is behind, and of a record
+from before commands and hashes were recorded.")
 
 (defun evidence-status (record)
-  "What RECORD says of its own verifiability, from its fields alone and with
-nothing re-run. `provenance-only' and `unverifiable (legacy)' are said of
-records sessions written by earlier versions still hold: a tool that ran
-several commands, and one from before the reproducibility hash."
-  (cond ((and (plusp (length (jstring record "reproHash")))
-              (plusp (length (jstring record "binarySha256"))))
-         "reproducible")
-        ((evidence-command-lines record) "provenance-only")
-        (t "unverifiable (legacy)")))
+  "What a report says of RECORD's verifiability: a manifest's `status', read
+by /re carry and by manifests' other readers, so the three spellings are
+fixed. `reproducible' is a record that can be re-run and is bound to the
+bytes it was taken against."
+  (multiple-value-bind (read why) (evidence-rerun record)
+    (cond ((and read (plusp (length (jstring record "binarySha256")))) "reproducible")
+          ((or read (eq why :provenance-only)) "provenance-only")
+          (t +unknown-evidence-status+))))
 
 ;;; --- reading the binary, and reading again -------------------------------------------------------
 

@@ -33,7 +33,7 @@
 (defun recorded-commands (session-id)
   "The command of every evidence record of the session, oldest first."
   (mapcar (lambda (record) (gethash "command" (gethash "args" record)))
-          (re::evidence-records (re::find-session session-id))))
+          (omp-re::evidence-records (omp-re:find-session session-id))))
 
 ;;; --- the allow-list ------------------------------------------------------------------------
 
@@ -90,16 +90,16 @@ through — whatever became of the open after that."
 
          (let* ((triage (re:triage))
                 (ids (cited-ids triage))
-                (session (re::find-session id)))
+                (session (omp-re:find-session id)))
            (check "every part cites an evidence id, and every id cited is a real record of a rizin_command read"
                   (and (>= (length ids) 6)
                        (every (lambda (short)
-                                (let ((record (re::find-evidence short session)))
+                                (let ((record (omp-re::find-evidence short session)))
                                   (and record (equal "rizin_command" (gethash "tool" record))
                                        (= 64 (length (gethash "reproHash" record))))))
                               ids)))
            (check "each read a recipe makes is a rizin_command call in the audit log"
-                  (let ((log (re::read-text-file (re::state-path "audit" (format nil "~a.log" id)))))
+                  (let ((log (omp-re::read-text-file (omp-re::state-path "audit" (format nil "~a.log" id)))))
                     (and (has "\"command\":\"iSj entropy\"" log) (has "\"command\":\"iej\"" log))))
            (check "/re off stops a recipe at its first read, like any call"
                   (let ((before (length (recorded-commands id))))

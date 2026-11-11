@@ -9,10 +9,12 @@
 ;;;; back on every fresh process, in that order and before the annotations:
 ;;;; a map must be there for a pass to see it, a pass must have found the
 ;;;; functions a signature names, and an annotation may sit on any of them.
-;;;; None is undoable — reopening the binary is how one starts clean.
+;;;; /re undo does not take one back; a branch that never did it does not
+;;;; have it.
 ;;;;
-;;;; None of these tools is evidence: rizin_command is the one way to observe
-;;;; the binary on the record.
+;;;; No result here is recorded as evidence: rizin_command is the one way to
+;;;; observe the binary on the record. (Up to 0.10 the triage tools' results
+;;;; were; report.lisp still reads those records.)
 
 (in-package #:omp-re)
 
@@ -24,10 +26,19 @@
    (with-open-file (in (uiop:parse-native-namestring path) :element-type '(unsigned-byte 8))
      (file-length in))))
 
-(defun path-basename (path)
-  "The last component of the native PATH, as node's basename gives it."
-  (let ((slash (position-if (lambda (char) (find char "/\\")) path :from-end t)))
-    (if slash (subseq path (1+ slash)) path)))
+(defun written-file-size (rz tool command path what &key missing empty)
+  "Have RZ run COMMAND, which writes the file at PATH — WHAT names its kind
+=> the file's size in octets. rizin saying something, no file and an empty
+file are each TOOL's refusal, MISSING and EMPTY adding what to try."
+  (let ((stderr (trimmed (nth-value 1 (rz-run rz command)))))
+    (unless (blank-p stderr)
+      (fail "omp-re: ~a: ~a" tool stderr)))
+  (let ((size (file-octets path)))
+    (unless size
+      (fail "omp-re: ~a: rizin reported no error but wrote no ~a file at ~a~@[ ~a~]" tool what path missing))
+    (when (zerop size)
+      (fail "omp-re: ~a: the ~a file at ~a is empty~@[ ~a~]" tool what path empty))
+    size))
 
 (defun function-count (rz)
   "How many functions RZ knows of; 0 when it does not say."
@@ -52,25 +63,15 @@ the mapped region allows, not a file write mode."
   (format nil "o ~a ~a~@[ ~a~]" (rz-quote path) (validate-addr addr)
           (and perm (validate-map-perm perm))))
 
-(defun recorded-map-files (binary-path &optional (session *session*))
-  "The files mapped against BINARY-PATH, once per path and address, in the
-order first mapped => a list of (PATH ADDR PERM)."
-  (let ((maps '()))
-    (dolist (data (binary-entries "re.mapfile" binary-path session) (nreverse maps))
-      (let ((path (jget data "path")) (addr (jget data "addr")) (perm (jget data "perm")))
-        (when (and (stringp path) (stringp addr)
-                   (notany (lambda (seen) (and (string= path (first seen)) (string= addr (second seen))))
-                           maps))
-          (push (list path addr (and (stringp perm) perm)) maps))))))
-
-(defun replay-map-files (session rz binary-path)
-  "Map the recorded files into the fresh RZ, in order. A map that no longer
-applies — the file moved since it was recorded — is a failure line, never
-the end of the replay."
-  (loop for (path addr perm) in (recorded-map-files binary-path session)
-        append (handler-case (progn (rz-cmd rz (map-file-command path addr perm)) nil)
-                 (error (condition)
-                   (list (format nil "map ~a @ ~a: ~a" path addr condition))))))
+;; A file is mapped once at an address. One that no longer maps — it moved
+;; since it was recorded — is a failure line of the replay.
+(contribute-recorded "mapped files" :order 10 :noun "mapped file(s)" :entry "re.mapfile"
+  :key (lambda (data)
+         (and (jstring data "path") (jstring data "addr")
+              (list (jstring data "path") (jstring data "addr"))))
+  :apply (lambda (rz data)
+           (rz-cmd rz (map-file-command (jstring data "path") (jstring data "addr") (jstring data "perm"))))
+  :describe (lambda (data) (format nil "map ~a @ ~a" (jstring data "path") (jstring data "addr"))))
 
 (define-tool "map_file"
     (:label "Map File" :tier :exec
@@ -86,7 +87,6 @@ the end of the replay."
      ("perm" :string :doc "Map permissions as r/w/x characters (default rizin's own, usually r). The file stays read-only on disk regardless."))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (binary (require-binary))
          (addr (validate-addr (jstring arguments "addr")))
          (perm (and (jstring arguments "perm") (validate-map-perm (jstring arguments "perm"))))
          ;; Resolved to an absolute, readable file with the engine's own
@@ -98,15 +98,11 @@ the end of the replay."
         (fail "omp-re: map_file: ~a" stderr)))
     (unless (> (length (or (rz-cmdj rz "omlj") #())) before)
       (fail "omp-re: map_file: no map was added for ~a at ~a (unreadable or zero-length file?)" path addr))
-    ;; Recorded for replay once per path and address on this binary.
-    (unless (find-if (lambda (seen) (and (string= path (first seen)) (string= addr (second seen))))
-                     (recorded-map-files binary))
-      (append-entry "re.mapfile" (obj "path" path "addr" addr "perm" (or perm :absent))))
+    (record-once "mapped files" (obj "path" path "addr" addr "perm" (or perm :absent)))
     (let ((sample (trimmed (rz-cmd rz (format nil "p8 16 @ ~a" addr)))))
       (text-result (format nil "map_file: ~a @ ~a" path addr)
                    (format nil "mapped ~a at ~a~@[ (~a)~]; first bytes: ~a~%Re-applied automatically on resume/respawn; reopen the binary to drop it."
-                           path addr perm (if (blank-p sample) "(unreadable)" sample))
-                   :tool "map_file"))))
+                           path addr perm (if (blank-p sample) "(unreadable)" sample))))))
 
 ;;; --- analyze -------------------------------------------------------------------------------
 ;;; open_binary's `aaa' is the baseline and runs again on every fresh
@@ -133,24 +129,14 @@ it: the one map the tool and the replay share.")
 (defun analysis-pass-command (pass)
   (cdr (assoc pass +analysis-passes+ :test #'string=)))
 
-(defun recorded-analysis-passes (binary-path &optional (session *session*))
-  "The passes run against BINARY-PATH, each once, in the order first run."
-  (let ((passes '()))
-    (dolist (data (binary-entries "re.analysis" binary-path session) (nreverse passes))
-      (let ((pass (jget data "pass")))
-        (when (and (stringp pass) (not (member pass passes :test #'string=)))
-          (push pass passes))))))
-
-(defun replay-analysis-passes (session rz binary-path)
-  "Re-run the recorded passes on the freshly analyzed RZ, in order. An
-unknown or failing pass is a failure line, never the end of the replay."
-  (loop for pass in (recorded-analysis-passes binary-path session)
-        for command = (analysis-pass-command pass)
-        append (if (null command)
-                   (list (format nil "analysis pass ~a: unknown" pass))
-                   (handler-case (progn (rz-cmd rz command :seconds (analysis-seconds)) nil)
-                     (error (condition)
-                       (list (format nil "analysis pass ~a: ~a" pass condition)))))))
+;; A pass is recorded once however often it ran. One this engine does not
+;; know — recorded by a later version — is a failure line of the replay.
+(contribute-recorded "analysis passes" :order 20 :noun "analysis pass(es)" :entry "re.analysis"
+  :key (lambda (data) (jstring data "pass"))
+  :apply (lambda (rz data)
+           (rz-cmd rz (or (analysis-pass-command (jstring data "pass")) (fail "unknown"))
+                   :seconds (analysis-seconds)))
+  :describe (lambda (data) (format nil "analysis pass ~a" (jstring data "pass"))))
 
 (define-tool "analyze"
     (:label "Analyze" :tier :exec
@@ -170,7 +156,6 @@ unknown or failing pass is a failure line, never the end of the replay."
               "emulate_functions: analyze references by emulating every function with ESIL (thorough but slow)."))))
     (arguments)
   (let* ((rz (ensure-rizin))
-         (binary (require-binary))
          (pass (jstring arguments "pass"))
          (command (analysis-pass-command pass))
          (before (function-count rz)))
@@ -184,17 +169,16 @@ unknown or failing pass is a failure line, never the end of the replay."
              (delta (- after before)))
         ;; Recorded for replay only when the pass did real work: one that
         ;; errored or found nothing has nothing worth re-running.
-        (when (and (not errored) (or (/= delta 0) (not (blank-p out)))
-                   (not (member pass (recorded-analysis-passes binary) :test #'string=)))
-          (append-entry "re.analysis" (obj "pass" pass)))
+        (if (and (not errored) (or (/= delta 0) (not (blank-p out))))
+            (record-once "analysis passes" (obj "pass" pass))
+            (analysis-changed))
         (let ((result (text-result
                        (format nil "analyze: ~a" pass)
                        (if errored
                            (format nil "~a: ~a" command err)
                            (format nil "~a: functions ~d -> ~d~a.~a" command before after
                                    (if (/= delta 0) (format nil " (+~d)" delta) " (no change)")
-                                   (if (blank-p out) "" (format nil "~%~a" out))))
-                       :tool "analyze")))
+                                   (if (blank-p out) "" (format nil "~%~a" out)))))))
           (if errored (as-failure result) result))))))
 
 ;;; --- FLIRT signatures ----------------------------------------------------------------------
@@ -210,8 +194,14 @@ unknown or failing pass is a failure line, never the end of the replay."
     (fail "omp-re: apply_signatures: empty path"))
   path)
 
+(defun resolve-signature-file (path)
+  "PATH, as the model wrote it, resolved like every file the engine is asked
+to read: against the session's directory, and held to the operator's
+allow-list."
+  (or (resolve-readable-file (validate-signature-path path))
+      (fail "omp-re: apply_signatures: no such signature file: ~a" path)))
+
 (defun signature-apply-command (path)
-  "The rizin line that applies one FLIRT file."
   (format nil "Fs ~a" (rz-quote (validate-signature-path path))))
 
 (defun parse-applied-count (output)
@@ -219,19 +209,10 @@ unknown or failing pass is a failure line, never the end of the replay."
   (multiple-value-bind (match groups) (ppcre:scan-to-strings "(?i)Found\\s+(\\d+)\\s+FLIRT signatures?" output)
     (and match (parse-integer (aref groups 0)))))
 
-(defun recorded-signatures (binary-path &optional (session *session*))
-  "The custom signature files applied against BINARY-PATH, in order."
-  (loop for data in (binary-entries "re.signature" binary-path session)
-        for path = (jget data "path")
-        when (stringp path) collect path))
-
-(defun replay-signatures (session rz binary-path)
-  "Apply the recorded signature files to the freshly analyzed RZ, in order.
-A file that no longer applies is a failure line, never the end of the replay."
-  (loop for path in (recorded-signatures binary-path session)
-        append (handler-case (progn (rz-cmd rz (signature-apply-command path)) nil)
-                 (error (condition)
-                   (list (format nil "signature ~a: ~a" path condition))))))
+(contribute-recorded "signatures" :order 30 :noun "signature file(s)" :entry "re.signature"
+  :key (lambda (data) (jstring data "path"))
+  :apply (lambda (rz data) (rz-cmd rz (signature-apply-command (jstring data "path"))))
+  :describe (lambda (data) (format nil "signature ~a" (jstring data "path"))))
 
 (define-tool "apply_signatures"
     (:label "Apply Signatures" :tier :exec
@@ -246,25 +227,24 @@ A file that no longer applies is a failure line, never the end of the replay."
       :doc "sigdb: re-apply rizin's built-in signature database. file: apply a custom FLIRT .sig/.pat file (path required).")
      ("path" :string :doc "Path to a .sig/.pat file, required when source is 'file'."))
     (arguments)
-  (let ((rz (ensure-rizin))
-        (binary (require-binary)))
+  (let ((rz (ensure-rizin)))
     (if (string= "sigdb" (jstring arguments "source"))
         (let ((before (function-count rz)))
           (rz-cmd rz "Fa")
+          (analysis-changed)
           (text-result "apply_signatures: sigdb"
                        (format nil "Re-applied the built-in signature database. Functions: ~d before, ~d after."
                                before (function-count rz))))
         (progn
           (unless (jstring arguments "path")
             (fail "omp-re: apply_signatures: source 'file' needs a path"))
-          (let* ((path (validate-signature-path (jstring arguments "path")))
+          (let* ((path (resolve-signature-file (jstring arguments "path")))
                  (out (trimmed (rz-cmd rz (signature-apply-command path))))
                  (count (parse-applied-count out)))
             ;; Recorded for replay only when it applied something: a zero-match
             ;; or failed application has nothing to reproduce.
-            (when (and count (plusp count)
-                       (not (member path (recorded-signatures binary) :test #'string=)))
-              (append-entry "re.signature" (obj "path" path)))
+            (when (and count (plusp count))
+              (record-once "signatures" (obj "path" path)))
             (text-result (format nil "apply_signatures: ~a" path)
                          (cond (count (format nil "Applied ~d FLIRT signature(s) from ~a." count path))
                                ((blank-p out) "(applied)")
@@ -283,23 +263,17 @@ A file that no longer applies is a failure line, never the end of the replay."
          (name (if (js-scan "(?i)\\.(pat|sig)$" requested) requested (format nil "~a.pat" requested)))
          ;; The name is held to a bare file name before rizin is asked anything.
          (path (rizin-output-path name)))
-    (let ((stderr (trimmed (nth-value 1 (rz-run rz (format nil "Fc ~a" (rizin-path-arg path)))))))
-      (unless (blank-p stderr)
-        (fail "omp-re: create_signature: ~a" stderr)))
-    (let ((size (file-octets path)))
-      (unless size
-        (fail "omp-re: create_signature: rizin reported no error but wrote no signature file at ~a (are there analyzed functions? run analyze/open_binary first)"
-              path))
-      (when (zerop size)
-        (fail "omp-re: create_signature: the signature file at ~a is empty (no functions to signature)" path))
+    (let ((size (written-file-size rz "create_signature" (format nil "Fc ~a" (rizin-path-arg path)) path
+                                   "signature"
+                                   :missing "(are there analyzed functions? run analyze/open_binary first)"
+                                   :empty "(no functions to signature)")))
       ;; Read back (`Fd' dumps a file's signatures): that it parses says it is
       ;; a FLIRT file, and its lines are the count.
       (let* ((dumped (trimmed (rz-cmd rz (format nil "Fd ~a" (rizin-path-arg path)))))
              (count (count-if-not #'blank-p (split-lines dumped))))
         (text-result (format nil "create_signature: ~a" name)
                      (format nil "wrote ~d function signature(s) to ~a (~d bytes)~%Apply it to another sample with apply_signatures (source 'file', path ~a)."
-                             count path size path)
-                     :tool "create_signature")))))
+                             count path size path))))))
 
 ;;; --- export_project ------------------------------------------------------------------------
 ;;; Export only. Loading a project would replace the session's analysis with
@@ -317,19 +291,12 @@ A file that no longer applies is a failure line, never the end of the replay."
          (binary (require-binary))
          (requested (or (jstring arguments "file") (format nil "~a.rzdb" (path-basename binary))))
          (name (if (js-scan "(?i)\\.rzdb$" requested) requested (format nil "~a.rzdb" requested)))
-         (path (rizin-output-path name)))
-    (let ((stderr (trimmed (nth-value 1 (rz-run rz (format nil "Ps ~a" (rizin-path-arg path)))))))
-      (unless (blank-p stderr)
-        (fail "omp-re: export_project: ~a" stderr)))
-    (let ((size (file-octets path)))
-      (unless size
-        (fail "omp-re: export_project: rizin reported no error but wrote no project file at ~a" path))
-      (when (zerop size)
-        (fail "omp-re: export_project: the project file at ~a is empty" path))
-      (text-result (format nil "export_project: ~a" name)
-                   (format nil "wrote the analysis to ~a (~d bytes)~%Open it in rizin or Cutter with: Po ~a"
-                           path size path)
-                   :tool "export_project"))))
+         (path (rizin-output-path name))
+         (size (written-file-size rz "export_project" (format nil "Ps ~a" (rizin-path-arg path)) path
+                                  "project")))
+    (text-result (format nil "export_project: ~a" name)
+                 (format nil "wrote the analysis to ~a (~d bytes)~%Open it in rizin or Cutter with: Po ~a"
+                         path size path))))
 
 ;;; --- rizin_cli -----------------------------------------------------------------------------
 ;;; The rz-* programs are separate executables run by argv, never through a
@@ -348,7 +315,6 @@ A file that no longer applies is a failure line, never the end of the replay."
   tool summary
   target                                ; :open — runs against the open binary; :args — the model names the files
   (denied-letters "")                   ; short-flag letters refused anywhere in a -xyz cluster
-  (denied-tokens '())                   ; whole tokens refused (long options)
   (denied-repeated-letters "")          ; safe once, a network fetch when given twice
   (denied-flag-values '()))             ; ((LETTER VALUE ...) ...): a flag's value refused in every spelling
 
@@ -413,10 +379,6 @@ carries a refused capability through."
     (dolist (token arguments)
       (when (ends-pipe-line-p token)
         (return-from check-rz-cli "omp-re: rizin_cli: an argument contains a line break or NUL"))
-      (when (member token (rz-cli-denied-tokens definition) :test #'string=)
-        (return-from check-rz-cli
-          (format nil "omp-re: rizin_cli: ~a ~a is not allowed here (it writes, runs code, or fetches over the network)"
-                  tool token)))
       (when (short-cluster-p token)
         (loop for char across (subseq token 1)
               do (when (find char (rz-cli-denied-letters definition))
@@ -481,17 +443,15 @@ minimal build may lack some. Asked each time, so one installed later is seen."
            (header (trimmed (format nil "~a ~{~a~^ ~}" name argv))))
       (multiple-value-bind (out err)
           (run-program (cons (resolve-rizin-tool name) argv) :seconds +rz-cli-seconds+)
-        ;; On Windows these end lines with CRLF; one line ending is what is read.
-        (let ((stdout (string-right-trim '(#\Newline) (replace-all out (format nil "~c~c" #\Return #\Newline)
-                                                                    (string #\Newline)))))
+        (let ((stdout (string-right-trim '(#\Newline) (unix-lines out))))
           (if (string= stdout "")
               ;; Many of these say "no match" or "no difference" with a
               ;; non-zero exit and nothing printed; only stderr is an error.
-              (let ((said (trimmed (replace-all err (format nil "~c~c" #\Return #\Newline) (string #\Newline)))))
+              (let ((said (trimmed (unix-lines err))))
                 (if (blank-p said)
                     (plain-result (format nil "~a~%(no output)" header))
                     (failed-result (format nil "~a~%(no output; ~a said:)~%~a" header name said))))
-              (text-result header stdout :tool "rizin_cli")))))))
+              (text-result header stdout)))))))
 
 ;;; --- external triage -----------------------------------------------------------------------
 ;;; capa, floss, Detect It Easy and yara, each run by argv against the open
@@ -529,9 +489,8 @@ minimal build may lack some. Asked each time, so one installed later is seen."
                (when present (setf (gethash key found) value))))))))
 
 (defun die-findings (parsed)
-  "The per-scan detections."
   (let ((scans (and (hash-table-p parsed) (gethash "scans" parsed))))
-    (and (vectorp scans) (not (stringp scans)) scans)))
+    (and (json-array-p scans) scans)))
 
 (defun triage-failed-p (out status)
   "Whether a scanner never ran at all. Its exit code alone is advisory — capa
@@ -544,8 +503,7 @@ non-zero exit must not read as \"0 findings\"."
 
 (defun run-plain-triage (name program seconds finder)
   "Run PROGRAM -j on the open binary and answer what FINDER takes from its JSON."
-  (let ((file (resolve-existing-file "file" (require-binary)))
-        (tool (format nil "triage_~a" name)))
+  (let ((file (resolve-existing-file "file" (require-binary))))
     (multiple-value-bind (out err status) (run-program (list program "-j" file) :seconds seconds)
       (when (triage-failed-p out status)
         (fail "omp-re: ~a failed (exit ~a): ~a" name (triage-exit status)
@@ -554,13 +512,13 @@ non-zero exit must not read as \"0 findings\"."
           (handler-case (values (json-decode out) t)
             (error () (values nil nil)))
         (if (not decoded)
-            (text-result (format nil "~a: output was not valid JSON (schema not recognized)" name) out :tool tool)
+            (text-result (format nil "~a: output was not valid JSON (schema not recognized)" name) out)
             (let ((findings (funcall finder parsed)))
               (if (null findings)
-                  (text-result (format nil "~a: expected JSON shape not found" name) out :tool tool)
+                  (text-result (format nil "~a: expected JSON shape not found" name) out)
                   (json-result (format nil "~a: ~d finding group(s)" name
                                        (if (hash-table-p findings) (hash-table-count findings) (length findings)))
-                               findings :tool tool))))))))
+                               findings))))))))
 
 (define-tool "triage_capa"
     (:label "Triage: capa" :tier :exec
@@ -622,7 +580,7 @@ array of objects. A line with no space (a warning) is skipped, not misread."
         (fail "omp-re: yara failed (exit ~a): ~a" (triage-exit status)
               (if (blank-p err) "no output" (trimmed err))))
       (let ((matches (parse-yara-matches out)))
-        (json-result (format nil "yara: ~d rule(s) matched" (length matches)) matches :tool "triage_yara")))))
+        (json-result (format nil "yara: ~d rule(s) matched" (length matches)) matches)))))
 
 ;;; --- rizin_emulate -------------------------------------------------------------------------
 ;;; rizin's RzIL VM (the aez family; ESIL's ae* is deprecated upstream). The
@@ -644,14 +602,10 @@ refuses anything else anyway, and refusing here keeps the message ours."
   value)
 
 (defun validate-emulate-hex (value)
-  "VALUE as the lowercase hex `wx' wants: an even number of digits, an
-optional 0x taken off."
-  (let ((hex (if (js-scan "^0[xX]" value) (subseq value 2) value)))
-    (unless (and (plusp (length hex)) (evenp (length hex)) (js-scan "^[0-9a-fA-F]+$" hex))
-      (fail "omp-re: emulate: bad bytes ~a — use an even number of hex digits, e.g. 41424344" (js-string value)))
-    (string-downcase hex)))
+  (or (hex-octets value)
+      (fail "omp-re: emulate: bad bytes ~a — use an even number of hex digits, e.g. 41424344" (js-string value))))
 
-(defun emulate-approval-reason ()
+(defparameter +emulate-approval-reason+
   '(:cases
     ((("action" "init")) "Set up the RzIL emulation state (no OS process runs — the code is interpreted inside rizin).")
     ((("action" "set_var")) "Set up the RzIL emulation state (no OS process runs — the code is interpreted inside rizin).")
@@ -663,7 +617,7 @@ optional 0x taken off."
 
 (define-tool "rizin_emulate"
     (:label "emulator" :tier :exec
-     :reason (emulate-approval-reason)
+     :reason +emulate-approval-reason+
      :render '(:subject "action")
      :description "Emulate code with rizin's RzIL VM: init at an address, step instructions and watch register/flag changes, step until an address, read and set VM variables, and seed the VM's memory (set_mem) so a routine can read an input buffer. No process runs — the target's logic is interpreted inside rizin, and the VM state lives in the analysis session (init resets registers; set_mem writes an in-memory overlay that persists and never touches the file on disk). External calls and syscalls are not emulated; keep runs small (a decryptor loop, an argument computation). To execute the real process instead, use the debugger tool.")
     (("action" :string :required t :enum '("init" "step" "step_until" "vars" "set_var" "set_mem")
@@ -684,7 +638,7 @@ optional 0x taken off."
         (action (jstring arguments "action"))
         (addr (jstring arguments "addr")))
     (flet ((vm-state () (trimmed (rz-cmd rz "aezvj")))
-           (answer (header body) (text-result header body :tool "rizin_emulate")))
+           (answer (header body) (text-result header body)))
       (cond
         ((string= action "init")
          (unless addr (fail "omp-re: emulate init needs addr"))
@@ -738,12 +692,3 @@ optional 0x taken off."
                    (answer (format nil "emulate: set_mem ~d byte(s) @ ~a" size ea)
                            (if (blank-p back) "(wrote; no readback)" back)))))))
         (t (fail "omp-re: emulate: unknown action ~a" (js-string action)))))))
-
-;;; --- putting the record back on a fresh process ----------------------------------------------
-;;; Mapped files bring address space, analysis passes find functions in it,
-;;; signatures name the functions that now exist; the annotations (order 60)
-;;; are the analyst's edits on top of all three.
-
-(contribute "mapped files" :order 10 :noun "mapped file(s)" :replay #'replay-map-files)
-(contribute "analysis passes" :order 20 :noun "analysis pass(es)" :replay #'replay-analysis-passes)
-(contribute "signatures" :order 30 :noun "signature file(s)" :replay #'replay-signatures)

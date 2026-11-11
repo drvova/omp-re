@@ -3,9 +3,12 @@
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
 ;;;; CALL-TOOL is the one way a tool runs, whoever asks — a verb in eval, a
-;;;; host that registered the tool, a recipe: the `/re off' gate, a line in
-;;;; the audit log, the body, and for a result that observes the binary an
-;;;; evidence record whose id is appended to what the model reads.
+;;;; host that registered the tool, a recipe: the `/re off' gate, then
+;;;; RUN-TOOL — a line in the audit log, the body, and for a result that
+;;;; observes the binary an evidence record whose id is appended to what the
+;;;; model reads. A tool or a /re line that makes reads of its own
+;;;; (adopt_finding, /re carry --inherit) makes each through RUN-TOOL, so it
+;;;; is audited and recorded like any other and gated once, where it was asked.
 
 (in-package #:omp-re)
 
@@ -66,14 +69,17 @@ where the host keeps artifacts, else the file's path."
        (ask-host :read-artifact session id)
        (read-text-file (artifact-path id session)))))
 
-(defun build-result (lead body &key ea tool commands repro-hash canonical-excerpt shift-hash)
+(defvar *running-tool* nil "The name of the tool whose body is running.")
+
+(defun build-result (lead body &key ea commands repro-hash canonical-excerpt shift-hash)
   "LEAD then BODY, cut to what a context can take; the whole text is kept as
-an artifact and the result names the file that holds it."
+an artifact, labelled with the running tool's name, and the result says
+where."
   (multiple-value-bind (kept truncated shown-lines total-lines shown-octets total-octets)
       (truncate-head body)
     (multiple-value-bind (artifact where)
         (and truncated *session*
-             (save-artifact (concatenate 'string lead body) (or tool "omp-re")))
+             (save-artifact (concatenate 'string lead body) (or *running-tool* "omp-re")))
       (make-result
        :text (concatenate
               'string lead kept
@@ -200,7 +206,6 @@ a parameter or a /re subcommand: lowercase, words joined by underscores. So
       schema)))
 
 (defun tool-schema (tool)
-  "TOOL's parameters as the JSON Schema a provider is shown."
   (members-schema (tool-parameters tool)))
 
 (defun check-members (parameters arguments path)
@@ -340,11 +345,10 @@ WHEN all hold is the sentence."
 ;;; --- the audit log -------------------------------------------------------------------------
 
 (defun append-audit-line (session call-id tool &key (arguments nil arguments-p) (approved nil approved-p) reason)
-  "Append one line to the session's audit log, signed when
-OMPRE_AUDIT_HMAC_KEY is set: for a call, its ARGUMENTS; for what a host's
-approval gate decided of one, APPROVED and the REASON given. Never signals:
-the log is a mirror for the operator, and must not abort the call it
-records."
+  "Append one line to the session's audit log, signed when the signing key
+is set: for a call, its ARGUMENTS; for what a host's approval gate decided
+of one, APPROVED and the REASON given. Never signals: the log is a mirror
+for the operator, and must not abort the call it records."
   (handler-case
       (let* ((base (obj "ts" (iso-now) "sessionId" (session-id session)
                         "toolCallId" call-id "tool" tool
@@ -359,9 +363,10 @@ records."
                      canonical (json-encode base)))
               ((not (session-audit-warned session))
                (setf (session-audit-warned session) t)
-               ;; Said once a session, and only on the log: the status line
-               ;; carries it for anyone who asks, and it is not a fault.
-               (warn "omp-re: OMPRE_AUDIT_HMAC_KEY not configured — audit log entries will not be signed.")))
+               ;; Not a fault, so the operator is told once a session and
+               ;; quietly; /re status says it to anyone who asks.
+               (notify :info "omp-re: ~a not configured — audit log entries will not be signed."
+                       (setting-variable :audit-hmac-key))))
         (append-text-file (state-path "audit" (format nil "~a.log" (session-id session)))
                           (format nil "~a~%" canonical)))
     (error (condition)
@@ -373,55 +378,61 @@ records."
             (list (format nil "audit log signing: ~a"
                           (if (setting-value :audit-hmac-key)
                               "HMAC-SHA256"
-                              "unsigned (set OMPRE_AUDIT_HMAC_KEY)")))))
+                              (format nil "unsigned (set ~a)" (setting-variable :audit-hmac-key)))))))
 
 (defparameter +tools-off+
   "omp-re: RE tools are off for this session — the user can re-enable them with /re on")
 
 ;;; --- one call --------------------------------------------------------------------------------
 
+(defun run-tool (name arguments &key call-id gated (session *session*))
+  "The tool NAME run with the JSON object ARGUMENTS in SESSION, which the
+caller holds => (values RESULT RAW EVIDENCE-ID): the arguments held to the
+schema, a line in the audit log, the body, and for a result that observes
+the binary its evidence record. GATED is for a call the model made: `/re
+off' refuses it. CALL-ID is the host's own id for the call, where it has
+one: the audit line carries it, so what the host's approval gate decided of
+the call can be paired with it."
+  (let* ((tool (or (find-tool name)
+                   (fail "omp-re: no tool named ~a~a" (js-string name) (voice :list-tools))))
+         (arguments (check-arguments tool (or arguments (obj)))))
+    (when (and gated (session-tools-off session))
+      (fail +tools-off+))
+    (append-audit-line session
+                       (or call-id
+                           (format nil "~a-~d" (file-safe (session-id session))
+                                   (incf (session-calls session))))
+                       name :arguments arguments)
+    (multiple-value-bind (result raw) (let ((*running-tool* name))
+                                        (funcall (tool-function tool) arguments))
+      (let ((id (and (tool-evidence tool) (result-observation result) (not (result-failed result))
+                     ;; A blob-store failure degrades to "no evidence
+                     ;; recorded", it does not fail the call.
+                     (handler-case (record-evidence name arguments (result-text result)
+                                                    (result-details result) session)
+                       (error (condition)
+                         (notify :warning "omp-re: evidence recording failed: ~a" condition)
+                         nil)))))
+        (when id (setf (gethash "evidenceId" (result-details result)) id))
+        (values result raw id)))))
+
 (defun call-tool (session name arguments &key call-id)
   "Run the tool NAME with the JSON object ARGUMENTS in SESSION — a session
 or the id of one => (values TEXT FAILED RAW EVIDENCE-ID ARTIFACT-PATH
-DETAILS). TEXT
-is what the model reads: for a failure, what went wrong in words it can act
-on. RAW is the tool's second value when it has one — the whole of what rizin
-printed, where TEXT may be cut. EVIDENCE-ID is the record this call left,
-whose tag TEXT ends with; ARTIFACT-PATH where all of a TEXT that was cut is
-kept; DETAILS the result's own details object. CALL-ID is the host's own id
-for the call, where it has one: the audit line carries it, so what the
-host's approval gate decided of the call can be paired with it. This is the
-whole pipeline — the `/re off' gate, the audit line, the body, the evidence
-record — so code that composes reads makes each of them a tool call in its
-own right, not a way around one."
+DETAILS). TEXT is what the model reads: for a failure, what went wrong in
+words it can act on. RAW is the tool's second value when it has one — the
+whole of what rizin printed, where TEXT may be cut. EVIDENCE-ID is the
+record this call left, whose tag TEXT ends with; ARTIFACT-PATH where all of
+a TEXT that was cut is kept; DETAILS the result's own details object."
   (in-session (session name)
-    (let* ((session *session*)
-           (tool (or (find-tool name)
-                     (fail "omp-re: no tool named ~a~a" (js-string name) (voice :list-tools))))
-           (arguments (check-arguments tool (or arguments (obj)))))
-      (when (session-tools-off session)
-        (fail +tools-off+))
-      (append-audit-line session
-                         (or call-id
-                             (format nil "~a-~d" (file-safe (session-id session))
-                                     (incf (session-calls session))))
-                         name :arguments arguments)
-      (multiple-value-bind (result raw) (funcall (tool-function tool) arguments)
-        (let* ((text (result-text result))
-               (details (result-details result))
-               ;; A blob-store failure degrades to "no evidence recorded", it
-               ;; does not fail the call.
-               (id (and (tool-evidence tool) (result-observation result) (not (result-failed result))
-                        (handler-case (record-evidence name arguments text details)
-                          (error (condition)
-                            (notify :warning "omp-re: evidence recording failed: ~a" condition)
-                            nil)))))
-          (when id (setf (gethash "evidenceId" details) id))
-          ;; The id rides on its own trailing line, so a *j result's body
-          ;; stays valid JSON between the header and the tag.
-          (values (if id (format nil "~a~%~a" text (evidence-tag id)) text)
-                  (result-failed result)
-                  raw
-                  id
-                  (jstring details "artifactPath")
-                  details))))))
+    (multiple-value-bind (result raw id) (run-tool name arguments :call-id call-id :gated t)
+      (let ((text (result-text result))
+            (details (result-details result)))
+        ;; The id rides on its own trailing line, so a *j result's body
+        ;; stays valid JSON between the header and the tag.
+        (values (if id (format nil "~a~%~a" text (evidence-tag id)) text)
+                (result-failed result)
+                raw
+                id
+                (jstring details "artifactPath")
+                details)))))

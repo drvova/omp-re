@@ -15,7 +15,7 @@
 ;;;; waiting on each other. Calls into one session still take their turn:
 ;;;; the session's lock is the engine's.
 
-(in-package #:omp-re)
+(in-package #:omp-re-stdio)
 
 (defparameter +protocol+ 1)
 
@@ -52,7 +52,6 @@ id for the question: (SEMAPHORE . ANSWER).")
 (defvar *closing* nil "True once the pipe has ended: nobody is left to answer.")
 
 (defun tell-omp (method &rest members)
-  "Say METHOD to omp, expecting no answer."
   (send (obj "method" method "params" (apply #'obj members))))
 
 (defun ask-omp (method &rest members)
@@ -83,13 +82,16 @@ started once and omp's variables can change after.")
 (defvar *voice-overrides* '())
 
 (defparameter +audit-seconds+ 30
-  "How long a support audit waits for omp's side turn.")
+  "How long omp is given for a support audit's side turn.")
+
+(defparameter +completed-evidence+ 200
+  "How many of the newest evidence ids omp is sent to complete one from.")
 
 (defun asking-session-id ()
   (if *request* (request-session-id *request*) +default-session+))
 
 (defvar *record-lock* (sb-thread:make-mutex :name "omp-re record")
-  "Held from asking omp about a record until the answer is in the engine's
+  "Held from asking omp about a record until the answer is the engine's
 copy. A status band reads a session beside the call that holds it; without
 this the two would each add what omp reported new.")
 
@@ -97,20 +99,24 @@ this the two would each add what omp reported new.")
   "SESSION's record as omp's session branch holds it. omp is asked once per
 request, and only for what the engine has not seen: the entries after the
 last one it holds, or all of them when the branch is no longer the one
-they were read from. What the engine appends meanwhile it adds itself."
+they were read from. What the engine appends meanwhile it adds itself.
+
+The vector answered is never changed afterwards: a longer record is a new
+vector. So whoever reads it beside the call that appends — a status band,
+an immediate /re line — walks a record that holds still, and the engine
+sees by identity when there is something new (the port's :ENTRIES)."
   (sb-thread:with-recursive-lock (*record-lock*)
-    (let ((held (or (session-held session "omp record")
-                    (setf (session-held session "omp record")
-                          (make-array 0 :adjustable t :fill-pointer 0)))))
+    (let ((held (or (session-held session "omp record") (vector))))
       (unless (and *request* (member session (request-seen *request*)))
         (let* ((last (and (plusp (length held)) (jstring (aref held (1- (length held))) "id")))
                (answer (ask-omp "entries" "session" (session-id session)
-                                "after" (or last :null) "count" (length held))))
-          (when (json-array-p (jget answer "all"))
-            (setf held (make-array 0 :adjustable t :fill-pointer 0)
-                  (session-held session "omp record") held))
-          (loop for entry across (or (jget answer "all") (jget answer "append") #())
-                do (vector-push-extend entry held)))
+                                "after" (or last :null) "count" (length held)))
+               (all (jget answer "all"))
+               (more (jget answer "append")))
+          (cond ((json-array-p all) (setf held (copy-seq all)))
+                ((and (json-array-p more) (plusp (length more)))
+                 (setf held (concatenate 'simple-vector held more))))
+          (setf (session-held session "omp record") held))
         (when *request* (push session (request-seen *request*))))
       held)))
 
@@ -119,20 +125,21 @@ they were read from. What the engine appends meanwhile it adds itself."
     (let* ((held (host-record session))
            (answer (ask-omp "append" "session" (session-id session) "type" type "data" data))
            (entry (obj "type" "custom" "id" (jstring answer "id") "customType" type "data" data)))
-      (vector-push-extend entry held)
+      (setf (session-held session "omp record") (concatenate 'simple-vector held (vector entry)))
       entry)))
 
 (defun install-omp-host ()
   (install-host
+   ;; omp has no section for the engine: its operator's settings are the
+   ;; environment. The one thing it says itself is where state is kept.
    :setting (lambda (name)
-              (case name
-                (:state-dir (values *state-directory* (and *state-directory* t)))
-                (:audit-seconds (values +audit-seconds+ t))
-                (t (values nil nil))))
+              (if (eq name :state-dir)
+                  (values *state-directory* (and *state-directory* t))
+                  (values nil nil)))
    :environment (lambda (name) (values (gethash name *environment*)))
    :voice (lambda (key)
             (cdr (or (assoc key *voice-overrides*) (assoc key +omp-voice+))))
-   :turn (lambda () (list :session-id (asking-session-id) :turn-id nil))
+   :turn (lambda () (list :session-id (asking-session-id)))
    :directory (lambda (session-id)
                 (and *request* (equal session-id (request-session-id *request*))
                      (request-directory *request*)))
@@ -143,7 +150,7 @@ they were read from. What the engine appends meanwhile it adds itself."
                                 "level" (string-downcase level)))
    :judge (lambda (prompt)
             (let ((answer (ask-omp "judge" "session" (asking-session-id) "prompt" prompt
-                                           "seconds" (setting-value :audit-seconds))))
+                                           "seconds" +audit-seconds+)))
               (or (jstring answer "text")
                   (values nil (jstring answer "reason")))))
    :progress (lambda (text)
@@ -174,17 +181,10 @@ they were read from. What the engine appends meanwhile it adds itself."
   "What omp's own surface shows of the session between calls: the status
 band's facts, and the evidence ids its /re completion offers, newest first.
 Sent with every answer that may have changed them, so drawing either never
-costs a round trip."
+costs a round trip. Neither waits for a call that holds the session nor
+asks rizin anything."
   (obj "facts" (or (engine-facts session-id) :null)
-       "evidence" (multiple-value-bind (rows failed)
-                      (in-session (session-id "listing evidence" :wait nil)
-                        (map 'simple-vector
-                             (lambda (record)
-                               (vector (jstring record "id")
-                                       (format nil "~a @ ~a" (jstring record "tool")
-                                               (or (jstring record "ea") "?"))))
-                             (last (reverse (evidence-records)) 200)))
-                    (if failed (vector) rows))))
+       "evidence" (engine-evidence session-id +completed-evidence+)))
 
 (defun with-state (answer session-id)
   (setf (gethash "state" answer) (session-state session-id))
@@ -193,7 +193,9 @@ costs a round trip."
 (defun restore-in-background (request &key open)
   "Start restoring the request's session on a thread of its own and return
 once that thread holds the session: a call that arrives next waits its turn
-behind the analysis, it does not race it."
+behind the analysis, it does not race it. While another call holds the
+session this waits with the restore, for as long as omp waits for the
+answer."
   (let ((held (sb-thread:make-semaphore))
         (session-id (request-session-id request)))
     (sb-thread:make-thread
@@ -203,10 +205,11 @@ behind the analysis, it does not race it."
                                       :has-ui (request-has-ui request))))
          (let ((answer nil))
            (unwind-protect
-                (in-session (session-id "restoring the session")
-                  (sb-thread:signal-semaphore held)
-                  (setf answer (engine-restore session-id :open open))
-                  nil)
+                (ignore-errors
+                 (engine-hold session-id
+                              (lambda ()
+                                (sb-thread:signal-semaphore held)
+                                (setf answer (engine-restore session-id :open open)))))
              (sb-thread:signal-semaphore held))
            (handler-case
                (progn
@@ -216,10 +219,10 @@ behind the analysis, it does not race it."
                  (tell-omp "state" "session" session-id "state" (session-state session-id)))
              (error () nil)))))
      :name "omp-re restore")
-    (sb-thread:wait-on-semaphore held :timeout 10)))
+    (loop until (sb-thread:wait-on-semaphore held :timeout 0.1)
+          do (check-cancelled "restoring the session"))))
 
 (defun handle (method params request)
-  "The answer to omp's METHOD with PARAMS, a JSON object."
   (let ((session-id (request-session-id request)))
     (cond
       ((string= method "describe")

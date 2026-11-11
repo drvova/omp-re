@@ -7,7 +7,9 @@
 ;;;; themselves and the gate is for what the model calls. A subcommand is
 ;;;; declared once, with where it stands in the help and the row it has in
 ;;;; the dialog a host may draw; the help, the dialog and what a host is told
-;;;; of the command all read that declaration.
+;;;; of the command all read that declaration. A subcommand that lists
+;;;; things (DEFINE-LIST) says its rows once: the line prints them, and a
+;;;; host with a screen opens the same rows as a panel (views.lisp).
 
 (in-package #:omp-re)
 
@@ -20,6 +22,7 @@
   immediate                             ; answers from what the session holds now, not after a call that holds it
   completes                             ; what its argument names, for a host that completes one: :EVIDENCE
   row                                   ; (POSITION LABEL &key detail ask placeholder verb), or NIL for no row
+  listing                               ; of a subcommand DEFINE-LIST declared
   function)                             ; (lambda (WORDS LINE)) => (values TEXT FAILED REPLY)
 
 (defstruct (draft (:copier nil))
@@ -59,6 +62,66 @@ completions as the operator types."
     (make-slash :name ,name :usage ,usage :description ,description :order ,order :row ',row
                 :immediate ,immediate :completes ,completes
                 :function (lambda (,words ,line) (declare (ignorable ,words ,line)) ,@body))))
+
+;;; --- a subcommand that lists ------------------------------------------------------------------
+
+(defstruct (listing (:copier nil))
+  enter                                 ; what choosing a row does, in a word: open, cite, discuss
+  none                                  ; what to say when there are no rows, or NIL to show the empty list
+  rows)                                 ; (lambda ()) => the rows, in the running session
+
+(defstruct (list-row (:copier nil))
+  value label description
+  enter                                 ; what choosing it on a screen does: {draft TEXT} or {view {kind, arg}}
+  line)                                 ; the row as a line of text
+
+(defun list-row (value label &key description enter line)
+  "One row of a list: LABEL and under it DESCRIPTION on a screen, where
+choosing it does ENTER; as text LINE, or the label and then the description."
+  (make-list-row :value value :label label :description description :enter enter
+                 :line (or line (format nil "~a~@[  ~a~]" label (and (plusp (length description)) description)))))
+
+(defparameter +list-characters+ 4000 "How much of a list a notice can carry.")
+
+(defun clip-list (title lines)
+  (let ((text (format nil "~a~%~a" title (if lines (join-lines lines) "(nothing to show)"))))
+    (if (> (length text) +list-characters+)
+        (format nil "~a~%… cut at ~d characters; ~a"
+                (subseq text 0 +list-characters+) +list-characters+ (voice :read-more))
+        text)))
+
+(defun find-list (name)
+  "The subcommand NAME when it is a list, or NIL."
+  (let ((slash (find name *slash-commands* :key #'slash-name :test #'string=)))
+    (and slash (slash-listing slash) slash)))
+
+(defun list-title (slash)
+  (format nil "omp-re: ~a" (slash-name slash)))
+
+(defun list-text (slash)
+  (let* ((listing (slash-listing slash))
+         (rows (funcall (listing-rows listing))))
+    (if (and (null rows) (listing-none listing))
+        (listing-none listing)
+        (clip-list (list-title slash) (mapcar #'list-row-line rows)))))
+
+(defmacro define-list (name (&key description (order 1000) row completes enter none one) &body body)
+  "Define the /re subcommand NAME as a list: BODY answers its rows (LIST-ROW)
+in the running session. The line prints them; a host with a screen opens
+them as a panel by the same name, where choosing a row does what ENTER says
+in a word. NONE is said in place of an empty list. ONE, (lambda (WORD)),
+answers the line when it names one row, as a body of DEFINE-SLASH answers."
+  `(register-slash
+    (make-slash :name ,name :usage ,(and one "[id]") :description ,description :order ,order :row ',row
+                :completes ,completes
+                :listing (make-listing :enter ,enter :none ,none :rows (lambda () ,@body))
+                :function (lambda (words line)
+                            (declare (ignore line))
+                            ,(if one
+                                 `(if words
+                                      (funcall ,one (first words))
+                                      (list-text (find-list ,name)))
+                                 `(progn words (list-text (find-list ,name))))))))
 
 (defun slash-help ()
   (join-lines

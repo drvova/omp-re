@@ -26,16 +26,16 @@
 (defun note (session-id turn n)
   "Write the note N to SESSION-ID's record in TURN."
   (in-turn (session-id turn)
-    (re::in-session (session-id "writing a note")
-      (re::append-entry "re.note" (re::obj "n" n)))))
+    (omp-re::in-session (session-id "writing a note")
+      (omp-re::append-entry "re.note" (omp-re:obj "n" n)))))
 
 (defun notes (session-id)
-  (mapcar (lambda (data) (gethash "n" data)) (re::entries-of "re.note" (re::find-session session-id))))
+  (mapcar (lambda (data) (gethash "n" data)) (omp-re::entries-of "re.note" (omp-re:find-session session-id))))
 
 (suite "branch: the record alone")
 (with-cell ()
   (let* ((id (fresh-session))
-         (session (re::find-session id)))
+         (session (omp-re:find-session id)))
     (unwind-protect
          (progn
            (note id "t1" 1)
@@ -43,7 +43,7 @@
            (note id nil 0)
            (check "an entry is stamped with the turn it was written in, and one written outside a turn with none"
                   (equal '("t1" "t2" nil)
-                         (map 'list (lambda (entry) (gethash "turn" entry)) (re::session-file-entries session))))
+                         (map 'list (lambda (entry) (gethash "turn" entry)) (omp-re:session-file-entries session))))
            (check "with no session tree to read, every entry is on the branch"
                   (equal '(1 2 0) (notes id)))
            (branch id "t1" "t2")
@@ -53,7 +53,7 @@
            (check "after a rewind to the first turn, the second turn's entry is not read; the turnless one still is"
                   (equal '(1 0) (notes id)))
            (check "nothing was deleted: the record on disk still holds all three"
-                  (= 3 (length (re::split-lines (re::trimmed (re::read-text-file (re::record-path session)))))))
+                  (= 3 (length (omp-re:split-lines (omp-re:trimmed (omp-re::read-text-file (omp-re::record-path session)))))))
            (check "the running turn's own entries are read whatever the store has recorded of it"
                   (progn (note id "t3" 3)
                          (in-turn (id "t3") (equal '(1 0 3) (notes id)))))
@@ -95,7 +95,7 @@
                          (and (has "branch: second turn" (re:cmd "pd 1" "entry0"))
                               (has "annotations in effect: 1" (re:status))
                               (has "findings on this branch: 1" (re:status)))))
-                (let ((rz (re::session-rz (re::find-session id))))
+                (let ((rz (omp-re::session-rz (omp-re:find-session id))))
                   ;; /tree: back to the first turn. The second turn's work is on another branch now.
                   (branch id "t1" "t3")
                   (in-turn (id "t3")
@@ -107,7 +107,7 @@
                                   (has "evidence on this branch: 1" status))))
                     (check "the rizin that carried the abandoned annotation is gone, and the fresh one does not have it"
                            (and (not (has "branch: second turn" (re:cmd "pd 1" "entry0")))
-                                (not (eq rz (re::session-rz (re::find-session id))))))
+                                (not (eq rz (omp-re::session-rz (omp-re:find-session id))))))
                     (check "evidence from the abandoned branch no longer grounds a finding"
                            (refusal (lambda () (re:call "record_finding" :claim "Unsupported here."
                                                                          :evidence (list second-evidence)))))
@@ -138,6 +138,29 @@
                               (has "annotations in effect: 1" (re:status)))))))
          (forget-tree)))
 
+     ;; What a branch did to rizin without annotating — a mapped file, an
+     ;; analysis pass, a signature file — goes with the branch too.
+     (let ((id (fresh-session))
+           (overlay (write-scratch "branch-overlay.bin" "BRANCHMAPPEDDATA")))
+       (unwind-protect
+            (progn
+              (branch id "t1" "t2")
+              (in-turn (id "t1")
+                (re:open *binary*))
+              (in-turn (id "t2")
+                (re:call "map_file" :path overlay :addr "0x5f0000")
+                (check "on the branch that mapped a file its bytes are read"
+                       (has "4252414e43484d4150504544" (re:cmd "p8 12" "0x5f0000"))))
+              (branch id "t1" "t3")
+              (in-turn (id "t3")
+                (check "after a rewind to before the map, rizin no longer has it"
+                       (not (has "4252414e43484d4150504544" (re:cmd "p8 12" "0x5f0000")))))
+              (branch id "t1" "t2")
+              (in-turn (id "t2")
+                (check "and after a redo it is mapped again"
+                       (has "4252414e43484d4150504544" (re:cmd "p8 12" "0x5f0000")))))
+         (forget-tree)))
+
      ;; A citation, where the caller has an input box.
      (let ((id (fresh-session)))
        (in-session (id)
@@ -163,9 +186,9 @@
          (re:call "set_comment" :addr "entry0" :text "notice: fine")
          ;; A recorded annotation that cannot be replayed: a comment at
          ;; something that is no address, which the engine will not send rizin.
-         (re::in-session (id "recording an annotation that cannot be replayed")
-           (re::append-entry "re.annotation"
-                             (re::obj "kind" "set_comment" "ea" "no;where" "oldValue" ""
+         (omp-re::in-session (id "recording an annotation that cannot be replayed")
+           (omp-re::append-entry "re.annotation"
+                             (omp-re:obj "kind" "set_comment" "ea" "no;where" "oldValue" ""
                                       "newValue" "notice: lost" "evidenceId" :null "ungrounded" t)))
          (kill-rizin id)
          (re:cmd "iIj")
