@@ -2,9 +2,8 @@
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's extensions/re/catalog.ts; the patterns and command
-;;;; lists themselves are generated from that file (policy-data.lisp), so this
-;;;; is only the logic over them. rizin_command is read-only: print, info,
+;;;; The patterns and command lists are policy-data.lisp; this is the logic
+;;;; over them. rizin_command is read-only: print, info,
 ;;;; search, graphs and listings run; everything that writes, sets config,
 ;;;; opens files, runs a shell or changes analysis is refused, and
 ;;;; annotations go through the dedicated, undoable tools.
@@ -30,7 +29,7 @@
 (rizin lists `iz' only as `izj', `izq', ...)."
   (or (nth-value 1 (gethash name catalog))
       (loop for command being the hash-keys of catalog
-            thereis (starts-with name command))))
+            thereis (uiop:string-prefix-p name command))))
 
 (defun missing-required-commands (catalog)
   (remove-if (lambda (command) (nth-value 1 (gethash command catalog))) +required-commands+))
@@ -169,7 +168,7 @@ match; anything else is a keyword search over summaries and descriptions."
          (exact (gethash query catalog))
          (specs (loop for spec being the hash-values of catalog collect spec))
          (family (and (plusp (length query))
-                      (sort (remove-if-not (lambda (spec) (starts-with query (jstring spec "cmd"))) specs)
+                      (sort (remove-if-not (lambda (spec) (uiop:string-prefix-p query (jstring spec "cmd"))) specs)
                             #'locale-less-p :key (lambda (spec) (jstring spec "cmd"))))))
     (if (or exact family)
         (let* ((rest (remove query family :key (lambda (spec) (jstring spec "cmd")) :test #'string=))

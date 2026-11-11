@@ -1,11 +1,9 @@
-;;;; tools-core.lisp --- open a binary, read it, and the /re command.
+;;;; tools-core.lisp --- open a binary, and read it.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Ported from omp-re's index.ts (open_binary, /re, the status text),
-;;;; tools-rizin.ts (rizin_help, rizin_command) and decompile.ts (which
-;;;; decompiler this rizin has). rizin_command is the one way to read the
-;;;; binary, and the one tool whose results are evidence.
+;;;; open_binary, rizin_help and rizin_command. rizin_command is the one way
+;;;; to read the binary, and the one tool whose results are evidence.
 
 (in-package #:nodecode-re)
 
@@ -30,29 +28,36 @@ fresh rizin, replay what the record holds for this binary, and record the
 choice so a later start restores it => the text that says what happened."
   (let* ((resolved (resolve-binary-path path))
          ;; Bound into every evidence record taken from here on, so /re verify
-         ;; knows it re-runs against the same bytes. A hash failure degrades to
-         ;; an unbound session, it never blocks the open.
+         ;; knows it re-runs against the same bytes. A file that cannot be
+         ;; hashed still opens: its evidence is then bound to no bytes, which
+         ;; /re verify says of each record.
          (sha256 (ignore-errors (sha256-file resolved)))
-         (failures (nth-value 1 (spawn-rizin resolved :load load :session session)))
-         (replayed (if *live-annotations*
-                       (length (funcall *live-annotations* resolved session))
-                       0))
+         (replayed (nth-value 1 (spawn-rizin resolved :load load :session session)))
+         ;; The warning is a courtesy: a catalog that cannot be read is said by /re status.
          (missing (ignore-errors (missing-required-commands (load-catalog)))))
     (setf (session-binary-sha256 session) sha256)
-    (append-entry "re.binary"
-                  (obj "path" resolved "load" (or load :absent) "sha256" (or sha256 :absent))
-                  session)
-    (join-lines
-     (append (list (format nil "Binary opened: ~a" resolved))
-             (when load
-               (list (format nil "Loaded with forced settings (~{~a~^, ~})."
-                             (loop for key being the hash-keys of load using (hash-value value)
-                                   collect (format nil "~a=~a" key value)))))
-             (when (plusp replayed)
-               (list (format nil "Re-applied ~d of ~d annotation(s) recorded earlier for this binary."
-                             (max 0 (- replayed (length failures))) replayed)))
-             (mapcar (lambda (failure) (format nil "  could not re-apply ~a" failure)) failures)
-             (when missing (list (missing-commands-warning missing)))))))
+    (let ((opened (obj "path" resolved "load" (or load :absent) "sha256" (or sha256 :absent))))
+      (append-entry "re.binary" opened session)
+      (ask-host :transcript session "re.binary" (format nil "[re: opened ~a]" resolved) opened))
+    (flet ((could-not (failures)
+             (mapcar (lambda (failure) (format nil "  could not re-apply ~a" failure)) failures)))
+      (join-lines
+       (append (list (format nil "Binary opened: ~a" resolved))
+               (when load
+                 (list (format nil "Loaded with forced settings (~{~a~^, ~})."
+                               (loop for key being the hash-keys of load using (hash-value value)
+                                     collect (format nil "~a=~a" key value)))))
+               ;; A group that counts what it re-applied says so, of its own
+               ;; things alone, with its own failures under the line.
+               (loop for (contribution failures applied) in replayed
+                     when (and applied (plusp (+ applied (length failures))))
+                       append (cons (format nil "Re-applied ~d of ~d ~a recorded earlier for this binary."
+                                            applied (+ applied (length failures))
+                                            (contribution-noun contribution))
+                                    (could-not failures)))
+               (loop for (nil failures applied) in replayed
+                     unless applied append (could-not failures))
+               (when missing (list (missing-commands-warning missing))))))))
 
 (define-tool "open_binary"
     (:label "Open binary" :tier :read
@@ -66,68 +71,7 @@ choice so a later start restores it => the text that says what happened."
     (arguments)
   (plain-result (open-binary (jstring arguments "path") :load (load-object arguments))))
 
-;;; --- the one directory the engine writes files to --------------------------------------------
-;;; Ported from output.ts. The engine never writes to the sample on disk. A
-;;; few tools must emit a separate file — a project, a signature file, a dump
-;;; of a live process's memory. Those go here and nowhere else: one dedicated
-;;; directory, never a path the model chose, so a tool cannot traverse out of
-;;; it or overwrite an arbitrary file.
-
-(defun output-directory ()
-  "OMPRE_OUTPUT_DIR when set, else omp-re-out under the system's temporary directory."
-  (uiop:ensure-directory-pathname
-   (let ((configured (env "OMPRE_OUTPUT_DIR")))
-     (if configured
-         (merge-pathnames (uiop:parse-native-namestring configured) (uiop:getcwd))
-         (merge-pathnames "omp-re-out/" (uiop:temporary-directory))))))
-
-(defun safe-basename (name)
-  "NAME when it is a bare file name of safe characters: no separator, no
-`..', not absolute. This is the guard that keeps a chosen name inside the
-output directory."
-  (let ((name (trimmed name)))
-    (when (member name '("" "." "..") :test #'string=)
-      (fail "omp-re: invalid output filename ~a" (js-string name)))
-    (unless (and (js-scan "^[A-Za-z0-9._-]+$" name) (not (search ".." name)))
-      (fail "omp-re: invalid output filename ~a — use a bare name of letters, digits, '.', '_' or '-' (no path separators)"
-            (js-string name)))
-    name))
-
-(defun to-rizin-path (path)
-  "PATH with forward slashes, which rizin accepts on every platform."
-  (substitute #\/ #\\ (if (stringp path) path (native path))))
-
-(defun rizin-path-arg (path)
-  "PATH as one single-quoted rizin argument, so rizin takes every byte of it
-literally — a `~' in a Windows short name is otherwise its grep operator."
-  (rz-quote (to-rizin-path path)))
-
-(defun prepare-output-path (basename)
-  "The native path for BASENAME inside the output directory, which is created."
-  (let* ((directory (output-directory))
-         (full (merge-pathnames (safe-basename basename) directory)))
-    (ensure-directories-exist full)
-    (native full)))
-
-(defun rizin-output-path (basename)
-  "Like PREPARE-OUTPUT-PATH, for a file rizin itself writes: the path must
-survive the pipe, and the one thing quoting cannot carry is a line break."
-  (let ((full (prepare-output-path basename)))
-    (when (find-if (lambda (char) (member char '(#\Newline #\Return #\Nul))) full)
-      (fail "omp-re: the output path ~a contains a line break or NUL" (js-string full)))
-    full))
-
-(defun output-subdirectory (basename &optional create)
-  "The native path of the folder BASENAME inside the output directory, made
-when CREATE."
-  (let ((full (uiop:ensure-directory-pathname
-               (merge-pathnames (safe-basename basename) (output-directory)))))
-    (when create (ensure-directories-exist full))
-    (string-right-trim "/" (native full))))
-
 ;;; --- rizin_help and rizin_command -----------------------------------------------------------
-
-(defparameter +rizin-command-seconds+ 120)
 
 (defparameter +manual+
   "omp-re — reverse engineering with rizin, driven from code.
@@ -199,18 +143,16 @@ nothing, which is not an error message."
                                    (ppcre:regex-replace-all +ansi-escape+ stderr "")))))))
 
 (defun run-rizin-command (command addr &optional (session *session*))
-  "The body of rizin_command: gate the line through the read-only policy,
-run it, and build the result with its reproducibility fields
-=> (values RESULT RAW-OUTPUT). /re carry re-runs a carried command through
-this, so it is recorded as the tool would; a recipe reads RAW-OUTPUT, which
-is whole where the result's text may be cut."
+  "The body of rizin_command: one gated read, and the result with its
+reproducibility fields => (values RESULT RAW-OUTPUT). /re carry re-runs a
+carried command through this, so it is recorded as the tool would; a recipe
+reads RAW-OUTPUT, which is whole where the result's text may be cut."
   ;; No binary is said before the catalog is read, so the guidance needs no rizin.
   (let ((binary-path (require-binary session)))
-    (let* ((line (check-rizin-command (load-catalog) command addr))
-           (rz (ensure-rizin session))
-           (ea (and addr (ignore-errors (ea-from-offset (resolve-numeric-addr rz addr)))))
-           (header (format nil "rizin> ~a" line)))
-      (multiple-value-bind (output stderr) (rz-run rz line :seconds +rizin-command-seconds+)
+    (multiple-value-bind (output stderr line) (run-read command addr session)
+      (let ((ea (and addr (ignore-errors
+                           (ea-from-offset (resolve-numeric-addr (ensure-rizin session) addr)))))
+            (header (format nil "rizin> ~a" line)))
         (if (blank-p output)
             (let ((errors (clean-stderr stderr)))
               (values (if (plusp (length errors))
@@ -242,230 +184,8 @@ is whole where the result's text may be cut."
      ("addr" :string :doc "Address or name to run the command at (sent as `@ <addr>`)."))
     (arguments)
   (if (blank-p (jstring arguments "command"))
-      ;; The manual observes nothing, so it must not be recorded as evidence.
       (let ((result (text-result "omp-re manual" +manual+)))
-        (setf (gethash "manual" (result-details result)) t)
+        (setf (result-observation result) nil)
         result)
       ;; Both values: the result, and the whole output for code that composes reads.
       (run-rizin-command (jstring arguments "command") (jstring arguments "addr"))))
-
-;;; --- which decompiler this rizin has ----------------------------------------------------------
-
-(defun decompiler-commands ()
-  "The decompiler commands to probe, OMPRE_DECOMPILER's first."
-  (remove-duplicates
-   (append (remove-if-not (lambda (name) (js-scan "^[a-zA-Z][a-zA-Z0-9]*$" name))
-                          (mapcar #'trimmed
-                                  (uiop:split-string (or (env "OMPRE_DECOMPILER") "") :separator '(#\,))))
-           (list "pdg" "pdd"))
-   :test #'string= :from-end t))
-
-(defun decompiler-label (kind)
-  (cond ((equal kind "pdg") "rz-ghidra (pdg)")
-        ((equal kind "pdd") "jsdec (pdd)")
-        (kind (format nil "~a (plugin)" kind))
-        (t "none — pdg/pdd fall back to labeled disassembly")))
-
-(defun resolve-decompiler (rz)
-  "The first decompiler command RZ answers for, asked once per process, or NIL."
-  (when (eq (rz-decompiler rz) :unknown)
-    (setf (rz-decompiler rz)
-          (find-if (lambda (command)
-                     (let ((reply (trimmed (rz-cmd rz (format nil "~a?" command)))))
-                       (and (plusp (length reply))
-                            (not (search "does not exist" reply))
-                            (not (starts-with "ERROR" reply)))))
-                   (decompiler-commands))))
-  (rz-decompiler rz))
-
-(defvar *debugger-setting* nil
-  "A function answering the cell's `debugger' setting, or NIL. Set by the cell at start.")
-
-(defun debugger-enabled-p ()
-  "Whether dynamic analysis — which executes the sample — was switched on:
-the cell's debugger setting, or OMPRE_ENABLE_DEBUGGER."
-  (or (and *debugger-setting* (funcall *debugger-setting*) t)
-      (env-on-p "OMPRE_ENABLE_DEBUGGER")))
-
-;;; --- /re ---------------------------------------------------------------------------------------
-
-(defvar *slash-commands* '()
-  "The /re subcommands: (NAME USAGE DESCRIPTION FUNCTION), in the order
-defined. FUNCTION takes the words after the subcommand and answers the text,
-or (values TEXT T) for a line that failed.")
-
-(defmacro define-slash (name (&key usage description) (words) &body body)
-  "Define the /re subcommand NAME; the body runs with WORDS bound to the
-words after it, *SESSION* to the session, holding the session's lock."
-  `(progn
-     (setf *slash-commands*
-           (append (remove ,name *slash-commands* :key #'first :test #'string=)
-                   (list (list ,name ,usage ,description
-                               (lambda (,words) (declare (ignorable ,words)) ,@body)))))
-     ,name))
-
-(defparameter *slash-order*
-  '("open" "functions" "strings" "imports" "evidence" "cite" "findings" "undo" "report" "verify"
-    "carry" "status" "on" "off" "help")
-  "The order /re help lists the subcommands in: omp-re's own.")
-
-(defun slash-help ()
-  (join-lines
-   (loop for entry in (sort (copy-list *slash-commands*) #'<
-                            :key (lambda (entry)
-                                   (or (position (first entry) *slash-order* :test #'string=) 99)))
-         collect (destructuring-bind (name usage description function) entry
-                   (declare (ignore function))
-                   (format nil "/re ~22a ~a" (format nil "~a~@[ ~a~]" name usage) description)))))
-
-(defun run-slash-line (session line)
-  "One /re LINE for SESSION => (values TEXT FAILED-P)."
-  (let* ((words (words line))
-         (name (string-downcase (or (first words) "help")))
-         (entry (find name *slash-commands* :key #'first :test #'string=)))
-    (if (null entry)
-        (values (format nil "omp-re: unknown /re subcommand ~a — try /re help" (js-string name)) t)
-        (handler-case
-            (with-session (session)
-              (multiple-value-bind (text failed) (funcall (fourth entry) (rest words))
-                (values (or text "(done)") failed)))
-          (re-error (condition)
-            (values (princ-to-string condition) t))
-          (error (condition)
-            (values (format nil "omp-re: /re ~a failed: ~a" name condition) t))))))
-
-(defun rest-of-line (words)
-  (format nil "~{~a~^ ~}" words))
-
-(define-slash "help" (:description "show this list") (words)
-  (slash-help))
-
-(define-slash "open" (:usage "<path>" :description "open a binary and analyze it with rizin") (words)
-  (if (null words)
-      (values "Usage: /re open <path>" t)
-      (open-binary (rest-of-line words))))
-
-(define-slash "on" (:description "enable the RE tools for this session") (words)
-  (setf (session-tools-off *session*) nil)
-  "omp-re: RE tools enabled for this session")
-
-(define-slash "off" (:description "disable the RE tools for this session") (words)
-  (setf (session-tools-off *session*) t)
-  "omp-re: RE tools disabled for this session — /re on to re-enable")
-
-(defvar *status-lines* '()
-  "Functions of no arguments, each answering a list of status lines, called
-in order after the core's: how a tool group says its own state.")
-
-(define-slash "status" (:description "rizin, decompiler, binary, and evidence status") (words)
-  (let* ((session *session*)
-         (version (rizin-version))
-         (catalog (ignore-errors (load-catalog))))
-    (join-lines
-     (append
-      (list (format nil "rizin: ~a" (or version (format nil "not found (~a)" (resolve-rizin-path)))))
-      (when catalog
-        (let ((missing (missing-required-commands catalog))
-              (present (remove-if-not (lambda (command) (nth-value 1 (gethash command catalog)))
-                                      (decompiler-commands))))
-          (append
-           (list (if missing
-                     (missing-commands-warning missing)
-                     (format nil "rizin commands: all ~d omp-re sends are present (~d in this build; rizin_help searches them)"
-                             (length +required-commands+) (hash-table-count catalog)))
-                 (format nil "decompiler: ~a" (decompiler-label (first present))))
-           (when (rest present)
-             (list (format nil "  also available: ~{~a~^, ~} (reorder with OMPRE_DECOMPILER)"
-                           (mapcar #'decompiler-label (rest present))))))))
-      (if (session-binary-path session)
-          (append (list (format nil "binary: ~a" (session-binary-path session)))
-                  ;; The record binds evidence to the bytes that were opened. A
-                  ;; file rebuilt since then is a different binary under the
-                  ;; same name, and reading on would mix the two.
-                  (let ((opened (session-binary-sha256 session))
-                        (now (ignore-errors (sha256-file (session-binary-path session)))))
-                    (cond ((null now)
-                           (list "  the file is no longer readable there"))
-                          ((and opened (string/= opened now))
-                           (list "  CHANGED ON DISK since it was opened: evidence so far is of the earlier bytes — /re open it again to analyze what is there now"))))
-                  (unless (rz-alive-p (session-rz session))
-                    (list "rizin process: not running (starts on next use)")))
-          (list "binary: none — /re open <path>"))
-      (list (if (debugger-enabled-p)
-                (format nil "debugger: enabled~:[ (the re section's debugger setting); executes the sample~; — a process is running under it~]"
-                        (rz-alive-p (session-dbg session)))
-                "debugger: off (set the re section's debugger to true to enable dynamic analysis — it executes the sample)"))
-      (list (format nil "evidence on this branch: ~d" (length (evidence-records session))))
-      (loop for lines in *status-lines* append (funcall lines))
-      (list (format nil "audit log signing: ~a"
-                    (if (env "OMPRE_AUDIT_HMAC_KEY") "HMAC-SHA256" "unsigned (set OMPRE_AUDIT_HMAC_KEY)")))))))
-
-(defun clip-list (title lines)
-  "TITLE over LINES, cut to what a notice can carry."
-  (let ((text (format nil "~a~%~a" title (if lines (join-lines lines) "(nothing to show)"))))
-    (if (> (length text) 4000)
-        (format nil "~a~%… cut at 4000 characters; read the rest with (re:cmd …)" (subseq text 0 4000))
-        text)))
-
-(define-slash "functions" (:description "the functions rizin found, with address and size") (words)
-  (let ((rz (ensure-rizin)))
-    (clip-list "omp-re: functions"
-               (loop for function in (coerce (or (rz-cmdj rz "aflj") #()) 'list)
-                     for addr = (or (jnumber function "addr") (jnumber function "offset"))
-                     for size = (or (jnumber function "realsz") (jnumber function "size"))
-                     when addr
-                       collect (format nil "~a  ~a~@[ · ~db~]" (jstring function "name")
-                                       (ea-from-offset addr) size)))))
-
-(define-slash "strings" (:description "the strings rizin found, with address") (words)
-  (let ((rz (ensure-rizin)))
-    (clip-list "omp-re: strings"
-               (loop for entry in (coerce (or (rz-cmdj rz "izj") #()) 'list)
-                     when (jnumber entry "vaddr")
-                       collect (format nil "~a  ~a" (ea-from-offset (jnumber entry "vaddr"))
-                                       (jstring entry "string"))))))
-
-(define-slash "imports" (:description "the imports, with address") (words)
-  (let ((rz (ensure-rizin)))
-    (clip-list "omp-re: imports"
-               (loop for entry in (coerce (or (rz-cmdj rz "iij") #()) 'list)
-                     collect (format nil "~a~@[  ~a~]" (jstring entry "name")
-                                     (and (jnumber entry "plt") (ea-from-offset (jnumber entry "plt"))))))))
-
-(defun evidence-detail (record)
-  (format nil "[~a:~a]~%~%~a~@[~%~%full output: ~a~]"
-          (jstring record "tool") (or (jstring record "ea") "?") (jstring record "summary")
-          (and (jstring record "artifactId") (native (artifact-path (jstring record "artifactId"))))))
-
-(define-slash "evidence" (:usage "[id]" :description "evidence recorded on this branch") (words)
-  (if words
-      (let ((record (find-evidence (first words))))
-        (if record
-            (evidence-detail record)
-            (values (format nil "omp-re: no evidence found with id ~a" (first words)) t)))
-      (clip-list "omp-re: evidence"
-                 (mapcar (lambda (record)
-                           (format nil "[~a] ~a @ ~a~@[  ~a~]"
-                                   (subseq (jstring record "id") 0 8) (jstring record "tool")
-                                   (or (jstring record "ea") "?")
-                                   (let ((line (first (split-lines (or (jstring record "summary") "")))))
-                                     (and line (subseq line 0 (min 80 (length line)))))))
-                         (evidence-records)))))
-
-(defvar *offered-draft* :unbound
-  "While a /re line runs for a caller that can take one: the text the line
-would put in the operator's input box, or NIL. :UNBOUND when nobody asked.")
-
-(define-slash "cite" (:usage "<id>" :description "cite an evidence entry in your next message") (words)
-  (let ((record (and words (find-evidence (first words)))))
-    (cond ((null words) (values "Usage: /re cite <id>" t))
-          ((null record) (values (format nil "omp-re: no evidence found with id ~a" (first words)) t))
-          (t (let ((text (format nil "Re: evidence ~a (~a @ ~a)~%~%~a"
-                                 (subseq (jstring record "id") 0 8) (jstring record "tool")
-                                 (or (jstring record "ea") "?") (jstring record "summary"))))
-               ;; Where the caller has an input box, the citation is put in it,
-               ;; as omp-re does under omp; anywhere else it is the answer.
-               (if (eq *offered-draft* :unbound)
-                   text
-                   (progn (setf *offered-draft* (format nil "~a~%~%" text))
-                          (format nil "Evidence ~a is in your draft." (subseq (jstring record "id") 0 8)))))))))

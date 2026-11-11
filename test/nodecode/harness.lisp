@@ -1,21 +1,36 @@
-;;;; harness.lisp --- load the cell over the kernel stand-in; CHECK and friends.
+;;;; harness.lisp --- load the cell over the kernel stand-in; the suites' vocabulary.
 ;;;;
 ;;;; SPDX-License-Identifier: MIT
 ;;;;
-;;;; Loaded by run.lisp before the suites. It loads the real system
-;;;; (nodecode-re.asd, nodecode/*.lisp) over kernel-stub.lisp, points the
-;;;; cell at a scratch home, and gives the suites their vocabulary:
+;;;; Loaded by run.lisp before the suites. It loads the engine (omp-re.asd)
+;;;; and the nodecode host over it (nodecode-re.asd) on kernel-stub.lisp, and
+;;;; gives the suites their vocabulary:
 ;;;;
 ;;;;   (suite "name")                      a heading
 ;;;;   (check "what holds" FORM)           FORM must answer true and not signal
 ;;;;   (refusal (lambda () ...))           the text of the error a thunk signals, or NIL
 ;;;;   (has "needle" text)                 substring test
-;;;;   (with-cell (:surface "tools") ...)  the body with the cell started, stopped after
 ;;;;   *rizin*                             true when rizin and *binary* are there
 ;;;;   *binary*                            OMPRE_TEST_BINARY, default /bin/ls
-;;;;   *scratch*                           the scratch home, a directory pathname
+;;;;   *root*                              the repository
+;;;;
+;;;;   (with-cell (:debugger t) ...)       the body with the cell started under that section, stopped after
+;;;;   (stop-running-cell)                 stop it now, by the function START-CELL answered
+;;;;   (with-open-store () ...)            the body with nodecode's store open and no session tree; its
+;;;;                                       sessions and turns forgotten after
 ;;;;   (fresh-session)                     a session id nothing has used
 ;;;;   (in-session (id) ...)               the body as that session's turn
+;;;;   (seed-session &key sha evidence)    a fresh session whose record says a binary is open and holds
+;;;;                                       one reproducible read => its id
+;;;;   (kill-rizin id)                     kill that session's rizin and wait until it is gone => the dead process
+;;;;   (tagged-evidence text)              the evidence id a tool result ends with
+;;;;   (cited-evidence text)               every evidence id a text cites, in order
+;;;;
+;;;;   *scratch*                           the running suite file's own scratch home, a directory pathname
+;;;;   (scratch-path "name")               a native path in it
+;;;;   (write-scratch "name" content)      a file in it, of a string or of octets => its native path
+;;;;   (begin-suite-file "name")           what run.lisp does before each suite file: a fresh scratch
+;;;;                                       home, the stand-in's tables emptied, the engine's sessions forgotten
 
 (load (merge-pathnames "kernel-stub.lisp" (or *load-truename* *default-pathname-defaults*)))
 
@@ -66,18 +81,79 @@
 (push *root* asdf:*central-registry*)
 (asdf:load-system "nodecode-re")
 
-(defparameter *scratch*
-  (uiop:ensure-directory-pathname
-   (uiop:native-namestring
-    (merge-pathnames (format nil "nodecode-re-test-~a/" (sb-posix:getpid)) (uiop:temporary-directory)))))
-(ensure-directories-exist *scratch*)
-(setf nlk:*stub-home* *scratch*
-      nlk:*stub-session-cwd* (uiop:native-namestring *scratch*))
-
 (defparameter *binary* (or (uiop:getenv "OMPRE_TEST_BINARY") "/bin/ls"))
 (defparameter *rizin*
   (and (probe-file *binary*)
        (ignore-errors (zerop (nth-value 2 (uiop:run-program '("rizin" "-v") :ignore-error-status t))))))
+
+;;; --- the cell ------------------------------------------------------------------------------
+
+(defvar *stop-cell* nil "The function the running cell's START-CELL answered.")
+
+(defun stop-running-cell ()
+  (when *stop-cell*
+    (funcall (shiftf *stop-cell* nil))))
+
+(defmacro with-cell ((&rest overrides) &body body)
+  "BODY with the cell started under OVERRIDES — a plist standing in for the
+operator's `re' section — and stopped after."
+  `(progn
+     (setf *stop-cell* (nodecode-re:start-cell (list ,@overrides)))
+     (unwind-protect (progn ,@body)
+       (stop-running-cell))))
+
+(defmacro with-open-store (() &body body)
+  "BODY with nodecode's store open — sessions can be created and asked a
+side question — and no session tree described."
+  `(let ((nlk:*stub-store-open* t))
+     (unwind-protect (progn ,@body)
+       (nlk:stub-forget-sessions))))
+
+;;; --- scratch ------------------------------------------------------------------------------
+
+(defparameter *scratch-root*
+  (uiop:ensure-directory-pathname
+   (uiop:native-namestring
+    (merge-pathnames (format nil "nodecode-re-test-~a/" (sb-posix:getpid)) (uiop:temporary-directory))))
+  "Every suite file's scratch home is a folder of this one, deleted when the run ends.")
+
+(defvar *scratch* nil)
+
+(defun begin-suite-file (name)
+  (ignore-errors (stop-running-cell))
+  (re::shutdown-sessions)
+  (clrhash nlk:*stub-visible*)
+  (clrhash nlk:*stub-lineage*)
+  (clrhash nle:*notices*)
+  (nlk:stub-forget-sessions)
+  (setf nlk:*stub-store-open* nil
+        nle:*stub-session* "smoke"
+        nle:*stub-turn* nil
+        *scratch* (merge-pathnames (format nil "~a/" name) *scratch-root*)
+        nlk:*stub-home* *scratch*
+        nlk:*stub-session-cwd* (uiop:native-namestring *scratch*))
+  (ensure-directories-exist *scratch*)
+  ;; With no cell running the engine keeps its state under the user's data
+  ;; directory, which for a suite is its scratch home too.
+  (sb-posix:setenv "XDG_DATA_HOME" (uiop:native-namestring *scratch*) 1)
+  *scratch*)
+
+(defun scratch-path (name)
+  (uiop:native-namestring (merge-pathnames name *scratch*)))
+
+(defun write-scratch (name content)
+  "CONTENT — a string, or a sequence of octets — as the file NAME in the
+scratch home => its native path."
+  (let ((path (scratch-path name)))
+    (ensure-directories-exist path)
+    (if (stringp content)
+        (re::write-text-file path content)
+        (with-open-file (out path :direction :output :if-exists :supersede
+                                  :element-type '(unsigned-byte 8))
+          (write-sequence (coerce content '(vector (unsigned-byte 8))) out)))
+    path))
+
+;;; --- sessions -------------------------------------------------------------------------------
 
 (defvar *session-counter* 0)
 (defun fresh-session ()
@@ -87,10 +163,42 @@
   "BODY as a turn of the session called ID."
   `(let ((nle:*stub-session* ,id)) ,@body))
 
-(defmacro with-cell ((&rest overrides) &body body)
-  "BODY with the cell started under OVERRIDES — a plist standing in for the
-operator's `re' section — and stopped after."
-  `(progn
-     (nodecode-re:start-cell (list ,@overrides))
-     (unwind-protect (progn ,@body)
-       (nodecode-re::stop-cell))))
+(defun seed-session (&key (sha (make-string 64 :initial-element #\a))
+                          (evidence "11111111-aaaa-bbbb-cccc-000000000001"))
+  "A fresh session whose record says a binary with hash SHA is open and
+holds one reproducible rizin_command record with the id EVIDENCE. Nothing in
+it needs the binary to exist => the session's id."
+  (let ((id (fresh-session)))
+    (re::in-session (id "seeding a test session")
+      (re::append-entry "re.binary" (re::obj "path" "/bin/sample" "sha256" sha))
+      (re::append-entry "re.evidence"
+                        (re::obj "id" evidence
+                                 "tool" "rizin_command"
+                                 "args" (re::obj "command" "pdf" "addr" "sym.f")
+                                 "commands" (vector "pdf @ sym.f")
+                                 "reproHash" (make-string 64 :initial-element #\b)
+                                 "binarySha256" sha
+                                 "summary" "imul eax, eax, 0x21")))
+    id))
+
+(defun kill-rizin (id)
+  "Kill the rizin of the session called ID, as a crash would, and wait until
+the engine sees it gone => the dead process."
+  (let* ((rz (re::session-rz (re::find-session id)))
+         (process (re::rz-process rz)))
+    (sb-ext:process-kill process 9)
+    (sb-ext:process-wait process)
+    rz))
+
+(defun cited-evidence (text)
+  "Every evidence id TEXT cites or is tagged with, in order, without duplicates."
+  (let ((ids '()))
+    (ppcre:do-register-groups (id) ("\\[evidence ([0-9a-f]{8})[ \\]]" text)
+      (pushnew id ids :test #'string=))
+    (nreverse ids)))
+
+(defun tagged-evidence (text)
+  "The evidence id a tool result ends with, or NIL."
+  (car (last (cited-evidence text))))
+
+(begin-suite-file "harness")
