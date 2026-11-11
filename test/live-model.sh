@@ -16,7 +16,7 @@
 #
 # Asserts only on recorded state (session entries, report files), never on model
 # prose. Model choice: OMPRE_LIVE_MODEL (default minimax-code/MiniMax-M3, which
-# reads MINIMAX_CODE_API_KEY). Skips (exit 0) without a key, omp, rizin, bun or
+# reads MINIMAX_CODE_API_KEY). Skips (exit 0) without a key, omp, rizin, sbcl or
 # a C compiler. Costs real tokens; not run in CI.
 set -u
 
@@ -34,7 +34,7 @@ if [ -z "${OMPRE_LIVE_MODEL:-}" ] && [ -z "${MINIMAX_CODE_API_KEY:-}" ]; then
 	log "SKIP: set MINIMAX_CODE_API_KEY (or OMPRE_LIVE_MODEL plus that provider's key)"
 	exit 0
 fi
-for tool in omp bun "${OMPRE_RIZIN_PATH:-rizin}"; do
+for tool in omp "${OMPRE_SBCL_PATH:-sbcl}" "${OMPRE_RIZIN_PATH:-rizin}"; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		log "SKIP: $tool not found on PATH"
 		exit 0

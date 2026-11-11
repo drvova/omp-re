@@ -82,7 +82,7 @@ A `when` condition names an argument by path (`attach.pid`) and holds when it eq
 
 `render` is how a transcript shows a result: `title`, the argument that is the call's `subject`, and whether the `body` is `text`, `json` or `none`.
 
-`commands` is what `engine-commands` answers: for each `/re` subcommand `name`, `usage?`, `description`, and `view: true` when it is also a list omp may open as a panel.
+`commands` is what `engine-commands` answers: for each `/re` subcommand `name`, `usage?`, `description`, `view: true` when it is also a list omp may open as a panel, and `completes: "evidence"` when its argument is an evidence id omp can complete from the session's state.
 
 **call.** Run one tool. `callId` is omp's own id for the call and is written to the audit log. `failed` is true for a refusal or an error, with the reason as `text`. `details` is the result's own: `ea?`, `truncated?`, `artifactId?`, `commands?`, `reproHash?`, `canonicalExcerpt?`, `shiftHash?`, `evidenceId?`.
 

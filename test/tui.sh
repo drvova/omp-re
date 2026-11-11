@@ -38,6 +38,10 @@ if ! command -v "${OMPRE_RIZIN_PATH:-rizin}" >/dev/null 2>&1; then
 	log "SKIP: rizin not found on PATH (set OMPRE_RIZIN_PATH)"
 	exit 0
 fi
+if ! command -v "${OMPRE_SBCL_PATH:-sbcl}" >/dev/null 2>&1; then
+	log "SKIP: sbcl not found on PATH (set OMPRE_SBCL_PATH)"
+	exit 0
+fi
 if [ ! -f "$TEST_BINARY" ]; then
 	log "SKIP: test binary not found at $TEST_BINARY (set OMPRE_TEST_BINARY)"
 	exit 0
@@ -109,7 +113,7 @@ for _ in $(seq 1 8); do
 	tmux send-keys -t "$SESSION" C-u
 	sleep 1
 	tmux send-keys -t "$SESSION" "/re help" Enter
-	if wait_for 'disable RE tools' 15; then
+	if wait_for 'disable the RE tools' 15; then
 		READY=1
 		break
 	fi

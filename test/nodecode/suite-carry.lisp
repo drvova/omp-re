@@ -457,6 +457,25 @@ object (and the text and the failure as further values); a refusal is signalled.
                                text)
                           (= 2 (length (re::evidence-records session)))
                           (= 2 (length (re::live-findings session))))))
+            ;; Where an operator is watching, the agenda is theirs to send.
+            (with-service (:has-ui (lambda () t))
+              (multiple-value-bind (text failed reply)
+                  (re::run-slash-line session (format nil "carry ~a --resolve" manifest-path))
+                (check "with an operator watching, --resolve asks for the agenda to be sent as their next message, and the line only says so"
+                       (and failed
+                            (has "resolve: sent 2 finding(s) to the model to re-examine" text)
+                            (not (has "These findings from the earlier report" text))
+                            (starts "These findings from the earlier report" (getf reply :user-message))
+                            (null (getf reply :draft))
+                            (eq :error (getf reply :level)))))
+              (multiple-value-bind (text failed reply)
+                  (re::run-slash-line session (format nil "carry ~a --inherit" manifest-path))
+                (declare (ignore failed))
+                (check "without --resolve the agenda is offered as a draft, under the summary as its notice"
+                       (and (not (has "These findings from the earlier report" text))
+                            (starts "These findings from the earlier report" (re::draft-text (getf reply :draft)))
+                            (string= text (re::draft-notice (getf reply :draft)))
+                            (null (getf reply :user-message))))))
             (multiple-value-bind (result text failed) (carried manifest-path :inherit t)
               (declare (ignore text failed))
               (let ((inheritance (gethash "inheritance" result)))

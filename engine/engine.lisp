@@ -79,9 +79,11 @@ CALL-ID is the host's own id for the call, written to the audit log."
 
 (defun engine-commands ()
   "The /re subcommands, in the order /re help lists them => a vector of
-  {name, usage?, description, view?, row?}
+  {name, usage?, description, view?, completes?, row?}
 VIEW is true for a subcommand that is also a list a host with a screen may
-open instead of printing (ENGINE-VIEW by the same name). ROW, where the
+open instead of printing (ENGINE-VIEW by the same name). COMPLETES is
+\"evidence\" where the subcommand's argument is an evidence id, for a host
+that completes one as it is typed. ROW, where the
 subcommand has one, is its row in a dialog of what /re
 offers, for a host that draws one: {position, label, detail?, ask?,
 placeholder?, verb?}. A row with ASK asks for a word under that label —
@@ -93,6 +95,7 @@ with it; any other runs the subcommand as it is. Rows are shown by POSITION."
               "usage" (or (slash-usage slash) :absent)
               "description" (slash-description slash)
               "view" (if (member (slash-name slash) +list-views+ :test #'string=) t :absent)
+              "completes" (if (slash-completes slash) (string-downcase (slash-completes slash)) :absent)
               "row" (if (slash-row slash)
                         (destructuring-bind (position label &key detail ask placeholder verb)
                             (slash-row slash)

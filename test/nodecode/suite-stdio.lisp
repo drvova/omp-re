@@ -57,6 +57,27 @@
        (re::obj "text" (or (gethash (gethash "id" params) (omp-artifacts omp)) :absent)))
       (t (re::obj)))))
 
+(defun omp-request (omp method &rest members)
+  "Send the request METHOD without waiting => its id."
+  (let ((id (sb-thread:with-mutex ((omp-lock omp)) (incf (omp-next omp)))))
+    (omp-write omp (re::obj "id" id "method" method "params" (apply #'re::obj members)))
+    id))
+
+(defun omp-await (omp id &optional (seconds 120))
+  "The engine's answer to the request ID => its result, or (values NIL
+MESSAGE) for an error, or (values NIL :TIMEOUT)."
+  (loop repeat (* seconds 100)
+        do (let ((answer (sb-thread:with-mutex ((omp-lock omp)) (gethash id (omp-answers omp)))))
+             (when answer
+               (return (if (gethash "error" answer)
+                           (values nil (re::jstring answer "error" "message"))
+                           (gethash "result" answer)))))
+           (sleep 0.01)
+        finally (return (values nil :timeout))))
+
+(defun omp-ask (omp method &rest members)
+  (omp-await omp (apply #'omp-request omp method members)))
+
 (defun start-omp (&key variables (state (scratch-path "agent/")) judge)
   "Start the engine as omp does and say hello => the stand-in."
   (let* ((process (sb-ext:run-program "sbcl"
@@ -88,27 +109,6 @@
     (omp-ask omp "hello" "protocol" 1 "stateDir" state
                          "variables" (apply #'re::obj "PATH" (uiop:getenv "PATH") variables))
     omp))
-
-(defun omp-request (omp method &rest members)
-  "Send the request METHOD without waiting => its id."
-  (let ((id (sb-thread:with-mutex ((omp-lock omp)) (incf (omp-next omp)))))
-    (omp-write omp (re::obj "id" id "method" method "params" (apply #'re::obj members)))
-    id))
-
-(defun omp-await (omp id &optional (seconds 120))
-  "The engine's answer to the request ID => its result, or (values NIL
-MESSAGE) for an error, or (values NIL :TIMEOUT)."
-  (loop repeat (* seconds 100)
-        do (let ((answer (sb-thread:with-mutex ((omp-lock omp)) (gethash id (omp-answers omp)))))
-             (when answer
-               (return (if (gethash "error" answer)
-                           (values nil (re::jstring answer "error" "message"))
-                           (gethash "result" answer)))))
-           (sleep 0.01)
-        finally (return (values nil :timeout))))
-
-(defun omp-ask (omp method &rest members)
-  (omp-await omp (apply #'omp-request omp method members)))
 
 (defun omp-heard-of (omp method &optional session)
   "The params of everything the engine sent as METHOD, oldest first."
@@ -215,13 +215,15 @@ MESSAGE) for an error, or (values NIL :TIMEOUT)."
                        (null (gethash "when" (second cases))))))
          (check "a read tool has no sentence: nothing is asked before it"
                 (null (gethash "approvalReason" (described omp "rizin_help"))))
-         (check "the /re subcommands are described, the lists among them marked as views"
+         (check "the /re subcommands are described: which are lists a screen may open, which take an evidence id"
                 (let ((commands (coerce (gethash "commands" (omp-ask omp "describe")) 'list)))
                   (flet ((command (name) (find name commands :key (lambda (c) (gethash "name" c)) :test #'string=)))
                     (and (= 15 (length commands))
                          (equal "<path>" (gethash "usage" (command "open")))
                          (eq t (gethash "view" (command "functions")))
                          (eq t (gethash "view" (command "evidence")))
+                         (equal "evidence" (gethash "completes" (command "cite")))
+                         (null (gethash "completes" (command "open")))
                          (null (gethash "view" (command "status")))))))
          (check "the debugger is offered only once omp's environment switches it on: the engine reads omp's variables, not its own"
                 (and (null (described omp "rizin_debug"))

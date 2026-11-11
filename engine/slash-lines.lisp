@@ -144,6 +144,7 @@
           (and (jstring record "artifactId") (locate-artifact (jstring record "artifactId")))))
 
 (define-slash "evidence" (:usage "[id]" :description "evidence recorded on this branch" :order 50
+                          :completes :evidence
                           :row (60 "Evidence" :detail "what has been observed on this branch"))
     (words)
   (if words
@@ -161,6 +162,7 @@
                          (evidence-records)))))
 
 (define-slash "cite" (:usage "<id>" :description "cite an evidence entry in your next message" :order 60
+                      :completes :evidence
                       :row (70 "Cite evidence" :ask "Evidence id" :placeholder "1a2b3c4d" :verb "cite"))
     (words)
   (if (null words)

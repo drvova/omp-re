@@ -7,7 +7,7 @@
  * extension runs beside omp (engine.ts). What is here is omp's side only: it
  * asks the engine what tools and `/re` subcommands it has and registers them
  * with omp under the engine's names, forwards calls and the session's life,
- * and draws what the engine sends (draw.ts, render.ts).
+ * and draws what the engine sends (ui.ts, render.ts).
  *
  * The factory runs once per omp session — the main session and each task
  * subagent get their own ExtensionAPI — while the engine is one for the
@@ -15,7 +15,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
-import { drawStatusBand, openView, type ViewSource } from "./draw.ts";
+import { drawStatusBand, openView, type ViewSource } from "./ui.ts";
 import type { JsonObject } from "./engine.ts";
 import { ask, engine, leaveSession, sessionOf, stateOf, tell } from "./host.ts";
 import { RE_LOAD_MODE, reRenderers, type RenderSpec } from "./render.ts";
@@ -43,6 +43,7 @@ interface DescribedCommand {
 	usage?: string;
 	description: string;
 	view?: boolean;
+	completes?: "evidence";
 }
 
 interface CallAnswer extends JsonObject {
@@ -127,10 +128,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		});
 	}
 
-	pi.registerMessageRenderer<{ path?: string }>("re.binary", (message, _options, theme) => {
-		const path = message.details?.path;
-		return new Text(theme.fg("accent", `[re: opened ${typeof path === "string" ? path : "?"}]`), 0, 0);
-	});
+	// The line the engine asks to have shown when a binary is opened (the protocol's `transcript`).
+	pi.registerMessageRenderer("re.binary", (message, _options, theme) => new Text(theme.fg("accent", typeof message.content === "string" ? message.content : ""), 0, 0));
 
 	pi.registerFlag("binary", {
 		description: "Path to a binary to open with rizin at startup",
@@ -201,7 +200,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			return matches.length > 0 ? matches : null;
 		}
 		const sub = prefix.slice(0, space).toLowerCase();
-		if ((sub !== "cite" && sub !== "evidence") || !latestCtx) return null;
+		if (commands.find((command) => command.name === sub)?.completes !== "evidence" || !latestCtx) return null;
 		const idPrefix = prefix.slice(space + 1).trim();
 		const matches = (stateOf(latestCtx.sessionManager.getSessionId())?.evidence ?? [])
 			.filter(([id]) => id.startsWith(idPrefix))

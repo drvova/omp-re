@@ -31,6 +31,10 @@ if ! command -v "${OMPRE_RIZIN_PATH:-rizin}" >/dev/null 2>&1; then
 	echo "SKIP: rizin not on PATH (set OMPRE_RIZIN_PATH)"
 	exit 0
 fi
+if ! command -v "${OMPRE_SBCL_PATH:-sbcl}" >/dev/null 2>&1; then
+	echo "SKIP: sbcl not on PATH (set OMPRE_SBCL_PATH)"
+	exit 0
+fi
 if ! command -v omp >/dev/null 2>&1; then
 	echo "SKIP: omp not on PATH"
 	exit 0
@@ -372,7 +376,7 @@ skip() {
 }
 
 # A panel's first Escape clears a non-empty filter and only the second closes
-# it (makePickerPanel handleInput, extensions/re/ui.ts). Never send two blind
+# it (pickerPanel's handleInput, extensions/re/ui.ts). Never send two blind
 # Escapes: the second would leak into whatever is underneath.
 close_overlay() {
 	local title_regex="$1"
@@ -492,7 +496,7 @@ for attempt in $(seq 1 16); do
 	keys C-u
 	sleep 1
 	slash "/re help"
-	if wait_for 'disable RE tools' 20; then
+	if wait_for 'disable the RE tools' 20; then
 		READY=1
 		break
 	fi
@@ -539,7 +543,7 @@ if plan_mode_active; then
 fi
 
 slash "/re help"
-if ! wait_for 'disable RE tools' 20; then
+if ! wait_for 'disable the RE tools' 20; then
 	echo "FAIL: /re help did not render after leaving plan mode"
 	diagnose
 	exit 1
@@ -605,10 +609,10 @@ expect 'A10 /re open on a missing file' 'omp-re: no such binary: /tmp/omp-re-nop
 slash "/re undo"
 expect 'A11 /re undo with no annotations' 'omp-re: no annotation left to undo'
 
-# A12-A14 assert the same literal through three separate code paths in ui.ts.
+# A12-A14 assert the same literal for three views the engine refuses alike.
 # Scrollback accumulates, so a plain match would let A13/A14 pass on A12's
 # output; count occurrences instead so each panel's guard is really exercised.
-NOBIN='omp-re: no binary open — use /re open <path> first'
+NOBIN='omp-re: no binary open — use /re open <path>, open_binary, or --binary <path> first'
 slash "/re functions"
 expect_count 'A12 functions panel guards on no binary' "$NOBIN" 1
 
@@ -1028,7 +1032,7 @@ if model_step 'G1 model calls hash_binary and reports the real digest' \
 	"$EXPECTED_SHA256" 1 180; then
 
 	# The audit HMAC warning fires on the first RE tool call, not at startup
-	# (appendAuditLine in extensions/re/audit.ts), so G1 is the earliest point
+	# (APPEND-AUDIT-LINE in engine/call.lisp), so G1 is the earliest point
 	# it can be asserted.
 	expect 'G1b audit HMAC warning on first tool call' \
 		'omp-re: OMPRE_AUDIT_HMAC_KEY not configured' 10
@@ -1126,7 +1130,8 @@ fi
 
 # --- Phase I — report writer -------------------------------------------------
 # The withheld-report path needs an ungrounded IOC-shaped annotation, which
-# cannot be produced deterministically through the TUI; report.test.ts covers it.
+# cannot be produced deterministically through the TUI; the Lisp suite
+# (test/nodecode/suite-findings.lisp) covers it.
 
 slash "/re report $TMP/qa-report.md"
 expect 'I1 /re report <path> confirms the write' "omp-re: report written to" 60
@@ -1215,8 +1220,8 @@ if [ "$MODEL_OK" -eq 1 ]; then
 		"$ALT_SHA256" 1 180; then
 
 		# K5: triage tools self-register only when their backing binary is on
-		# PATH (isOnPath, extensions/re/tools-triage.ts). Proven behaviourally
-		# and cheaply via a rules file that does not exist: resolveExistingFile
+		# PATH (PROGRAM-AVAILABLE-P, engine/extras.lisp). Proven behaviourally
+		# and cheaply via a rules file that does not exist: the engine
 		# rejects it before yara is ever executed, so a registered tool answers
 		# with its own validation error while an unregistered one could not be
 		# called at all. A missing path is used rather than an empty string
@@ -1255,8 +1260,8 @@ check_layout() {
 	tmux resize-window -t "$SESSION" -x "$width" -y "$height"
 	sleep 3
 
-	# L2: the band's two lines hold their documented shapes (renderBand,
-	# extensions/re/ui.ts:143-150), not just a line count. "wc -l -eq 2" was
+	# L2: the band's two lines hold their documented shapes (bandLines,
+	# extensions/re/ui.ts), not just a line count. "wc -l -eq 2" was
 	# a tautology: band()'s awk unconditionally prints two (possibly empty)
 	# lines whenever the editor anchor exists, making it exactly equivalent
 	# to editor_visible — a band that wrapped to 3 rows at 60 columns, the
@@ -1289,10 +1294,10 @@ check_layout() {
 	# the character count is always <= the cell count <= real width — an
 	# overflowing line does not arrive long, it wraps into an extra row or
 	# gets clipped instead. Assert the panel's total ROW COUNT rather than
-	# any line's length: makePickerPanel renders [title, filterLine,
-	# ...selectList.render(), hint] (ui.ts:223-227), and SelectList appends
+	# any line's length: pickerPanel renders [title, filterLine,
+	# ...list.render(), hint] (extensions/re/ui.ts), and SelectList appends
 	# one "Type to search" status row whenever the pre-filtered item count
-	# exceeds MAX_VISIBLE_ROWS=12 (pi-tui select-list.ts
+	# exceeds VISIBLE_ROWS=12 (pi-tui select-list.ts
 	# #shouldRenderSearchStatus). A wrapped or clipped line changes this count.
 	local fn_count=0
 	if printf '%s' "$band_line2" | grep -Eq '^[0-9]+ fn '; then

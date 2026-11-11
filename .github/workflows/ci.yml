@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  RIZIN_VERSION: "0.9.1"
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -16,6 +19,38 @@ jobs:
       - run: bun install --ignore-scripts
       - run: bun run check
 
+  # The engine is Common Lisp (engine/*.lisp, omp-re.asd). This job loads it
+  # in a plain SBCL — it must need nothing of any host — then runs its suite
+  # (test/nodecode/run.lisp): the engine, the nodecode host over a stand-in
+  # for nodecode's kernel, and the omp host served over real pipes. rizin is
+  # installed, so the suites' rizin halves run too, against a fixture built
+  # here. Never fetch a malware sample into CI.
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
+      - name: Install rizin (portable static build; the release has no .deb)
+        run: |
+          set -eux
+          curl -fsSL "https://github.com/rizinorg/rizin/releases/download/v${RIZIN_VERSION}/rizin-v${RIZIN_VERSION}-static-x86_64.tar.xz" -o /tmp/rizin.tar.xz
+          mkdir -p "$HOME/rizin" && tar -xJf /tmp/rizin.tar.xz -C "$HOME/rizin"
+          dirname "$(find "$HOME/rizin" -type f -name rizin | head -1)" >> "$GITHUB_PATH"
+      - name: Build fixture
+        run: |
+          cc -o fixture test/fixtures/sample.c
+          echo "OMPRE_TEST_BINARY=$PWD/fixture" >> "$GITHUB_ENV"
+      - name: The engine loads alone
+        run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames "omp-re.asd" (uiop:getcwd)))' --eval '(asdf:load-system "omp-re")'
+      # The debugger's attach-by-pid check attaches to a process that is not a
+      # child of rizin; hosted runners default to kernel.yama.ptrace_scope=1,
+      # which forbids that.
+      - run: sudo sysctl -w kernel.yama.ptrace_scope=0
+      - run: sbcl --non-interactive --load test/nodecode/run.lisp
+
+  # The bun suites load the extension through omp's real SDK, and the
+  # extension starts the engine: every one of them needs SBCL and cl-ppcre,
+  # and rizin for the tests that open a binary.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -23,32 +58,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
-      - run: bun install --ignore-scripts
-      # No rizin install here. The rizin-free suites — including
-      # extension-sdk, which loads the extension through omp's real SDK and
-      # catches host API drift — run in full; the rizin suites
-      # `describe.skipIf(...)` themselves out except for their rizin-free tests
-      # — 102 pass, 98 skip, 0 fail, exit code 0. That is the expected shape of
-      # this job; run the rizin suites locally (they use /bin/ls). See
-      # docs/testing.md. Never fetch a malware sample into CI.
-      - run: bun test
-
-  # The nodecode cell is omp-re's engine ported to Common Lisp (nodecode/*.lisp).
-  # This job loads the real system under SBCL and runs its suites
-  # (test/nodecode/run.lisp), then lets `bun test` hold the Lisp engine to the
-  # TypeScript one (test/nodecode-parity.test.ts needs sbcl to do it). The
-  # suites run over a stand-in for nodecode's kernel, so they prove the cell's
-  # own code; see docs/testing.md. No rizin here: each suite's rizin half
-  # prints SKIPPED, and the parity test judges a fixed list of command names
-  # instead of the installed catalog.
-  nodecode:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
+      - name: Install rizin (portable static build; the release has no .deb)
+        run: |
+          set -eux
+          curl -fsSL "https://github.com/rizinorg/rizin/releases/download/v${RIZIN_VERSION}/rizin-v${RIZIN_VERSION}-static-x86_64.tar.xz" -o /tmp/rizin.tar.xz
+          mkdir -p "$HOME/rizin" && tar -xJf /tmp/rizin.tar.xz -C "$HOME/rizin"
+          dirname "$(find "$HOME/rizin" -type f -name rizin | head -1)" >> "$GITHUB_PATH"
       - run: bun install --ignore-scripts
-      - run: bun run test:nodecode
-      - run: bun test test/nodecode-parity.test.ts
+      - run: bun test

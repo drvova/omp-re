@@ -1,25 +1,25 @@
 name: Cross-OS
 
-# Runs the FULL test suite with rizin installed on Linux and Windows, so the
-# OS-specific paths — the debugger (debug.test.ts executes the fixture under
-# rizin's debugger) and PE format handling — get real coverage on the real OS.
-# The default CI (ci.yml) stays deliberately rizin-free and fast; this is the
-# "borrow a Windows runner per run" tier.
+# Runs the suites with SBCL and rizin installed on Linux and Windows, so the
+# OS-specific paths — starting and ending the engine process, rizin's pipe,
+# the debugger, PE format handling — are exercised on the real OS. Both legs
+# run the bun suites, which drive the engine through the extension. The Lisp
+# suite runs on Linux only: its harness sets up processes with POSIX calls.
 #
 # macOS was dropped from the matrix. Its one unique value — the debugger —
 # can't run on a hosted macOS runner (rizin's Darwin backend needs
-# task_for_pid, refused to a non-root, un-codesigned rizin), so debug.test.ts
-# gates its live-debug blocks off on macOS anyway. With the debugger gated off
-# the leg still wedged `bun test` for ~20 min for a reason that could not be
-# diagnosed from CI — a timed-out job is *cancelled*, and GitHub archives no
-# downloadable log for a cancelled job, so the hang point was never visible.
-# The remaining macOS coverage (Mach-O static analysis) overlaps Linux's ELF
-# coverage. debug.test.ts keeps its `process.platform === "darwin"` gate so a
-# local macOS dev run still skips the debugger cleanly (see docs/testing.md).
+# task_for_pid, refused to a non-root, un-codesigned rizin). With the debugger
+# gated off the leg still wedged `bun test` for ~20 min for a reason that
+# could not be diagnosed from CI — a timed-out job is *cancelled*, and GitHub
+# archives no downloadable log for a cancelled job, so the hang point was
+# never visible. The remaining macOS coverage (Mach-O static analysis)
+# overlaps Linux's ELF coverage.
 #
-# Install notes (verified working on the first runs): Linux uses the portable
-# static release tarball (no .deb exists); Windows uses the
-# rizin-windows-shared64 release zip; both pinned to v0.9.1. clang builds the
+# Install notes: rizin on Linux is the portable static release tarball (no
+# .deb exists), on Windows the rizin-windows-shared64 release zip; both pinned
+# to v0.9.1. SBCL is the distribution's package on Linux and Chocolatey's on
+# Windows. cl-ppcre is the distribution's package on Linux; on Windows its
+# source is cloned to ~/common-lisp/, where ASDF looks. clang builds the
 # fixture PE on Windows.
 #
 # Never add a malware sample here — the fixture is a trivial program built from
@@ -52,6 +52,22 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
+
+      # --- install SBCL and cl-ppcre: the engine ---
+      - name: Install SBCL and cl-ppcre (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sbcl cl-ppcre
+
+      - name: Install SBCL and cl-ppcre (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install sbcl -y --no-progress
+          git clone --depth 1 --branch v2.1.1 https://github.com/edicl/cl-ppcre "$HOME\common-lisp\cl-ppcre"
+
+      - name: The engine loads alone
+        # No string in the forms: the two legs' shells quote differently.
+        run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:load-asd (merge-pathnames (string-downcase :omp-re.asd) (uiop:getcwd)))' --eval '(asdf:load-system :omp-re)'
 
       # --- install rizin v0.9.1 (there is no .deb in the release) ---
       - name: Install rizin (Linux, portable static build)
@@ -97,16 +113,18 @@ jobs:
       - run: bun install --ignore-scripts
       - run: bun run check
 
-      # The debugger's attach-by-pid test attaches to a process that is not a
+      # The debugger's attach-by-pid check attaches to a process that is not a
       # child of rizin; hosted Linux runners default to
       # kernel.yama.ptrace_scope=1, which forbids attaching to a non-descendant.
-      # Relax it so the debugger integration suite runs for real. (Windows
-      # permits the attach as-is.)
       - name: Allow ptrace attach by PID (Linux)
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.yama.ptrace_scope=0
 
-      # No OMPRE_ENABLE_DEBUGGER here: debug.test.ts sets and restores it itself,
-      # and extension-sdk.test.ts asserts the default-off behavior — setting it
-      # globally would break that assertion.
+      - name: The Lisp suite (Linux)
+        if: runner.os == 'Linux'
+        run: sbcl --non-interactive --load test/nodecode/run.lisp
+
+      # No OMPRE_ENABLE_DEBUGGER here: extension-sdk.test.ts asserts the
+      # default-off behavior and switches it on itself where it tests the
+      # debugger.
       - run: bun test

@@ -18,6 +18,7 @@
   usage description
   (order 1000)                          ; where /re help lists it
   immediate                             ; answers from what the session holds now, not after a call that holds it
+  completes                             ; what its argument names, for a host that completes one: :EVIDENCE
   row                                   ; (POSITION LABEL &key detail ask placeholder verb), or NIL for no row
   function)                             ; (lambda (WORDS LINE)) => (values TEXT FAILED REPLY)
 
@@ -36,7 +37,7 @@ one, and what the line then says instead of its text."
                      #'< :key #'slash-order))
   (slash-name slash))
 
-(defmacro define-slash (name (&key usage description (order 1000) row immediate)
+(defmacro define-slash (name (&key usage description (order 1000) row immediate completes)
                         (words &optional (line (gensym "LINE")))
                         &body body)
   "Define the /re subcommand NAME. The body runs in the session, with WORDS
@@ -51,10 +52,12 @@ verb), is its row in the dialog of what /re offers: one that runs the line,
 or with ASK one that asks for a word first. IMMEDIATE is for a line that
 needs nothing of rizin — help, status, on, off: while a long call holds the
 session (a large binary still being analyzed) it answers at once, from what
-the session holds, instead of after it."
+the session holds, instead of after it. COMPLETES says what the line's
+argument names — :EVIDENCE, an evidence id — for a host that offers
+completions as the operator types."
   `(register-slash
     (make-slash :name ,name :usage ,usage :description ,description :order ,order :row ',row
-                :immediate ,immediate
+                :immediate ,immediate :completes ,completes
                 :function (lambda (,words ,line) (declare (ignorable ,words ,line)) ,@body))))
 
 (defun slash-help ()

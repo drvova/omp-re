@@ -3,7 +3,7 @@
 #
 # Builds two versions of the sample fixture (v2 renames `fib` and changes
 # `checksum`'s multiplier), records three findings on v1 with
-# test/e2e/make-carry-manifest.ts (real rizin evidence, no model), then
+# test/e2e/make-carry-manifest.lisp (real rizin evidence, no model), then
 # starts omp on v2 with the extension loaded explicitly (-e) and drives
 # the slash commands a user would type. It checks that two findings are
 # re-proven (one relocated), that the drifted one lands in the editor as
@@ -25,7 +25,7 @@ fail() {
 	FAIL=1
 }
 
-for tool in tmux "${OMPRE_RIZIN_PATH:-rizin}" omp bun; do
+for tool in tmux "${OMPRE_RIZIN_PATH:-rizin}" omp "${OMPRE_SBCL_PATH:-sbcl}"; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		log "SKIP: $tool not found on PATH"
 		exit 0
@@ -52,7 +52,7 @@ sed -e 's/h \* 33u/h * 31u/' -e 's/\bfib\b/fibonacci/g' "$REPO_DIR/test/fixtures
 	fail "compiling the fixtures"
 	exit 1
 }
-(cd "$REPO_DIR" && bun test/e2e/make-carry-manifest.ts "$WORK/v1" "$WORK/v1.md") >/dev/null || {
+(cd "$REPO_DIR" && "${OMPRE_SBCL_PATH:-sbcl}" --script test/e2e/make-carry-manifest.lisp "$WORK/v1" "$WORK/v1.md") >/dev/null || {
 	fail "recording the v1 findings"
 	exit 1
 }

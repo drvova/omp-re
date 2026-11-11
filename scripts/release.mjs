@@ -4,7 +4,7 @@
  *
  * Looks at the commits in a range, decides whether they warrant a release and
  * at what level, and — if so — bumps the version in `package.json`,
- * `.omp-plugin/marketplace.json`, `omp-re.asd` and `nodecode-re.asd` (kept in lock-step) and stamps a dated
+ * `.omp-plugin/marketplace.json` and the three `.asd` files (kept in lock-step) and stamps a dated
  * section in `CHANGELOG.md`. It only edits files; the workflow does the git
  * commit / tag / push. Run it locally with `--dry-run` to preview a decision
  * without touching anything.
@@ -38,8 +38,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = join(ROOT, "package.json");
 const MARKET = join(ROOT, ".omp-plugin", "marketplace.json");
 const CHANGELOG = join(ROOT, "CHANGELOG.md");
-// The engine's system definition and the nodecode cell's carry the same version.
-const ASDS = [join(ROOT, "omp-re.asd"), join(ROOT, "nodecode-re.asd")];
+// The engine's system definition and its two hosts' carry the same version.
+const ASDS = [join(ROOT, "omp-re.asd"), join(ROOT, "omp-re-stdio.asd"), join(ROOT, "nodecode-re.asd")];
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
